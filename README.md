@@ -15,14 +15,18 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
   support, alternate-screen apps, configurable scrollback and cursor style,
   and an opt-in Metal GPU renderer.
-- **Chat-style shell** — translucent sidebar with New terminal / Automations /
-  Skills rows and workspaces whose tabs read like conversations (blue activity
-  dots for live background sessions); a "Let's build" landing screen; a
-  composer bar with Local / Worktree / Cloud context tabs and the focused
-  session's git branch.
+- **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
+  and workspaces whose tabs read like conversations (blue activity dots for
+  live background sessions); a landing screen with quick-start cards and
+  recent commands from your shell history; a composer bar carrying the
+  workspace, host, and the focused session's git branch.
+- **Dockable panels** — a terminal dock along the bottom and a browser or file
+  panel down the right, opened independently from the toggles at the top right
+  of the content area, with draggable dividers whose sizes persist.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
-  per tab, snapshotted to Application Support and restored on launch.
-- **Scriptable browser pane** — an embedded WKWebView, usable as a sliding
+  per tab, snapshotted to Application Support and restored on launch. A tab
+  with one pane renders flush; focus rings appear only once it is split.
+- **Scriptable browser** — an embedded WKWebView usable as a tabbed right
   panel or a split pane, drivable from the API (navigate, click, fill, read
   text, wait for a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
@@ -115,7 +119,7 @@ iterminalctl browser.screenshot path=~/shot.png
 | `tab.list`, `tab.create`, `tab.select`, `tab.close` | `id`, `workspace`, `directory` |
 | `pane.list`, `pane.split`, `pane.close` | `direction`, `kind` |
 | `terminal.send`, `terminal.capture` | `text`, `newline`, `session` |
-| `browser.open` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
+| `browser.open` / `newTab` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
 | `files.list` | `path`, `connection`, `hidden` |
 | `connection.list` | — |
 | `terminal.reconnect` | `session` |
@@ -154,6 +158,8 @@ iterminalctl subscribe events=session.exited,tab.created
 | `tab.created` / `tab.closed` / `tab.selected` | tab lifecycle |
 | `workspace.created`, `pane.split`, `pane.closed` | layout changes |
 | `browser.navigated` | a browser pane finishes loading |
+| `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
+| `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
 
 ## Remote sessions and files
 
@@ -196,6 +202,7 @@ non-interactively and therefore **requires key-based authentication**.
 | Split right / down | ⌘D / ⇧⌘D |
 | Split with browser | ⇧⌘B |
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
+| Terminal dock | ⌘J |
 | Browser / Files panel | ⌥⌘B / ⌥⌘F |
 | Settings | ⌘, |
 
