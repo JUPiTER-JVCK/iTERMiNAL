@@ -58,6 +58,11 @@ final class AppSettings: ObservableObject {
     @Published var followTerminalDirectory: Bool { didSet { defaults.set(followTerminalDirectory, forKey: "followTerminalDirectory") } }
     @Published var composerEnabled: Bool { didSet { defaults.set(composerEnabled, forKey: "composerEnabled") } }
 
+    // MARK: Sidebar section state
+    @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
+    @Published var projectsExpanded: Bool { didSet { defaults.set(projectsExpanded, forKey: "projectsExpanded") } }
+    @Published var recentsExpanded: Bool { didSet { defaults.set(recentsExpanded, forKey: "recentsExpanded") } }
+
     // MARK: Security / automation
     /// The local socket API is powerful (it can type into live shells), so it
     /// is opt-in and off until the user turns it on.
@@ -97,6 +102,10 @@ final class AppSettings: ObservableObject {
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
         followTerminalDirectory = defaults.object(forKey: "followTerminalDirectory") as? Bool ?? true
         composerEnabled = defaults.object(forKey: "composerEnabled") as? Bool ?? true
+
+        pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
+        projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
+        recentsExpanded = defaults.object(forKey: "recentsExpanded") as? Bool ?? false
 
         localAPIEnabled = defaults.bool(forKey: "localAPIEnabled")
         apiAllowBrowserControl = defaults.object(forKey: "apiAllowBrowserControl") as? Bool ?? true

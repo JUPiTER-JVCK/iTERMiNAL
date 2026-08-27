@@ -116,26 +116,29 @@ private struct TabContentView: View {
     }
 }
 
-/// The "no tab open" landing: centered glyph, "Let's build", a workspace
-/// picker pill, and a row of quick-start cards — mirroring the reference
-/// app's new-thread screen.
+/// The "no tab open" landing: centered glyph, a heading naming the current
+/// workspace, recent commands pulled from the user's shell history, and
+/// quick-start cards.
 private struct LandingView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
+    @State private var recentCommands: [String] = []
+
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             Spacer()
 
             Image(systemName: "apple.terminal")
                 .font(.system(size: 38, weight: .light))
                 .foregroundStyle(theme.textPrimary)
 
-            Text("Let's build")
+            Text(heading)
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
+                .multilineTextAlignment(.center)
 
             Menu {
                 ForEach(store.workspaces) { workspace in
@@ -162,6 +165,18 @@ private struct LandingView: View {
             .menuIndicator(.hidden)
             .fixedSize()
 
+            if !recentCommands.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(recentCommands, id: \.self) { command in
+                        RecentCommandRow(command: command, theme: theme) {
+                            run(command)
+                        }
+                    }
+                }
+                .frame(maxWidth: 520)
+                .padding(.top, 6)
+            }
+
             HStack(spacing: 12) {
                 SuggestionCard(icon: "terminal", tint: settings.accentColor, title: "Open a new terminal") {
                     store.newTab()
@@ -177,11 +192,68 @@ private struct LandingView: View {
                     store.togglePanel(.files)
                 }
             }
-            .padding(.top, 10)
+            .padding(.top, 6)
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // Read once per appearance; the file rarely changes mid-session.
+            if recentCommands.isEmpty {
+                recentCommands = ShellHistory.recentCommands(limit: 3)
+            }
+        }
+    }
+
+    private var heading: String {
+        if let name = store.currentWorkspace?.name, !name.isEmpty {
+            return "What should we build in \(name)?"
+        }
+        return "What should we build?"
+    }
+
+    private func run(_ command: String) {
+        let tab = store.newTab()
+        tab.primarySession?.send(text: command + "\n")
+    }
+}
+
+/// One recent command from shell history.
+private struct RecentCommandRow: View {
+    let command: String
+    let theme: Theme
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.textSecondary)
+                Text(command)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(hovering ? theme.surfaceHover : theme.surface.opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(theme.surfaceBorder)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Run in a new terminal")
     }
 }
 

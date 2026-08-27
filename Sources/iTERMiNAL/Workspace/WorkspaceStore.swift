@@ -46,6 +46,8 @@ final class WorkspaceStore: ObservableObject {
     @Published var focusedSessionID: UUID?
     @Published var activePanel: SidePanel?
     @Published var showCommandPalette = false
+    /// Sessions the user closed, newest first, so they can be reopened.
+    @Published private(set) var recentSessions: [RecentSession] = []
 
     /// Models backing the sliding side panels (distinct from panes that live
     /// inside a tab's split layout).
@@ -197,8 +199,51 @@ final class WorkspaceStore: ObservableObject {
         return tab
     }
 
+    /// Pinned tabs across every workspace, newest activity first.
+    var pinnedTabs: [WorkspaceTab] {
+        workspaces.flatMap(\.tabs).filter(\.isPinned)
+    }
+
+    func togglePin(_ tab: WorkspaceTab) {
+        tab.isPinned.toggle()
+        scheduleSave()
+    }
+
+    /// Reopens a closed session in a new tab.
+    func reopen(_ recent: RecentSession) {
+        let kind: SessionKind = recent.connection
+            .flatMap { UUID(uuidString: $0) }
+            .map { SessionKind.remote($0) } ?? .localShell
+        newTab(directory: recent.isRemote ? nil : recent.directory, kind: kind)
+        recentSessions.removeAll { $0.id == recent.id }
+        scheduleSave()
+    }
+
+    func clearRecents() {
+        recentSessions.removeAll()
+        scheduleSave()
+    }
+
+    private func rememberClosed(_ tab: WorkspaceTab) {
+        for session in tab.root.allSessions() {
+            let entry = RecentSession(
+                id: session.id,
+                title: tab.displayName,
+                directory: session.currentDirectory,
+                connection: session.kind.connectionID?.uuidString,
+                closedAt: Date()
+            )
+            recentSessions.removeAll { $0.id == entry.id }
+            recentSessions.insert(entry, at: 0)
+        }
+        if recentSessions.count > 20 {
+            recentSessions.removeLast(recentSessions.count - 20)
+        }
+    }
+
     func closeTab(_ tab: WorkspaceTab) {
         guard let workspace = workspace(containingTab: tab.id) else { return }
+        rememberClosed(tab)
         tab.root.allSessions().forEach { $0.terminate() }
         workspace.tabs.removeAll { $0 === tab }
         EventBus.shared.publish(APIEvent("tab.closed", ["tab": tab.id.uuidString]))
@@ -327,10 +372,10 @@ final class WorkspaceStore: ObservableObject {
 
     func togglePanel(_ panel: SidePanel) {
         if activePanel == panel {
-            activePanel = nil
+            withAnimation(Motion.panel) { activePanel = nil }
             return
         }
-        activePanel = panel
+        withAnimation(Motion.panel) { activePanel = panel }
         if panel == .files,
            AppSettings.shared.followTerminalDirectory,
            !panelFiles.isRemote,
@@ -353,7 +398,8 @@ final class WorkspaceStore: ObservableObject {
     func currentSnapshot() -> AppStateSnapshot {
         AppStateSnapshot(
             workspaces: workspaces.map { $0.snapshot() },
-            selectedTabID: selectedTabID
+            selectedTabID: selectedTabID,
+            recents: recentSessions
         )
     }
 
@@ -362,6 +408,7 @@ final class WorkspaceStore: ObservableObject {
     func applySnapshot(_ snapshot: AppStateSnapshot) {
         terminateAllSessions()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
+        recentSessions = snapshot.recents ?? []
         if workspaces.isEmpty {
             bootstrap()
             return
@@ -392,6 +439,7 @@ final class WorkspaceStore: ObservableObject {
               !snapshot.workspaces.isEmpty else { return false }
 
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
+        recentSessions = snapshot.recents ?? []
         let allTabs = workspaces.flatMap(\.tabs)
         guard !allTabs.isEmpty else { return false }
 

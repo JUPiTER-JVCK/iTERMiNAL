@@ -21,6 +21,8 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Whether SwiftTerm's Metal renderer ended up active for this session —
     /// requesting GPU rendering can silently fall back to the CPU path.
     @Published private(set) var isGPUAccelerated = false
+    /// Drives the sidebar's relative timestamps.
+    @Published private(set) var lastActivityAt = Date()
 
     let engine: SwiftTermEngine
     private var hasStarted = false
@@ -43,6 +45,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         }
         engine.onActivity = { [weak self] in
             guard let self else { return }
+            // Already debounced by the engine, so this is cheap.
+            self.lastActivityAt = Date()
             EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
         }
         engine.onLinkActivated = { [weak self] link in
@@ -107,6 +111,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             engine.start(configuration)
             isRunning = true
             lastExitCode = nil
+            lastActivityAt = Date()
             EventBus.shared.publish(APIEvent("session.started", [
                 "session": id.uuidString,
                 "remote": isRemote,

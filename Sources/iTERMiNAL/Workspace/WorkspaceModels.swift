@@ -34,10 +34,13 @@ final class WorkspaceTab: ObservableObject, Identifiable {
     let id: UUID
     @Published var customName: String?
     @Published var root: PaneNode
+    /// Pinned tabs also appear in the sidebar's Pinned section.
+    @Published var isPinned: Bool
 
-    init(id: UUID = UUID(), customName: String? = nil, root: PaneNode) {
+    init(id: UUID = UUID(), customName: String? = nil, isPinned: Bool = false, root: PaneNode) {
         self.id = id
         self.customName = customName
+        self.isPinned = isPinned
         self.root = root
     }
 
@@ -133,6 +136,19 @@ extension PaneNode {
 struct AppStateSnapshot: Codable {
     var workspaces: [WorkspaceSnapshot]
     var selectedTabID: UUID?
+    /// Optional so older state files still decode.
+    var recents: [RecentSession]?
+}
+
+/// A session the user closed, kept so it can be reopened from the sidebar.
+struct RecentSession: Codable, Identifiable, Hashable {
+    var id: UUID
+    var title: String
+    var directory: String
+    var connection: String?
+    var closedAt: Date
+
+    var isRemote: Bool { connection != nil }
 }
 
 struct WorkspaceSnapshot: Codable {
@@ -145,6 +161,8 @@ struct TabSnapshot: Codable {
     var id: UUID
     var customName: String?
     var root: PaneSnapshot
+    /// Optional so layouts saved before pinning existed still decode.
+    var isPinned: Bool?
 }
 
 indirect enum PaneSnapshot: Codable {
@@ -193,11 +211,16 @@ extension PaneNode {
 
 extension WorkspaceTab {
     func snapshot() -> TabSnapshot {
-        TabSnapshot(id: id, customName: customName, root: root.snapshot())
+        TabSnapshot(id: id, customName: customName, root: root.snapshot(), isPinned: isPinned)
     }
 
     convenience init(snapshot: TabSnapshot) {
-        self.init(id: snapshot.id, customName: snapshot.customName, root: PaneNode.restore(snapshot.root))
+        self.init(
+            id: snapshot.id,
+            customName: snapshot.customName,
+            isPinned: snapshot.isPinned ?? false,
+            root: PaneNode.restore(snapshot.root)
+        )
     }
 }
 
