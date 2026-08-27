@@ -498,6 +498,7 @@ private struct WorkspaceFolderRow: View {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "folder" : "folder.fill")
                         .font(.system(size: 11))
+                        .foregroundStyle(IdentityPalette.color(for: workspace.id))
                     Text(workspace.name)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
@@ -543,32 +544,35 @@ private struct SidebarTabRow: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        Button(action: onSelect) {
-            HStack(spacing: 6) {
-                if let session = tab.primarySession {
-                    SessionRowContent(
-                        tab: tab,
-                        session: session,
-                        isSelected: isSelected,
-                        isHovering: hovering
-                    )
-                } else {
-                    Text(tab.displayName)
-                        .font(.system(size: 13))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                }
+        // Deliberately not a Button wrapping everything: the pin and close
+        // controls live in this row, and nesting buttons makes which one
+        // receives the click a matter of luck.
+        HStack(spacing: 6) {
+            if let session = tab.primarySession {
+                SessionRowContent(
+                    tab: tab,
+                    session: session,
+                    isSelected: isSelected,
+                    isHovering: hovering
+                )
+            } else {
+                Text(tab.displayName)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .padding(.leading, indented ? 22 : 9)
-            .padding(.trailing, 9)
-            .frame(height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.leading, indented ? 22 : 9)
+        .padding(.trailing, 9)
+        .frame(height: 30)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+                // The tap target is the background, so the trailing buttons
+                // drawn above it keep their own hits.
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onSelect)
+        )
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
@@ -731,13 +735,13 @@ private struct SidebarStatusRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var metrics = ProcessMetrics.shared
+    @ObservedObject private var metrics = ProcessMetrics.shared
     @State private var showShortcuts = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
-            Divider()
+            FadedDivider()
             HStack(spacing: 8) {
                 SettingsLink {
                     HStack(spacing: 8) {
@@ -778,6 +782,7 @@ private struct SidebarStatusRow: View {
             ShortcutsPopover()
         }
         .onAppear { metrics.start() }
+        .onDisappear { metrics.stop() }
     }
 }
 

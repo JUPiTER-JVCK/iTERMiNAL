@@ -113,6 +113,9 @@ struct ElevatedSurface: ViewModifier {
     var cornerRadius: CGFloat = 14
     var radius: CGFloat = 14
     var y: CGFloat = 4
+    /// Overridable so hover states can brighten the surface — a shadow
+    /// growing on its own is weak feedback.
+    var fill: Color?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -121,7 +124,7 @@ struct ElevatedSurface: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(theme.surface)
+                    .fill(fill ?? theme.surface)
                     .shadow(color: theme.elevatedShadow, radius: radius, y: y)
             )
             .overlay(
@@ -139,8 +142,13 @@ struct ElevatedSurface: ViewModifier {
 }
 
 extension View {
-    func elevated(cornerRadius: CGFloat = 14, radius: CGFloat = 14, y: CGFloat = 4) -> some View {
-        modifier(ElevatedSurface(cornerRadius: cornerRadius, radius: radius, y: y))
+    func elevated(
+        cornerRadius: CGFloat = 14,
+        radius: CGFloat = 14,
+        y: CGFloat = 4,
+        fill: Color? = nil
+    ) -> some View {
+        modifier(ElevatedSurface(cornerRadius: cornerRadius, radius: radius, y: y, fill: fill))
     }
 }
 
@@ -179,6 +187,33 @@ struct AccentOption: Identifiable {
     let id: String
     let name: String
     let color: Color
+}
+
+/// Per-item colour identity, the way the reference app gives every project
+/// its own glyph colour instead of a wall of uniform grey.
+///
+/// The colour is derived from the item's UUID, so it is stable across
+/// relaunches without needing to be stored, and two workspaces created in the
+/// same order always look the same as each other.
+enum IdentityPalette {
+    static let colors: [Color] = [
+        Color(p3: 0x5B8DEF),  // blue
+        Color(p3: 0x9B7BEA),  // violet
+        Color(p3: 0x3FB68B),  // green
+        Color(p3: 0xE8833A),  // orange
+        Color(p3: 0xE0609C),  // pink
+        Color(p3: 0x46B0C7),  // teal
+        Color(p3: 0xD4A73C),  // amber
+    ]
+
+    static func color(for id: UUID) -> Color {
+        // Fold the UUID's bytes rather than using hashValue, which Swift
+        // seeds per-process and would repaint everything on every launch.
+        let sum = withUnsafeBytes(of: id.uuid) { bytes in
+            bytes.reduce(0) { $0 &+ Int($1) }
+        }
+        return colors[sum % colors.count]
+    }
 }
 
 enum Accents {

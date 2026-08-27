@@ -79,7 +79,7 @@ struct SettingsRootView: View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 0) {
             navigationRail(theme: theme)
-            Divider()
+            FadedDivider(axis: .vertical)
             contentColumn(theme: theme)
         }
         .frame(width: 940, height: 640)

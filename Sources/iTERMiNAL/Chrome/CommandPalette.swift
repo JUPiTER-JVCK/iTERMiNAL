@@ -55,7 +55,7 @@ struct CommandPaletteView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
 
-            Divider()
+            FadedDivider()
 
             ScrollViewReader { proxy in
                 ScrollView {

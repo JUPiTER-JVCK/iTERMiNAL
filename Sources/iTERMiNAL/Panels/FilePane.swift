@@ -233,7 +233,7 @@ struct FilePaneView: View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
             toolbar(theme: theme)
-            Divider()
+            FadedDivider()
             content(theme: theme)
             if let note = model.transferNote {
                 statusStrip(text: note, theme: theme, isError: false)

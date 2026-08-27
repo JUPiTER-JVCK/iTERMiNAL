@@ -56,7 +56,9 @@ struct DetailView: View {
                                 axis: .horizontal,
                                 size: $settings.rightPanelWidth,
                                 range: 280...1200,
-                                inverted: true
+                                inverted: true,
+                                resetTo: 420,
+                                available: proxy.size.width
                             )
                         }
                         RightPanelView()
@@ -73,7 +75,8 @@ struct DetailView: View {
                     axis: .vertical,
                     size: $settings.bottomDockHeight,
                     range: 120...620,
-                    inverted: true
+                    inverted: true,
+                    resetTo: 260
                 )
                 TerminalDockView()
                     .frame(height: settings.bottomDockHeight)
@@ -227,9 +230,24 @@ private struct PanelResizeHandle: View {
     @Binding var size: Double
     let range: ClosedRange<Double>
     var inverted = false
+    /// Default the handle returns to on a double-click.
+    var resetTo: Double
+    /// Total extent of the container, used to work out the snap points.
+    var available: Double = 0
 
     @State private var hovering = false
     @State private var baseline: Double?
+
+    /// A third, half and two thirds of the container — the proportions worth
+    /// landing on exactly. Within 12pt the drag settles onto one.
+    private func snapped(_ value: Double) -> Double {
+        guard available > 0 else { return value }
+        let targets = [available / 3, available / 2, available * 2 / 3]
+        for target in targets where abs(value - target) < 12 {
+            return target
+        }
+        return value
+    }
 
     var body: some View {
         Rectangle()
@@ -273,10 +291,14 @@ private struct PanelResizeHandle: View {
                                         ? value.translation.width
                                         : value.translation.height
                                 )
-                                size = (start + (inverted ? -moved : moved)).clamped(to: range)
+                                let raw = start + (inverted ? -moved : moved)
+                                size = snapped(raw).clamped(to: range)
                             }
                             .onEnded { _ in baseline = nil }
                     )
+                    .onTapGesture(count: 2) {
+                        withAnimation(Motion.panel) { size = resetTo }
+                    }
             }
     }
 }
@@ -471,7 +493,12 @@ private struct SuggestionCard: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-            .elevated(cornerRadius: 12, radius: hovering ? 14 : 8, y: hovering ? 5 : 2)
+            .elevated(
+                cornerRadius: 12,
+                radius: hovering ? 14 : 8,
+                y: hovering ? 5 : 2,
+                fill: hovering ? theme.surfaceHover : theme.surface
+            )
             .animation(Motion.disclosure, value: hovering)
             .contentShape(Rectangle())
         }
@@ -538,7 +565,7 @@ struct RightPanelView: View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
             header(theme: theme)
-            Divider()
+            FadedDivider()
             content
         }
         .background(theme.background)
@@ -762,7 +789,12 @@ struct TerminalDockView: View {
             .padding(.vertical, 6)
 
             if let session = store.selectedDockSession {
+                // Identity must follow the session. Without it SwiftUI sees
+                // the same view in the same slot when you switch dock tabs,
+                // calls updateNSView, and the container keeps hosting the
+                // previous terminal — the visible shell never changes.
                 TerminalHostView(session: session)
+                    .id(session.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Spacer()

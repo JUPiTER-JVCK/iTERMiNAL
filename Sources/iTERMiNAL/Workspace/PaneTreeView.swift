@@ -51,7 +51,10 @@ struct TerminalPaneView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         let isFocused = store.focusedSessionID == session.id
+        // Same reasoning as the dock: tie the hosted view's identity to the
+        // session so a restructured tree can never leave a stale terminal.
         let host = TerminalHostView(session: session)
+            .id(session.id)
             .overlay(alignment: .top) {
                 if let note = session.statusNote {
                     SessionStatusBanner(session: session, note: note, theme: theme)
@@ -101,6 +104,6 @@ private struct SessionStatusBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(theme.surface.opacity(0.96))
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) { FadedDivider() }
     }
 }
