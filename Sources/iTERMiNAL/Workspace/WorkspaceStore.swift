@@ -44,9 +44,14 @@ final class WorkspaceStore: ObservableObject {
         }
     }
     @Published var focusedSessionID: UUID?
-    /// The trailing panel, if any. Independent of the bottom dock: the
-    /// reference app lets both be open at once.
-    @Published var rightPanel: SidePanel?
+    /// Panels currently open in the trailing region. A set rather than one
+    /// optional, so opening Files no longer evicts the browser — every panel
+    /// keeps its place until you close it yourself.
+    @Published private(set) var openPanels: Set<SidePanel> = []
+    /// Which open panel is in front when more than one shares the region.
+    @Published var frontPanel: SidePanel?
+    /// True while the trailing region is expanded over the main surface.
+    @Published private(set) var rightPanelExpanded = false
     @Published private(set) var bottomDockOpen = false
     @Published var showCommandPalette = false
     /// Sessions the user closed, newest first, so they can be reopened.
@@ -393,7 +398,7 @@ final class WorkspaceStore: ObservableObject {
             browser.navigate(to: link) { _ in }
             return
         }
-        withAnimation(Motion.panel) { rightPanel = .browser }
+        openPanel(.browser)
         // A tabbed browser should open a link beside the current page, not
         // navigate away from it.
         panelBrowserTabs.newTab(url: link)
@@ -401,12 +406,33 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Side panels
 
+    /// The trailing region is open when anything is in it.
+    var rightPanelOpen: Bool { !openPanels.isEmpty }
+
+    /// Open panels in a stable order, so the tab strip doesn't reshuffle.
+    var orderedOpenPanels: [SidePanel] {
+        SidePanel.allCases.filter { openPanels.contains($0) }
+    }
+
+    /// The panel the trailing region is currently showing.
+    var visiblePanel: SidePanel? {
+        if let frontPanel, openPanels.contains(frontPanel) { return frontPanel }
+        return orderedOpenPanels.first
+    }
+
     func togglePanel(_ panel: SidePanel) {
-        if rightPanel == panel {
-            withAnimation(Motion.panel) { rightPanel = nil }
-            return
+        if openPanels.contains(panel) {
+            closePanel(panel)
+        } else {
+            openPanel(panel)
         }
-        withAnimation(Motion.panel) { rightPanel = panel }
+    }
+
+    func openPanel(_ panel: SidePanel) {
+        withAnimation(Motion.panel) {
+            _ = openPanels.insert(panel)
+            frontPanel = panel
+        }
         if panel == .browser, panelBrowserTabs.tabs.isEmpty {
             panelBrowserTabs.newTab()
         }
@@ -416,6 +442,19 @@ final class WorkspaceStore: ObservableObject {
            let directory = focusedSession?.currentDirectory {
             panelFiles.navigate(to: directory)
         }
+    }
+
+    func closePanel(_ panel: SidePanel) {
+        withAnimation(Motion.panel) {
+            _ = openPanels.remove(panel)
+            if frontPanel == panel { frontPanel = orderedOpenPanels.first }
+            // Nothing left to expand over the main surface.
+            if openPanels.isEmpty { rightPanelExpanded = false }
+        }
+    }
+
+    func toggleRightPanelExpanded() {
+        withAnimation(Motion.panel) { rightPanelExpanded.toggle() }
     }
 
     // MARK: Bottom terminal dock

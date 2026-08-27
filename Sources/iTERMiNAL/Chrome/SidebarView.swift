@@ -362,8 +362,8 @@ private struct SidebarSectionHeader<Accessory: View>: View {
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 3)
+        .padding(.top, 18)
+        .padding(.bottom, 6)
         .onHover { hovering = $0 }
     }
 }
@@ -409,8 +409,10 @@ struct SidebarActionRow: View {
                         .foregroundStyle(theme.textSecondary)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 9)
+            // Fixed height rather than padding arithmetic: the reference app
+            // sits on a 34pt rhythm and text metrics vary by label.
+            .frame(height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isActive ? theme.surface : (hovering ? theme.surface.opacity(0.6) : Color.clear))
@@ -512,8 +514,8 @@ private struct WorkspaceFolderRow: View {
             }
         }
         .foregroundStyle(theme.textPrimary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 17)
+        .frame(height: 30)
         .onHover { hovering = $0 }
     }
 }
@@ -543,9 +545,9 @@ private struct SidebarTabRow: View {
                     Spacer(minLength: 0)
                 }
             }
-            .padding(.leading, indented ? 22 : 8)
-            .padding(.trailing, 8)
-            .padding(.vertical, 4)
+            .padding(.leading, indented ? 22 : 9)
+            .padding(.trailing, 9)
+            .frame(height: 30)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
