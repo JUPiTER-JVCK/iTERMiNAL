@@ -1,0 +1,54 @@
+name: iTERMiNAL
+options:
+  bundleIdPrefix: com.jupiterjvck
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    # Pinned to v1.20.0: the newest release whose manifest (swift-tools 6.0)
+    # builds with Xcode 16.x; every API the engine wrapper uses was verified
+    # present at this revision.
+    revision: 5d14406844143538cd8f8851d2d8a67c1fe443e5
+
+targets:
+  iTERMiNAL:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/iTERMiNAL
+      - path: Resources/Assets.xcassets
+    dependencies:
+      - package: SwiftTerm
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: iTERMiNAL
+        CFBundleDisplayName: iTERMiNAL
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "MIT License — iTERMiNAL contributors"
+        NSPrincipalClass: NSApplication
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+        # The embedded browser pane must be able to load plain-http sites.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jupiterjvck.iterminal
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        # A real terminal cannot run sandboxed; dev builds are ad-hoc signed.
+        ENABLE_APP_SANDBOX: "NO"
+        ENABLE_HARDENED_RUNTIME: "NO"
+        CODE_SIGN_IDENTITY: "-"
+        COMBINE_HIDPI_IMAGES: "YES"
+    scheme:
+      testTargets: []
