@@ -85,7 +85,11 @@ final class ProcessMetrics: ObservableObject {
         var total: Double = 0
         for index in 0..<Int(count) {
             var info = thread_basic_info()
-            var infoCount = mach_msg_type_number_t(THREAD_BASIC_INFO_COUNT)
+            // THREAD_BASIC_INFO_COUNT is an expression macro, so Swift can't
+            // import it — same reason TASK_VM_INFO's count is computed below.
+            var infoCount = mach_msg_type_number_t(
+                MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<natural_t>.size
+            )
             let result = withUnsafeMutablePointer(to: &info) { pointer in
                 pointer.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) {
                     thread_info(threads[index], thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount)
