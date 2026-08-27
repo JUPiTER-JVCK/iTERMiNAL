@@ -1,43 +1,53 @@
 import AppKit
 import SwiftTerm
 
-/// SwiftTerm subclass that reports keyboard focus so the app can track which
-/// pane splits, composer input, and file-panel "follow" actions apply to.
-final class FocusReportingTerminalView: LocalProcessTerminalView {
-    var onFocusGained: (() -> Void)?
-
-    override func becomeFirstResponder() -> Bool {
-        let accepted = super.becomeFirstResponder()
-        if accepted {
-            onFocusGained?()
-        }
-        return accepted
-    }
-}
-
 /// TerminalEngine backed by SwiftTerm's LocalProcessTerminalView (a PTY-run
 /// child process with full VT100/xterm emulation).
+///
+/// Focus tracking: SwiftTerm's `becomeFirstResponder` is public but not open,
+/// so instead of subclassing, a local mouse-down monitor reports clicks that
+/// land inside this engine's view — that's what drives the app's notion of
+/// the focused pane.
 final class SwiftTermEngine: TerminalEngine {
     weak var delegate: TerminalEngineDelegate?
+    var onFocusGained: (() -> Void)?
 
-    private let terminalView: FocusReportingTerminalView
+    private let terminalView: LocalProcessTerminalView
     private var started = false
     private var lastAppearance: TerminalAppearance?
+    private var clickMonitor: Any?
 
     var view: NSView { terminalView }
 
-    var onFocusGained: (() -> Void)? {
-        get { terminalView.onFocusGained }
-        set { terminalView.onFocusGained = newValue }
-    }
-
     init(options: TerminalOptions) {
-        terminalView = FocusReportingTerminalView(
+        terminalView = LocalProcessTerminalView(
             frame: NSRect(x: 0, y: 0, width: 640, height: 400),
             font: nil,
             options: options
         )
         terminalView.processDelegate = self
+
+        clickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            self?.reportFocusIfClickLands(event)
+            return event
+        }
+    }
+
+    deinit {
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
+        }
+    }
+
+    private func reportFocusIfClickLands(_ event: NSEvent) {
+        guard let window = terminalView.window,
+              event.window === window else { return }
+        let point = terminalView.convert(event.locationInWindow, from: nil)
+        if terminalView.bounds.contains(point) {
+            onFocusGained?()
+        }
     }
 
     func start(_ configuration: TerminalLaunchConfiguration) {

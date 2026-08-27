@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SwiftTerm
 
 /// Bridges a session's AppKit terminal view into SwiftUI, keeping appearance
 /// in sync with settings and routing keyboard focus to the focused pane.
@@ -31,7 +32,7 @@ struct TerminalHostView: NSViewRepresentable {
             // Claim focus only from the window itself or another terminal —
             // never from a text field the user is typing in (composer, URL bar).
             let responder = window.firstResponder
-            guard responder === window || responder is FocusReportingTerminalView else { return }
+            guard responder === window || responder is LocalProcessTerminalView else { return }
             window.makeFirstResponder(nsView)
         }
     }
