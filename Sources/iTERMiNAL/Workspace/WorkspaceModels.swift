@@ -34,10 +34,13 @@ final class WorkspaceTab: ObservableObject, Identifiable {
     let id: UUID
     @Published var customName: String?
     @Published var root: PaneNode
+    /// Pinned tabs also appear in the sidebar's Pinned section.
+    @Published var isPinned: Bool
 
-    init(id: UUID = UUID(), customName: String? = nil, root: PaneNode) {
+    init(id: UUID = UUID(), customName: String? = nil, isPinned: Bool = false, root: PaneNode) {
         self.id = id
         self.customName = customName
+        self.isPinned = isPinned
         self.root = root
     }
 
@@ -91,6 +94,24 @@ extension PaneNode {
         }
     }
 
+    func allBrowsers() -> [BrowserModel] {
+        switch content {
+        case .browser(let browser):
+            return [browser]
+        case .split(_, let children):
+            return children.flatMap { $0.allBrowsers() }
+        case .terminal, .files:
+            return []
+        }
+    }
+
+    /// True when this node holds content directly rather than a split. A tab
+    /// whose root is a leaf has exactly one pane, so it needs no focus ring.
+    var isLeaf: Bool {
+        if case .split = content { return false }
+        return true
+    }
+
     /// The leaf node whose terminal session has the given id.
     func leaf(containingSessionID sessionID: UUID) -> PaneNode? {
         switch content {
@@ -122,6 +143,19 @@ extension PaneNode {
 struct AppStateSnapshot: Codable {
     var workspaces: [WorkspaceSnapshot]
     var selectedTabID: UUID?
+    /// Optional so older state files still decode.
+    var recents: [RecentSession]?
+}
+
+/// A session the user closed, kept so it can be reopened from the sidebar.
+struct RecentSession: Codable, Identifiable, Hashable {
+    var id: UUID
+    var title: String
+    var directory: String
+    var connection: String?
+    var closedAt: Date
+
+    var isRemote: Bool { connection != nil }
 }
 
 struct WorkspaceSnapshot: Codable {
@@ -134,12 +168,14 @@ struct TabSnapshot: Codable {
     var id: UUID
     var customName: String?
     var root: PaneSnapshot
+    /// Optional so layouts saved before pinning existed still decode.
+    var isPinned: Bool?
 }
 
 indirect enum PaneSnapshot: Codable {
-    case terminal(directory: String?)
+    case terminal(directory: String?, connection: String?)
     case browser(url: String?)
-    case files(path: String?)
+    case files(path: String?, connection: String?)
     case split(direction: SplitDirection, children: [PaneSnapshot])
 }
 
@@ -147,11 +183,14 @@ extension PaneNode {
     func snapshot() -> PaneSnapshot {
         switch content {
         case .terminal(let session):
-            return .terminal(directory: session.currentDirectory)
+            return .terminal(
+                directory: session.currentDirectory,
+                connection: session.kind.connectionID?.uuidString
+            )
         case .browser(let browser):
             return .browser(url: browser.urlText)
         case .files(let files):
-            return .files(path: files.directory.path)
+            return .files(path: files.directory, connection: files.connectionID)
         case .split(let direction, let children):
             return .split(direction: direction, children: children.map { $0.snapshot() })
         }
@@ -159,12 +198,18 @@ extension PaneNode {
 
     static func restore(_ snapshot: PaneSnapshot) -> PaneNode {
         switch snapshot {
-        case .terminal(let directory):
-            return PaneNode(content: .terminal(TerminalSession(initialDirectory: directory)))
+        case .terminal(let directory, let connection):
+            // A remote pane restores as a remote pane and redials on launch.
+            let kind: SessionKind = connection
+                .flatMap { UUID(uuidString: $0) }
+                .map { SessionKind.remote($0) } ?? .localShell
+            return PaneNode(content: .terminal(
+                TerminalSession(kind: kind, initialDirectory: directory)
+            ))
         case .browser(let url):
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))
-        case .files(let path):
-            return PaneNode(content: .files(FileBrowserModel(path: path)))
+        case .files(let path, let connection):
+            return PaneNode(content: .files(FileBrowserModel(path: path, connectionID: connection)))
         case .split(let direction, let children):
             return PaneNode(content: .split(direction, children.map { PaneNode.restore($0) }))
         }
@@ -173,11 +218,16 @@ extension PaneNode {
 
 extension WorkspaceTab {
     func snapshot() -> TabSnapshot {
-        TabSnapshot(id: id, customName: customName, root: root.snapshot())
+        TabSnapshot(id: id, customName: customName, root: root.snapshot(), isPinned: isPinned)
     }
 
     convenience init(snapshot: TabSnapshot) {
-        self.init(id: snapshot.id, customName: snapshot.customName, root: PaneNode.restore(snapshot.root))
+        self.init(
+            id: snapshot.id,
+            customName: snapshot.customName,
+            isPinned: snapshot.isPinned ?? false,
+            root: PaneNode.restore(snapshot.root)
+        )
     }
 }
 

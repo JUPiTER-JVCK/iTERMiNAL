@@ -1,7 +1,10 @@
 name: Build
 
+# Branches with an open PR are covered by the pull_request trigger, so the
+# push trigger is scoped to main — otherwise every PR push builds twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -24,7 +27,23 @@ jobs:
             -scheme iTERMiNAL \
             -configuration Debug \
             -destination "platform=macOS" \
+            -derivedDataPath build \
             -skipPackagePluginValidation \
             -skipMacroValidation \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # ditto preserves the bundle structure; a plain zip would mangle it.
+      - name: Package app
+        run: |
+          ditto -c -k --keepParent \
+            build/Build/Products/Debug/iTERMiNAL.app \
+            iTERMiNAL.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: iTERMiNAL-app
+          path: iTERMiNAL.zip
+          if-no-files-found: error

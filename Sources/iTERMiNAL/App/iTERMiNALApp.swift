@@ -30,7 +30,13 @@ struct ITerminalApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // The scripting API only listens when the user has enabled it.
+        LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        LocalAPIServer.shared.stop()
         WorkspaceStore.shared.saveNow()
         WorkspaceStore.shared.terminateAllSessions()
     }
@@ -48,6 +54,20 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.newWorkspace()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
+        }
+
+        CommandGroup(after: .toolbar) {
+            Button("Command Palette") {
+                WorkspaceStore.shared.showCommandPalette = true
+            }
+            .keyboardShortcut("k", modifiers: .command)
+
+            // The reference design uses ⌘P for the palette; keep both, since
+            // the app has nothing to print.
+            Button("Command Palette (⌘P)") {
+                WorkspaceStore.shared.showCommandPalette = true
+            }
+            .keyboardShortcut("p", modifiers: .command)
         }
 
         CommandMenu("Terminal") {
@@ -84,6 +104,13 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Panels") {
+            Button("Toggle Terminal Dock") {
+                WorkspaceStore.shared.toggleBottomDock()
+            }
+            .keyboardShortcut("j", modifiers: .command)
+
+            Divider()
+
             Button("Toggle Browser Panel") {
                 WorkspaceStore.shared.togglePanel(.browser)
             }

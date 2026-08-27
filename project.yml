@@ -22,6 +22,13 @@ targets:
       - path: Resources/Assets.xcassets
     dependencies:
       - package: SwiftTerm
+      # The CLI ships inside the app bundle; Settings → Security installs it
+      # into ~/.local/bin on request.
+      - target: iterminalctl
+        link: false
+        embed: false
+        copy:
+          destination: resources
     info:
       path: Resources/Info.plist
       properties:
@@ -35,20 +42,44 @@ targets:
         NSPrincipalClass: NSApplication
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
-        # The embedded browser pane must be able to load plain-http sites.
+        # Scope the ATS exception to web-view content only, so the browser
+        # pane can preview a plain-http dev server without weakening the
+        # transport policy for the rest of the app.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoadsInWebContent: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jupiterjvck.iterminal
-        MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.2.0
+        CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
-        # A real terminal cannot run sandboxed; dev builds are ad-hoc signed.
+        # Universal so the app runs natively on Intel and Apple Silicon.
+        ARCHS: "x86_64 arm64"
+        ONLY_ACTIVE_ARCH: "NO"
+        # A terminal exists to launch the user's own programs, and sandboxed
+        # children inherit the sandbox — a sandboxed build could not read
+        # ~/.ssh, Homebrew tools, or repos outside its container. Hardened
+        # Runtime is the part notarization actually requires, and it does not
+        # restrict spawned processes.
         ENABLE_APP_SANDBOX: "NO"
-        ENABLE_HARDENED_RUNTIME: "NO"
+        ENABLE_HARDENED_RUNTIME: "YES"
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
     scheme:
       testTargets: []
+
+  iterminalctl:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/iterminalctl
+    settings:
+      base:
+        PRODUCT_NAME: iterminalctl
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ARCHS: "x86_64 arm64"
+        ONLY_ACTIVE_ARCH: "NO"
+        ENABLE_HARDENED_RUNTIME: "YES"
+        CODE_SIGN_IDENTITY: "-"

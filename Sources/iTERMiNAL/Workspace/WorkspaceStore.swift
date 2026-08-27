@@ -38,15 +38,34 @@ final class WorkspaceStore: ObservableObject {
             if selectedTabID != nil { detailMode = .terminal }
             focusSelectedTab()
             scheduleSave()
+            if let selectedTabID {
+                EventBus.shared.publish(APIEvent("tab.selected", ["tab": selectedTabID.uuidString]))
+            }
         }
     }
     @Published var focusedSessionID: UUID?
-    @Published var activePanel: SidePanel?
+    /// The trailing panel, if any. Independent of the bottom dock: the
+    /// reference app lets both be open at once.
+    @Published var rightPanel: SidePanel?
+    @Published private(set) var bottomDockOpen = false
+    @Published var showCommandPalette = false
+    /// Sessions the user closed, newest first, so they can be reopened.
+    @Published private(set) var recentSessions: [RecentSession] = []
+
+    /// Terminals living in the bottom dock. Separate from tab panes — the
+    /// dock is a scratch surface that survives switching tabs.
+    @Published private(set) var dockSessions: [TerminalSession] = []
+    @Published var selectedDockSessionID: UUID?
 
     /// Models backing the sliding side panels (distinct from panes that live
     /// inside a tab's split layout).
-    lazy var panelBrowser = BrowserModel()
+    lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
+
+    var selectedDockSession: TerminalSession? {
+        guard let selectedDockSessionID else { return dockSessions.first }
+        return dockSessions.first { $0.id == selectedDockSessionID } ?? dockSessions.first
+    }
 
     private var pendingSave: DispatchWorkItem?
 
@@ -104,7 +123,41 @@ final class WorkspaceStore: ObservableObject {
                 }
             }
         }
-        return nil
+        // The dock's terminals take focus like any other, so they have to be
+        // findable here or the composer would type into the wrong shell.
+        return dockSessions.first { $0.id == id }
+    }
+
+    /// True when the id belongs to the bottom dock rather than a tab pane.
+    func isDockSession(_ id: UUID) -> Bool {
+        dockSessions.contains { $0.id == id }
+    }
+
+    // MARK: Lookups used by the scripting API
+
+    /// Resolves a tab by UUID string or by its display name.
+    func tab(withID identifier: String) -> WorkspaceTab? {
+        let all = workspaces.flatMap(\.tabs)
+        if let match = all.first(where: { $0.id.uuidString == identifier }) { return match }
+        return all.first { $0.displayName == identifier }
+    }
+
+    func session(withIdentifier identifier: String) -> TerminalSession? {
+        guard let uuid = UUID(uuidString: identifier) else {
+            // Fall back to the primary session of a tab named this.
+            return tab(withID: identifier)?.primarySession
+        }
+        return session(withID: uuid)
+    }
+
+    /// Every browser the API can address: panes inside tabs, plus the
+    /// right panel's tabs, which carry ids of their own.
+    func allBrowsers() -> [BrowserModel] {
+        workspaces.flatMap { $0.tabs.flatMap { $0.root.allBrowsers() } } + panelBrowserTabs.tabs
+    }
+
+    func browser(withIdentifier identifier: String) -> BrowserModel? {
+        allBrowsers().first { $0.id.uuidString == identifier }
     }
 
     func noteFocused(session: TerminalSession) {
@@ -124,14 +177,23 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Workspace / tab lifecycle
 
-    func newWorkspace() {
-        let workspace = Workspace(name: "Workspace \(workspaces.count + 1)")
+    func newWorkspace(named name: String? = nil) {
+        let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
+        let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
+        EventBus.shared.publish(APIEvent("workspace.created", [
+            "workspace": workspace.id.uuidString,
+            "name": workspace.name,
+        ]))
         newTab(in: workspace)
     }
 
     @discardableResult
-    func newTab(in workspace: Workspace? = nil, directory: String? = nil) -> WorkspaceTab {
+    func newTab(
+        in workspace: Workspace? = nil,
+        directory: String? = nil,
+        kind: SessionKind = .localShell
+    ) -> WorkspaceTab {
         let target: Workspace
         if let workspace {
             target = workspace
@@ -143,20 +205,71 @@ final class WorkspaceStore: ObservableObject {
             target = created
         }
 
-        let session = TerminalSession(initialDirectory: directory)
+        let session = TerminalSession(kind: kind, initialDirectory: directory)
         session.startIfNeeded()
         let tab = WorkspaceTab(root: PaneNode(content: .terminal(session)))
         target.tabs.append(tab)
         selectedTabID = tab.id
         focusedSessionID = session.id
         scheduleSave()
+        EventBus.shared.publish(APIEvent("tab.created", [
+            "tab": tab.id.uuidString,
+            "workspace": target.id.uuidString,
+            "workspaceName": target.name,
+            "session": session.id.uuidString,
+            "remote": kind.isRemote,
+        ]))
         return tab
+    }
+
+    /// Pinned tabs across every workspace, newest activity first.
+    var pinnedTabs: [WorkspaceTab] {
+        workspaces.flatMap(\.tabs).filter(\.isPinned)
+    }
+
+    func togglePin(_ tab: WorkspaceTab) {
+        tab.isPinned.toggle()
+        scheduleSave()
+    }
+
+    /// Reopens a closed session in a new tab.
+    func reopen(_ recent: RecentSession) {
+        let kind: SessionKind = recent.connection
+            .flatMap { UUID(uuidString: $0) }
+            .map { SessionKind.remote($0) } ?? .localShell
+        newTab(directory: recent.isRemote ? nil : recent.directory, kind: kind)
+        recentSessions.removeAll { $0.id == recent.id }
+        scheduleSave()
+    }
+
+    func clearRecents() {
+        recentSessions.removeAll()
+        scheduleSave()
+    }
+
+    private func rememberClosed(_ tab: WorkspaceTab) {
+        for session in tab.root.allSessions() {
+            let entry = RecentSession(
+                id: session.id,
+                title: tab.displayName,
+                directory: session.currentDirectory,
+                connection: session.kind.connectionID?.uuidString,
+                closedAt: Date()
+            )
+            recentSessions.removeAll { $0.id == entry.id }
+            recentSessions.insert(entry, at: 0)
+        }
+        if recentSessions.count > 20 {
+            recentSessions.removeLast(recentSessions.count - 20)
+        }
     }
 
     func closeTab(_ tab: WorkspaceTab) {
         guard let workspace = workspace(containingTab: tab.id) else { return }
+        rememberClosed(tab)
         tab.root.allSessions().forEach { $0.terminate() }
         workspace.tabs.removeAll { $0 === tab }
+        EventBus.shared.publish(APIEvent("tab.closed", ["tab": tab.id.uuidString]))
         if selectedTabID == tab.id {
             selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
         }
@@ -181,11 +294,17 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Splits
 
-    func splitFocusedPane(_ direction: SplitDirection, kind: PaneKind) {
-        guard let tab = selectedTab else {
-            newTab()
-            return
-        }
+    /// Splits the focused pane and returns the newly created node, so callers
+    /// (notably the scripting API) can address exactly what they just made.
+    @discardableResult
+    func splitFocusedPane(
+        _ direction: SplitDirection,
+        kind: PaneKind,
+        connection: UUID? = nil
+    ) -> PaneNode? {
+        // With nothing open, create a tab first and split that, so the caller
+        // still gets back a pane of the kind they asked for.
+        let tab = selectedTab ?? newTab()
 
         let target: PaneNode
         if let focusedSessionID,
@@ -198,7 +317,11 @@ final class WorkspaceStore: ObservableObject {
         let newContent: PaneContent
         switch kind {
         case .terminal:
-            let session = TerminalSession(initialDirectory: focusedSession?.currentDirectory)
+            let sessionKind: SessionKind = connection.map { .remote($0) } ?? .localShell
+            let session = TerminalSession(
+                kind: sessionKind,
+                initialDirectory: sessionKind.isRemote ? nil : focusedSession?.currentDirectory
+            )
             session.startIfNeeded()
             newContent = .terminal(session)
             focusedSessionID = session.id
@@ -212,9 +335,20 @@ final class WorkspaceStore: ObservableObject {
         let added = PaneNode(content: newContent)
         target.content = .split(direction, [existing, added])
         scheduleSave()
+        EventBus.shared.publish(APIEvent("pane.split", [
+            "tab": tab.id.uuidString,
+            "direction": direction.rawValue,
+        ]))
+        return added
     }
 
     func closeFocusedPane() {
+        // Focus may be in the dock, which owns no pane — closing the tab
+        // because the user clicked into the dock would be destructive.
+        if let focusedSessionID, isDockSession(focusedSessionID) {
+            closeDockSession(focusedSessionID)
+            return
+        }
         guard let tab = selectedTab else { return }
         guard let focusedSessionID,
               let leaf = tab.root.leaf(containingSessionID: focusedSessionID) else {
@@ -237,6 +371,7 @@ final class WorkspaceStore: ObservableObject {
         }
         self.focusedSessionID = tab.root.firstTerminal()?.id
         scheduleSave()
+        EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
     // MARK: Composer routing
@@ -250,18 +385,78 @@ final class WorkspaceStore: ObservableObject {
         tab.primarySession?.send(text: text)
     }
 
+    /// Opens a link clicked in a terminal inside the app's browser — an
+    /// existing browser pane in this tab if there is one, otherwise the
+    /// sliding panel.
+    func openLinkFromTerminal(_ link: String) {
+        if let browser = selectedTab?.root.allBrowsers().first {
+            browser.navigate(to: link) { _ in }
+            return
+        }
+        withAnimation(Motion.panel) { rightPanel = .browser }
+        // A tabbed browser should open a link beside the current page, not
+        // navigate away from it.
+        panelBrowserTabs.newTab(url: link)
+    }
+
     // MARK: Side panels
 
     func togglePanel(_ panel: SidePanel) {
-        if activePanel == panel {
-            activePanel = nil
+        if rightPanel == panel {
+            withAnimation(Motion.panel) { rightPanel = nil }
             return
         }
-        activePanel = panel
+        withAnimation(Motion.panel) { rightPanel = panel }
+        if panel == .browser, panelBrowserTabs.tabs.isEmpty {
+            panelBrowserTabs.newTab()
+        }
         if panel == .files,
            AppSettings.shared.followTerminalDirectory,
+           !panelFiles.isRemote,
            let directory = focusedSession?.currentDirectory {
-            panelFiles.navigate(to: URL(fileURLWithPath: directory))
+            panelFiles.navigate(to: directory)
+        }
+    }
+
+    // MARK: Bottom terminal dock
+
+    func toggleBottomDock() {
+        withAnimation(Motion.panel) { bottomDockOpen.toggle() }
+        // Opening an empty dock with nothing in it would just show a blank
+        // strip, so give it a shell.
+        if bottomDockOpen, dockSessions.isEmpty {
+            _ = newDockSession()
+        }
+    }
+
+    func closeBottomDock() {
+        withAnimation(Motion.panel) { bottomDockOpen = false }
+    }
+
+    @discardableResult
+    func newDockSession(directory: String? = nil) -> TerminalSession {
+        let session = TerminalSession(
+            kind: .localShell,
+            initialDirectory: directory ?? focusedSession?.currentDirectory
+        )
+        session.startIfNeeded()
+        dockSessions.append(session)
+        selectedDockSessionID = session.id
+        EventBus.shared.publish(APIEvent("dock.session.created", ["session": session.id.uuidString]))
+        return session
+    }
+
+    func closeDockSession(_ id: UUID) {
+        guard let index = dockSessions.firstIndex(where: { $0.id == id }) else { return }
+        let session = dockSessions.remove(at: index)
+        session.terminate()
+        if selectedDockSessionID == id {
+            selectedDockSessionID = dockSessions.first?.id
+        }
+        EventBus.shared.publish(APIEvent("dock.session.closed", ["session": id.uuidString]))
+        // An empty dock is just a blank strip; fold it away.
+        if dockSessions.isEmpty {
+            withAnimation(Motion.panel) { bottomDockOpen = false }
         }
     }
 
@@ -274,11 +469,36 @@ final class WorkspaceStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
-    func saveNow() {
-        let snapshot = AppStateSnapshot(
+    /// The current layout as a persistable value — used both for autosave and
+    /// for exporting a portable snapshot.
+    func currentSnapshot() -> AppStateSnapshot {
+        AppStateSnapshot(
             workspaces: workspaces.map { $0.snapshot() },
-            selectedTabID: selectedTabID
+            selectedTabID: selectedTabID,
+            recents: recentSessions
         )
+    }
+
+    /// Replaces every workspace with the contents of a snapshot, shutting down
+    /// the processes that belonged to the outgoing layout.
+    func applySnapshot(_ snapshot: AppStateSnapshot) {
+        terminateAllSessions()
+        workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
+        recentSessions = snapshot.recents ?? []
+        if workspaces.isEmpty {
+            bootstrap()
+            return
+        }
+        let allTabs = workspaces.flatMap(\.tabs)
+        selectedTabID = snapshot.selectedTabID.flatMap { id in
+            allTabs.first { $0.id == id }?.id
+        } ?? allTabs.first?.id
+        focusedSessionID = selectedTab?.root.firstTerminal()?.id
+        saveNow()
+    }
+
+    func saveNow() {
+        let snapshot = currentSnapshot()
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -295,6 +515,7 @@ final class WorkspaceStore: ObservableObject {
               !snapshot.workspaces.isEmpty else { return false }
 
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
+        recentSessions = snapshot.recents ?? []
         let allTabs = workspaces.flatMap(\.tabs)
         guard !allTabs.isEmpty else { return false }
 
@@ -312,6 +533,7 @@ final class WorkspaceStore: ObservableObject {
                 tab.root.allSessions().forEach { $0.terminate() }
             }
         }
+        dockSessions.forEach { $0.terminate() }
     }
 
     var stateFileURL: URL { stateURL }
