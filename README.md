@@ -44,7 +44,30 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - Xcode 16 or later (SwiftTerm's manifest uses Swift tools 6.0)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-## Building
+## Running it
+
+It's a native macOS app, so it needs a Mac (14+, Intel or Apple Silicon).
+There are two ways to get it running.
+
+### Download a build (no Xcode needed)
+
+Every green CI run publishes the built app. Open the
+[Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions), click the
+most recent successful **Build** run, and download **iTERMiNAL-app** from the
+Artifacts section. Then:
+
+```sh
+unzip iTERMiNAL.zip
+xattr -dr com.apple.quarantine iTERMiNAL.app   # see note below
+open iTERMiNAL.app
+```
+
+These builds are **unsigned**, and macOS quarantines anything downloaded
+through a browser — so without that `xattr` line Gatekeeper refuses to open
+it ("damaged or can't be verified"). Right-click → Open works too. Signing
+properly needs an Apple Developer ID, which this project doesn't have yet.
+
+### Build from source
 
 ```sh
 brew install xcodegen

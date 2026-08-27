@@ -206,9 +206,9 @@ struct SidebarView: View {
             onToggle: {
                 withAnimation(Motion.disclosure) {
                     if expandedWorkspaces.contains(workspace.id) {
-                        expandedWorkspaces.remove(workspace.id)
+                        _ = expandedWorkspaces.remove(workspace.id)
                     } else {
-                        expandedWorkspaces.insert(workspace.id)
+                        _ = expandedWorkspaces.insert(workspace.id)
                     }
                 }
             },
@@ -227,7 +227,7 @@ struct SidebarView: View {
         if tabs.count > visible.count {
             Button {
                 withAnimation(Motion.disclosure) {
-                    expandedWorkspaces.insert(workspace.id)
+                    _ = expandedWorkspaces.insert(workspace.id)
                 }
             } label: {
                 Text("Show more")
