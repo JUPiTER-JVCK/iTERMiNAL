@@ -47,7 +47,7 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
 
-                    if store.rightPanelOpen {
+                    if store.rightRegionOpen {
                         if !store.rightPanelExpanded {
                             PanelResizeHandle(
                                 axis: .horizontal,
@@ -81,15 +81,19 @@ struct DetailView: View {
         .background(theme.background)
     }
 
-    /// Honour the user's stored width, but never below the panel's minimum
-    /// and never so wide that the main surface drops under `minMainWidth`.
+    /// Width for the trailing panel against the space actually available.
     private func panelWidth(in available: Double) -> Double {
         let minMain: Double = 360
         let minPanel: Double = 280
-        guard available > minMain + minPanel else {
-            return max(minPanel, available * 0.5)
+        if available >= minMain + minPanel {
+            // Room for both: honour the stored width, capped so the main
+            // surface keeps its minimum.
+            return min(settings.rightPanelWidth, available - minMain)
         }
-        return min(settings.rightPanelWidth, available - minMain)
+        // Too narrow for both minimums, so neither gets one. Split what
+        // there is and leave the larger share to the main surface — it
+        // holds the terminal, which is what the window is for.
+        return max(0, available * 0.4)
     }
 
     @ViewBuilder
@@ -157,7 +161,7 @@ private struct DetailTopStrip: View {
                 StripToggle(
                     icon: panel.icon,
                     help: "Toggle \(panel.title) panel",
-                    isActive: store.openPanels.contains(panel)
+                    isActive: store.rightRegionOpen && store.openPanels.contains(panel)
                 ) {
                     store.togglePanel(panel)
                 }
@@ -561,7 +565,6 @@ struct RightPanelView: View {
                 PanelTabChip(
                     panel: panel,
                     isSelected: store.visiblePanel == panel,
-                    showsClose: store.openPanels.count > 1,
                     onSelect: { store.frontPanel = panel },
                     onClose: { store.closePanel(panel) }
                 )
@@ -584,7 +587,7 @@ struct RightPanelView: View {
             .help(store.rightPanelExpanded ? "Collapse panel" : "Expand panel")
 
             Button {
-                if let panel = store.visiblePanel { store.closePanel(panel) }
+                store.closeRightRegion()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .medium))
@@ -604,7 +607,6 @@ struct RightPanelView: View {
 private struct PanelTabChip: View {
     let panel: SidePanel
     let isSelected: Bool
-    let showsClose: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
@@ -620,17 +622,15 @@ private struct PanelTabChip: View {
             Text(panel.title)
                 .font(.system(size: 12))
                 .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
-            if showsClose {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(theme.textSecondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Close \(panel.title)")
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Close \(panel.title)")
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)

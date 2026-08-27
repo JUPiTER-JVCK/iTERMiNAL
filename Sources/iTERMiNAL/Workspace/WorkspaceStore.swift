@@ -44,10 +44,14 @@ final class WorkspaceStore: ObservableObject {
         }
     }
     @Published var focusedSessionID: UUID?
-    /// Panels currently open in the trailing region. A set rather than one
+    /// Panels currently in the trailing region. A set rather than one
     /// optional, so opening Files no longer evicts the browser — every panel
     /// keeps its place until you close it yourself.
     @Published private(set) var openPanels: Set<SidePanel> = []
+    /// Whether the trailing region is showing, tracked separately from what
+    /// is in it: the region can be open and empty (offering the picker), and
+    /// hiding it keeps its panels so reopening restores them where they were.
+    @Published private(set) var rightRegionOpen = false
     /// Which open panel is in front when more than one shares the region.
     @Published var frontPanel: SidePanel?
     /// True while the trailing region is expanded over the main surface.
@@ -406,9 +410,6 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Side panels
 
-    /// The trailing region is open when anything is in it.
-    var rightPanelOpen: Bool { !openPanels.isEmpty }
-
     /// Open panels in a stable order, so the tab strip doesn't reshuffle.
     var orderedOpenPanels: [SidePanel] {
         SidePanel.allCases.filter { openPanels.contains($0) }
@@ -420,9 +421,18 @@ final class WorkspaceStore: ObservableObject {
         return orderedOpenPanels.first
     }
 
+    /// Shortcut and top-strip semantics: turning a panel off that was the
+    /// only one also puts the region away, so the toggle stays predictable.
     func togglePanel(_ panel: SidePanel) {
-        if openPanels.contains(panel) {
-            closePanel(panel)
+        if rightRegionOpen, openPanels.contains(panel) {
+            withAnimation(Motion.panel) {
+                _ = openPanels.remove(panel)
+                if frontPanel == panel { frontPanel = orderedOpenPanels.first }
+                if openPanels.isEmpty {
+                    rightRegionOpen = false
+                    rightPanelExpanded = false
+                }
+            }
         } else {
             openPanel(panel)
         }
@@ -432,6 +442,7 @@ final class WorkspaceStore: ObservableObject {
         withAnimation(Motion.panel) {
             _ = openPanels.insert(panel)
             frontPanel = panel
+            rightRegionOpen = true
         }
         if panel == .browser, panelBrowserTabs.tabs.isEmpty {
             panelBrowserTabs.newTab()
@@ -444,12 +455,23 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// Closing a panel from its own tab leaves the region up, so emptying it
+    /// lands on the picker rather than collapsing the layout out from under
+    /// the pointer that just clicked.
     func closePanel(_ panel: SidePanel) {
         withAnimation(Motion.panel) {
             _ = openPanels.remove(panel)
             if frontPanel == panel { frontPanel = orderedOpenPanels.first }
             // Nothing left to expand over the main surface.
             if openPanels.isEmpty { rightPanelExpanded = false }
+        }
+    }
+
+    /// Puts the whole region away, keeping its panels for next time.
+    func closeRightRegion() {
+        withAnimation(Motion.panel) {
+            rightRegionOpen = false
+            rightPanelExpanded = false
         }
     }
 
