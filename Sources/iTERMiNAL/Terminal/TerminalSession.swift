@@ -13,6 +13,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var gitBranch: String?
     @Published private(set) var isRunning = false
     @Published private(set) var lastExitCode: Int32?
+    /// Whether SwiftTerm's Metal renderer ended up active for this session —
+    /// requesting GPU rendering can silently fall back to the CPU path.
+    @Published private(set) var isGPUAccelerated = false
 
     let engine: SwiftTermEngine
     private var hasStarted = false
@@ -78,14 +81,27 @@ final class TerminalSession: ObservableObject, Identifiable {
         engine.send(text: text)
     }
 
-    func applyAppearance(settings: AppSettings, darkMode: Bool) {
-        let theme: Theme = darkMode ? .dark : .light
+    /// Visible screen contents, used by the local API's capture command.
+    func captureVisibleText() -> String {
+        engine.captureVisibleText()
+    }
+
+    /// Pushes font, colors, ANSI palette, and the GPU renderer preference
+    /// into the engine. Safe to call on every SwiftUI update — the engine
+    /// ignores values that haven't changed.
+    func applyStyling(settings: AppSettings, darkMode: Bool) {
+        let theme = settings.resolvedTerminalTheme(darkMode: darkMode)
+        engine.applyPalette(theme.palette)
         engine.apply(TerminalAppearance(
             font: settings.resolvedTerminalFont(),
-            background: theme.terminalBackground,
-            foreground: theme.terminalForeground,
+            background: theme.backgroundColor,
+            foreground: theme.foregroundColor,
             backgroundAlpha: CGFloat(settings.backgroundOpacity)
         ))
+        let active = engine.setGPUAcceleration(settings.useGPURendering)
+        if isGPUAccelerated != active {
+            isGPUAccelerated = active
+        }
     }
 
     func terminate() {
@@ -106,13 +122,13 @@ final class TerminalSession: ObservableObject, Identifiable {
         }
     }
 
-    /// Walks up from `path` looking for .git/HEAD; returns the branch name,
-    /// a short SHA when detached, or nil outside a repository.
+    /// Walks up from `path` looking for a git directory; returns the branch
+    /// name, a short SHA when detached, or nil outside a repository.
     static func gitBranch(startingAt path: String) -> String? {
         var url = URL(fileURLWithPath: path)
         for _ in 0..<16 {
-            let head = url.appendingPathComponent(".git").appendingPathComponent("HEAD")
-            if let contents = try? String(contentsOf: head, encoding: .utf8) {
+            if let gitDirectory = resolveGitDirectory(url.appendingPathComponent(".git")),
+               let contents = try? String(contentsOf: gitDirectory.appendingPathComponent("HEAD"), encoding: .utf8) {
                 let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
                 let refPrefix = "ref: refs/heads/"
                 if trimmed.hasPrefix(refPrefix) {
@@ -122,6 +138,32 @@ final class TerminalSession: ObservableObject, Identifiable {
             }
             if url.path == "/" { break }
             url.deleteLastPathComponent()
+        }
+        return nil
+    }
+
+    /// `.git` is a directory in an ordinary clone, but a *file* containing
+    /// `gitdir: <path>` inside linked worktrees and submodules — follow that
+    /// pointer so branch detection works in both layouts.
+    private static func resolveGitDirectory(_ dotGit: URL) -> URL? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        if isDirectory.boolValue { return dotGit }
+
+        guard let contents = try? String(contentsOf: dotGit, encoding: .utf8) else { return nil }
+        let prefix = "gitdir:"
+        for line in contents.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix(prefix) else { continue }
+            let target = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+            guard !target.isEmpty else { continue }
+            if target.hasPrefix("/") {
+                return URL(fileURLWithPath: target)
+            }
+            return URL(fileURLWithPath: target, relativeTo: dotGit.deletingLastPathComponent())
+                .standardizedFileURL
         }
         return nil
     }

@@ -17,6 +17,11 @@ struct MainWindowView: View {
                 }
         }
         .frame(minWidth: 900, minHeight: 560)
+        .sheet(isPresented: $store.showCommandPalette) {
+            CommandPaletteView()
+                .environmentObject(store)
+                .environmentObject(settings)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 ForEach(SidePanel.allCases) { panel in

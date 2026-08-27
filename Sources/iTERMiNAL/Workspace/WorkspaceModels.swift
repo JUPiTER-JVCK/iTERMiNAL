@@ -91,6 +91,17 @@ extension PaneNode {
         }
     }
 
+    func allBrowsers() -> [BrowserModel] {
+        switch content {
+        case .browser(let browser):
+            return [browser]
+        case .split(_, let children):
+            return children.flatMap { $0.allBrowsers() }
+        case .terminal, .files:
+            return []
+        }
+    }
+
     /// The leaf node whose terminal session has the given id.
     func leaf(containingSessionID sessionID: UUID) -> PaneNode? {
         switch content {
@@ -139,7 +150,7 @@ struct TabSnapshot: Codable {
 indirect enum PaneSnapshot: Codable {
     case terminal(directory: String?)
     case browser(url: String?)
-    case files(path: String?)
+    case files(path: String?, connection: String?)
     case split(direction: SplitDirection, children: [PaneSnapshot])
 }
 
@@ -151,7 +162,7 @@ extension PaneNode {
         case .browser(let browser):
             return .browser(url: browser.urlText)
         case .files(let files):
-            return .files(path: files.directory.path)
+            return .files(path: files.directory, connection: files.connectionID)
         case .split(let direction, let children):
             return .split(direction: direction, children: children.map { $0.snapshot() })
         }
@@ -163,8 +174,8 @@ extension PaneNode {
             return PaneNode(content: .terminal(TerminalSession(initialDirectory: directory)))
         case .browser(let url):
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))
-        case .files(let path):
-            return PaneNode(content: .files(FileBrowserModel(path: path)))
+        case .files(let path, let connection):
+            return PaneNode(content: .files(FileBrowserModel(path: path, connectionID: connection)))
         case .split(let direction, let children):
             return PaneNode(content: .split(direction, children.map { PaneNode.restore($0) }))
         }

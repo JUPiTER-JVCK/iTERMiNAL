@@ -15,7 +15,12 @@ final class SwiftTermEngine: TerminalEngine {
     private let terminalView: LocalProcessTerminalView
     private var started = false
     private var lastAppearance: TerminalAppearance?
+    private var lastPalette: [PaletteColor]?
+    private var lastGPURequest: Bool?
     private var clickMonitor: Any?
+
+    /// True when SwiftTerm's Metal renderer is actually driving this view.
+    private(set) var isGPUAccelerated = false
 
     var view: NSView { terminalView }
 
@@ -75,6 +80,47 @@ final class SwiftTermEngine: TerminalEngine {
         let alpha = max(0.5, min(1.0, appearance.backgroundAlpha))
         terminalView.nativeBackgroundColor = appearance.background.withAlphaComponent(alpha)
         terminalView.caretColor = appearance.foreground
+    }
+
+    func applyPalette(_ colors: [PaletteColor]) {
+        guard colors.count == 16, colors != lastPalette else { return }
+        lastPalette = colors
+        terminalView.installColors(colors.map {
+            SwiftTerm.Color(red8: $0.red, green8: $0.green, blue8: $0.blue)
+        })
+        // installColors resets the native fore/background, so push the
+        // current appearance back in afterwards.
+        if let appearance = lastAppearance {
+            lastAppearance = nil
+            apply(appearance)
+        }
+    }
+
+    @discardableResult
+    func setGPUAcceleration(_ enabled: Bool) -> Bool {
+        guard enabled != lastGPURequest else { return isGPUAccelerated }
+        lastGPURequest = enabled
+        do {
+            try terminalView.setUseMetal(enabled)
+            isGPUAccelerated = terminalView.isUsingMetalRenderer
+        } catch {
+            // Metal is unavailable or failed to initialize — SwiftTerm stays
+            // on the CoreGraphics path, which is a correct fallback.
+            NSLog("GPU rendering unavailable, using CPU renderer: \(error.localizedDescription)")
+            isGPUAccelerated = false
+        }
+        return isGPUAccelerated
+    }
+
+    func captureVisibleText() -> String {
+        let terminal = terminalView.getTerminal()
+        let cols = terminal.cols
+        let rows = terminal.rows
+        guard cols > 0, rows > 0 else { return "" }
+        return terminal.getText(
+            start: Position(col: 0, row: 0),
+            end: Position(col: cols - 1, row: rows - 1)
+        )
     }
 
     func terminate() {

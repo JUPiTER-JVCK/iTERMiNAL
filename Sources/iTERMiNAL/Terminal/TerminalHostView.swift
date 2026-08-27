@@ -11,7 +11,7 @@ struct TerminalHostView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         session.startIfNeeded()
-        session.applyAppearance(settings: settings, darkMode: colorScheme == .dark)
+        session.applyStyling(settings: settings, darkMode: colorScheme == .dark)
         let view = session.engine.view
         let sessionID = session.id
         DispatchQueue.main.async {
@@ -23,7 +23,7 @@ struct TerminalHostView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        session.applyAppearance(settings: settings, darkMode: colorScheme == .dark)
+        session.applyStyling(settings: settings, darkMode: colorScheme == .dark)
         let sessionID = session.id
         DispatchQueue.main.async {
             guard WorkspaceStore.shared.focusedSessionID == sessionID,

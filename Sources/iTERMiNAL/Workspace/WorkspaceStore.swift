@@ -42,6 +42,7 @@ final class WorkspaceStore: ObservableObject {
     }
     @Published var focusedSessionID: UUID?
     @Published var activePanel: SidePanel?
+    @Published var showCommandPalette = false
 
     /// Models backing the sliding side panels (distinct from panes that live
     /// inside a tab's split layout).
@@ -107,6 +108,31 @@ final class WorkspaceStore: ObservableObject {
         return nil
     }
 
+    // MARK: Lookups used by the scripting API
+
+    /// Resolves a tab by UUID string or by its display name.
+    func tab(withID identifier: String) -> WorkspaceTab? {
+        let all = workspaces.flatMap(\.tabs)
+        if let match = all.first(where: { $0.id.uuidString == identifier }) { return match }
+        return all.first { $0.displayName == identifier }
+    }
+
+    func session(withIdentifier identifier: String) -> TerminalSession? {
+        guard let uuid = UUID(uuidString: identifier) else {
+            // Fall back to the primary session of a tab named this.
+            return tab(withID: identifier)?.primarySession
+        }
+        return session(withID: uuid)
+    }
+
+    func allBrowsers() -> [BrowserModel] {
+        workspaces.flatMap { $0.tabs.flatMap { $0.root.allBrowsers() } }
+    }
+
+    func browser(withIdentifier identifier: String) -> BrowserModel? {
+        allBrowsers().first { $0.id.uuidString == identifier }
+    }
+
     func noteFocused(session: TerminalSession) {
         if focusedSessionID != session.id {
             focusedSessionID = session.id
@@ -124,8 +150,9 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Workspace / tab lifecycle
 
-    func newWorkspace() {
-        let workspace = Workspace(name: "Workspace \(workspaces.count + 1)")
+    func newWorkspace(named name: String? = nil) {
+        let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
+        let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
         newTab(in: workspace)
     }
@@ -181,11 +208,13 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Splits
 
-    func splitFocusedPane(_ direction: SplitDirection, kind: PaneKind) {
-        guard let tab = selectedTab else {
-            newTab()
-            return
-        }
+    /// Splits the focused pane and returns the newly created node, so callers
+    /// (notably the scripting API) can address exactly what they just made.
+    @discardableResult
+    func splitFocusedPane(_ direction: SplitDirection, kind: PaneKind) -> PaneNode? {
+        // With nothing open, create a tab first and split that, so the caller
+        // still gets back a pane of the kind they asked for.
+        let tab = selectedTab ?? newTab()
 
         let target: PaneNode
         if let focusedSessionID,
@@ -212,6 +241,7 @@ final class WorkspaceStore: ObservableObject {
         let added = PaneNode(content: newContent)
         target.content = .split(direction, [existing, added])
         scheduleSave()
+        return added
     }
 
     func closeFocusedPane() {
@@ -260,8 +290,9 @@ final class WorkspaceStore: ObservableObject {
         activePanel = panel
         if panel == .files,
            AppSettings.shared.followTerminalDirectory,
+           !panelFiles.isRemote,
            let directory = focusedSession?.currentDirectory {
-            panelFiles.navigate(to: URL(fileURLWithPath: directory))
+            panelFiles.navigate(to: directory)
         }
     }
 
@@ -274,11 +305,34 @@ final class WorkspaceStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
-    func saveNow() {
-        let snapshot = AppStateSnapshot(
+    /// The current layout as a persistable value — used both for autosave and
+    /// for exporting a portable snapshot.
+    func currentSnapshot() -> AppStateSnapshot {
+        AppStateSnapshot(
             workspaces: workspaces.map { $0.snapshot() },
             selectedTabID: selectedTabID
         )
+    }
+
+    /// Replaces every workspace with the contents of a snapshot, shutting down
+    /// the processes that belonged to the outgoing layout.
+    func applySnapshot(_ snapshot: AppStateSnapshot) {
+        terminateAllSessions()
+        workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
+        if workspaces.isEmpty {
+            bootstrap()
+            return
+        }
+        let allTabs = workspaces.flatMap(\.tabs)
+        selectedTabID = snapshot.selectedTabID.flatMap { id in
+            allTabs.first { $0.id == id }?.id
+        } ?? allTabs.first?.id
+        focusedSessionID = selectedTab?.root.firstTerminal()?.id
+        saveNow()
+    }
+
+    func saveNow() {
+        let snapshot = currentSnapshot()
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

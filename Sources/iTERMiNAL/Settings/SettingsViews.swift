@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, terminal, panels, shortcuts, advanced
+    case general, appearance, terminal, panels, connections, security, sync, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -12,6 +12,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "Appearance"
         case .terminal: return "Terminal"
         case .panels: return "Panels"
+        case .connections: return "Connections"
+        case .security: return "Security"
+        case .sync: return "Sync"
         case .shortcuts: return "Shortcuts"
         case .advanced: return "Advanced"
         }
@@ -23,6 +26,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "paintbrush"
         case .terminal: return "terminal"
         case .panels: return "sidebar.right"
+        case .connections: return "network"
+        case .security: return "lock.shield"
+        case .sync: return "arrow.triangle.2.circlepath"
         case .shortcuts: return "keyboard"
         case .advanced: return "wrench.and.screwdriver"
         }
@@ -51,13 +57,16 @@ struct SettingsRootView: View {
                 case .appearance: AppearanceSettingsView()
                 case .terminal: TerminalSettingsView()
                 case .panels: PanelsSettingsView()
+                case .connections: ConnectionsSettingsView()
+                case .security: SecuritySettingsView()
+                case .sync: SyncSettingsView()
                 case .shortcuts: ShortcutsSettingsView()
                 case .advanced: AdvancedSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 760, height: 480)
+        .frame(width: 780, height: 520)
     }
 }
 
@@ -174,6 +183,15 @@ struct TerminalSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Colors") {
+                Picker("Terminal theme", selection: $settings.terminalThemeID) {
+                    Text("Match system appearance").tag("auto")
+                    Divider()
+                    ForEach(TerminalTheme.all) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                }
+            }
             Section("Font") {
                 Picker("Font", selection: $settings.terminalFontName) {
                     Text("System monospace (SF Mono)").tag("")
@@ -207,6 +225,12 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Performance") {
+                Toggle("GPU rendering (experimental)", isOn: $settings.useGPURendering)
+                Text("Draws the terminal with Metal for smoother scrolling. The renderer is still experimental upstream; if it can't start, terminals silently keep using the CPU renderer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }
@@ -232,8 +256,231 @@ struct PanelsSettingsView: View {
     }
 }
 
+/// SSH hosts for the file panel's remote mode.
+struct ConnectionsSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @State private var selectedID: UUID?
+
+    var body: some View {
+        Form {
+            Section("Saved hosts") {
+                if settings.sshConnections.isEmpty {
+                    Text("No hosts yet. Add one to browse it in the Files panel over SFTP.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Host", selection: $selectedID) {
+                        Text("None").tag(UUID?.none)
+                        ForEach(settings.sshConnections) { connection in
+                            Text("\(connection.name) — \(connection.subtitle)").tag(UUID?.some(connection.id))
+                        }
+                    }
+                }
+                HStack {
+                    Button("Add Host") { addConnection() }
+                    if let selectedID {
+                        Button("Remove", role: .destructive) { remove(selectedID) }
+                    }
+                }
+            }
+
+            if let selectedID, let binding = connectionBinding(selectedID) {
+                Section("Details") {
+                    TextField("Name", text: binding.name)
+                    TextField("Host", text: binding.host)
+                    TextField("Username", text: binding.username)
+                    TextField("Port", value: binding.port, format: .number)
+                    TextField("Identity file (optional)", text: Binding(
+                        get: { binding.wrappedValue.identityFile ?? "" },
+                        set: { binding.wrappedValue.identityFile = $0.isEmpty ? nil : $0 }
+                    ), prompt: Text("~/.ssh/id_ed25519"))
+                    TextField("Start directory (optional)", text: Binding(
+                        get: { binding.wrappedValue.initialPath ?? "" },
+                        set: { binding.wrappedValue.initialPath = $0.isEmpty ? nil : $0 }
+                    ), prompt: Text("~"))
+                }
+            }
+
+            Section("Authentication") {
+                Text("""
+                iTERMiNAL never stores SSH passwords. Transfers run through the system's own sftp client in batch mode, reusing your ssh-agent, keys, and known_hosts — so key-based authentication is required, and nothing secret is kept by this app.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func addConnection() {
+        let connection = SSHConnection(name: "New Host", host: "", username: NSUserName())
+        settings.sshConnections.append(connection)
+        selectedID = connection.id
+    }
+
+    private func remove(_ id: UUID) {
+        settings.sshConnections.removeAll { $0.id == id }
+        selectedID = nil
+    }
+
+    /// Looks the element up by id on every access, so the binding stays valid
+    /// even when the list is reordered or edited underneath it.
+    private func connectionBinding(_ id: UUID) -> Binding<SSHConnection>? {
+        guard settings.sshConnections.contains(where: { $0.id == id }) else { return nil }
+        return Binding(
+            get: {
+                settings.sshConnections.first { $0.id == id }
+                    ?? SSHConnection(name: "", host: "", username: "")
+            },
+            set: { newValue in
+                guard let index = settings.sshConnections.firstIndex(where: { $0.id == id }) else { return }
+                settings.sshConnections[index] = newValue
+            }
+        )
+    }
+}
+
+/// The local scripting API's controls, plus a plain statement of what the app
+/// does and doesn't do with the user's data.
+struct SecuritySettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @State private var installMessage: String?
+
+    var body: some View {
+        Form {
+            Section("Local scripting API") {
+                Toggle("Enable local API", isOn: $settings.localAPIEnabled)
+                Text("Lets scripts, the iterminalctl command, and AI agents drive this app over a Unix socket. It can type into live shells, so it stays off until you turn it on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if settings.localAPIEnabled {
+                    Toggle("Allow sending input to terminals", isOn: $settings.apiAllowTerminalInput)
+                    Toggle("Allow controlling the browser pane", isOn: $settings.apiAllowBrowserControl)
+
+                    LabeledContent("Socket") {
+                        Text(LocalAPIServer.shared.socketPath)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+
+                    HStack {
+                        Button("Copy Token") {
+                            let token = LocalAPIServer.shared.ensureToken()
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(token, forType: .string)
+                        }
+                        Button("Regenerate Token") {
+                            _ = LocalAPIServer.shared.regenerateToken()
+                        }
+                    }
+                }
+            }
+
+            if settings.localAPIEnabled {
+                Section("Command line tool") {
+                    Button("Install iterminalctl…") { installCLI() }
+                    if let installMessage {
+                        Text(installMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Copies the bundled iterminalctl into ~/.local/bin.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section("How your data is handled") {
+                Text("""
+                • The API socket is created with owner-only permissions inside a private folder, and every request must present a token kept in your keychain.
+                • Secrets live only in the keychain — never in preferences, the saved layout, or exported snapshots.
+                • SSH authentication is delegated to the system; this app cannot prompt for or store a password.
+                • App Transport Security stays enabled; only the embedded web view may load plain HTTP, so you can preview a local dev server.
+                • A terminal can't run inside the macOS sandbox — it exists to launch your programs — so capabilities are narrowed individually instead.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func installCLI() {
+        guard let source = Bundle.main.url(forResource: "iterminalctl", withExtension: nil) else {
+            installMessage = "The bundled tool wasn't found in the app bundle."
+            return
+        }
+        let destinationDirectory = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".local/bin", isDirectory: true)
+        let destination = destinationDirectory.appendingPathComponent("iterminalctl")
+        do {
+            try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
+            installMessage = "Installed to \(destination.path). Add ~/.local/bin to your PATH if it isn't already."
+        } catch {
+            installMessage = "Install failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+struct SyncSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        Form {
+            Section("Status") {
+                LabeledContent("Mode", value: LocalOnlySyncEngine.shared.displayName)
+                Text(LocalOnlySyncEngine.shared.statusDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent("State file") {
+                    Text(store.stateFileURL.path)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([store.stateFileURL])
+                }
+            }
+
+            Section("Snapshots") {
+                HStack {
+                    Button("Export Workspaces…") {
+                        WorkspaceArchiveIO.promptExport(store: store, settings: settings)
+                    }
+                    Button("Import Workspaces…") {
+                        WorkspaceArchiveIO.promptImport(store: store, settings: settings)
+                    }
+                }
+                Text("A snapshot carries your workspaces, tabs, split layout, and preferences — but no secrets. Importing replaces the current layout.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("iCloud") {
+                Text("Cross-device sync over iCloud isn't wired up yet: it needs a paid Apple Developer account, the iCloud entitlement, and a signed build, which a source build doesn't have. The sync layer is written as a seam so it can be added without changing the rest of the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 struct ShortcutsSettingsView: View {
     private let shortcuts: [(action: String, keys: String)] = [
+        ("Command palette", "⌘K"),
         ("New terminal tab", "⌘T"),
         ("New workspace", "⇧⌘N"),
         ("Split right", "⌘D"),
