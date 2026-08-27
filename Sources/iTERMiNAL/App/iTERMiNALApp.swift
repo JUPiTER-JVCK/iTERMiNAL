@@ -61,6 +61,13 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.showCommandPalette = true
             }
             .keyboardShortcut("k", modifiers: .command)
+
+            // The reference design uses ⌘P for the palette; keep both, since
+            // the app has nothing to print.
+            Button("Command Palette (⌘P)") {
+                WorkspaceStore.shared.showCommandPalette = true
+            }
+            .keyboardShortcut("p", modifiers: .command)
         }
 
         CommandMenu("Terminal") {

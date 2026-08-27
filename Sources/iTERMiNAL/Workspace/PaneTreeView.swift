@@ -66,6 +66,11 @@ struct TerminalPaneView: View {
         let theme = Theme.current(for: colorScheme)
         let isFocused = store.focusedSessionID == session.id
         TerminalHostView(session: session)
+            .overlay(alignment: .top) {
+                if let note = session.statusNote {
+                    SessionStatusBanner(session: session, note: note, theme: theme)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -75,5 +80,34 @@ struct TerminalPaneView: View {
                     )
             )
             .padding(3)
+    }
+}
+
+/// Shown when a session has exited, dropped, or failed to launch, with the
+/// one action that matters: try again.
+private struct SessionStatusBanner: View {
+    @ObservedObject var session: TerminalSession
+    let note: String
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 11))
+            Text(session.launchError ?? "Session \(note).")
+                .font(.system(size: 11))
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            Button(session.isRemote ? "Reconnect" : "Restart") {
+                session.reconnect()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(theme.textPrimary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(theme.surface.opacity(0.96))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }

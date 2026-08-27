@@ -32,6 +32,15 @@ struct ComposerBar: View {
                 HStack {
                     Menu {
                         Button("New Terminal Tab") { store.newTab() }
+                        if !settings.sshConnections.isEmpty {
+                            Menu("Connect to") {
+                                ForEach(settings.sshConnections) { connection in
+                                    Button(connection.name) {
+                                        store.newTab(kind: .remote(connection.id))
+                                    }
+                                }
+                            }
+                        }
                         Divider()
                         Button("Split Right") { store.splitFocusedPane(.horizontal, kind: .terminal) }
                         Button("Split Down") { store.splitFocusedPane(.vertical, kind: .terminal) }
@@ -110,7 +119,7 @@ private struct ComposerFooter: View {
             Text("Cloud")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.textSecondary.opacity(0.6))
-                .help("Remote sessions are coming soon")
+                .help("Hosted cloud sessions are coming soon")
             Spacer()
             if let session = store.focusedSession {
                 BranchLabel(session: session)

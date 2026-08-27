@@ -20,6 +20,7 @@ let supportDirectory = FileManager.default
 var socketPath = supportDirectory.appendingPathComponent("api.sock").path
 var tokenPath = supportDirectory.appendingPathComponent("api.token").path
 var rawOutput = false
+var follow = false
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -31,7 +32,7 @@ func usage() -> Never {
     iterminalctl — control a running iTERMiNAL
 
     Usage:
-      iterminalctl <command> [key=value ...] [--raw] [--socket PATH] [--token VALUE]
+      iterminalctl <command> [key=value ...] [--raw] [--follow] [--socket PATH] [--token VALUE]
 
     Examples:
       iterminalctl help
@@ -40,6 +41,10 @@ func usage() -> Never {
       iterminalctl browser.open url=localhost:3000
       iterminalctl browser.fill selector="#email" value=me@example.com
       iterminalctl browser.screenshot path=~/shot.png
+
+    Stream events (Ctrl-C to stop):
+      iterminalctl subscribe
+      iterminalctl subscribe events=session.exited,tab.created
 
     Run "iterminalctl help" against a running app for the full command list.
     """)
@@ -63,6 +68,8 @@ while index < arguments.count {
         usage()
     case "--raw":
         rawOutput = true
+    case "--follow":
+        follow = true
     case "--socket":
         index += 1
         guard index < arguments.count else { fail("--socket needs a path") }
@@ -78,7 +85,11 @@ while index < arguments.count {
             let key = String(argument[argument.startIndex..<separator])
             let value = String(argument[argument.index(after: separator)...])
             // Light coercion so "newline=true" and "timeout=5" arrive typed.
-            if value == "true" {
+            if key == "events" {
+                params[key] = value.split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+            } else if value == "true" {
                 params[key] = true
             } else if value == "false" {
                 params[key] = false
@@ -176,32 +187,31 @@ requestData.withUnsafeBytes { buffer in
 
 var responseData = Data()
 var chunk = [UInt8](repeating: 0, count: 4096)
-while !responseData.contains(0x0A) {
-    let count = chunk.withUnsafeMutableBytes { pointer -> Int in
-        guard let base = pointer.baseAddress else { return -1 }
-        return Darwin.read(descriptor, base, pointer.count)
+
+/// Reads one newline-delimited JSON object, refilling from the socket as
+/// needed. Returns nil at end of stream.
+func readFrame() -> [String: Any]? {
+    while true {
+        if let newline = responseData.firstIndex(of: 0x0A) {
+            let line = responseData.subdata(in: responseData.startIndex..<newline)
+            responseData.removeSubrange(responseData.startIndex...newline)
+            if line.isEmpty { continue }
+            guard let object = try? JSONSerialization.jsonObject(with: line),
+                  let dictionary = object as? [String: Any] else {
+                fail("Could not parse the reply: \(String(data: line, encoding: .utf8) ?? "")")
+            }
+            return dictionary
+        }
+        let count = chunk.withUnsafeMutableBytes { pointer -> Int in
+            guard let base = pointer.baseAddress else { return -1 }
+            return Darwin.read(descriptor, base, pointer.count)
+        }
+        if count <= 0 { return nil }
+        responseData.append(contentsOf: chunk[0..<count])
     }
-    if count <= 0 { break }
-    responseData.append(contentsOf: chunk[0..<count])
 }
 
-guard let newline = responseData.firstIndex(of: 0x0A) else {
-    fail("The app closed the connection without replying")
-}
-let line = responseData.subdata(in: responseData.startIndex..<newline)
-
-guard let object = try? JSONSerialization.jsonObject(with: line),
-      let response = object as? [String: Any] else {
-    fail("Could not parse the reply: \(String(data: line, encoding: .utf8) ?? "")")
-}
-
-if rawOutput {
-    print(String(data: line, encoding: .utf8) ?? "")
-    exit((response["ok"] as? Bool) == true ? 0 : 1)
-}
-
-if (response["ok"] as? Bool) == true {
-    let result = response["result"] as? [String: Any] ?? [:]
+func render(_ result: [String: Any]) {
     if result.isEmpty {
         print("ok")
     } else if let text = result["text"] as? String, result.count == 1 {
@@ -214,7 +224,44 @@ if (response["ok"] as? Bool) == true {
     } else {
         print("ok")
     }
-    exit(0)
+}
+
+guard let response = readFrame() else {
+    fail("The app closed the connection without replying")
+}
+
+if rawOutput {
+    if let data = try? JSONSerialization.data(withJSONObject: response),
+       let text = String(data: data, encoding: .utf8) {
+        print(text)
+    }
+} else if (response["ok"] as? Bool) == true {
+    render(response["result"] as? [String: Any] ?? [:])
 } else {
     fail(response["error"] as? String ?? "The command failed")
 }
+
+// Subscriptions keep the socket open and print each pushed event until the
+// app goes away or the user interrupts.
+if follow || command == "subscribe" {
+    setvbuf(stdout, nil, _IOLBF, 0)
+    while let frame = readFrame() {
+        if rawOutput {
+            if let data = try? JSONSerialization.data(withJSONObject: frame),
+               let text = String(data: data, encoding: .utf8) {
+                print(text)
+            }
+            continue
+        }
+        let name = frame["event"] as? String ?? "event"
+        let data = frame["data"] as? [String: Any] ?? [:]
+        if let encoded = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]),
+           let text = String(data: encoded, encoding: .utf8) {
+            print("\(name) \(text)")
+        } else {
+            print(name)
+        }
+    }
+}
+
+exit(0)

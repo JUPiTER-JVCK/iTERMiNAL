@@ -15,10 +15,12 @@ final class APIRouter {
 
     static let commands: [String] = [
         "help", "ping", "app.info",
+        "subscribe", "unsubscribe",
+        "connection.list",
         "workspace.list", "workspace.create",
         "tab.list", "tab.create", "tab.select", "tab.close",
         "pane.list", "pane.split", "pane.close",
-        "terminal.send", "terminal.capture",
+        "terminal.send", "terminal.capture", "terminal.reconnect",
         "browser.open", "browser.navigate", "browser.eval", "browser.click",
         "browser.fill", "browser.text", "browser.html", "browser.wait",
         "browser.screenshot",
@@ -70,8 +72,27 @@ final class APIRouter {
             let workspace = request.string("workspace").flatMap { name in
                 store.workspaces.first { $0.name == name || $0.id.uuidString == name }
             }
-            let tab = store.newTab(in: workspace, directory: request.string("directory"))
+            var kind = SessionKind.localShell
+            if let identifier = request.string("connection") ?? (request.string("kind") == "ssh" ? request.string("host") : nil) {
+                guard let connection = settings.connection(withID: identifier) else {
+                    return fail("No saved connection named \(identifier).")
+                }
+                kind = .remote(connection.id)
+            }
+            let tab = store.newTab(in: workspace, directory: request.string("directory"), kind: kind)
             ok(["tab": Self.describe(tab, workspaceName: workspace?.name)])
+
+        case "connection.list":
+            ok(["connections": settings.sshConnections.map { connection in
+                [
+                    "id": connection.id.uuidString,
+                    "name": connection.name,
+                    "host": connection.host,
+                    "port": connection.port,
+                    "username": connection.username,
+                    "transport": connection.transport.rawValue,
+                ] as [String: Any]
+            }])
 
         case "tab.select":
             guard let identifier = request.string("id"),
@@ -102,7 +123,14 @@ final class APIRouter {
             case "files": kind = .files
             default: kind = .terminal
             }
-            store.splitFocusedPane(direction, kind: kind)
+            var connectionID: UUID?
+            if let identifier = request.string("connection") {
+                guard let connection = settings.connection(withID: identifier) else {
+                    return fail("No saved connection named \(identifier).")
+                }
+                connectionID = connection.id
+            }
+            store.splitFocusedPane(direction, kind: kind, connection: connectionID)
             ok()
 
         case "pane.close":
@@ -121,6 +149,12 @@ final class APIRouter {
             let payload = request.bool("newline", default: false) ? text + "\n" : text
             session.send(text: payload)
             ok(["session": session.id.uuidString])
+
+        case "terminal.reconnect":
+            let session = request.string("session").flatMap { store.session(withIdentifier: $0) } ?? store.focusedSession
+            guard let session else { return fail("No terminal session available.") }
+            session.reconnect()
+            ok(["session": session.id.uuidString, "running": session.isRunning])
 
         case "terminal.capture":
             let session = request.string("session").flatMap { store.session(withIdentifier: $0) } ?? store.focusedSession
@@ -315,7 +349,9 @@ final class APIRouter {
             payload["session"] = session.id.uuidString
             payload["directory"] = session.currentDirectory
             payload["running"] = session.isRunning
+            payload["remote"] = session.isRemote
             if let branch = session.gitBranch { payload["branch"] = branch }
+            if let error = session.launchError { payload["error"] = error }
         }
         return payload
     }
@@ -328,6 +364,7 @@ final class APIRouter {
                 "id": session.id.uuidString,
                 "directory": session.currentDirectory,
                 "running": session.isRunning,
+                "remote": session.isRemote,
             ]]
         case .browser(let browser):
             return [[

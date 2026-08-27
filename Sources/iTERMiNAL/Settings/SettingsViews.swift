@@ -287,6 +287,11 @@ struct ConnectionsSettingsView: View {
             if let selectedID, let binding = connectionBinding(selectedID) {
                 Section("Details") {
                     TextField("Name", text: binding.name)
+                    Picker("Transport", selection: binding.transport) {
+                        ForEach(SSHTransport.allCases) { transport in
+                            Text(transport.label).tag(transport)
+                        }
+                    }
                     TextField("Host", text: binding.host)
                     TextField("Username", text: binding.username)
                     TextField("Port", value: binding.port, format: .number)
@@ -298,12 +303,25 @@ struct ConnectionsSettingsView: View {
                         get: { binding.wrappedValue.initialPath ?? "" },
                         set: { binding.wrappedValue.initialPath = $0.isEmpty ? nil : $0 }
                     ), prompt: Text("~"))
+
+                    if binding.wrappedValue.transport == .custom {
+                        TextField("Command", text: binding.customCommand,
+                                  prompt: Text("tailscale ssh %u@%h"))
+                        Text("Runs in the terminal as written. %h, %p, %u, and %d expand to host, port, username, and user@host.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField("Extra arguments (optional)", text: binding.extraArguments,
+                                  prompt: Text("-A -J bastion"))
+                    }
                 }
             }
 
             Section("Authentication") {
                 Text("""
-                iTERMiNAL never stores SSH passwords. Transfers run through the system's own sftp client in batch mode, reusing your ssh-agent, keys, and known_hosts — so key-based authentication is required, and nothing secret is kept by this app.
+                iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
+
+                Terminal sessions get a real TTY, so ssh can prompt you for a password or 2FA code itself. The file browser runs sftp non-interactively (it has no TTY to prompt on), so browsing a host requires key-based authentication.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)

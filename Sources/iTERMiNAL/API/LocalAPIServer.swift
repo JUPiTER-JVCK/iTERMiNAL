@@ -186,7 +186,28 @@ final class LocalAPIServer {
     // MARK: Connection handling
 
     private func serve(client fd: Int32) {
-        defer { Darwin.close(fd) }
+        // Each connection gets an id (for event subscriptions) and a serial
+        // write queue, so pushed events can never interleave with replies.
+        let connectionID = UUID()
+        let writeQueue = DispatchQueue(
+            label: "com.jupiterjvck.iterminal.api.write.\(connectionID.uuidString)"
+        )
+        var alive = true
+
+        let send: (Data) -> Void = { [weak self] data in
+            guard let self else { return }
+            writeQueue.async {
+                guard alive else { return }
+                if !self.write(fd: fd, data: data) { alive = false }
+            }
+        }
+
+        defer {
+            EventBus.shared.unsubscribe(id: connectionID)
+            // Drains anything already queued before the descriptor closes.
+            writeQueue.sync { alive = false }
+            Darwin.close(fd)
+        }
 
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
@@ -197,8 +218,7 @@ final class LocalAPIServer {
                 let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
                 buffer.removeSubrange(buffer.startIndex...newlineIndex)
                 if lineData.isEmpty { continue }
-                let response = process(lineData)
-                if !write(fd: fd, data: response) { return }
+                send(process(lineData, connectionID: connectionID, send: send))
             }
 
             let count = chunk.withUnsafeMutableBytes { pointer -> Int in
@@ -213,7 +233,11 @@ final class LocalAPIServer {
     /// Decodes one request line, runs it on the main queue, and encodes the
     /// reply. Blocking this connection's own queue while the main queue works
     /// is safe — the main queue never waits on API connections.
-    private func process(_ line: Data) -> Data {
+    private func process(
+        _ line: Data,
+        connectionID: UUID,
+        send: @escaping (Data) -> Void
+    ) -> Data {
         let request: APIRequest
         do {
             request = try APIRequest(jsonLine: line)
@@ -226,6 +250,31 @@ final class LocalAPIServer {
         }
         guard let provided = request.token, constantTimeEquals(provided, expected) else {
             return APIResponse.failure(id: request.id, message: "Unauthorized: missing or invalid token.").jsonLine()
+        }
+
+        // Subscriptions are owned by the connection, so they're handled here
+        // rather than in the router.
+        switch request.command {
+        case "subscribe":
+            let requested = (request.params["events"] as? [String])?.filter { !$0.isEmpty } ?? []
+            var names = Set(requested)
+            if names.isEmpty { names = ["*"] }
+            EventBus.shared.subscribe(id: connectionID, to: names) { event in
+                if let data = try? JSONSerialization.data(withJSONObject: event.payload) {
+                    send(data)
+                }
+            }
+            return APIResponse.success(id: request.id, [
+                "subscribed": names.sorted(),
+                "available": EventBus.allEvents,
+            ]).jsonLine()
+
+        case "unsubscribe":
+            EventBus.shared.unsubscribe(id: connectionID)
+            return APIResponse.success(id: request.id).jsonLine()
+
+        default:
+            break
         }
 
         let semaphore = DispatchSemaphore(value: 0)

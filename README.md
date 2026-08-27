@@ -25,12 +25,12 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Scriptable browser pane** — an embedded WKWebView, usable as a sliding
   panel or a split pane, drivable from the API (navigate, click, fill, read
   text, wait for a selector, screenshot) for testing a web UI from an agent.
-- **Local and remote files** — a Finder-style file pane that browses this Mac
-  or any saved SSH host over SFTP, with upload, download, drag-and-drop, and
-  open-in-place.
+- **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
+  (with reconnect), plus a Finder-style file pane that browses this Mac or any
+  saved host over SFTP, with upload, download, and drag-and-drop.
 - **Local scripting API + CLI** — a Unix-socket JSON API and the `iterminalctl`
   command for creating workspaces, splitting panes, sending input, and driving
-  the browser.
+  the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
   cursor, scrollback, GPU), Panels, Connections, Security, Sync, Shortcuts, and
@@ -40,7 +40,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later
+- macOS 14 (Sonoma) or later, Intel or Apple Silicon (universal binary)
 - Xcode 16 or later (SwiftTerm's manifest uses Swift tools 6.0)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
@@ -94,6 +94,9 @@ iterminalctl browser.screenshot path=~/shot.png
 | `terminal.send`, `terminal.capture` | `text`, `newline`, `session` |
 | `browser.open` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
 | `files.list` | `path`, `connection`, `hidden` |
+| `connection.list` | — |
+| `terminal.reconnect` | `session` |
+| `subscribe` / `unsubscribe` | `events` |
 
 The wire protocol is newline-delimited JSON over a Unix socket, so any language
 can speak it:
@@ -105,13 +108,43 @@ can speak it:
 {"id":"1","ok":true,"result":{"session":"…"}}
 ```
 
-## Remote files (SFTP)
+### Event stream
 
-Add hosts in **Settings → Connections**, then pick one from the Files panel's
-source menu. Transfers run through the system's own `sftp` client in batch
-mode, reusing your `~/.ssh/config`, `known_hosts`, agent, and keys — so
-**key-based authentication is required** and this app never stores, prompts
-for, or transmits an SSH password.
+Subscribe and the connection stays open, pushing a frame per event — this is
+what plugins and agents hook into:
+
+```sh
+iterminalctl subscribe
+iterminalctl subscribe events=session.exited,tab.created
+```
+
+```jsonc
+{"event":"session.exited","data":{"session":"…","exitCode":0,"remote":true}}
+```
+
+| Event | Fires when |
+| --- | --- |
+| `session.started` / `session.exited` | a session launches or its process ends |
+| `session.directory` / `session.title` | the shell reports a new cwd or title |
+| `session.activity` | a session repaints (debounced to 4/sec) |
+| `session.link` | the user clicks a link in a terminal |
+| `tab.created` / `tab.closed` / `tab.selected` | tab lifecycle |
+| `workspace.created`, `pane.split`, `pane.closed` | layout changes |
+| `browser.navigated` | a browser pane finishes loading |
+
+## Remote sessions and files
+
+Add hosts in **Settings → Connections**, then open one from the sidebar's
+**Connect** row, the composer's `+` menu, or the palette. Transport can be
+`ssh`, `mosh`, or a custom command (which is how Tailscale SSH or Eternal
+Terminal fit — `%h`, `%p`, `%u`, `%d` expand to host, port, user, and
+user@host). The same hosts appear in the Files panel's source menu for SFTP.
+
+Both features run the system's own clients, reusing your `~/.ssh/config`,
+`known_hosts`, agent, and keys — this app never stores, prompts for, or
+transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
+you for a password or 2FA code itself; the file browser runs `sftp`
+non-interactively and therefore **requires key-based authentication**.
 
 ## Security model
 
@@ -124,8 +157,11 @@ for, or transmits an SSH password.
   layout, or exported snapshots.
 - **App Transport Security stays on**; only web-view content is exempt, so the
   browser pane can preview a plain-http dev server.
-- **No sandbox** — a terminal exists to launch your programs, so it can't run
-  sandboxed. Capabilities are narrowed individually instead.
+- **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
+  programs, and sandboxed children inherit the sandbox — a sandboxed build
+  could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
+  general-purpose terminal ships sandboxed. Hardened Runtime is the part
+  notarization actually requires, and it doesn't restrict spawned processes.
 
 ## Keyboard shortcuts
 
@@ -169,9 +205,8 @@ the UI.
 ## Roadmap
 
 - [ ] AI assistant behind the `@ai` composer prefix (provider-pluggable)
-- [ ] Pane attention notifications (OSC 9/777)
+- [ ] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
-- [ ] SSH terminal sessions (not just SFTP file transfer)
 - [ ] iCloud sync (needs a signing/entitlement story)
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases

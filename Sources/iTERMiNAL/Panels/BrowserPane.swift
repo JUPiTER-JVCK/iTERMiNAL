@@ -273,6 +273,11 @@ extension BrowserModel: WKNavigationDelegate {
             urlText = url.absoluteString
         }
         finishNavigation(.success(webView.url?.absoluteString ?? urlText))
+        EventBus.shared.publish(APIEvent("browser.navigated", [
+            "pane": id.uuidString,
+            "url": urlText,
+            "title": pageTitle,
+        ]))
         WorkspaceStore.shared.scheduleSave()
     }
 

@@ -152,6 +152,17 @@ struct CommandPaletteView: View {
             },
         ]
 
+        for connection in settings.sshConnections {
+            actions.append(PaletteAction(
+                id: "connect.\(connection.id.uuidString)",
+                title: "Connect to \(connection.name)",
+                subtitle: connection.subtitle,
+                systemImage: "network"
+            ) {
+                store.newTab(kind: .remote(connection.id))
+            })
+        }
+
         for theme in TerminalTheme.all {
             actions.append(PaletteAction(
                 id: "theme.\(theme.id)",

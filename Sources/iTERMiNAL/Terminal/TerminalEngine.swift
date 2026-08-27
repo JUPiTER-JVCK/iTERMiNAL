@@ -31,6 +31,10 @@ protocol TerminalEngine: AnyObject {
     var view: NSView { get }
     var delegate: TerminalEngineDelegate? { get set }
     var onFocusGained: (() -> Void)? { get set }
+    /// Debounced "the terminal repainted" signal, used for API activity events.
+    var onActivity: (() -> Void)? { get set }
+    /// A link the user clicked inside the terminal.
+    var onLinkActivated: ((String) -> Void)? { get set }
 
     func start(_ configuration: TerminalLaunchConfiguration)
     func send(text: String)

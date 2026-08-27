@@ -1,44 +1,5 @@
 import Foundation
 
-/// A saved SSH target. Deliberately holds no secret: authentication is
-/// delegated to the system ssh-agent and key files, so this app never stores,
-/// prompts for, or transmits a password.
-struct SSHConnection: Codable, Identifiable, Hashable {
-    var id: UUID
-    var name: String
-    var host: String
-    var port: Int
-    var username: String
-    var identityFile: String?
-    var initialPath: String?
-
-    init(
-        id: UUID = UUID(),
-        name: String,
-        host: String,
-        port: Int = 22,
-        username: String,
-        identityFile: String? = nil,
-        initialPath: String? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.host = host
-        self.port = port
-        self.username = username
-        self.identityFile = identityFile
-        self.initialPath = initialPath
-    }
-
-    var destination: String {
-        username.isEmpty ? host : "\(username)@\(host)"
-    }
-
-    var subtitle: String {
-        port == 22 ? destination : "\(destination):\(port)"
-    }
-}
-
 /// Remote filesystem access over SFTP.
 ///
 /// Rather than embedding an SSH stack, this drives the system `sftp` binary in

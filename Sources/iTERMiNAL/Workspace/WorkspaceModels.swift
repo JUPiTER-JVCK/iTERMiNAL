@@ -148,7 +148,7 @@ struct TabSnapshot: Codable {
 }
 
 indirect enum PaneSnapshot: Codable {
-    case terminal(directory: String?)
+    case terminal(directory: String?, connection: String?)
     case browser(url: String?)
     case files(path: String?, connection: String?)
     case split(direction: SplitDirection, children: [PaneSnapshot])
@@ -158,7 +158,10 @@ extension PaneNode {
     func snapshot() -> PaneSnapshot {
         switch content {
         case .terminal(let session):
-            return .terminal(directory: session.currentDirectory)
+            return .terminal(
+                directory: session.currentDirectory,
+                connection: session.kind.connectionID?.uuidString
+            )
         case .browser(let browser):
             return .browser(url: browser.urlText)
         case .files(let files):
@@ -170,8 +173,14 @@ extension PaneNode {
 
     static func restore(_ snapshot: PaneSnapshot) -> PaneNode {
         switch snapshot {
-        case .terminal(let directory):
-            return PaneNode(content: .terminal(TerminalSession(initialDirectory: directory)))
+        case .terminal(let directory, let connection):
+            // A remote pane restores as a remote pane and redials on launch.
+            let kind: SessionKind = connection
+                .flatMap { UUID(uuidString: $0) }
+                .map { SessionKind.remote($0) } ?? .localShell
+            return PaneNode(content: .terminal(
+                TerminalSession(kind: kind, initialDirectory: directory)
+            ))
         case .browser(let url):
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))
         case .files(let path, let connection):

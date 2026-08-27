@@ -1,18 +1,23 @@
 import AppKit
 import SwiftTerm
 
-/// One live shell: owns the engine (and therefore the PTY child process),
-/// and publishes the metadata the sidebar shows — title, working directory,
-/// and git branch. The session object outlives view attachment, which is what
-/// keeps processes alive while the user switches tabs or workspaces.
+/// One live session: a local shell or a remote host, owning the engine (and
+/// therefore the PTY child process) and publishing the metadata the sidebar
+/// shows — title, working directory, git branch. The session object outlives
+/// view attachment, which is what keeps processes alive while the user
+/// switches tabs or workspaces.
 final class TerminalSession: ObservableObject, Identifiable {
     let id: UUID
+    let kind: SessionKind
 
     @Published private(set) var title: String = ""
     @Published private(set) var currentDirectory: String
     @Published private(set) var gitBranch: String?
     @Published private(set) var isRunning = false
     @Published private(set) var lastExitCode: Int32?
+    /// Set when the session could not be launched at all (missing binary,
+    /// deleted connection) — distinct from a process that ran and exited.
+    @Published private(set) var launchError: String?
     /// Whether SwiftTerm's Metal renderer ended up active for this session —
     /// requesting GPU rendering can silently fall back to the CPU path.
     @Published private(set) var isGPUAccelerated = false
@@ -20,9 +25,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     let engine: SwiftTermEngine
     private var hasStarted = false
 
-    init(id: UUID = UUID(), initialDirectory: String? = nil) {
+    init(id: UUID = UUID(), kind: SessionKind = .localShell, initialDirectory: String? = nil) {
         let settings = AppSettings.shared
         self.id = id
+        self.kind = kind
         self.currentDirectory = initialDirectory ?? settings.resolvedInitialDirectory
 
         let options = TerminalOptions(
@@ -35,15 +41,36 @@ final class TerminalSession: ObservableObject, Identifiable {
             guard let self else { return }
             WorkspaceStore.shared.noteFocused(session: self)
         }
+        engine.onActivity = { [weak self] in
+            guard let self else { return }
+            EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+        }
+        engine.onLinkActivated = { [weak self] link in
+            guard let self else { return }
+            EventBus.shared.publish(APIEvent("session.link", [
+                "session": self.id.uuidString,
+                "url": link,
+            ]))
+            WorkspaceStore.shared.openLinkFromTerminal(link)
+        }
+    }
+
+    var isRemote: Bool { kind.isRemote }
+
+    var connection: SSHConnection? {
+        guard let id = kind.connectionID else { return nil }
+        return AppSettings.shared.sshConnections.first { $0.id == id }
     }
 
     var displayTitle: String {
         if !title.isEmpty { return title }
+        if let connection { return connection.name.isEmpty ? connection.destination : connection.name }
         let component = (currentDirectory as NSString).lastPathComponent
         return component.isEmpty ? "Terminal" : component
     }
 
     var abbreviatedDirectory: String {
+        if isRemote { return connection?.subtitle ?? currentDirectory }
         let home = NSHomeDirectory()
         if currentDirectory == home { return "~" }
         if currentDirectory.hasPrefix(home + "/") {
@@ -52,29 +79,44 @@ final class TerminalSession: ObservableObject, Identifiable {
         return currentDirectory
     }
 
+    /// Short status for the sidebar: nil while healthy.
+    var statusNote: String? {
+        if launchError != nil { return "failed" }
+        if hasStarted && !isRunning { return isRemote ? "disconnected" : "exited" }
+        return nil
+    }
+
     func startIfNeeded() {
         guard !hasStarted else { return }
         hasStarted = true
+        launch()
+    }
 
+    /// Re-runs the session in place — the natural action after a remote
+    /// connection drops or a launch failed.
+    func reconnect() {
+        guard !isRunning else { return }
+        launch()
+    }
+
+    private func launch() {
         let settings = AppSettings.shared
-        let shell = settings.resolvedShell()
-
-        var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "xterm-256color"
-        env["COLORTERM"] = "truecolor"
-        if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
-        env["TERM_PROGRAM"] = "iTERMiNAL"
-        let environmentList = env.map { "\($0.key)=\($0.value)" }
-
-        engine.start(TerminalLaunchConfiguration(
-            executable: shell.path,
-            args: shell.args,
-            execName: shell.execName,
-            environment: environmentList,
-            initialDirectory: currentDirectory
-        ))
-        isRunning = true
-        refreshGitBranch()
+        switch SessionLaunch.configuration(for: kind, settings: settings, directory: isRemote ? nil : currentDirectory) {
+        case .success(let configuration):
+            launchError = nil
+            engine.start(configuration)
+            isRunning = true
+            lastExitCode = nil
+            EventBus.shared.publish(APIEvent("session.started", [
+                "session": id.uuidString,
+                "remote": isRemote,
+                "directory": currentDirectory,
+            ]))
+            if !isRemote { refreshGitBranch() }
+        case .failure(let error):
+            launchError = error.localizedDescription
+            isRunning = false
+        }
     }
 
     func send(text: String) {
@@ -172,6 +214,10 @@ final class TerminalSession: ObservableObject, Identifiable {
 extension TerminalSession: TerminalEngineDelegate {
     func engineTitleChanged(_ title: String) {
         self.title = title
+        EventBus.shared.publish(APIEvent("session.title", [
+            "session": id.uuidString,
+            "title": title,
+        ]))
     }
 
     func engineDirectoryChanged(_ directory: String?) {
@@ -185,12 +231,21 @@ extension TerminalSession: TerminalEngineDelegate {
         }
         guard !path.isEmpty, path != currentDirectory else { return }
         currentDirectory = path
-        refreshGitBranch()
+        if !isRemote { refreshGitBranch() }
+        EventBus.shared.publish(APIEvent("session.directory", [
+            "session": id.uuidString,
+            "directory": path,
+        ]))
         WorkspaceStore.shared.scheduleSave()
     }
 
     func engineProcessTerminated(exitCode: Int32?) {
         isRunning = false
         lastExitCode = exitCode
+        EventBus.shared.publish(APIEvent("session.exited", [
+            "session": id.uuidString,
+            "exitCode": exitCode ?? -1,
+            "remote": isRemote,
+        ]))
     }
 }

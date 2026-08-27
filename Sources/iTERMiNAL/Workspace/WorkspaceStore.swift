@@ -38,6 +38,9 @@ final class WorkspaceStore: ObservableObject {
             if selectedTabID != nil { detailMode = .terminal }
             focusSelectedTab()
             scheduleSave()
+            if let selectedTabID {
+                EventBus.shared.publish(APIEvent("tab.selected", ["tab": selectedTabID.uuidString]))
+            }
         }
     }
     @Published var focusedSessionID: UUID?
@@ -154,11 +157,19 @@ final class WorkspaceStore: ObservableObject {
         let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
         let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
+        EventBus.shared.publish(APIEvent("workspace.created", [
+            "workspace": workspace.id.uuidString,
+            "name": workspace.name,
+        ]))
         newTab(in: workspace)
     }
 
     @discardableResult
-    func newTab(in workspace: Workspace? = nil, directory: String? = nil) -> WorkspaceTab {
+    func newTab(
+        in workspace: Workspace? = nil,
+        directory: String? = nil,
+        kind: SessionKind = .localShell
+    ) -> WorkspaceTab {
         let target: Workspace
         if let workspace {
             target = workspace
@@ -170,13 +181,19 @@ final class WorkspaceStore: ObservableObject {
             target = created
         }
 
-        let session = TerminalSession(initialDirectory: directory)
+        let session = TerminalSession(kind: kind, initialDirectory: directory)
         session.startIfNeeded()
         let tab = WorkspaceTab(root: PaneNode(content: .terminal(session)))
         target.tabs.append(tab)
         selectedTabID = tab.id
         focusedSessionID = session.id
         scheduleSave()
+        EventBus.shared.publish(APIEvent("tab.created", [
+            "tab": tab.id.uuidString,
+            "workspace": target.name,
+            "session": session.id.uuidString,
+            "remote": kind.isRemote,
+        ]))
         return tab
     }
 
@@ -184,6 +201,7 @@ final class WorkspaceStore: ObservableObject {
         guard let workspace = workspace(containingTab: tab.id) else { return }
         tab.root.allSessions().forEach { $0.terminate() }
         workspace.tabs.removeAll { $0 === tab }
+        EventBus.shared.publish(APIEvent("tab.closed", ["tab": tab.id.uuidString]))
         if selectedTabID == tab.id {
             selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
         }
@@ -211,7 +229,11 @@ final class WorkspaceStore: ObservableObject {
     /// Splits the focused pane and returns the newly created node, so callers
     /// (notably the scripting API) can address exactly what they just made.
     @discardableResult
-    func splitFocusedPane(_ direction: SplitDirection, kind: PaneKind) -> PaneNode? {
+    func splitFocusedPane(
+        _ direction: SplitDirection,
+        kind: PaneKind,
+        connection: UUID? = nil
+    ) -> PaneNode? {
         // With nothing open, create a tab first and split that, so the caller
         // still gets back a pane of the kind they asked for.
         let tab = selectedTab ?? newTab()
@@ -227,7 +249,11 @@ final class WorkspaceStore: ObservableObject {
         let newContent: PaneContent
         switch kind {
         case .terminal:
-            let session = TerminalSession(initialDirectory: focusedSession?.currentDirectory)
+            let sessionKind: SessionKind = connection.map { .remote($0) } ?? .localShell
+            let session = TerminalSession(
+                kind: sessionKind,
+                initialDirectory: sessionKind.isRemote ? nil : focusedSession?.currentDirectory
+            )
             session.startIfNeeded()
             newContent = .terminal(session)
             focusedSessionID = session.id
@@ -241,6 +267,10 @@ final class WorkspaceStore: ObservableObject {
         let added = PaneNode(content: newContent)
         target.content = .split(direction, [existing, added])
         scheduleSave()
+        EventBus.shared.publish(APIEvent("pane.split", [
+            "tab": tab.id.uuidString,
+            "direction": direction.rawValue,
+        ]))
         return added
     }
 
@@ -267,6 +297,7 @@ final class WorkspaceStore: ObservableObject {
         }
         self.focusedSessionID = tab.root.firstTerminal()?.id
         scheduleSave()
+        EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
     // MARK: Composer routing
@@ -278,6 +309,18 @@ final class WorkspaceStore: ObservableObject {
         }
         let tab = newTab()
         tab.primarySession?.send(text: text)
+    }
+
+    /// Opens a link clicked in a terminal inside the app's browser — an
+    /// existing browser pane in this tab if there is one, otherwise the
+    /// sliding panel.
+    func openLinkFromTerminal(_ link: String) {
+        if let browser = selectedTab?.root.allBrowsers().first {
+            browser.navigate(to: link) { _ in }
+            return
+        }
+        activePanel = .browser
+        panelBrowser.navigate(to: link) { _ in }
     }
 
     // MARK: Side panels

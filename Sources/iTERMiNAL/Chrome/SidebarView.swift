@@ -54,6 +54,8 @@ struct SidebarView: View {
             SidebarActionRow(icon: "square.and.pencil", title: "New terminal", shortcutHint: "⌘T", isActive: false) {
                 store.newTab()
             }
+            SidebarConnectionRow()
+
             SidebarActionRow(icon: "clock", title: "Automations", isActive: store.detailMode == .automations) {
                 store.detailMode = .automations
             }
@@ -114,6 +116,52 @@ struct SidebarView: View {
 
     private var isRenamingWorkspace: Binding<Bool> {
         Binding(get: { renamingWorkspace != nil }, set: { if !$0 { renamingWorkspace = nil } })
+    }
+}
+
+/// "Connect" row: opens a saved SSH/mosh host in a new tab.
+private struct SidebarConnectionRow: View {
+    @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        Menu {
+            if settings.sshConnections.isEmpty {
+                Text("No saved hosts — add one in Settings → Connections")
+            } else {
+                ForEach(settings.sshConnections) { connection in
+                    Button {
+                        store.newTab(kind: .remote(connection.id))
+                    } label: {
+                        Text("\(connection.name) — \(connection.subtitle)")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "network")
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+                Text("Connect")
+                    .font(.system(size: 13))
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovering ? theme.surface.opacity(0.6) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .foregroundStyle(theme.textPrimary)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, 8)
     }
 }
 
@@ -247,8 +295,8 @@ private struct CodexTabRowContent: View {
                 .font(.system(size: 13))
                 .lineLimit(1)
             Spacer()
-            if !session.isRunning {
-                Text("exited")
+            if let note = session.statusNote {
+                Text(note)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -260,6 +308,10 @@ private struct CodexTabRowContent: View {
     /// Blue dot = a live process in a tab you're not currently looking at.
     private var showsActivityDot: Bool {
         session.isRunning && store.selectedTabID != tab.id
+    }
+
+    private var rowIcon: String {
+        session.isRemote ? "network" : "terminal"
     }
 
     private var rowTooltip: String {

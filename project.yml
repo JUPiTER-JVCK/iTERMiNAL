@@ -54,9 +54,16 @@ targets:
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
-        # A real terminal cannot run sandboxed; dev builds are ad-hoc signed.
+        # Universal so the app runs natively on Intel and Apple Silicon.
+        ARCHS: "x86_64 arm64"
+        ONLY_ACTIVE_ARCH: "NO"
+        # A terminal exists to launch the user's own programs, and sandboxed
+        # children inherit the sandbox — a sandboxed build could not read
+        # ~/.ssh, Homebrew tools, or repos outside its container. Hardened
+        # Runtime is the part notarization actually requires, and it does not
+        # restrict spawned processes.
         ENABLE_APP_SANDBOX: "NO"
-        ENABLE_HARDENED_RUNTIME: "NO"
+        ENABLE_HARDENED_RUNTIME: "YES"
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
     scheme:
@@ -72,4 +79,7 @@ targets:
         PRODUCT_NAME: iterminalctl
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
+        ARCHS: "x86_64 arm64"
+        ONLY_ACTIVE_ARCH: "NO"
+        ENABLE_HARDENED_RUNTIME: "YES"
         CODE_SIGN_IDENTITY: "-"
