@@ -187,7 +187,7 @@ final class APIRouter {
         case "browser.newTab":
             guard settings.apiAllowBrowserControl else { return fail(Self.browserDisabled) }
             let tab = store.panelBrowserTabs.newTab()
-            store.rightPanel = .browser
+            store.openPanel(.browser)
             if let url = request.string("url") {
                 tab.navigate(to: url) { result in
                     switch result {

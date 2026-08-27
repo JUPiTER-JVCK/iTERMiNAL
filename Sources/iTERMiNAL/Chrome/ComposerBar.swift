@@ -79,8 +79,7 @@ struct ComposerBar: View {
                 }
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(theme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(theme.surfaceBorder))
+            .elevated(cornerRadius: 22, radius: 18, y: 6)
         }
     }
 

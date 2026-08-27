@@ -403,7 +403,6 @@ final class BrowserTabsModel: ObservableObject {
 /// live page or the empty state.
 struct BrowserPanelView: View {
     @ObservedObject var model: BrowserTabsModel
-    @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -458,18 +457,6 @@ struct BrowserPanelView: View {
             .help("New tab")
 
             Spacer(minLength: 0)
-
-            Button {
-                store.togglePanel(.browser)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close browser panel")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

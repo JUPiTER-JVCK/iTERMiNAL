@@ -34,24 +34,38 @@ struct DetailView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    DetailTopStrip()
-                    mainSurface
+            // The strip spans the whole detail column rather than living
+            // inside the content VStack: nested there, it narrowed whenever a
+            // panel opened and the right-aligned toggles slid with it.
+            DetailTopStrip()
+            FadedDivider()
+
+            // GeometryReader so the trailing panel can never take so much
+            // width that the terminal is squeezed to a sliver — its width is
+            // clamped against what is actually available.
+            GeometryReader { proxy in
+                HStack(spacing: 0) {
+                    if !store.rightPanelExpanded {
+                        mainSurface
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+
+                    if store.rightRegionOpen {
+                        if !store.rightPanelExpanded {
+                            PanelResizeHandle(
+                                axis: .horizontal,
+                                size: $settings.rightPanelWidth,
+                                range: 280...1200,
+                                inverted: true
+                            )
+                        }
+                        RightPanelView()
+                            .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: proxy.size.width))
+                            .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if let panel = store.rightPanel {
-                    PanelResizeHandle(
-                        axis: .horizontal,
-                        size: $settings.rightPanelWidth,
-                        range: 280...820,
-                        inverted: true
-                    )
-                    RightPanelView(panel: panel)
-                        .frame(width: settings.rightPanelWidth)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
             }
 
             if store.bottomDockOpen {
@@ -70,20 +84,39 @@ struct DetailView: View {
         .background(theme.background)
     }
 
+    /// Width for the trailing panel against the space actually available.
+    private func panelWidth(in available: Double) -> Double {
+        let minMain: Double = 360
+        let minPanel: Double = 280
+        if available >= minMain + minPanel {
+            // Room for both: honour the stored width, capped so the main
+            // surface keeps its minimum.
+            return min(settings.rightPanelWidth, available - minMain)
+        }
+        // Too narrow for both minimums, so neither gets one. Split what
+        // there is and leave the larger share to the main surface — it
+        // holds the terminal, which is what the window is for.
+        return max(0, available * 0.4)
+    }
+
     @ViewBuilder
     private var mainSurface: some View {
         switch store.detailMode {
         case .automations:
-            ModePlaceholderView(
-                icon: "clock",
+            SectionPageView(
                 title: "Automations",
-                caption: "Scheduled commands and triggers are coming soon."
+                subtitle: "Run commands on a schedule, or when something in a session changes.",
+                icon: "clock",
+                emptyTitle: "No automations yet",
+                emptyCaption: "Scheduled commands and triggers are coming soon."
             )
         case .skills:
-            ModePlaceholderView(
-                icon: "book",
+            SectionPageView(
                 title: "Skills",
-                caption: "Reusable command snippets are coming soon."
+                subtitle: "Reusable command snippets you can run from the composer or the palette.",
+                icon: "book",
+                emptyTitle: "No skills yet",
+                emptyCaption: "Saved snippets are coming soon."
             )
         case .terminal:
             if let tab = store.selectedTab {
@@ -93,9 +126,11 @@ struct DetailView: View {
             }
             if settings.composerEnabled {
                 ComposerBar()
+                    .frame(maxWidth: 820)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 12)
             }
         }
     }
@@ -129,7 +164,7 @@ private struct DetailTopStrip: View {
                 StripToggle(
                     icon: panel.icon,
                     help: "Toggle \(panel.title) panel",
-                    isActive: store.rightPanel == panel
+                    isActive: store.rightRegionOpen && store.openPanels.contains(panel)
                 ) {
                     store.togglePanel(panel)
                 }
@@ -436,14 +471,8 @@ private struct SuggestionCard: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(hovering ? theme.surfaceHover : theme.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(theme.surfaceBorder)
-            )
+            .elevated(cornerRadius: 12, radius: hovering ? 14 : 8, y: hovering ? 5 : 2)
+            .animation(Motion.disclosure, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -451,74 +480,231 @@ private struct SuggestionCard: View {
     }
 }
 
-/// Placeholder detail surface for the sidebar sections that ship later.
-private struct ModePlaceholderView: View {
-    let icon: String
+/// A sidebar section rendered as a real page: left-aligned title and
+/// subtitle at the top, content below — the shape the reference app uses for
+/// its own sections rather than a centred placeholder.
+private struct SectionPageView: View {
     let title: String
-    let caption: String
+    let subtitle: String
+    let icon: String
+    let emptyTitle: String
+    let emptyCaption: String
+
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: icon)
-                .font(.system(size: 32, weight: .light))
-                .foregroundStyle(theme.textSecondary)
-            Text(title)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
-            Text(caption)
-                .font(.system(size: 13))
-                .foregroundStyle(theme.textSecondary)
-            Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 26)
+            .padding(.bottom, 22)
+
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(theme.textSecondary)
+                Text(emptyTitle)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                Text(emptyCaption)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
-/// The trailing panel. The browser brings its own tab strip and navigation
-/// row, so it needs no wrapper chrome; the file browser gets a small header
-/// with a close button so both panels dismiss the same way.
+/// The trailing region. It holds every open panel at once: a small tab strip
+/// appears when more than one is in there, so opening Files no longer pushes
+/// the browser out of the way.
 struct RightPanelView: View {
-    let panel: SidePanel
-
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        switch panel {
+        VStack(spacing: 0) {
+            header(theme: theme)
+            Divider()
+            content
+        }
+        .background(theme.background)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch store.visiblePanel {
         case .browser:
             BrowserPanelView(model: store.panelBrowserTabs)
         case .files:
-            VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Text("Files")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.textPrimary)
-                    Spacer()
-                    Button {
-                        store.togglePanel(.files)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(theme.textSecondary)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Close files panel")
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-
-                Divider()
-
-                FilePaneView(model: store.panelFiles)
-            }
-            .background(theme.background)
+            FilePaneView(model: store.panelFiles)
+        case nil:
+            PanelPicker()
         }
+    }
+
+    private func header(theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            ForEach(store.orderedOpenPanels) { panel in
+                PanelTabChip(
+                    panel: panel,
+                    isSelected: store.visiblePanel == panel,
+                    onSelect: { store.frontPanel = panel },
+                    onClose: { store.closePanel(panel) }
+                )
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                store.toggleRightPanelExpanded()
+            } label: {
+                Image(systemName: store.rightPanelExpanded
+                      ? "arrow.down.right.and.arrow.up.left"
+                      : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(store.rightPanelExpanded ? "Collapse panel" : "Expand panel")
+
+            Button {
+                store.closeRightRegion()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close panel")
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 38)
+    }
+}
+
+/// One panel tab in the trailing region's strip.
+private struct PanelTabChip: View {
+    let panel: SidePanel
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 6) {
+            Image(systemName: panel.icon)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textSecondary)
+            Text(panel.title)
+                .font(.system(size: 12))
+                .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close \(panel.title)")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? theme.surface : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Shown when the trailing region is open but empty — the reference app
+/// offers the same choice rather than a blank panel.
+private struct PanelPicker: View {
+    @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        VStack(spacing: 4) {
+            Spacer()
+            ForEach(SidePanel.allCases) { panel in
+                PickerRow(
+                    icon: panel.icon,
+                    title: panel.title,
+                    shortcut: panel == .browser ? "⌥⌘B" : "⌥⌘F",
+                    theme: theme
+                ) {
+                    store.openPanel(panel)
+                }
+            }
+            PickerRow(icon: "apple.terminal", title: "Terminal", shortcut: "⌘J", theme: theme) {
+                store.toggleBottomDock()
+            }
+            Spacer()
+        }
+        .frame(maxWidth: 260)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct PickerRow: View {
+    let icon: String
+    let title: String
+    let shortcut: String
+    let theme: Theme
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Text(shortcut)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovering ? theme.surface : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
