@@ -376,6 +376,55 @@ extension SidebarSectionHeader where Accessory == EmptyView {
 
 // MARK: - Rows
 
+/// The visual body every top-level sidebar row shares.
+///
+/// Connect renders inside a `Menu` rather than a `Button`, so it used to be a
+/// separate copy of this layout — and drifted out of alignment with its
+/// neighbours the moment the metrics were retuned. One view, no drift.
+struct SidebarRowContent: View {
+    let icon: String
+    let title: String
+    var shortcutHint: String? = nil
+    var badge: Int? = nil
+    var isActive = false
+    var isHovering = false
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .frame(width: 18)
+            Text(title)
+                .font(.system(size: 13))
+            Spacer()
+            if let badge, badge > 0 {
+                Text("\(badge)")
+                    .font(.system(size: 10, weight: .medium))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(theme.surfaceHover))
+            } else if let shortcutHint {
+                Text(shortcutHint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+        }
+        .foregroundStyle(theme.textPrimary)
+        .padding(.horizontal, 9)
+        // Fixed height rather than padding arithmetic: the reference app
+        // sits on a 34pt rhythm and text metrics vary by label.
+        .frame(height: 34)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isActive ? theme.surface : (isHovering ? theme.surface.opacity(0.6) : Color.clear))
+        )
+        .contentShape(Rectangle())
+    }
+}
+
 struct SidebarActionRow: View {
     let icon: String
     let title: String
@@ -385,42 +434,19 @@ struct SidebarActionRow: View {
     let action: () -> Void
 
     @State private var hovering = false
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
         Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                    .frame(width: 18)
-                Text(title)
-                    .font(.system(size: 13))
-                Spacer()
-                if let badge, badge > 0 {
-                    Text("\(badge)")
-                        .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(theme.surfaceHover))
-                } else if let shortcutHint {
-                    Text(shortcutHint)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
-                }
-            }
-            .padding(.horizontal, 9)
-            // Fixed height rather than padding arithmetic: the reference app
-            // sits on a 34pt rhythm and text metrics vary by label.
-            .frame(height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isActive ? theme.surface : (hovering ? theme.surface.opacity(0.6) : Color.clear))
+            SidebarRowContent(
+                icon: icon,
+                title: title,
+                shortcutHint: shortcutHint,
+                badge: badge,
+                isActive: isActive,
+                isHovering: hovering
             )
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
     }
@@ -430,11 +456,9 @@ struct SidebarActionRow: View {
 struct SidebarConnectionRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
-    @Environment(\.colorScheme) private var colorScheme
     @State private var hovering = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
         Menu {
             if settings.sshConnections.isEmpty {
                 Text("No saved hosts — add one in Settings → Connections")
@@ -446,25 +470,10 @@ struct SidebarConnectionRow: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "network")
-                    .font(.system(size: 13))
-                    .frame(width: 18)
-                Text("Connect")
-                    .font(.system(size: 13))
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovering ? theme.surface.opacity(0.6) : Color.clear)
-            )
-            .contentShape(Rectangle())
+            SidebarRowContent(icon: "network", title: "Connect", isHovering: hovering)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
     }
@@ -537,7 +546,12 @@ private struct SidebarTabRow: View {
         Button(action: onSelect) {
             HStack(spacing: 6) {
                 if let session = tab.primarySession {
-                    SessionRowContent(tab: tab, session: session, isSelected: isSelected)
+                    SessionRowContent(
+                        tab: tab,
+                        session: session,
+                        isSelected: isSelected,
+                        isHovering: hovering
+                    )
                 } else {
                     Text(tab.displayName)
                         .font(.system(size: 13))
@@ -571,6 +585,8 @@ private struct SessionRowContent: View {
     @ObservedObject var tab: WorkspaceTab
     @ObservedObject var session: TerminalSession
     let isSelected: Bool
+    /// Hover lives on the parent row, which owns the whole hit area.
+    var isHovering = false
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
@@ -603,7 +619,18 @@ private struct SessionRowContent: View {
 
             Spacer(minLength: 6)
 
-            if let note = session.statusNote {
+            if isHovering {
+                RowIconButton(
+                    icon: tab.isPinned ? "pin.slash" : "pin",
+                    help: tab.isPinned ? "Unpin" : "Pin",
+                    theme: theme
+                ) {
+                    store.togglePin(tab)
+                }
+                RowIconButton(icon: "xmark", help: "Close tab", theme: theme) {
+                    store.closeTab(tab)
+                }
+            } else if let note = session.statusNote {
                 Text(note)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -626,6 +653,33 @@ private struct SessionRowContent: View {
         var parts = [session.abbreviatedDirectory]
         if let branch = session.gitBranch { parts.append("⎇ " + branch) }
         return parts.joined(separator: "  ")
+    }
+}
+
+/// A compact trailing action inside a sidebar row.
+private struct RowIconButton: View {
+    let icon: String
+    let help: String
+    let theme: Theme
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
+                .frame(width: 18, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(hovering ? theme.surfaceHover : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
     }
 }
 
@@ -677,6 +731,7 @@ private struct SidebarStatusRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var metrics = ProcessMetrics.shared
     @State private var showShortcuts = false
 
     var body: some View {
@@ -685,22 +740,24 @@ private struct SidebarStatusRow: View {
             Divider()
             HStack(spacing: 8) {
                 SettingsLink {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        // The API's on/off state keeps a home in this dot
+                        // rather than a line of text, leaving the row for
+                        // numbers that actually change.
                         Circle()
-                            .fill(settings.localAPIEnabled ? settings.accentColor : theme.textSecondary.opacity(0.4))
+                            .fill(settings.localAPIEnabled ? settings.accentColor : theme.textSecondary.opacity(0.35))
                             .frame(width: 7, height: 7)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(statusTitle)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(theme.textPrimary)
-                            Text(statusDetail)
-                                .font(.system(size: 10))
-                                .foregroundStyle(theme.textSecondary)
-                        }
+                            .help(settings.localAPIEnabled
+                                  ? "Local scripting API is listening"
+                                  : "Local scripting API is off")
+
+                        MetricReadout(label: "CPU", value: metrics.cpuText, theme: theme)
+                        MetricReadout(label: "RAM", value: metrics.memoryText, theme: theme)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help("Open Settings")
 
                 Spacer()
 
@@ -720,17 +777,27 @@ private struct SidebarStatusRow: View {
         .popover(isPresented: $showShortcuts, arrowEdge: .top) {
             ShortcutsPopover()
         }
+        .onAppear { metrics.start() }
     }
+}
 
-    private var statusTitle: String {
-        settings.localAPIEnabled ? "API on" : "API off"
-    }
+/// One footer statistic: a muted label and a monospaced-digit value, so the
+/// row doesn't jitter as the numbers change width.
+private struct MetricReadout: View {
+    let label: String
+    let value: String
+    let theme: Theme
 
-    private var statusDetail: String {
-        var parts: [String] = [settings.useGPURendering ? "GPU" : "CPU"]
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        if let version { parts.append("v\(version)") }
-        return parts.joined(separator: " · ")
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.textSecondary)
+            Text(value)
+                .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(theme.textPrimary)
+        }
     }
 }
 

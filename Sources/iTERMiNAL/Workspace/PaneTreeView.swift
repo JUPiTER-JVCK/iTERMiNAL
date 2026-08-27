@@ -16,13 +16,9 @@ struct PaneTreeView: View {
         case .terminal(let session):
             TerminalPaneView(session: session, isSolo: isSolo)
         case .browser(let model):
-            PaneCard(isSolo: isSolo) {
-                BrowserPaneView(model: model)
-            }
+            BrowserPaneView(model: model)
         case .files(let model):
-            PaneCard(isSolo: isSolo) {
-                FilePaneView(model: model)
-            }
+            FilePaneView(model: model)
         case .split(let direction, let children):
             if direction == .horizontal {
                 HSplitView {
@@ -43,31 +39,8 @@ struct PaneTreeView: View {
     }
 }
 
-/// Shared card treatment for non-terminal leaf panes. Flush when solo.
-struct PaneCard<Content: View>: View {
-    var isSolo = true
-    @Environment(\.colorScheme) private var colorScheme
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        if isSolo {
-            content
-        } else {
-            content
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(theme.surfaceBorder)
-                )
-                .padding(3)
-        }
-    }
-}
-
-/// Terminal leaf. Flush when it is the tab's only pane; inside a split it
-/// gets a hairline card and a restrained focus tint on the pane the keyboard
-/// currently drives.
+/// Terminal leaf. Every pane renders flush; inside a split, the one the
+/// keyboard drives is marked by a bar along its top edge.
 struct TerminalPaneView: View {
     @ObservedObject var session: TerminalSession
     var isSolo = true
@@ -88,16 +61,17 @@ struct TerminalPaneView: View {
         if isSolo {
             host
         } else {
+            // A ring around an opaque terminal reads as a halo, and the inset
+            // it needs divides the gap between panes unevenly. A bar along
+            // the focused pane's top edge says the same thing without
+            // surrounding the content.
             host
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            isFocused ? settings.accentColor.opacity(0.30) : theme.surfaceBorder,
-                            lineWidth: 1
-                        )
-                )
-                .padding(3)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(isFocused ? settings.accentColor : Color.clear)
+                        .frame(height: 2)
+                        .animation(Motion.disclosure, value: isFocused)
+                }
         }
     }
 }

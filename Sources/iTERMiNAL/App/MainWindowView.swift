@@ -34,17 +34,20 @@ struct DetailView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
+            // The strip spans the whole detail column rather than living
+            // inside the content VStack: nested there, it narrowed whenever a
+            // panel opened and the right-aligned toggles slid with it.
+            DetailTopStrip()
+            FadedDivider()
+
             // GeometryReader so the trailing panel can never take so much
             // width that the terminal is squeezed to a sliver — its width is
-            // clamped against what's actually available.
+            // clamped against what is actually available.
             GeometryReader { proxy in
                 HStack(spacing: 0) {
                     if !store.rightPanelExpanded {
-                        VStack(spacing: 0) {
-                            DetailTopStrip()
-                            mainSurface
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        mainSurface
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
 
                     if store.rightRegionOpen {
@@ -468,14 +471,8 @@ private struct SuggestionCard: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(hovering ? theme.surfaceHover : theme.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(theme.surfaceBorder)
-            )
+            .elevated(cornerRadius: 12, radius: hovering ? 14 : 8, y: hovering ? 5 : 2)
+            .animation(Motion.disclosure, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
