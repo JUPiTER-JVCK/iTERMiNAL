@@ -24,5 +24,7 @@ jobs:
             -scheme iTERMiNAL \
             -configuration Debug \
             -destination "platform=macOS" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             build
