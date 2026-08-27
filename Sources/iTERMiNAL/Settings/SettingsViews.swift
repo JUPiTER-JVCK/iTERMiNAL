@@ -363,6 +363,7 @@ struct ConnectionsSettingsView: View {
 struct SecuritySettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var installMessage: String?
+    @State private var tokenMessage: String?
 
     var body: some View {
         Form {
@@ -386,13 +387,27 @@ struct SecuritySettingsView: View {
 
                     HStack {
                         Button("Copy Token") {
-                            let token = LocalAPIServer.shared.ensureToken()
+                            // A nil token means the keychain refused or the
+                            // RNG failed; say so rather than copying nothing.
+                            guard let token = LocalAPIServer.shared.ensureToken() else {
+                                tokenMessage = "Couldn't read or create a token in your keychain."
+                                return
+                            }
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(token, forType: .string)
+                            tokenMessage = "Token copied to the clipboard."
                         }
                         Button("Regenerate Token") {
-                            _ = LocalAPIServer.shared.regenerateToken()
+                            tokenMessage = LocalAPIServer.shared.regenerateToken() == nil
+                                ? "Couldn't create a new token in your keychain."
+                                : "New token created. The old one no longer works."
                         }
+                    }
+
+                    if let tokenMessage {
+                        Text(tokenMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
