@@ -1,27 +1,72 @@
 import SwiftUI
 
-/// Left rail styled after a conversation list: a search field, a prominent
-/// "New terminal" row, then workspaces as sections whose tabs read like
-/// conversations — title on top, working directory and git branch below.
+/// Left rail matching the reference layout: a small icon strip up top,
+/// action rows (New terminal / Automations / Skills), then a Workspaces
+/// section with folder headers and single-line tab rows. Background sessions
+/// that are still running get a blue activity dot.
 struct SidebarView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var query = ""
+    @State private var searchVisible = false
     @State private var renamingTab: WorkspaceTab?
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(alignment: .leading, spacing: 6) {
-            searchField(theme: theme)
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Spacer()
+                Button {
+                    searchVisible.toggle()
+                    if !searchVisible { query = "" }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Search tabs")
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
 
-            newTerminalRow(theme: theme)
-                .padding(.horizontal, 6)
+            if searchVisible {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                    TextField("Search", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.surface.opacity(0.6)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+            }
+
+            SidebarActionRow(icon: "square.and.pencil", title: "New terminal", shortcutHint: "⌘T", isActive: false) {
+                store.newTab()
+            }
+            SidebarActionRow(icon: "clock", title: "Automations", isActive: store.detailMode == .automations) {
+                store.detailMode = .automations
+            }
+            SidebarActionRow(icon: "book", title: "Skills", isActive: store.detailMode == .skills) {
+                store.detailMode = .skills
+            }
+
+            Text("Workspaces")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.textSecondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
 
             List(selection: $store.selectedTabID) {
                 ForEach(store.workspaces) { workspace in
@@ -70,42 +115,46 @@ struct SidebarView: View {
     private var isRenamingWorkspace: Binding<Bool> {
         Binding(get: { renamingWorkspace != nil }, set: { if !$0 { renamingWorkspace = nil } })
     }
+}
 
-    private func searchField(theme: Theme) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.textSecondary)
-            TextField("Search", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.surface.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
-    }
+private struct SidebarActionRow: View {
+    let icon: String
+    let title: String
+    var shortcutHint: String? = nil
+    var isActive = false
+    let action: () -> Void
 
-    private func newTerminalRow(theme: Theme) -> some View {
-        Button {
-            store.newTab()
-        } label: {
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 13, weight: .medium))
-                Text("New terminal")
-                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 13))
                 Spacer()
-                Text("⌘T")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary)
+                if let shortcutHint {
+                    Text(shortcutHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isActive ? theme.surface : (hovering ? theme.surface.opacity(0.6) : Color.clear))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.textPrimary)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, 8)
     }
 }
 
@@ -119,14 +168,15 @@ private struct WorkspaceSectionView: View {
     var body: some View {
         Section {
             ForEach(filteredTabs) { tab in
-                TabRowView(tab: tab, onRename: { onRenameTab(tab) })
+                CodexTabRow(tab: tab, onRename: { onRenameTab(tab) })
                     .tag(tab.id)
             }
         } header: {
-            HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
                 Text(workspace.name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .medium))
                 Spacer()
                 Menu {
                     Button("New Tab Here") { store.newTab(in: workspace) }
@@ -154,7 +204,7 @@ private struct WorkspaceSectionView: View {
     }
 }
 
-private struct TabRowView: View {
+private struct CodexTabRow: View {
     @ObservedObject var tab: WorkspaceTab
     let onRename: () -> Void
     @EnvironmentObject private var store: WorkspaceStore
@@ -162,11 +212,15 @@ private struct TabRowView: View {
     var body: some View {
         Group {
             if let session = tab.primarySession {
-                SessionRowContent(tab: tab, session: session)
+                CodexTabRowContent(tab: tab, session: session)
             } else {
-                Label(tab.displayName, systemImage: "terminal")
+                Text(tab.displayName)
+                    .font(.system(size: 13))
             }
         }
+        // Clicking any tab row returns the detail column to the terminal,
+        // even when the row was already selected.
+        .simultaneousGesture(TapGesture().onEnded { store.detailMode = .terminal })
         .contextMenu {
             Button("Rename…") { onRename() }
             Button("Close Tab") { store.closeTab(tab) }
@@ -174,39 +228,45 @@ private struct TabRowView: View {
     }
 }
 
-private struct SessionRowContent: View {
+private struct CodexTabRowContent: View {
     @ObservedObject var tab: WorkspaceTab
     @ObservedObject var session: TerminalSession
+    @EnvironmentObject private var store: WorkspaceStore
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.system(size: 12))
-                .frame(width: 20, height: 20)
-                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.secondary.opacity(0.15)))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(tab.displayName)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(session.abbreviatedDirectory)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                    if let branch = session.gitBranch {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 8))
-                        Text(branch)
-                            .lineLimit(1)
-                    }
-                    if !session.isRunning {
-                        Text("exited")
-                            .foregroundStyle(.red)
-                    }
+        HStack(spacing: 6) {
+            ZStack {
+                if showsActivityDot {
+                    Circle()
+                        .fill(Color(hex: 0x3B82F6))
+                        .frame(width: 6, height: 6)
                 }
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+            }
+            .frame(width: 8)
+            Text(tab.displayName)
+                .font(.system(size: 13))
+                .lineLimit(1)
+            Spacer()
+            if !session.isRunning {
+                Text("exited")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
+        .help(rowTooltip)
+    }
+
+    /// Blue dot = a live process in a tab you're not currently looking at.
+    private var showsActivityDot: Bool {
+        session.isRunning && store.selectedTabID != tab.id
+    }
+
+    private var rowTooltip: String {
+        var parts = [session.abbreviatedDirectory]
+        if let branch = session.gitBranch {
+            parts.append("⎇ " + branch)
+        }
+        return parts.joined(separator: "  ")
     }
 }

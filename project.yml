@@ -8,8 +8,10 @@ options:
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    # Pinned to the revision the app's engine wrapper was written against.
-    revision: 5fa368ecfecd5a3afdeab9c791c675e23d84d677
+    # Pinned to v1.20.0: the newest release whose manifest (swift-tools 6.0)
+    # builds with Xcode 16.x; every API the engine wrapper uses was verified
+    # present at this revision.
+    revision: 5d14406844143538cd8f8851d2d8a67c1fe443e5
 
 targets:
   iTERMiNAL:

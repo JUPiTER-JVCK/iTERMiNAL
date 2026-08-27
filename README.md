@@ -14,9 +14,12 @@ terminal (vim, htop, and ssh all work), not a command runner.
 - **Real terminal emulation** — PTY-backed login shell via SwiftTerm, full
   ANSI/xterm support, alternate-screen apps, configurable scrollback and
   cursor style.
-- **Chat-style shell** — translucent sidebar listing workspaces and tabs like
-  conversations, with working directory and git branch under each title; a
-  bottom composer bar that sends commands to the focused terminal.
+- **Chat-style shell** — translucent sidebar with New terminal / Automations /
+  Skills action rows and a Workspaces section whose tabs read like
+  conversations (blue activity dots for live background sessions); a "Let's
+  build" landing screen with a workspace picker and quick-start cards; a tall
+  rounded composer with Local / Worktree / Cloud context tabs and the focused
+  session's git branch underneath.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
   per tab; layouts are snapshotted to Application Support and restored on
   launch.
@@ -33,7 +36,7 @@ terminal (vim, htop, and ssh all work), not a command runner.
 ## Requirements
 
 - macOS 14 (Sonoma) or later
-- Xcode 15 or later
+- Xcode 16 or later (SwiftTerm's manifest uses Swift tools 6.0)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
 ## Building

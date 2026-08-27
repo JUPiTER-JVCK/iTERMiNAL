@@ -18,6 +18,12 @@ enum SidePanel: String, CaseIterable, Identifiable {
     }
 }
 
+/// What the detail column is showing: the terminal surface, or one of the
+/// placeholder sections mirrored from the sidebar's action rows.
+enum DetailMode {
+    case terminal, automations, skills
+}
+
 /// Single source of truth for workspaces, tabs, pane layout, focus, and the
 /// sliding side panels. Layout is snapshotted to Application Support and
 /// restored on the next launch.
@@ -25,9 +31,11 @@ final class WorkspaceStore: ObservableObject {
     static let shared = WorkspaceStore()
 
     @Published var workspaces: [Workspace] = []
+    @Published var detailMode: DetailMode = .terminal
     @Published var selectedTabID: UUID? {
         didSet {
             guard oldValue != selectedTabID else { return }
+            if selectedTabID != nil { detailMode = .terminal }
             focusSelectedTab()
             scheduleSave()
         }
