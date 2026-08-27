@@ -1,7 +1,10 @@
 name: Build
 
+# Branches with an open PR are covered by the pull_request trigger, so the
+# push trigger is scoped to main — otherwise every PR push builds twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
