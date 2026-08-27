@@ -130,8 +130,11 @@ final class APIRouter {
                 }
                 connectionID = connection.id
             }
-            store.splitFocusedPane(direction, kind: kind, connection: connectionID)
-            ok()
+            guard let node = store.splitFocusedPane(direction, kind: kind, connection: connectionID) else {
+                return ok()
+            }
+            // Hand back the new pane so scripts can target it deterministically.
+            ok(["pane": Self.describePanes(node).first ?? [:]])
 
         case "pane.close":
             store.closeFocusedPane()

@@ -400,18 +400,39 @@ struct FilePaneView: View {
     }
 
     private func loadDroppedFiles(_ providers: [NSItemProvider]) {
-        var urls: [URL] = []
+        // loadObject calls back on an arbitrary queue, so the shared array
+        // needs a lock — appending from several at once would corrupt it.
+        let collected = DroppedURLs()
         let group = DispatchGroup()
         for provider in providers {
             group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url { urls.append(url) }
+                if let url { collected.append(url) }
                 group.leave()
             }
         }
         group.notify(queue: .main) {
-            model.upload(urls)
+            model.upload(collected.urls)
         }
+    }
+}
+
+/// Lock-guarded accumulator for drag-and-drop, whose callbacks arrive on
+/// whatever queue the item provider chooses.
+private final class DroppedURLs {
+    private let lock = NSLock()
+    private var storage: [URL] = []
+
+    func append(_ url: URL) {
+        lock.lock()
+        storage.append(url)
+        lock.unlock()
+    }
+
+    var urls: [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
     }
 }
 

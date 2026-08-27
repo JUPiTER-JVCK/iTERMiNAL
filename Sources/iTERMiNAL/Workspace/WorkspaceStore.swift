@@ -192,7 +192,8 @@ final class WorkspaceStore: ObservableObject {
         scheduleSave()
         EventBus.shared.publish(APIEvent("tab.created", [
             "tab": tab.id.uuidString,
-            "workspace": target.name,
+            "workspace": target.id.uuidString,
+            "workspaceName": target.name,
             "session": session.id.uuidString,
             "remote": kind.isRemote,
         ]))

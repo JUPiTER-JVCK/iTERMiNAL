@@ -45,21 +45,32 @@ final class LocalAPIServer {
 
     // MARK: Token
 
+    /// Returns the API token, minting one if needed. Nil means no token could
+    /// be produced — the caller must not fall back to anything weaker.
     @discardableResult
-    func ensureToken() -> String {
+    func ensureToken() -> String? {
         if let existing = KeychainStore.get(Self.tokenAccount), !existing.isEmpty {
             writeTokenMirror(existing)
             return existing
         }
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            // A failed RNG would leave the buffer as zeros; a predictable
+            // token is worse than no API, so refuse rather than degrade.
+            NSLog("Local API: secure random generation failed (status \(status))")
+            return nil
+        }
         let token = Data(bytes).base64EncodedString()
-        KeychainStore.set(token, for: Self.tokenAccount)
+        guard KeychainStore.set(token, for: Self.tokenAccount) else {
+            NSLog("Local API: could not store the token in the keychain")
+            return nil
+        }
         writeTokenMirror(token)
         return token
     }
 
-    func regenerateToken() -> String {
+    func regenerateToken() -> String? {
         KeychainStore.delete(Self.tokenAccount)
         return ensureToken()
     }
@@ -95,7 +106,10 @@ final class LocalAPIServer {
         stateQueue.sync {
             guard !running else { return }
             ensureSupportDirectory()
-            _ = ensureToken()
+            guard ensureToken() != nil else {
+                NSLog("Local API: no authentication token available; not listening")
+                return
+            }
 
             unlink(socketPath)
 
