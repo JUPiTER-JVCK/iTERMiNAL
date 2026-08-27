@@ -157,6 +157,13 @@ struct AppearanceSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Sidebar") {
+                Toggle("Translucent sidebar", isOn: $settings.sidebarTranslucent)
+                Text("Off by default, matching the flat sidebar of the app this one is modelled on. On, the sidebar picks up the desktop behind it the way most macOS apps do.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

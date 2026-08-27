@@ -105,6 +105,13 @@ extension PaneNode {
         }
     }
 
+    /// True when this node holds content directly rather than a split. A tab
+    /// whose root is a leaf has exactly one pane, so it needs no focus ring.
+    var isLeaf: Bool {
+        if case .split = content { return false }
+        return true
+    }
+
     /// The leaf node whose terminal session has the given id.
     func leaf(containingSessionID sessionID: UUID) -> PaneNode? {
         switch content {

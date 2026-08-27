@@ -43,6 +43,9 @@ final class AppSettings: ObservableObject {
     @Published var theme: ThemeChoice { didSet { defaults.set(theme.rawValue, forKey: "theme") } }
     @Published var accentID: String { didSet { defaults.set(accentID, forKey: "accentID") } }
     @Published var backgroundOpacity: Double { didSet { defaults.set(backgroundOpacity, forKey: "backgroundOpacity") } }
+    /// The reference app draws a flat sidebar; macOS vibrancy is offered as
+    /// an opt-in for people who prefer the native translucent look.
+    @Published var sidebarTranslucent: Bool { didSet { defaults.set(sidebarTranslucent, forKey: "sidebarTranslucent") } }
 
     // MARK: Terminal
     @Published var terminalFontName: String { didSet { defaults.set(terminalFontName, forKey: "terminalFontName") } }
@@ -57,6 +60,9 @@ final class AppSettings: ObservableObject {
     @Published var showHiddenFiles: Bool { didSet { defaults.set(showHiddenFiles, forKey: "showHiddenFiles") } }
     @Published var followTerminalDirectory: Bool { didSet { defaults.set(followTerminalDirectory, forKey: "followTerminalDirectory") } }
     @Published var composerEnabled: Bool { didSet { defaults.set(composerEnabled, forKey: "composerEnabled") } }
+    /// Panel geometry, persisted so a resized layout survives relaunch.
+    @Published var rightPanelWidth: Double { didSet { defaults.set(rightPanelWidth, forKey: "rightPanelWidth") } }
+    @Published var bottomDockHeight: Double { didSet { defaults.set(bottomDockHeight, forKey: "bottomDockHeight") } }
 
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
@@ -90,6 +96,7 @@ final class AppSettings: ObservableObject {
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
         accentID = defaults.string(forKey: "accentID") ?? "green"
         backgroundOpacity = defaults.object(forKey: "backgroundOpacity") as? Double ?? 1.0
+        sidebarTranslucent = defaults.bool(forKey: "sidebarTranslucent")
 
         terminalFontName = defaults.string(forKey: "terminalFontName") ?? ""
         terminalFontSize = defaults.object(forKey: "terminalFontSize") as? Double ?? 13
@@ -102,6 +109,8 @@ final class AppSettings: ObservableObject {
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
         followTerminalDirectory = defaults.object(forKey: "followTerminalDirectory") as? Bool ?? true
         composerEnabled = defaults.object(forKey: "composerEnabled") as? Bool ?? true
+        rightPanelWidth = defaults.object(forKey: "rightPanelWidth") as? Double ?? 420
+        bottomDockHeight = defaults.object(forKey: "bottomDockHeight") as? Double ?? 260
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -207,6 +216,7 @@ final class AppSettings: ObservableObject {
         theme = .system
         accentID = "green"
         backgroundOpacity = 1.0
+        sidebarTranslucent = false
         terminalFontName = ""
         terminalFontSize = 13
         cursorStyleTag = "steadyBlock"
@@ -217,6 +227,8 @@ final class AppSettings: ObservableObject {
         showHiddenFiles = false
         followTerminalDirectory = true
         composerEnabled = true
+        rightPanelWidth = 420
+        bottomDockHeight = 260
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

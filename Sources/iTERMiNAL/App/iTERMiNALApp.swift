@@ -104,6 +104,13 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Panels") {
+            Button("Toggle Terminal Dock") {
+                WorkspaceStore.shared.toggleBottomDock()
+            }
+            .keyboardShortcut("j", modifiers: .command)
+
+            Divider()
+
             Button("Toggle Browser Panel") {
                 WorkspaceStore.shared.togglePanel(.browser)
             }

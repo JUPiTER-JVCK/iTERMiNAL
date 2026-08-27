@@ -44,15 +44,28 @@ final class WorkspaceStore: ObservableObject {
         }
     }
     @Published var focusedSessionID: UUID?
-    @Published var activePanel: SidePanel?
+    /// The trailing panel, if any. Independent of the bottom dock: the
+    /// reference app lets both be open at once.
+    @Published var rightPanel: SidePanel?
+    @Published private(set) var bottomDockOpen = false
     @Published var showCommandPalette = false
     /// Sessions the user closed, newest first, so they can be reopened.
     @Published private(set) var recentSessions: [RecentSession] = []
 
+    /// Terminals living in the bottom dock. Separate from tab panes — the
+    /// dock is a scratch surface that survives switching tabs.
+    @Published private(set) var dockSessions: [TerminalSession] = []
+    @Published var selectedDockSessionID: UUID?
+
     /// Models backing the sliding side panels (distinct from panes that live
     /// inside a tab's split layout).
-    lazy var panelBrowser = BrowserModel()
+    lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
+
+    var selectedDockSession: TerminalSession? {
+        guard let selectedDockSessionID else { return dockSessions.first }
+        return dockSessions.first { $0.id == selectedDockSessionID } ?? dockSessions.first
+    }
 
     private var pendingSave: DispatchWorkItem?
 
@@ -110,7 +123,14 @@ final class WorkspaceStore: ObservableObject {
                 }
             }
         }
-        return nil
+        // The dock's terminals take focus like any other, so they have to be
+        // findable here or the composer would type into the wrong shell.
+        return dockSessions.first { $0.id == id }
+    }
+
+    /// True when the id belongs to the bottom dock rather than a tab pane.
+    func isDockSession(_ id: UUID) -> Bool {
+        dockSessions.contains { $0.id == id }
     }
 
     // MARK: Lookups used by the scripting API
@@ -130,8 +150,10 @@ final class WorkspaceStore: ObservableObject {
         return session(withID: uuid)
     }
 
+    /// Every browser the API can address: panes inside tabs, plus the
+    /// right panel's tabs, which carry ids of their own.
     func allBrowsers() -> [BrowserModel] {
-        workspaces.flatMap { $0.tabs.flatMap { $0.root.allBrowsers() } }
+        workspaces.flatMap { $0.tabs.flatMap { $0.root.allBrowsers() } } + panelBrowserTabs.tabs
     }
 
     func browser(withIdentifier identifier: String) -> BrowserModel? {
@@ -321,6 +343,12 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func closeFocusedPane() {
+        // Focus may be in the dock, which owns no pane — closing the tab
+        // because the user clicked into the dock would be destructive.
+        if let focusedSessionID, isDockSession(focusedSessionID) {
+            closeDockSession(focusedSessionID)
+            return
+        }
         guard let tab = selectedTab else { return }
         guard let focusedSessionID,
               let leaf = tab.root.leaf(containingSessionID: focusedSessionID) else {
@@ -365,23 +393,70 @@ final class WorkspaceStore: ObservableObject {
             browser.navigate(to: link) { _ in }
             return
         }
-        activePanel = .browser
-        panelBrowser.navigate(to: link) { _ in }
+        withAnimation(Motion.panel) { rightPanel = .browser }
+        // A tabbed browser should open a link beside the current page, not
+        // navigate away from it.
+        panelBrowserTabs.newTab(url: link)
     }
 
     // MARK: Side panels
 
     func togglePanel(_ panel: SidePanel) {
-        if activePanel == panel {
-            withAnimation(Motion.panel) { activePanel = nil }
+        if rightPanel == panel {
+            withAnimation(Motion.panel) { rightPanel = nil }
             return
         }
-        withAnimation(Motion.panel) { activePanel = panel }
+        withAnimation(Motion.panel) { rightPanel = panel }
+        if panel == .browser, panelBrowserTabs.tabs.isEmpty {
+            panelBrowserTabs.newTab()
+        }
         if panel == .files,
            AppSettings.shared.followTerminalDirectory,
            !panelFiles.isRemote,
            let directory = focusedSession?.currentDirectory {
             panelFiles.navigate(to: directory)
+        }
+    }
+
+    // MARK: Bottom terminal dock
+
+    func toggleBottomDock() {
+        withAnimation(Motion.panel) { bottomDockOpen.toggle() }
+        // Opening an empty dock with nothing in it would just show a blank
+        // strip, so give it a shell.
+        if bottomDockOpen, dockSessions.isEmpty {
+            _ = newDockSession()
+        }
+    }
+
+    func closeBottomDock() {
+        withAnimation(Motion.panel) { bottomDockOpen = false }
+    }
+
+    @discardableResult
+    func newDockSession(directory: String? = nil) -> TerminalSession {
+        let session = TerminalSession(
+            kind: .localShell,
+            initialDirectory: directory ?? focusedSession?.currentDirectory
+        )
+        session.startIfNeeded()
+        dockSessions.append(session)
+        selectedDockSessionID = session.id
+        EventBus.shared.publish(APIEvent("dock.session.created", ["session": session.id.uuidString]))
+        return session
+    }
+
+    func closeDockSession(_ id: UUID) {
+        guard let index = dockSessions.firstIndex(where: { $0.id == id }) else { return }
+        let session = dockSessions.remove(at: index)
+        session.terminate()
+        if selectedDockSessionID == id {
+            selectedDockSessionID = dockSessions.first?.id
+        }
+        EventBus.shared.publish(APIEvent("dock.session.closed", ["session": id.uuidString]))
+        // An empty dock is just a blank strip; fold it away.
+        if dockSessions.isEmpty {
+            withAnimation(Motion.panel) { bottomDockOpen = false }
         }
     }
 
@@ -458,6 +533,7 @@ final class WorkspaceStore: ObservableObject {
                 tab.root.allSessions().forEach { $0.terminate() }
             }
         }
+        dockSessions.forEach { $0.terminate() }
     }
 
     var stateFileURL: URL { stateURL }

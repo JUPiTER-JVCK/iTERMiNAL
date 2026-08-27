@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AppKit
 
 enum BrowserError: LocalizedError {
     case invalidURL(String)
@@ -28,6 +29,9 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     let id = UUID()
 
     @Published var urlText: String
+    /// False until this tab has actually loaded something, so a fresh tab can
+    /// show an empty state instead of a blank web view.
+    @Published private(set) var hasNavigated = false
     @Published private(set) var isLoading = false
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
@@ -38,18 +42,23 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     /// Completions waiting for the current navigation to settle.
     private var navigationCompletions: [(Result<String, Error>) -> Void] = []
 
-    init(initialURL: String? = nil) {
+    /// `autoLoad: false` produces an empty tab — used by the panel's "new
+    /// tab", which should land on the empty state rather than the homepage.
+    init(initialURL: String? = nil, autoLoad: Bool = true) {
         webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        urlText = initialURL ?? AppSettings.shared.browserHomepage
+        urlText = initialURL ?? (autoLoad ? AppSettings.shared.browserHomepage : "")
         super.init()
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
-        loadCurrentText()
+        if autoLoad || initialURL != nil {
+            loadCurrentText()
+        }
     }
 
     func loadCurrentText() {
         guard let url = Self.url(fromUserInput: urlText) else { return }
         urlText = url.absoluteString
+        hasNavigated = true
         webView.load(URLRequest(url: url))
     }
 
@@ -108,6 +117,7 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
             return
         }
         urlText = url.absoluteString
+        hasNavigated = true
         navigationCompletions.append(completion)
         isLoading = true
         webView.load(URLRequest(url: url))
@@ -347,5 +357,262 @@ struct BrowserPaneView: View {
             WebViewRepresentable(webView: model.webView)
         }
         .background(theme.background)
+    }
+}
+
+// MARK: - Tabbed browser panel
+
+/// A collection of browser tabs for the right-hand panel. Each tab owns its
+/// own `WKWebView`, so switching tabs keeps every page alive and scrolled
+/// where it was.
+final class BrowserTabsModel: ObservableObject {
+    @Published private(set) var tabs: [BrowserModel] = []
+    @Published var selectedID: UUID?
+
+    var active: BrowserModel? {
+        guard let selectedID else { return tabs.first }
+        return tabs.first { $0.id == selectedID } ?? tabs.first
+    }
+
+    @discardableResult
+    func newTab(url: String? = nil) -> BrowserModel {
+        // A tab opened by hand starts empty; one opened for a link loads it.
+        let model = BrowserModel(initialURL: url, autoLoad: false)
+        tabs.append(model)
+        selectedID = model.id
+        EventBus.shared.publish(APIEvent("browser.tab.created", ["tab": model.id.uuidString]))
+        return model
+    }
+
+    func closeTab(_ id: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs.remove(at: index)
+        if selectedID == id {
+            // Prefer the neighbour on the left, the way browsers do.
+            selectedID = tabs[max(0, index - 1)..<tabs.count].first?.id ?? tabs.last?.id
+        }
+        EventBus.shared.publish(APIEvent("browser.tab.closed", ["tab": id.uuidString]))
+    }
+
+    func title(for model: BrowserModel) -> String {
+        model.pageTitle.isEmpty ? "New tab" : model.pageTitle
+    }
+}
+
+/// The right-hand browser panel: a tab strip, a navigation row, and either a
+/// live page or the empty state.
+struct BrowserPanelView: View {
+    @ObservedObject var model: BrowserTabsModel
+    @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        VStack(spacing: 0) {
+            tabStrip(theme: theme)
+            Divider()
+            if let active = model.active {
+                BrowserNavigationRow(model: active)
+                Divider()
+                ZStack {
+                    WebViewRepresentable(webView: active.webView)
+                        .opacity(active.hasNavigated ? 1 : 0)
+                    if !active.hasNavigated {
+                        BrowserEmptyState(theme: theme)
+                    }
+                }
+            } else {
+                BrowserEmptyState(theme: theme)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(theme.background)
+    }
+
+    private func tabStrip(theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.tabs) { tab in
+                        BrowserTabChip(
+                            tab: tab,
+                            title: model.title(for: tab),
+                            isSelected: model.active?.id == tab.id,
+                            onSelect: { model.selectedID = tab.id },
+                            onClose: { model.closeTab(tab.id) }
+                        )
+                    }
+                }
+            }
+
+            Button {
+                model.newTab()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New tab")
+
+            Spacer(minLength: 0)
+
+            Button {
+                store.togglePanel(.browser)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close browser panel")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+}
+
+/// One tab chip: favicon-ish glyph, title, and a close button.
+private struct BrowserTabChip: View {
+    @ObservedObject var tab: BrowserModel
+    let title: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 6) {
+            Image(systemName: "globe")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.textSecondary)
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close tab")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .frame(maxWidth: 190)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? theme.surface : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Back / forward / reload, the address field, and page actions.
+private struct BrowserNavigationRow: View {
+    @ObservedObject var model: BrowserModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 8) {
+            Button(action: model.goBack) {
+                Image(systemName: "arrow.left")
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canGoBack)
+            .help("Back")
+
+            Button(action: model.goForward) {
+                Image(systemName: "arrow.right")
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canGoForward)
+            .help("Forward")
+
+            Button {
+                model.isLoading ? model.stop() : model.reload()
+            } label: {
+                Image(systemName: model.isLoading ? "xmark" : "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+            .help(model.isLoading ? "Stop loading" : "Reload")
+
+            TextField("Enter a URL", text: $model.urlText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .onSubmit { model.loadCurrentText() }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(theme.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(theme.surfaceBorder)
+                )
+
+            Button {
+                if let url = BrowserModel.url(fromUserInput: model.urlText) {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Image(systemName: "arrow.up.right")
+            }
+            .buttonStyle(.plain)
+            .disabled(model.urlText.isEmpty)
+            .help("Open in your default browser")
+
+            Menu {
+                Button("Reload", action: model.reload)
+                Button("Home", action: model.goHome)
+                Divider()
+                Button("Copy Address") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.urlText, forType: .string)
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .foregroundStyle(theme.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+}
+
+private struct BrowserEmptyState: View {
+    let theme: Theme
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "globe")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(theme.textSecondary)
+            Text("Start browsing")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(theme.textPrimary)
+            Text("Enter a URL to open a page")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textSecondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

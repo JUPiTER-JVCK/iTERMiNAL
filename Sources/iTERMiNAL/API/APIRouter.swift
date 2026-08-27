@@ -184,6 +184,21 @@ final class APIRouter {
                 ok(["pane": browser.id.uuidString])
             }
 
+        case "browser.newTab":
+            guard settings.apiAllowBrowserControl else { return fail(Self.browserDisabled) }
+            let tab = store.panelBrowserTabs.newTab()
+            store.rightPanel = .browser
+            if let url = request.string("url") {
+                tab.navigate(to: url) { result in
+                    switch result {
+                    case .success(let final): ok(["pane": tab.id.uuidString, "url": final])
+                    case .failure(let error): fail(error.localizedDescription)
+                    }
+                }
+            } else {
+                ok(["pane": tab.id.uuidString])
+            }
+
         case "browser.navigate":
             withBrowser(request, fail: fail) { browser in
                 guard let url = request.string("url") else { return fail("Missing \"url\".") }
@@ -294,7 +309,11 @@ final class APIRouter {
     private static let browserDisabled = "Browser control over the API is disabled in Settings → Security."
 
     /// Resolves the browser a command targets: an explicit pane id, else the
-    /// first browser pane in the current tab, else the side panel's browser.
+    /// first browser pane in the current tab, else the panel's active tab.
+    ///
+    /// The panel is tabbed, so "panel" means whichever tab is in front. With
+    /// no tab open there is nothing to drive, and saying so beats silently
+    /// creating one behind the user's back.
     private func withBrowser(
         _ request: APIRequest,
         fail: @escaping (String) -> Void,
@@ -306,7 +325,11 @@ final class APIRouter {
         }
         if let identifier = request.string("pane") {
             if identifier == "panel" {
-                body(store.panelBrowser)
+                guard let active = store.panelBrowserTabs.active else {
+                    fail(Self.noPanelTab)
+                    return
+                }
+                body(active)
                 return
             }
             guard let browser = store.browser(withIdentifier: identifier) else {
@@ -320,8 +343,16 @@ final class APIRouter {
             body(browser)
             return
         }
-        body(store.panelBrowser)
+        guard let active = store.panelBrowserTabs.active else {
+            fail(Self.noPanelTab)
+            return
+        }
+        body(active)
     }
+
+    private static let noPanelTab =
+        "No browser tab is open. Open the browser panel or call browser.newTab first."
+
 
     private static func deliver(
         _ result: Result<String, Error>,

@@ -59,7 +59,14 @@ struct SidebarView: View {
             Spacer(minLength: 0)
             SidebarStatusRow()
         }
-        .background(VisualEffectView(material: .sidebar).ignoresSafeArea())
+        .background {
+            // The reference app draws a flat sidebar; vibrancy is opt-in.
+            if settings.sidebarTranslucent {
+                VisualEffectView(material: .sidebar).ignoresSafeArea()
+            } else {
+                theme.sidebar.ignoresSafeArea()
+            }
+        }
         .alert("Rename Tab", isPresented: isRenamingTab, presenting: renamingTab) { tab in
             TextField("Name", text: $renameText)
             Button("Rename") {
@@ -90,11 +97,11 @@ struct SidebarView: View {
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Text("iTERMiNAL")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 19, weight: .semibold))
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                 }
                 .foregroundStyle(theme.textPrimary)
             }
@@ -127,8 +134,8 @@ struct SidebarView: View {
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
     }
 
     private func searchField(theme: Theme) -> some View {
@@ -334,7 +341,7 @@ private struct SidebarSectionHeader<Accessory: View>: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
@@ -383,9 +390,9 @@ struct SidebarActionRow: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .frame(width: 18)
                 Text(title)
                     .font(.system(size: 13))
@@ -403,7 +410,7 @@ struct SidebarActionRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isActive ? theme.surface : (hovering ? theme.surface.opacity(0.6) : Color.clear))
