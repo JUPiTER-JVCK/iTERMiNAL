@@ -21,7 +21,29 @@ enum SidePanel: String, CaseIterable, Identifiable {
 /// What the detail column is showing: the terminal surface, or one of the
 /// placeholder sections mirrored from the sidebar's action rows.
 enum DetailMode {
-    case terminal, automations, skills
+    case terminal, automations, skills, tasks
+}
+
+/// A running shell plus where it lives, for the task manager.
+struct RunningTask: Identifiable {
+    enum Origin {
+        case tab(WorkspaceTab, Workspace)
+        case dock
+        case composer
+
+        var label: String {
+            switch self {
+            case .tab(_, let workspace): return workspace.name
+            case .dock: return "Terminal dock"
+            case .composer: return "Composer"
+            }
+        }
+    }
+
+    let session: TerminalSession
+    let origin: Origin
+
+    var id: UUID { session.id }
 }
 
 /// Single source of truth for workspaces, tabs, pane layout, focus, and the
@@ -60,6 +82,14 @@ final class WorkspaceStore: ObservableObject {
     @Published var showCommandPalette = false
     /// Sessions the user closed, newest first, so they can be reopened.
     @Published private(set) var recentSessions: [RecentSession] = []
+
+    /// The composer's own shell. Commands typed into the composer run here
+    /// and nowhere else, so what you type can never land in the pane behind
+    /// it. Created on first use — most sessions never touch it.
+    @Published private(set) var composerSession: TerminalSession?
+    /// True once the composer's shell has been given something to run, which
+    /// is when its transcript is worth showing.
+    @Published private(set) var composerHasRun = false
 
     /// Terminals living in the bottom dock. Separate from tab panes — the
     /// dock is a scratch surface that survives switching tabs.
@@ -134,7 +164,8 @@ final class WorkspaceStore: ObservableObject {
         }
         // The dock's terminals take focus like any other, so they have to be
         // findable here or the composer would type into the wrong shell.
-        return dockSessions.first { $0.id == id }
+        if let session = dockSessions.first(where: { $0.id == id }) { return session }
+        return composerSession?.id == id ? composerSession : nil
     }
 
     /// True when the id belongs to the bottom dock rather than a tab pane.
@@ -383,6 +414,48 @@ final class WorkspaceStore: ObservableObject {
         EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
+    // MARK: Task manager
+
+    /// Every shell the app owns, wherever it lives — tab panes, the dock, and
+    /// the composer. Exited sessions are included: knowing something died is
+    /// the point of a task list.
+    func allTasks() -> [RunningTask] {
+        var tasks: [RunningTask] = []
+        for workspace in workspaces {
+            for tab in workspace.tabs {
+                for session in tab.root.allSessions() {
+                    tasks.append(RunningTask(session: session, origin: .tab(tab, workspace)))
+                }
+            }
+        }
+        tasks.append(contentsOf: dockSessions.map { RunningTask(session: $0, origin: .dock) })
+        if let composerSession {
+            tasks.append(RunningTask(session: composerSession, origin: .composer))
+        }
+        // Live shells first, then most recently active.
+        return tasks.sorted {
+            if $0.session.isRunning != $1.session.isRunning { return $0.session.isRunning }
+            return $0.session.lastActivityAt > $1.session.lastActivityAt
+        }
+    }
+
+    /// Brings a task's home surface to the front and focuses its shell.
+    func reveal(_ task: RunningTask) {
+        switch task.origin {
+        case .tab(let tab, _):
+            detailMode = .terminal
+            selectedTabID = tab.id
+            focusedSessionID = task.session.id
+        case .dock:
+            detailMode = .terminal
+            if !bottomDockOpen { toggleBottomDock() }
+            selectedDockSessionID = task.session.id
+        case .composer:
+            detailMode = .terminal
+            AppSettings.shared.composerCollapsed = false
+        }
+    }
+
     // MARK: Composer routing
 
     func sendToFocusedTerminal(_ text: String) {
@@ -392,6 +465,34 @@ final class WorkspaceStore: ObservableObject {
         }
         let tab = newTab()
         tab.primarySession?.send(text: text)
+    }
+
+    /// Runs a command in the composer's own shell, starting it if this is the
+    /// first one. Deliberately does not touch `focusedSession`.
+    func sendToComposer(_ text: String) {
+        let session = ensureComposerSession()
+        session.send(text: text)
+        if !composerHasRun { composerHasRun = true }
+    }
+
+    @discardableResult
+    func ensureComposerSession() -> TerminalSession {
+        if let composerSession { return composerSession }
+        let session = TerminalSession(
+            kind: .localShell,
+            initialDirectory: focusedSession?.currentDirectory
+        )
+        session.startIfNeeded()
+        composerSession = session
+        EventBus.shared.publish(APIEvent("composer.session.created", ["session": session.id.uuidString]))
+        return session
+    }
+
+    /// Ends the composer's shell and clears its transcript.
+    func resetComposerSession() {
+        composerSession?.terminate()
+        composerSession = nil
+        composerHasRun = false
     }
 
     /// Opens a link clicked in a terminal inside the app's browser — an
@@ -649,6 +750,7 @@ final class WorkspaceStore: ObservableObject {
             }
         }
         dockSessions.forEach { $0.terminate() }
+        composerSession?.terminate()
     }
 
     var stateFileURL: URL { stateURL }

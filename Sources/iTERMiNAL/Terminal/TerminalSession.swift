@@ -23,6 +23,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var isGPUAccelerated = false
     /// Drives the sidebar's relative timestamps.
     @Published private(set) var lastActivityAt = Date()
+    /// When the shell was launched, for the task manager's uptime column.
+    /// Nil until it actually starts, so a session that never launched reads
+    /// as "not started" rather than claiming zero seconds of uptime.
+    @Published private(set) var startedAt: Date?
 
     let engine: SwiftTermEngine
     private var hasStarted = false
@@ -93,6 +97,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     func startIfNeeded() {
         guard !hasStarted else { return }
         hasStarted = true
+        startedAt = Date()
         launch()
     }
 

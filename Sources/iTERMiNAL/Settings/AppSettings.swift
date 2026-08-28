@@ -64,6 +64,13 @@ final class AppSettings: ObservableObject {
     @Published var rightPanelWidth: Double { didSet { defaults.set(rightPanelWidth, forKey: "rightPanelWidth") } }
     @Published var bottomDockHeight: Double { didSet { defaults.set(bottomDockHeight, forKey: "bottomDockHeight") } }
 
+    /// Where the floating composer sits, relative to its default position,
+    /// and whether it is collapsed to a pill.
+    @Published var composerOffsetX: Double { didSet { defaults.set(composerOffsetX, forKey: "composerOffsetX") } }
+    @Published var composerOffsetY: Double { didSet { defaults.set(composerOffsetY, forKey: "composerOffsetY") } }
+    @Published var composerCollapsed: Bool { didSet { defaults.set(composerCollapsed, forKey: "composerCollapsed") } }
+    @Published var composerTranscriptHeight: Double { didSet { defaults.set(composerTranscriptHeight, forKey: "composerTranscriptHeight") } }
+
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
     @Published var projectsExpanded: Bool { didSet { defaults.set(projectsExpanded, forKey: "projectsExpanded") } }
@@ -111,6 +118,10 @@ final class AppSettings: ObservableObject {
         composerEnabled = defaults.object(forKey: "composerEnabled") as? Bool ?? true
         rightPanelWidth = defaults.object(forKey: "rightPanelWidth") as? Double ?? 420
         bottomDockHeight = defaults.object(forKey: "bottomDockHeight") as? Double ?? 260
+        composerOffsetX = defaults.object(forKey: "composerOffsetX") as? Double ?? 0
+        composerOffsetY = defaults.object(forKey: "composerOffsetY") as? Double ?? 0
+        composerCollapsed = defaults.bool(forKey: "composerCollapsed")
+        composerTranscriptHeight = defaults.object(forKey: "composerTranscriptHeight") as? Double ?? 200
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -229,6 +240,10 @@ final class AppSettings: ObservableObject {
         composerEnabled = true
         rightPanelWidth = 420
         bottomDockHeight = 260
+        composerOffsetX = 0
+        composerOffsetY = 0
+        composerCollapsed = false
+        composerTranscriptHeight = 200
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

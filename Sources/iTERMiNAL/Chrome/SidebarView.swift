@@ -15,6 +15,12 @@ struct SidebarView: View {
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
 
+    /// Live shells, shown as a badge so the count is visible without opening
+    /// the page.
+    private var runningTaskCount: Int {
+        store.allTasks().filter(\.session.isRunning).count
+    }
+
     /// How many tabs a project shows before "Show more".
     private let collapsedTabLimit = 6
 
@@ -39,6 +45,14 @@ struct SidebarView: View {
                         isActive: store.detailMode == .automations
                     ) {
                         store.detailMode = .automations
+                    }
+                    SidebarActionRow(
+                        icon: "list.bullet.rectangle",
+                        title: "Tasks",
+                        badge: runningTaskCount,
+                        isActive: store.detailMode == .tasks
+                    ) {
+                        store.detailMode = .tasks
                     }
                     SidebarActionRow(
                         icon: "book",

@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// Rounded composer matching the reference: a context chip row and the input
-/// stacked inside one card, with a "+" menu bottom-left and the send button
-/// bottom-right. Plain text goes to the focused terminal; "@ai …" is reserved
-/// for the assistant.
+/// A floating, self-contained terminal.
+///
+/// It owns its own shell rather than typing into whichever pane happens to
+/// have focus, so nothing entered here can land in the window behind it — the
+/// transcript below the input is that shell, not a copy of anything else.
+///
+/// It can be dragged anywhere in the content area and collapsed to a pill;
+/// both survive relaunch.
 struct ComposerBar: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -12,10 +16,58 @@ struct ComposerBar: View {
     @State private var text = ""
     @State private var assistantNotice = false
     @State private var showActions = false
+    /// Live drag delta, folded into the persisted offset when the drag ends.
+    @State private var dragDelta: CGSize = .zero
 
     var body: some View {
+        Group {
+            if settings.composerCollapsed {
+                collapsedPill
+            } else {
+                expandedCard
+            }
+        }
+        .offset(
+            x: settings.composerOffsetX + dragDelta.width,
+            y: settings.composerOffsetY + dragDelta.height
+        )
+        .animation(Motion.panel, value: settings.composerCollapsed)
+    }
+
+    // MARK: Collapsed
+
+    private var collapsedPill: some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 8) {
+        return Button {
+            settings.composerCollapsed = false
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Run anything")
+                    .font(.system(size: 12))
+                if store.composerHasRun {
+                    // A quiet reminder that a shell is still alive down here.
+                    Circle()
+                        .fill(settings.accentColor)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .foregroundStyle(theme.textSecondary)
+            .padding(.horizontal, 14)
+            .frame(height: 32)
+            .elevated(cornerRadius: 16, radius: 14, y: 4, fill: theme.floatingSurface)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show the composer")
+    }
+
+    // MARK: Expanded
+
+    private var expandedCard: some View {
+        let theme = Theme.current(for: colorScheme)
+        return VStack(spacing: 8) {
             if assistantNotice {
                 Text("The AI assistant isn't configured yet — @ai commands will be supported in a future release.")
                     .font(.system(size: 11))
@@ -24,7 +76,21 @@ struct ComposerBar: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                ContextChipRow()
+                header(theme: theme)
+
+                if store.composerHasRun, let session = store.composerSession {
+                    // The composer's own shell. Identity is tied to the
+                    // session so a reset swaps the view rather than reusing
+                    // a container still hosting the old terminal.
+                    TerminalHostView(session: session)
+                        .id(session.id)
+                        .frame(height: settings.composerTranscriptHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(theme.surfaceBorder)
+                        )
+                }
 
                 TextField("Run anything", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -75,7 +141,66 @@ struct ComposerBar: View {
                 }
             }
             .padding(14)
-            .elevated(cornerRadius: 22, radius: 18, y: 6)
+            // A distinctly lighter surface and a deeper shadow, so this reads
+            // as floating above the terminal rather than painted onto it.
+            .elevated(cornerRadius: 22, radius: 22, y: 8, fill: theme.floatingSurface)
+        }
+    }
+
+    /// Chips on the left, window controls on the right. The whole row is the
+    /// drag handle — grabbing the input would fight text selection.
+    private func header(theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            ContextChipRow()
+
+            Spacer(minLength: 8)
+
+            if store.composerHasRun {
+                Button {
+                    store.resetComposerSession()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Restart this shell and clear the transcript")
+            }
+
+            Button {
+                settings.composerCollapsed = true
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Minimise the composer")
+        }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture()
+                .onChanged { dragDelta = $0.translation }
+                .onEnded { value in
+                    // Clamped so it can never be dragged somewhere the
+                    // double-click-to-reset handle can't be reached.
+                    settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
+                        .clamped(to: -700...700)
+                    settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
+                        .clamped(to: -600...200)
+                    dragDelta = .zero
+                }
+        )
+        // Double-click the handle to put it back where it started.
+        .onTapGesture(count: 2) {
+            withAnimation(Motion.panel) {
+                settings.composerOffsetX = 0
+                settings.composerOffsetY = 0
+            }
         }
     }
 
@@ -94,7 +219,10 @@ struct ComposerBar: View {
             return
         }
         assistantNotice = false
-        store.sendToFocusedTerminal(command + "\n")
+        // Its own shell — never the pane behind it.
+        withAnimation(Motion.panel) {
+            store.sendToComposer(command + "\n")
+        }
         text = ""
     }
 }
