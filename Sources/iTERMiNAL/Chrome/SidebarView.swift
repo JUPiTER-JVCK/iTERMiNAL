@@ -544,35 +544,53 @@ private struct SidebarTabRow: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        // Deliberately not a Button wrapping everything: the pin and close
-        // controls live in this row, and nesting buttons makes which one
-        // receives the click a matter of luck.
-        HStack(spacing: 6) {
-            if let session = tab.primarySession {
-                SessionRowContent(
-                    tab: tab,
-                    session: session,
-                    isSelected: isSelected,
-                    isHovering: hovering
+        // A real Button for the row — it keeps keyboard activation and the
+        // VoiceOver button role — with the pin and close controls overlaid
+        // as siblings rather than nested inside its label.
+        ZStack(alignment: .trailing) {
+            Button(action: onSelect) {
+                HStack(spacing: 6) {
+                    if let session = tab.primarySession {
+                        SessionRowContent(
+                            tab: tab,
+                            session: session,
+                            isSelected: isSelected,
+                            isHovering: hovering
+                        )
+                    } else {
+                        Text(tab.displayName)
+                            .font(.system(size: 13))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(.leading, indented ? 22 : 9)
+                .padding(.trailing, 9)
+                .frame(height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
                 )
-            } else {
-                Text(tab.displayName)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if hovering {
+                HStack(spacing: 2) {
+                    RowIconButton(
+                        icon: tab.isPinned ? "pin.slash" : "pin",
+                        help: tab.isPinned ? "Unpin" : "Pin",
+                        theme: theme
+                    ) {
+                        store.togglePin(tab)
+                    }
+                    RowIconButton(icon: "xmark", help: "Close tab", theme: theme) {
+                        store.closeTab(tab)
+                    }
+                }
+                .padding(.trailing, 7)
             }
         }
-        .padding(.leading, indented ? 22 : 9)
-        .padding(.trailing, 9)
-        .frame(height: 30)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
-                // The tap target is the background, so the trailing buttons
-                // drawn above it keep their own hits.
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onSelect)
-        )
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
@@ -623,26 +641,20 @@ private struct SessionRowContent: View {
 
             Spacer(minLength: 6)
 
-            if isHovering {
-                RowIconButton(
-                    icon: tab.isPinned ? "pin.slash" : "pin",
-                    help: tab.isPinned ? "Unpin" : "Pin",
-                    theme: theme
-                ) {
-                    store.togglePin(tab)
+            // Hovering hands this space to the pin and close buttons, which
+            // the parent overlays as siblings — they cannot live here without
+            // nesting a Button inside the row's own Button.
+            if !isHovering {
+                if let note = session.statusNote {
+                    Text(note)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(RelativeTime.short(since: session.lastActivityAt))
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.textSecondary)
+                        .monospacedDigit()
                 }
-                RowIconButton(icon: "xmark", help: "Close tab", theme: theme) {
-                    store.closeTab(tab)
-                }
-            } else if let note = session.statusNote {
-                Text(note)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(RelativeTime.short(since: session.lastActivityAt))
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.textSecondary)
-                    .monospacedDigit()
             }
         }
         .help(tooltip)

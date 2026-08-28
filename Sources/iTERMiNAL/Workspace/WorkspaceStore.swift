@@ -577,6 +577,14 @@ final class WorkspaceStore: ObservableObject {
         if let width = snapshot.rightPanelWidth { settings.rightPanelWidth = width }
         if let height = snapshot.bottomDockHeight { settings.bottomDockHeight = height }
 
+        // Importing a snapshot runs terminateAllSessions() first, which kills
+        // the dock's shells but leaves them in the array. Clear it here or the
+        // relaunched sessions stack on top of dead ones and the selection
+        // lands on a terminated terminal.
+        dockSessions.forEach { $0.terminate() }
+        dockSessions.removeAll()
+        selectedDockSessionID = nil
+
         for directory in snapshot.dockDirectories {
             _ = newDockSession(directory: directory)
         }

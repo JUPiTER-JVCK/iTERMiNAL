@@ -32,43 +32,50 @@ struct DetailView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        // One reader over the whole column: the trailing handle needs the
+        // width and the dock handle needs the height. A second reader nested
+        // just for the dock would report zero before first layout.
+        GeometryReader { outer in
+            detailColumn(in: outer.size)
+        }
+    }
+
+    private func detailColumn(in size: CGSize) -> some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             // The strip spans the whole detail column rather than living
             // inside the content VStack: nested there, it narrowed whenever a
             // panel opened and the right-aligned toggles slid with it.
             DetailTopStrip()
             FadedDivider()
 
-            // GeometryReader so the trailing panel can never take so much
-            // width that the terminal is squeezed to a sliver — its width is
-            // clamped against what is actually available.
-            GeometryReader { proxy in
-                HStack(spacing: 0) {
-                    if !store.rightPanelExpanded {
-                        mainSurface
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-
-                    if store.rightRegionOpen {
-                        if !store.rightPanelExpanded {
-                            PanelResizeHandle(
-                                axis: .horizontal,
-                                size: $settings.rightPanelWidth,
-                                range: 280...1200,
-                                inverted: true,
-                                resetTo: 420,
-                                available: proxy.size.width
-                            )
-                        }
-                        RightPanelView()
-                            .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: proxy.size.width))
-                            .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+            // The trailing panel can never take so much width that the
+            // terminal is squeezed to a sliver — clamped against what is
+            // actually available.
+            HStack(spacing: 0) {
+                if !store.rightPanelExpanded {
+                    mainSurface
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if store.rightRegionOpen {
+                    if !store.rightPanelExpanded {
+                        PanelResizeHandle(
+                            axis: .horizontal,
+                            size: $settings.rightPanelWidth,
+                            range: 280...1200,
+                            inverted: true,
+                            resetTo: 420,
+                            available: size.width
+                        )
+                    }
+                    RightPanelView()
+                        .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: size.width))
+                        .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if store.bottomDockOpen {
                 PanelResizeHandle(
@@ -76,7 +83,8 @@ struct DetailView: View {
                     size: $settings.bottomDockHeight,
                     range: 120...620,
                     inverted: true,
-                    resetTo: 260
+                    resetTo: 260,
+                    available: size.height
                 )
                 TerminalDockView()
                     .frame(height: settings.bottomDockHeight)
