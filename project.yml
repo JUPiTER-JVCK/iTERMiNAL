@@ -24,9 +24,14 @@ targets:
       - package: SwiftTerm
       # The CLI ships inside the app bundle; Settings → Security installs it
       # into ~/.local/bin on request.
+      #
+      # embed must stay true: XcodeGen only honours `copy` for embedded
+      # dependencies ("This only applies when embed is true"), so with
+      # embed: false the tool was built and made a dependency but never
+      # copied into Resources — and Install iterminalctl… could not find it.
       - target: iterminalctl
         link: false
-        embed: false
+        embed: true
         copy:
           destination: resources
     info:
