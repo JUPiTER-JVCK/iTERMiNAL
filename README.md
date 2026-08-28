@@ -27,8 +27,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   per tab, snapshotted to Application Support and restored on launch. A tab
   with one pane renders flush; focus rings appear only once it is split.
 - **Scriptable browser** — an embedded WKWebView usable as a tabbed right
-  panel or a split pane, drivable from the API (navigate, click, fill, read
-  text, wait for a selector, screenshot) for testing a web UI from an agent.
+  panel or a split pane, with page zoom, print and a scoped "clear browsing
+  data", and drivable from the API (navigate, click, fill, read text, wait for
+  a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop.

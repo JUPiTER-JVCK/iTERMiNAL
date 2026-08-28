@@ -84,6 +84,62 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
 
+    // MARK: Zoom
+
+    /// Steps the page zoom. `pageZoom` is the whole-page scale, which is what
+    /// a browser's zoom means — distinct from `magnification`, which is the
+    /// pinch gesture and resets on navigation.
+    private static let zoomSteps: [Double] = [0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+
+    var zoomPercent: Int { Int((webView.pageZoom * 100).rounded()) }
+    var canZoomIn: Bool { webView.pageZoom < Self.zoomSteps.last! - 0.001 }
+    var canZoomOut: Bool { webView.pageZoom > Self.zoomSteps.first! + 0.001 }
+
+    func zoomIn() {
+        let current = webView.pageZoom
+        if let next = Self.zoomSteps.first(where: { $0 > current + 0.001 }) {
+            webView.pageZoom = next
+            objectWillChange.send()
+        }
+    }
+
+    func zoomOut() {
+        let current = webView.pageZoom
+        if let previous = Self.zoomSteps.last(where: { $0 < current - 0.001 }) {
+            webView.pageZoom = previous
+            objectWillChange.send()
+        }
+    }
+
+    func resetZoom() {
+        webView.pageZoom = 1.0
+        objectWillChange.send()
+    }
+
+    // MARK: Page actions
+
+    func printPage() {
+        let info = NSPrintInfo.shared
+        let operation = webView.printOperation(with: info)
+        operation.view?.frame = webView.bounds
+        if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+    }
+
+    /// Clears cookies, caches and local storage for every site. Scoped to
+    /// this app's data store, so it touches nothing Safari owns.
+    func clearBrowsingData(completion: @escaping () -> Void) {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(
+            ofTypes: types,
+            modifiedSince: Date(timeIntervalSince1970: 0),
+            completionHandler: completion
+        )
+    }
+
     /// Cancels an in-flight load — what the toolbar's stop affordance needs.
     func stop() {
         webView.stopLoading()
@@ -511,6 +567,7 @@ private struct BrowserTabChip: View {
 private struct BrowserNavigationRow: View {
     @ObservedObject var model: BrowserModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var confirmClearData = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -565,11 +622,34 @@ private struct BrowserNavigationRow: View {
             Menu {
                 Button("Reload", action: model.reload)
                 Button("Home", action: model.goHome)
+
                 Divider()
+
+                Button("Zoom In") { model.zoomIn() }
+                    .disabled(!model.canZoomIn)
+                Button("Zoom Out") { model.zoomOut() }
+                    .disabled(!model.canZoomOut)
+                Button("Actual Size (\(model.zoomPercent)%)") { model.resetZoom() }
+                    .disabled(model.zoomPercent == 100)
+
+                Divider()
+
+                Button("Print…") { model.printPage() }
+                Button("Open in Default Browser") {
+                    if let url = BrowserModel.url(fromUserInput: model.urlText) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .disabled(model.urlText.isEmpty)
                 Button("Copy Address") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.urlText, forType: .string)
                 }
+                .disabled(model.urlText.isEmpty)
+
+                Divider()
+
+                Button("Clear Browsing Data…") { confirmClearData = true }
             } label: {
                 Image(systemName: "ellipsis")
             }
@@ -580,6 +660,19 @@ private struct BrowserNavigationRow: View {
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        // Clearing is irreversible and hits every site, so it asks first.
+        .confirmationDialog(
+            "Clear browsing data?",
+            isPresented: $confirmClearData,
+            titleVisibility: .visible
+        ) {
+            Button("Clear", role: .destructive) {
+                model.clearBrowsingData {}
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes cookies, caches and local storage for every site in this app's browser. Safari and other browsers are untouched.")
+        }
     }
 }
 
