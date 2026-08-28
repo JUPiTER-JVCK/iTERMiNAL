@@ -205,6 +205,9 @@ non-interactively and therefore **requires key-based authentication**.
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
 | Browser / Files panel | ⌥⌘B / ⌥⌘F |
+| Focus composer | ⇧⌘R |
+| Minimise / expand composer | ⇧⌘M |
+| Task manager | ⌥⌘T |
 | Settings | ⌘, |
 
 ## Architecture

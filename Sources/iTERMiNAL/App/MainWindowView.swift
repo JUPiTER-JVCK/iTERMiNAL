@@ -132,18 +132,37 @@ struct DetailView: View {
                 emptyCaption: "Saved snippets are coming soon."
             )
         case .terminal:
+            terminalSurface
+        }
+    }
+
+    /// The terminal — or the landing screen — with the composer floating over
+    /// it.
+    ///
+    /// An overlay rather than a sibling in the stack. As a sibling the
+    /// composer reserved layout height even after it was given an offset, so
+    /// dragging the card upward left an empty band along the bottom of the
+    /// window: the opposite of floating. The reader hands the card the size of
+    /// the surface it has to stay inside, which is what keeps a drag from
+    /// parking it somewhere unreachable.
+    private var terminalSurface: some View {
+        Group {
             if let tab = store.selectedTab {
                 TabContentView(tab: tab)
             } else {
                 LandingView()
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
             if settings.composerEnabled {
-                ComposerBar()
-                    .frame(maxWidth: 820)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
+                GeometryReader { proxy in
+                    ComposerBar(bounds: proxy.size)
+                        .frame(maxWidth: 820)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+                }
             }
         }
     }
@@ -524,6 +543,7 @@ private struct TaskManagerView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// Uptime has to be recomputed to tick; nothing else here needs a timer.
     @State private var now = Date()
+    @State private var filter = ""
 
     /// Static so it isn't rebuilt — and restarted — every time this struct is
     /// initialised, which SwiftUI does on every render.
@@ -531,14 +551,25 @@ private struct TaskManagerView: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        let tasks = store.allTasks()
+        let all = store.allTasks()
+        let tasks = matching(all)
 
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tasks")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(theme.textPrimary)
-                Text(summary(for: tasks))
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Tasks")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+
+                    Spacer(minLength: 12)
+
+                    // Only worth the width once there is enough here to lose
+                    // something in.
+                    if all.count > 3 {
+                        TaskFilterField(text: $filter, theme: theme)
+                    }
+                }
+                Text(summary(for: all))
                     .font(.system(size: 13))
                     .foregroundStyle(theme.textSecondary)
             }
@@ -549,13 +580,15 @@ private struct TaskManagerView: View {
             if tasks.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
-                    Image(systemName: "list.bullet.rectangle")
+                    Image(systemName: all.isEmpty ? "list.bullet.rectangle" : "magnifyingglass")
                         .font(.system(size: 26, weight: .light))
                         .foregroundStyle(theme.textSecondary)
-                    Text("Nothing running")
+                    Text(all.isEmpty ? "Nothing running" : "No matches")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(theme.textPrimary)
-                    Text("Shells you open appear here while they live.")
+                    Text(all.isEmpty
+                         ? "Shells you open appear here while they live."
+                         : "No task matches \u{201C}\(filter)\u{201D}.")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.textSecondary)
                     Spacer()
@@ -577,6 +610,21 @@ private struct TaskManagerView: View {
         .onReceive(Self.clock) { now = $0 }
     }
 
+    /// Filters on the things visible in a row — title, where it lives, and
+    /// its directory — so what you type matches what you can see.
+    private func matching(_ tasks: [RunningTask]) -> [RunningTask] {
+        let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return tasks }
+        return tasks.filter { task in
+            let haystack = [
+                task.session.displayTitle,
+                task.origin.label,
+                task.session.abbreviatedDirectory
+            ].joined(separator: " ").lowercased()
+            return haystack.contains(needle)
+        }
+    }
+
     private func summary(for tasks: [RunningTask]) -> String {
         let live = tasks.filter(\.session.isRunning).count
         let stopped = tasks.count - live
@@ -584,6 +632,48 @@ private struct TaskManagerView: View {
         var parts = ["\(live) running"]
         if stopped > 0 { parts.append("\(stopped) stopped") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Search box for the task list. Its own view so the list isn't rebuilt on
+/// every keystroke of something that only narrows it.
+private struct TaskFilterField: View {
+    @Binding var text: String
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textSecondary)
+
+            TextField("Filter", text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .frame(width: 150)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the filter")
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.surfaceBorder)
+        )
     }
 }
 
@@ -632,19 +722,26 @@ private struct TaskRow: View {
                 .monospacedDigit()
                 .foregroundStyle(theme.textSecondary)
 
-            if hovering {
+            // Faded rather than absent when not hovering: removing them
+            // entirely takes them out of the keyboard and VoiceOver order,
+            // and makes the row's layout jump under the pointer.
+            HStack(spacing: 10) {
                 Button("Go to") { store.reveal(task) }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(theme.textPrimary)
+                    .help("Show this session")
 
                 if session.isRunning {
                     Button("Stop") { session.terminate() }
                         .buttonStyle(.plain)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color(p3: 0xE0605C))
+                        .help("End this session")
                 }
             }
+            .opacity(hovering ? 1 : 0.35)
+            .animation(Motion.disclosure, value: hovering)
         }
         .padding(.horizontal, 12)
         .frame(height: 46)
@@ -654,6 +751,18 @@ private struct TaskRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onTapGesture(count: 2) { store.reveal(task) }
+        .contextMenu {
+            Button("Go to") { store.reveal(task) }
+            Button("Copy Working Directory") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(session.currentDirectory, forType: .string)
+            }
+            if session.isRunning {
+                Divider()
+                Button("Stop") { session.terminate() }
+            }
+        }
     }
 
     /// Uptime while alive; why it ended once it isn't.
