@@ -34,6 +34,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      # The app promises a bundled iterminalctl (Settings → Security installs
+      # it). That went missing for weeks because nothing checked, so check.
+      - name: Verify bundle contents
+        run: |
+          APP=build/Build/Products/Debug/iTERMiNAL.app
+          fail=0
+          for path in \
+            "$APP/Contents/MacOS/iTERMiNAL" \
+            "$APP/Contents/Resources/iterminalctl"
+          do
+            if [ ! -e "$path" ]; then
+              echo "::error::missing from the app bundle: $path"
+              fail=1
+            fi
+          done
+          # Universal binary: both slices, or Intel Macs get nothing.
+          for arch in x86_64 arm64; do
+            if ! lipo -archs "$APP/Contents/MacOS/iTERMiNAL" | grep -qw "$arch"; then
+              echo "::error::main binary is missing the $arch slice"
+              fail=1
+            fi
+          done
+          exit $fail
+
       # ditto preserves the bundle structure; a plain zip would mangle it.
       - name: Package app
         run: |
