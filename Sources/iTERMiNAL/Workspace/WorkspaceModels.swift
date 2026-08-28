@@ -145,6 +145,23 @@ struct AppStateSnapshot: Codable {
     var selectedTabID: UUID?
     /// Optional so older state files still decode.
     var recents: [RecentSession]?
+    /// Also optional, for the same reason.
+    var panels: PanelStateSnapshot?
+}
+
+/// The surrounding layout — which panels were up and what the dock held.
+///
+/// Dock terminals are recorded by working directory rather than by process:
+/// a shell cannot outlive a quit, so restoring means starting fresh ones
+/// where the old ones were.
+struct PanelStateSnapshot: Codable {
+    var openPanels: [String]
+    var frontPanel: String?
+    var rightRegionOpen: Bool
+    var bottomDockOpen: Bool
+    var dockDirectories: [String]
+    var rightPanelWidth: Double?
+    var bottomDockHeight: Double?
 }
 
 /// A session the user closed, kept so it can be reopened from the sidebar.

@@ -32,48 +32,59 @@ struct DetailView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        // One reader over the whole column: the trailing handle needs the
+        // width and the dock handle needs the height. A second reader nested
+        // just for the dock would report zero before first layout.
+        GeometryReader { outer in
+            detailColumn(in: outer.size)
+        }
+    }
+
+    private func detailColumn(in size: CGSize) -> some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             // The strip spans the whole detail column rather than living
             // inside the content VStack: nested there, it narrowed whenever a
             // panel opened and the right-aligned toggles slid with it.
             DetailTopStrip()
             FadedDivider()
 
-            // GeometryReader so the trailing panel can never take so much
-            // width that the terminal is squeezed to a sliver — its width is
-            // clamped against what is actually available.
-            GeometryReader { proxy in
-                HStack(spacing: 0) {
-                    if !store.rightPanelExpanded {
-                        mainSurface
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-
-                    if store.rightRegionOpen {
-                        if !store.rightPanelExpanded {
-                            PanelResizeHandle(
-                                axis: .horizontal,
-                                size: $settings.rightPanelWidth,
-                                range: 280...1200,
-                                inverted: true
-                            )
-                        }
-                        RightPanelView()
-                            .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: proxy.size.width))
-                            .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+            // The trailing panel can never take so much width that the
+            // terminal is squeezed to a sliver — clamped against what is
+            // actually available.
+            HStack(spacing: 0) {
+                if !store.rightPanelExpanded {
+                    mainSurface
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if store.rightRegionOpen {
+                    if !store.rightPanelExpanded {
+                        PanelResizeHandle(
+                            axis: .horizontal,
+                            size: $settings.rightPanelWidth,
+                            range: 280...1200,
+                            inverted: true,
+                            resetTo: 420,
+                            available: size.width
+                        )
+                    }
+                    RightPanelView()
+                        .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: size.width))
+                        .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if store.bottomDockOpen {
                 PanelResizeHandle(
                     axis: .vertical,
                     size: $settings.bottomDockHeight,
                     range: 120...620,
-                    inverted: true
+                    inverted: true,
+                    resetTo: 260,
+                    available: size.height
                 )
                 TerminalDockView()
                     .frame(height: settings.bottomDockHeight)
@@ -227,9 +238,24 @@ private struct PanelResizeHandle: View {
     @Binding var size: Double
     let range: ClosedRange<Double>
     var inverted = false
+    /// Default the handle returns to on a double-click.
+    var resetTo: Double
+    /// Total extent of the container, used to work out the snap points.
+    var available: Double = 0
 
     @State private var hovering = false
     @State private var baseline: Double?
+
+    /// A third, half and two thirds of the container — the proportions worth
+    /// landing on exactly. Within 12pt the drag settles onto one.
+    private func snapped(_ value: Double) -> Double {
+        guard available > 0 else { return value }
+        let targets = [available / 3, available / 2, available * 2 / 3]
+        for target in targets where abs(value - target) < 12 {
+            return target
+        }
+        return value
+    }
 
     var body: some View {
         Rectangle()
@@ -273,10 +299,14 @@ private struct PanelResizeHandle: View {
                                         ? value.translation.width
                                         : value.translation.height
                                 )
-                                size = (start + (inverted ? -moved : moved)).clamped(to: range)
+                                let raw = start + (inverted ? -moved : moved)
+                                size = snapped(raw).clamped(to: range)
                             }
                             .onEnded { _ in baseline = nil }
                     )
+                    .onTapGesture(count: 2) {
+                        withAnimation(Motion.panel) { size = resetTo }
+                    }
             }
     }
 }
@@ -471,7 +501,12 @@ private struct SuggestionCard: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-            .elevated(cornerRadius: 12, radius: hovering ? 14 : 8, y: hovering ? 5 : 2)
+            .elevated(
+                cornerRadius: 12,
+                radius: hovering ? 14 : 8,
+                y: hovering ? 5 : 2,
+                fill: hovering ? theme.surfaceHover : theme.surface
+            )
             .animation(Motion.disclosure, value: hovering)
             .contentShape(Rectangle())
         }
@@ -538,7 +573,7 @@ struct RightPanelView: View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
             header(theme: theme)
-            Divider()
+            FadedDivider()
             content
         }
         .background(theme.background)
@@ -762,7 +797,12 @@ struct TerminalDockView: View {
             .padding(.vertical, 6)
 
             if let session = store.selectedDockSession {
+                // Identity must follow the session. Without it SwiftUI sees
+                // the same view in the same slot when you switch dock tabs,
+                // calls updateNSView, and the container keeps hosting the
+                // previous terminal — the visible shell never changes.
                 TerminalHostView(session: session)
+                    .id(session.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Spacer()

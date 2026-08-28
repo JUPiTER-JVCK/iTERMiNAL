@@ -352,7 +352,7 @@ struct BrowserPaneView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
 
-            Divider()
+            FadedDivider()
 
             WebViewRepresentable(webView: model.webView)
         }
@@ -409,10 +409,10 @@ struct BrowserPanelView: View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
             tabStrip(theme: theme)
-            Divider()
+            FadedDivider()
             if let active = model.active {
                 BrowserNavigationRow(model: active)
-                Divider()
+                FadedDivider()
                 ZStack {
                     WebViewRepresentable(webView: active.webView)
                         .opacity(active.hasNavigated ? 1 : 0)

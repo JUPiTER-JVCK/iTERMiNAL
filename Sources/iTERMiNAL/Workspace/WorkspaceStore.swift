@@ -436,6 +436,7 @@ final class WorkspaceStore: ObservableObject {
         } else {
             openPanel(panel)
         }
+        scheduleSave()
     }
 
     func openPanel(_ panel: SidePanel) {
@@ -453,6 +454,7 @@ final class WorkspaceStore: ObservableObject {
            let directory = focusedSession?.currentDirectory {
             panelFiles.navigate(to: directory)
         }
+        scheduleSave()
     }
 
     /// Closing a panel from its own tab leaves the region up, so emptying it
@@ -465,6 +467,7 @@ final class WorkspaceStore: ObservableObject {
             // Nothing left to expand over the main surface.
             if openPanels.isEmpty { rightPanelExpanded = false }
         }
+        scheduleSave()
     }
 
     /// Puts the whole region away, keeping its panels for next time.
@@ -473,6 +476,7 @@ final class WorkspaceStore: ObservableObject {
             rightRegionOpen = false
             rightPanelExpanded = false
         }
+        scheduleSave()
     }
 
     func toggleRightPanelExpanded() {
@@ -488,6 +492,7 @@ final class WorkspaceStore: ObservableObject {
         if bottomDockOpen, dockSessions.isEmpty {
             _ = newDockSession()
         }
+        scheduleSave()
     }
 
     func closeBottomDock() {
@@ -504,6 +509,7 @@ final class WorkspaceStore: ObservableObject {
         dockSessions.append(session)
         selectedDockSessionID = session.id
         EventBus.shared.publish(APIEvent("dock.session.created", ["session": session.id.uuidString]))
+        scheduleSave()
         return session
     }
 
@@ -519,6 +525,7 @@ final class WorkspaceStore: ObservableObject {
         if dockSessions.isEmpty {
             withAnimation(Motion.panel) { bottomDockOpen = false }
         }
+        scheduleSave()
     }
 
     // MARK: Persistence
@@ -536,8 +543,53 @@ final class WorkspaceStore: ObservableObject {
         AppStateSnapshot(
             workspaces: workspaces.map { $0.snapshot() },
             selectedTabID: selectedTabID,
-            recents: recentSessions
+            recents: recentSessions,
+            panels: panelSnapshot()
         )
+    }
+
+    private func panelSnapshot() -> PanelStateSnapshot {
+        let settings = AppSettings.shared
+        return PanelStateSnapshot(
+            openPanels: orderedOpenPanels.map(\.rawValue),
+            frontPanel: frontPanel?.rawValue,
+            rightRegionOpen: rightRegionOpen,
+            bottomDockOpen: bottomDockOpen,
+            dockDirectories: dockSessions.map(\.currentDirectory),
+            rightPanelWidth: settings.rightPanelWidth,
+            bottomDockHeight: settings.bottomDockHeight
+        )
+    }
+
+    /// Puts the surrounding layout back. Dock terminals are relaunched in the
+    /// directories the old ones were sitting in — the processes themselves
+    /// died with the app.
+    private func applyPanelSnapshot(_ snapshot: PanelStateSnapshot?) {
+        guard let snapshot else { return }
+        openPanels = Set(snapshot.openPanels.compactMap(SidePanel.init(rawValue:)))
+        frontPanel = snapshot.frontPanel.flatMap(SidePanel.init(rawValue:))
+        rightRegionOpen = snapshot.rightRegionOpen && !openPanels.isEmpty
+        if openPanels.contains(.browser), panelBrowserTabs.tabs.isEmpty {
+            panelBrowserTabs.newTab()
+        }
+
+        let settings = AppSettings.shared
+        if let width = snapshot.rightPanelWidth { settings.rightPanelWidth = width }
+        if let height = snapshot.bottomDockHeight { settings.bottomDockHeight = height }
+
+        // Importing a snapshot runs terminateAllSessions() first, which kills
+        // the dock's shells but leaves them in the array. Clear it here or the
+        // relaunched sessions stack on top of dead ones and the selection
+        // lands on a terminated terminal.
+        dockSessions.forEach { $0.terminate() }
+        dockSessions.removeAll()
+        selectedDockSessionID = nil
+
+        for directory in snapshot.dockDirectories {
+            _ = newDockSession(directory: directory)
+        }
+        bottomDockOpen = snapshot.bottomDockOpen && !dockSessions.isEmpty
+        selectedDockSessionID = dockSessions.first?.id
     }
 
     /// Replaces every workspace with the contents of a snapshot, shutting down
@@ -550,6 +602,7 @@ final class WorkspaceStore: ObservableObject {
             bootstrap()
             return
         }
+        applyPanelSnapshot(snapshot.panels)
         let allTabs = workspaces.flatMap(\.tabs)
         selectedTabID = snapshot.selectedTabID.flatMap { id in
             allTabs.first { $0.id == id }?.id
@@ -585,6 +638,7 @@ final class WorkspaceStore: ObservableObject {
         }
         selectedTabID = restoredSelection ?? allTabs.first?.id
         focusedSessionID = selectedTab?.root.firstTerminal()?.id
+        applyPanelSnapshot(snapshot.panels)
         return true
     }
 
