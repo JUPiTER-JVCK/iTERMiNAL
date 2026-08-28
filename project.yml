@@ -44,6 +44,9 @@ targets:
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "MIT License — iTERMiNAL contributors"
+        # macOS resolves an asset-catalog icon through CFBundleIconName; an
+        # AppIcon set alone leaves the Dock showing the generic placeholder.
+        CFBundleIconName: AppIcon
         NSPrincipalClass: NSApplication
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
@@ -55,6 +58,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jupiterjvck.iterminal
+        # XcodeGen doesn't set this the way Xcode's own app template does, so
+        # without it actool compiles the icon set and nothing ever uses it.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: 0.2.0
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: "5.0"

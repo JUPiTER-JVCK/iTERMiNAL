@@ -90,6 +90,15 @@ final class WorkspaceStore: ObservableObject {
     /// True once the composer's shell has been given something to run, which
     /// is when its transcript is worth showing.
     @Published private(set) var composerHasRun = false
+    /// Commands sent from the composer, oldest first, for arrow-key recall.
+    /// In memory only and never written to the state file: composer input is
+    /// as likely to contain a token as a `ls`, and none of it is worth
+    /// keeping on disk.
+    @Published private(set) var composerHistory: [String] = []
+    /// Bumped when something — a menu command, a revealed task — asks the
+    /// composer to take keyboard focus. The view watches the number rather
+    /// than a Bool, so two requests in a row both land.
+    @Published private(set) var composerFocusRequest = 0
 
     /// Terminals living in the bottom dock. Separate from tab panes — the
     /// dock is a scratch surface that survives switching tabs.
@@ -451,9 +460,18 @@ final class WorkspaceStore: ObservableObject {
             if !bottomDockOpen { toggleBottomDock() }
             selectedDockSessionID = task.session.id
         case .composer:
-            detailMode = .terminal
-            AppSettings.shared.composerCollapsed = false
+            focusComposer()
         }
+    }
+
+    /// Brings the composer forward and puts the caret in it — un-hiding and
+    /// un-collapsing first, since either would otherwise make this silently
+    /// do nothing.
+    func focusComposer() {
+        detailMode = .terminal
+        AppSettings.shared.composerEnabled = true
+        AppSettings.shared.composerCollapsed = false
+        composerFocusRequest += 1
     }
 
     // MARK: Composer routing
@@ -473,6 +491,18 @@ final class WorkspaceStore: ObservableObject {
         let session = ensureComposerSession()
         session.send(text: text)
         if !composerHasRun { composerHasRun = true }
+        recordComposerCommand(text)
+    }
+
+    /// Keeps the recall list free of adjacent duplicates and bounded, so a
+    /// command run in a loop doesn't crowd out everything before it.
+    private func recordComposerCommand(_ text: String) {
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, composerHistory.last != command else { return }
+        composerHistory.append(command)
+        if composerHistory.count > 100 {
+            composerHistory.removeFirst(composerHistory.count - 100)
+        }
     }
 
     @discardableResult

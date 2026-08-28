@@ -840,7 +840,11 @@ private struct ShortcutsPopover: View {
         ("Split right / down", "⌘D / ⇧⌘D"),
         ("Split with browser", "⇧⌘B"),
         ("Close pane / tab", "⇧⌘W / ⌥⌘W"),
+        ("Terminal dock", "⌘J"),
         ("Browser / Files panel", "⌥⌘B / ⌥⌘F"),
+        ("Focus composer", "⇧⌘R"),
+        ("Minimise composer", "⇧⌘M"),
+        ("Task manager", "⌥⌘T"),
         ("Settings", "⌘,"),
     ]
 

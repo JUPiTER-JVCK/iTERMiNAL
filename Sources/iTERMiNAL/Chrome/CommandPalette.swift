@@ -150,6 +150,15 @@ struct CommandPaletteView: View {
             PaletteAction(id: "panel.files", title: "Toggle Files Panel", systemImage: "sidebar.right", shortcut: "⌥⌘F") {
                 store.togglePanel(.files)
             },
+            PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
+                store.toggleBottomDock()
+            },
+            PaletteAction(id: "composer.focus", title: "Focus Composer", subtitle: "Run a command in its own shell", systemImage: "text.cursor", shortcut: "⇧⌘R") {
+                store.focusComposer()
+            },
+            PaletteAction(id: "tasks.open", title: "Task Manager", subtitle: "Every shell this app is running", systemImage: "list.bullet.rectangle", shortcut: "⌥⌘T") {
+                store.detailMode = .tasks
+            },
         ]
 
         for connection in settings.sshConnections {

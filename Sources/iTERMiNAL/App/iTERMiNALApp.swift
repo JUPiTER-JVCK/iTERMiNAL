@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct AppCommands: Commands {
+    /// Observed so the composer item's title follows its state. A Commands
+    /// body is only re-evaluated for state it actually observes; reading the
+    /// singleton directly would freeze the title at whatever it said when the
+    /// menu was first built.
+    @ObservedObject private var settings = AppSettings.shared
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Terminal Tab") {
@@ -120,6 +126,27 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.togglePanel(.files)
             }
             .keyboardShortcut("f", modifiers: [.command, .option])
+
+            Divider()
+
+            Button("Focus Composer") {
+                WorkspaceStore.shared.focusComposer()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+
+            Button(settings.composerCollapsed ? "Expand Composer" : "Minimise Composer") {
+                withAnimation(Motion.panel) {
+                    settings.composerCollapsed.toggle()
+                }
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Task Manager") {
+                WorkspaceStore.shared.detailMode = .tasks
+            }
+            .keyboardShortcut("t", modifiers: [.command, .option])
         }
 
         SidebarCommands()

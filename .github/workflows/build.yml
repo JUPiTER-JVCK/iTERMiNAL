@@ -7,6 +7,13 @@ on:
     branches: [main]
   pull_request:
 
+# The artifact people download should be the build they would ship: the
+# unoptimised configuration carries assertions and is not what to test
+# against. Named once so the build, the verification and the packaging step
+# can never drift apart.
+env:
+  CONFIGURATION: Release
+
 jobs:
   build:
     name: Build (macOS)
@@ -25,7 +32,7 @@ jobs:
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
-            -configuration Debug \
+            -configuration "$CONFIGURATION" \
             -destination "platform=macOS" \
             -derivedDataPath build \
             -skipPackagePluginValidation \
@@ -38,11 +45,12 @@ jobs:
       # it). That went missing for weeks because nothing checked, so check.
       - name: Verify bundle contents
         run: |
-          APP=build/Build/Products/Debug/iTERMiNAL.app
+          APP="build/Build/Products/$CONFIGURATION/iTERMiNAL.app"
           fail=0
           for path in \
             "$APP/Contents/MacOS/iTERMiNAL" \
-            "$APP/Contents/Resources/iterminalctl"
+            "$APP/Contents/Resources/iterminalctl" \
+            "$APP/Contents/Resources/AppIcon.icns"
           do
             if [ ! -e "$path" ]; then
               echo "::error::missing from the app bundle: $path"
@@ -62,7 +70,7 @@ jobs:
       - name: Package app
         run: |
           ditto -c -k --keepParent \
-            build/Build/Products/Debug/iTERMiNAL.app \
+            "build/Build/Products/$CONFIGURATION/iTERMiNAL.app" \
             iTERMiNAL.zip
 
       - name: Upload app

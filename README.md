@@ -18,11 +18,15 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions); a landing screen with quick-start cards and
-  recent commands from your shell history; a composer bar carrying the
-  workspace, host, and the focused session's git branch.
+  recent commands from your shell history; and a floating composer that runs
+  in its own shell — drag it anywhere, minimise it to a pill, resize its
+  transcript, and recall earlier commands with the arrow keys.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file
   panel down the right, opened independently from the toggles at the top right
   of the content area, with draggable dividers whose sizes persist.
+- **Task manager** — every shell the app is running, wherever it lives: tab
+  panes, the terminal dock, and the composer. Uptime while alive, exit code
+  once it isn't, and one click to jump to it or stop it.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
   per tab, snapshotted to Application Support and restored on launch. A tab
   with one pane renders flush; focus rings appear only once it is split.
@@ -56,7 +60,8 @@ There are two ways to get it running.
 
 ### Download a build (no Xcode needed)
 
-Every green CI run publishes the built app. Open the
+Every green CI run publishes the built app — an optimised Release build, the
+same configuration a shipped copy would be. Open the
 [Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions), click the
 most recent successful **Build** run, and download **iTERMiNAL-app** from the
 Artifacts section. Then:
@@ -205,6 +210,9 @@ non-interactively and therefore **requires key-based authentication**.
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
 | Browser / Files panel | ⌥⌘B / ⌥⌘F |
+| Focus composer | ⇧⌘R |
+| Minimise / expand composer | ⇧⌘M |
+| Task manager | ⌥⌘T |
 | Settings | ⌘, |
 
 ## Architecture

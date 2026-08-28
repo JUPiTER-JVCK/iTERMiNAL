@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// A floating, self-contained terminal.
 ///
@@ -9,6 +10,10 @@ import SwiftUI
 /// It can be dragged anywhere in the content area and collapsed to a pill;
 /// both survive relaunch.
 struct ComposerBar: View {
+    /// The surface this card floats over. Its offset is clamped against these
+    /// bounds, so shrinking the window can never strand the card off-screen.
+    let bounds: CGSize
+
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -18,6 +23,11 @@ struct ComposerBar: View {
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
     @State private var dragDelta: CGSize = .zero
+    /// Where arrow-key recall currently sits in the history, and the
+    /// half-typed line it interrupted.
+    @State private var historyIndex: Int?
+    @State private var draft = ""
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         Group {
@@ -32,6 +42,26 @@ struct ComposerBar: View {
             y: settings.composerOffsetY + dragDelta.height
         )
         .animation(Motion.panel, value: settings.composerCollapsed)
+        .onChange(of: bounds) { _, _ in clampToBounds() }
+        .onChange(of: store.composerFocusRequest) { _, _ in inputFocused = true }
+    }
+
+    /// How far the card may travel from home without leaving the surface.
+    /// Home is the bottom edge, so vertically it only ever moves up.
+    private var offsetLimits: (x: ClosedRange<Double>, y: ClosedRange<Double>) {
+        let horizontal = max(0, (bounds.width - 240) / 2)
+        let vertical = max(0, bounds.height - 120)
+        return (-horizontal...horizontal, -vertical...0)
+    }
+
+    /// Re-anchors the card when the window shrinks under it. Writes only on a
+    /// real change — this runs on every frame of a live window resize.
+    private func clampToBounds() {
+        let limits = offsetLimits
+        let x = settings.composerOffsetX.clamped(to: limits.x)
+        let y = settings.composerOffsetY.clamped(to: limits.y)
+        if x != settings.composerOffsetX { settings.composerOffsetX = x }
+        if y != settings.composerOffsetY { settings.composerOffsetY = y }
     }
 
     // MARK: Collapsed
@@ -76,7 +106,8 @@ struct ComposerBar: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                header(theme: theme)
+                gripBar(theme: theme)
+                ContextChipRow()
 
                 if store.composerHasRun, let session = store.composerSession {
                     // The composer's own shell. Identity is tied to the
@@ -90,13 +121,21 @@ struct ComposerBar: View {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(theme.surfaceBorder)
                         )
+
+                    TranscriptResizeHandle(
+                        height: $settings.composerTranscriptHeight,
+                        theme: theme
+                    )
                 }
 
                 TextField("Run anything", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .lineLimit(1...6)
+                    .focused($inputFocused)
                     .onSubmit(send)
+                    .onKeyPress(.upArrow) { recallEarlier() }
+                    .onKeyPress(.downArrow) { recallLater() }
 
                 HStack(spacing: 8) {
                     // A popover rather than a Menu: the reference app groups
@@ -147,14 +186,49 @@ struct ComposerBar: View {
         }
     }
 
-    /// Chips on the left, window controls on the right. The whole row is the
-    /// drag handle — grabbing the input would fight text selection.
-    private func header(theme: Theme) -> some View {
+    /// The card's drag handle: a grip in the middle, window controls on the
+    /// right.
+    ///
+    /// Deliberately its own row rather than sharing one with the context
+    /// chips. Those chips are menus, and with them in the handle the only
+    /// actually grabbable part of it was the gaps between them.
+    private func gripBar(theme: Theme) -> some View {
         HStack(spacing: 6) {
-            ContextChipRow()
+            Spacer(minLength: 0)
 
-            Spacer(minLength: 8)
+            Capsule()
+                .fill(theme.textSecondary.opacity(0.28))
+                .frame(width: 34, height: 4)
 
+            Spacer(minLength: 0)
+        }
+        .frame(height: 18)
+        .overlay(alignment: .trailing) { headerControls(theme: theme) }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture()
+                .onChanged { dragDelta = $0.translation }
+                .onEnded { value in
+                    let limits = offsetLimits
+                    settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
+                        .clamped(to: limits.x)
+                    settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
+                        .clamped(to: limits.y)
+                    dragDelta = .zero
+                }
+        )
+        // Double-click the handle to put it back where it started.
+        .onTapGesture(count: 2) {
+            withAnimation(Motion.panel) {
+                settings.composerOffsetX = 0
+                settings.composerOffsetY = 0
+            }
+        }
+        .help("Drag to move the composer · double-click to reset")
+    }
+
+    private func headerControls(theme: Theme) -> some View {
+        HStack(spacing: 6) {
             if store.composerHasRun {
                 Button {
                     store.resetComposerSession()
@@ -181,27 +255,6 @@ struct ComposerBar: View {
             .buttonStyle(.plain)
             .help("Minimise the composer")
         }
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture()
-                .onChanged { dragDelta = $0.translation }
-                .onEnded { value in
-                    // Clamped so it can never be dragged somewhere the
-                    // double-click-to-reset handle can't be reached.
-                    settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
-                        .clamped(to: -700...700)
-                    settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
-                        .clamped(to: -600...200)
-                    dragDelta = .zero
-                }
-        )
-        // Double-click the handle to put it back where it started.
-        .onTapGesture(count: 2) {
-            withAnimation(Motion.panel) {
-                settings.composerOffsetX = 0
-                settings.composerOffsetY = 0
-            }
-        }
     }
 
     private var trimmedText: String {
@@ -224,6 +277,81 @@ struct ComposerBar: View {
             store.sendToComposer(command + "\n")
         }
         text = ""
+        historyIndex = nil
+        draft = ""
+    }
+
+    // MARK: Arrow-key recall
+
+    /// Walks back through commands this composer has run, the way a shell
+    /// does. Multi-line input is left alone: there the arrows have to move
+    /// the caret, and stealing them would make the field unusable.
+    private func recallEarlier() -> KeyPress.Result {
+        let history = store.composerHistory
+        guard !text.contains("\n"), !history.isEmpty else { return .ignored }
+        if let historyIndex {
+            guard historyIndex > 0 else { return .handled }
+            self.historyIndex = historyIndex - 1
+            text = history[historyIndex - 1]
+        } else {
+            // Remember the half-typed line so walking back down restores it.
+            draft = text
+            historyIndex = history.count - 1
+            text = history[history.count - 1]
+        }
+        return .handled
+    }
+
+    private func recallLater() -> KeyPress.Result {
+        let history = store.composerHistory
+        guard !text.contains("\n"), let historyIndex else { return .ignored }
+        if historyIndex + 1 < history.count {
+            self.historyIndex = historyIndex + 1
+            text = history[historyIndex + 1]
+        } else {
+            self.historyIndex = nil
+            text = draft
+        }
+        return .handled
+    }
+}
+
+/// Drag to change how much of the composer's shell is visible; double-click
+/// for the default height.
+private struct TranscriptResizeHandle: View {
+    @Binding var height: Double
+    let theme: Theme
+
+    /// Height when the drag began. `DragGesture` reports translation from the
+    /// start of the gesture, not since the last event, so it has to be added
+    /// to a fixed starting height rather than to the live one.
+    @State private var startHeight: Double?
+    @State private var hovering = false
+
+    var body: some View {
+        Capsule()
+            .fill(theme.textSecondary.opacity(hovering ? 0.45 : 0.2))
+            .frame(width: 44, height: 4)
+            .frame(maxWidth: .infinity)
+            .frame(height: 12)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeUpDown.set() } else { NSCursor.arrow.set() }
+            }
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let start = startHeight ?? height
+                        if startHeight == nil { startHeight = start }
+                        height = (start + value.translation.height).clamped(to: 100...560)
+                    }
+                    .onEnded { _ in startHeight = nil }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(Motion.panel) { height = 200 }
+            }
+            .help("Drag to resize the transcript · double-click to reset")
     }
 }
 
