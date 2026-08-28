@@ -121,6 +121,8 @@ struct DetailView: View {
                 emptyTitle: "No automations yet",
                 emptyCaption: "Scheduled commands and triggers are coming soon."
             )
+        case .tasks:
+            TaskManagerView()
         case .skills:
             SectionPageView(
                 title: "Skills",
@@ -512,6 +514,159 @@ private struct SuggestionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+/// Every shell the app owns, wherever it lives, with what it is doing and
+/// the two things worth doing to it: go to it, or stop it.
+private struct TaskManagerView: View {
+    @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.colorScheme) private var colorScheme
+    /// Uptime has to be recomputed to tick; nothing else here needs a timer.
+    @State private var now = Date()
+
+    /// Static so it isn't rebuilt — and restarted — every time this struct is
+    /// initialised, which SwiftUI does on every render.
+    private static let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        let tasks = store.allTasks()
+
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Tasks")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Text(summary(for: tasks))
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 26)
+            .padding(.bottom, 18)
+
+            if tasks.isEmpty {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 26, weight: .light))
+                        .foregroundStyle(theme.textSecondary)
+                    Text("Nothing running")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(theme.textPrimary)
+                    Text("Shells you open appear here while they live.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textSecondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(tasks) { task in
+                            TaskRow(task: task, now: now)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onReceive(Self.clock) { now = $0 }
+    }
+
+    private func summary(for tasks: [RunningTask]) -> String {
+        let live = tasks.filter(\.session.isRunning).count
+        let stopped = tasks.count - live
+        if tasks.isEmpty { return "Shells this app is running." }
+        var parts = ["\(live) running"]
+        if stopped > 0 { parts.append("\(stopped) stopped") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct TaskRow: View {
+    let task: RunningTask
+    let now: Date
+
+    @ObservedObject private var session: TerminalSession
+    @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+
+    init(task: RunningTask, now: Date) {
+        self.task = task
+        self.now = now
+        _session = ObservedObject(wrappedValue: task.session)
+    }
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 12) {
+            Circle()
+                .fill(session.isRunning ? Color(p3: 0x3FB68B) : theme.textSecondary.opacity(0.4))
+                .frame(width: 7, height: 7)
+
+            Image(systemName: session.isRemote ? "network" : "terminal")
+                .font(.system(size: 13))
+                .foregroundStyle(theme.textSecondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayTitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+                Text("\(task.origin.label) · \(session.abbreviatedDirectory)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(status)
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(theme.textSecondary)
+
+            if hovering {
+                Button("Go to") { store.reveal(task) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+
+                if session.isRunning {
+                    Button("Stop") { session.terminate() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(p3: 0xE0605C))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 46)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(hovering ? theme.surface : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    /// Uptime while alive; why it ended once it isn't.
+    private var status: String {
+        if !session.isRunning {
+            if let code = session.lastExitCode { return "exited \(code)" }
+            return session.statusNote ?? "stopped"
+        }
+        guard let startedAt = session.startedAt else { return "starting" }
+        let seconds = Int(now.timeIntervalSince(startedAt))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
     }
 }
 

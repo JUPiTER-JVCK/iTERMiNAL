@@ -68,6 +68,10 @@ struct Theme {
     let elevatedHighlight: Color
     /// Structural seams between regions.
     let divider: Color
+    /// Fill for surfaces that float over content. Deliberately further from
+    /// `background` than `surface` is, so a floating panel never reads as
+    /// painted onto the window behind it.
+    let floatingSurface: Color
 
     static func current(for scheme: ColorScheme) -> Theme {
         scheme == .dark ? .dark : .light
@@ -85,7 +89,8 @@ struct Theme {
         terminalForeground: NSColor(p3: 0xEDEDEF),
         elevatedShadow: Color.black.opacity(0.55),
         elevatedHighlight: Color.white.opacity(0.06),
-        divider: Color.white.opacity(0.09)
+        divider: Color.white.opacity(0.09),
+        floatingSurface: Color(p3: 0x25252B)
     )
 
     static let light = Theme(
@@ -100,7 +105,8 @@ struct Theme {
         terminalForeground: NSColor(p3: 0x0D0D0F),
         elevatedShadow: Color.black.opacity(0.13),
         elevatedHighlight: Color.white.opacity(0.9),
-        divider: Color.black.opacity(0.08)
+        divider: Color.black.opacity(0.08),
+        floatingSurface: Color(p3: 0xFDFDFE)
     )
 }
 
