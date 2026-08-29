@@ -733,11 +733,11 @@ private struct TaskRow: View {
                     .help("Show this session")
 
                 if session.isRunning {
-                    Button("Stop") { session.terminate() }
+                    Button("Stop") { store.stopTask(task) }
                         .buttonStyle(.plain)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color(p3: 0xE0605C))
-                        .help("End this session")
+                        .help("End this session and move it to Recents")
                 }
             }
             .opacity(hovering ? 1 : 0.35)
@@ -760,7 +760,7 @@ private struct TaskRow: View {
             }
             if session.isRunning {
                 Divider()
-                Button("Stop") { session.terminate() }
+                Button("Stop") { store.stopTask(task) }
             }
         }
     }

@@ -105,23 +105,13 @@ struct SidebarView: View {
 
     private func header(theme: Theme) -> some View {
         HStack(spacing: 6) {
-            Menu {
-                Button("New Workspace") { store.newWorkspace() }
-                Button("New Terminal") { store.newTab() }
-                Divider()
-                SettingsLink { Text("Settings…") }
-            } label: {
-                HStack(spacing: 5) {
-                    Text("iTERMiNAL")
-                        .font(.system(size: 19, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                }
+            // Just the name. The menu that used to hang off this offered New
+            // Workspace, New Terminal and Settings — all three of which are
+            // already their own rows in this same sidebar.
+            Text("iTERMiNAL")
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+                .fixedSize()
 
             Spacer()
 

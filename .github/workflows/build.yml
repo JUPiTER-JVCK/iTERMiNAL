@@ -26,10 +26,36 @@ jobs:
     name: Build (macOS)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
+      # Not `brew install xcodegen`. The runner image ships an untrusted
+      # `aws/tap`, so every brew invocation printed a tap-trust warning that
+      # had nothing to do with this project. Taking the tool straight from its
+      # own release skips Homebrew entirely — no warning, and much faster than
+      # letting brew update itself first.
       - name: Install XcodeGen
-        run: brew install xcodegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/xcodegen"
+          mkdir -p "$dir"
+          gh release download --repo yonaskolb/XcodeGen \
+            --pattern '*.zip' --dir "$dir" --clobber
+          for archive in "$dir"/*.zip; do
+            unzip -q "$archive" -d "$dir"
+          done
+          # Locate the binary rather than assuming where in the archive it
+          # sits; unzip preserves the layout either way, so the tool still
+          # finds its own share/ resources next to it.
+          binary=$(find "$dir" -type f -name xcodegen -perm -u+x | head -1)
+          if [ -z "$binary" ]; then
+            echo "::error::no xcodegen binary in the XcodeGen release archive"
+            exit 1
+          fi
+          echo "$(dirname "$binary")" >> "$GITHUB_PATH"
+          # Fail here, with a clear reason, rather than at project generation.
+          "$binary" --version
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -93,7 +119,7 @@ jobs:
       # Kept alongside the release below: this is how a PR branch that hasn't
       # merged gets tested, and releases are only cut from pushes.
       - name: Upload app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: iTERMiNAL-app
           path: iTERMiNAL.zip
@@ -113,11 +139,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Extracts iTERMiNAL.zip (the packaged bundle) into the working directory.
       - name: Download the built app
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: iTERMiNAL-app
 

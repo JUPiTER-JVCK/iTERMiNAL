@@ -15,6 +15,11 @@ struct ITerminalApp: App {
                 .environmentObject(settings)
                 .environmentObject(store)
                 .preferredColorScheme(settings.preferredColorScheme)
+                // Without this the accent setting governed almost nothing:
+                // every stock control — toggles, sliders, pickers, list
+                // selection — falls back to the *system* accent unless the
+                // hierarchy is tinted.
+                .tint(settings.accentColor)
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
@@ -25,12 +30,17 @@ struct ITerminalApp: App {
                 .environmentObject(settings)
                 .environmentObject(store)
                 .preferredColorScheme(settings.preferredColorScheme)
+                .tint(settings.accentColor)
         }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // NSApp exists by now, which it does not when AppSettings is first
+        // constructed — so the stored choice is applied here rather than in
+        // the initialiser that loads it.
+        AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
     }

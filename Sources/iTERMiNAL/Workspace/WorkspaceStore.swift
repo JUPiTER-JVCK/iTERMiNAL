@@ -298,16 +298,20 @@ final class WorkspaceStore: ObservableObject {
 
     private func rememberClosed(_ tab: WorkspaceTab) {
         for session in tab.root.allSessions() {
-            let entry = RecentSession(
-                id: session.id,
-                title: tab.displayName,
-                directory: session.currentDirectory,
-                connection: session.kind.connectionID?.uuidString,
-                closedAt: Date()
-            )
-            recentSessions.removeAll { $0.id == entry.id }
-            recentSessions.insert(entry, at: 0)
+            rememberClosed(session, title: tab.displayName)
         }
+    }
+
+    private func rememberClosed(_ session: TerminalSession, title: String) {
+        let entry = RecentSession(
+            id: session.id,
+            title: title,
+            directory: session.currentDirectory,
+            connection: session.kind.connectionID?.uuidString,
+            closedAt: Date()
+        )
+        recentSessions.removeAll { $0.id == entry.id }
+        recentSessions.insert(entry, at: 0)
         if recentSessions.count > 20 {
             recentSessions.removeLast(recentSessions.count - 20)
         }
@@ -462,6 +466,66 @@ final class WorkspaceStore: ObservableObject {
         case .composer:
             focusComposer()
         }
+    }
+
+    /// Ends a task and takes its surface away with it.
+    ///
+    /// Stopping used to call `terminate()` alone, which left a dead pane
+    /// sitting in the workspace and put nothing in Recents — the shell was
+    /// gone but every trace of it stayed exactly where it was. Stopping now
+    /// means the same thing closing does: the surface goes, and the session
+    /// becomes a Recents entry you can reopen.
+    func stopTask(_ task: RunningTask) {
+        let session = task.session
+        switch task.origin {
+        case .tab(let tab, _):
+            rememberClosed(session, title: tab.displayName)
+            removePane(hosting: session, in: tab)
+        case .dock:
+            rememberClosed(session, title: session.displayTitle)
+            closeDockSession(session.id)
+        case .composer:
+            rememberClosed(session, title: session.displayTitle)
+            resetComposerSession()
+        }
+        scheduleSave()
+    }
+
+    /// Drops the leaf holding `session`, collapsing the split around it — and
+    /// closing the whole tab when that leaf was all the tab had.
+    private func removePane(hosting session: TerminalSession, in tab: WorkspaceTab) {
+        guard let leaf = tab.root.leaf(containingSessionID: session.id) else {
+            session.terminate()
+            return
+        }
+        if leaf === tab.root {
+            // rememberClosed already ran for this session; closeTab would add
+            // it a second time, so terminate and drop the tab directly.
+            guard let workspace = workspace(containingTab: tab.id) else { return }
+            session.terminate()
+            workspace.tabs.removeAll { $0 === tab }
+            EventBus.shared.publish(APIEvent("tab.closed", ["tab": tab.id.uuidString]))
+            if selectedTabID == tab.id {
+                selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
+            }
+            return
+        }
+        guard let parent = tab.root.parent(of: leaf),
+              case .split(let direction, var children) = parent.content else {
+            session.terminate()
+            return
+        }
+        session.terminate()
+        children.removeAll { $0 === leaf }
+        if children.count == 1 {
+            parent.content = children[0].content
+        } else {
+            parent.content = .split(direction, children)
+        }
+        if focusedSessionID == session.id {
+            focusedSessionID = tab.root.firstTerminal()?.id
+        }
+        EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
     /// Brings the composer forward and puts the caret in it — un-hiding and

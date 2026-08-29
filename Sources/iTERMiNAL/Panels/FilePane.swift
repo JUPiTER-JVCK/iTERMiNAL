@@ -304,9 +304,13 @@ struct FilePaneView: View {
 
             if !model.isRemote {
                 Button {
-                    if let directory = store.focusedSession?.currentDirectory {
-                        model.navigate(to: directory)
-                    }
+                    // Read the shell's directory now rather than trusting the
+                    // last value: without an OSC 7 hook the cached one is
+                    // whatever the session launched in, which is what made
+                    // this button look broken.
+                    guard let session = store.focusedSession else { return }
+                    session.refreshDirectoryFromProcess()
+                    model.navigate(to: session.currentDirectory)
                 } label: {
                     Image(systemName: "terminal")
                 }

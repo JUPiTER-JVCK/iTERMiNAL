@@ -27,6 +27,12 @@ struct ComposerBar: View {
     /// half-typed line it interrupted.
     @State private var historyIndex: Int?
     @State private var draft = ""
+    /// The card's rendered size, measured so the drag clamp can keep the whole
+    /// card on screen rather than guessing from the container alone.
+    @State private var cardSize: CGSize = .zero
+    /// Darkens the grip while a drag is in flight, so it is obvious the card
+    /// has been picked up.
+    @State private var dragging = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -37,6 +43,16 @@ struct ComposerBar: View {
                 expandedCard
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: ComposerSizeKey.self, value: proxy.size)
+            }
+        )
+        .onPreferenceChange(ComposerSizeKey.self) { size in
+            guard size != cardSize else { return }
+            cardSize = size
+            clampToBounds()
+        }
         .offset(
             x: settings.composerOffsetX + dragDelta.width,
             y: settings.composerOffsetY + dragDelta.height
@@ -46,11 +62,17 @@ struct ComposerBar: View {
         .onChange(of: store.composerFocusRequest) { _, _ in inputFocused = true }
     }
 
-    /// How far the card may travel from home without leaving the surface.
-    /// Home is the bottom edge, so vertically it only ever moves up.
+    /// How far the card may travel from home while staying fully on the
+    /// surface, with a margin so it never sits flush against an edge.
+    ///
+    /// This used to guess from the container alone, which let a wide card hang
+    /// off the side — the limits have to account for how big the card actually
+    /// is. Home is horizontally centred and bottom-aligned, so the horizontal
+    /// room is the slack either side and the vertical room is upward only.
     private var offsetLimits: (x: ClosedRange<Double>, y: ClosedRange<Double>) {
-        let horizontal = max(0, (bounds.width - 240) / 2)
-        let vertical = max(0, bounds.height - 120)
+        let margin: Double = 12
+        let horizontal = max(0, (bounds.width - cardSize.width) / 2 - margin)
+        let vertical = max(0, bounds.height - cardSize.height - margin * 2)
         return (-horizontal...horizontal, -vertical...0)
     }
 
@@ -197,17 +219,38 @@ struct ComposerBar: View {
             Spacer(minLength: 0)
 
             Capsule()
-                .fill(theme.textSecondary.opacity(0.28))
-                .frame(width: 34, height: 4)
+                .fill(theme.textSecondary.opacity(dragging ? 0.5 : 0.28))
+                .frame(width: 40, height: 4)
 
             Spacer(minLength: 0)
         }
-        .frame(height: 18)
+        // Taller than it looks: the capsule is 4pt, but the grabbable strip
+        // around it needs to be big enough to hit without aiming.
+        .frame(height: 24)
         .overlay(alignment: .trailing) { headerControls(theme: theme) }
         .contentShape(Rectangle())
+        .onHover { NSCursor.openHand.set(); if !$0 { NSCursor.arrow.set() } }
         .gesture(
-            DragGesture()
-                .onChanged { dragDelta = $0.translation }
+            // The default 10pt threshold swallowed short drags, which is what
+            // made the card feel stuck — it only moved once you had committed
+            // to a big gesture.
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    // Clamp while dragging, not only on release. Assigning the
+                    // raw translation let the card follow the pointer clean off
+                    // the surface and then snap back when let go, which is not
+                    // what "stays inside" should feel like.
+                    let limits = offsetLimits
+                    let x = (settings.composerOffsetX + value.translation.width)
+                        .clamped(to: limits.x)
+                    let y = (settings.composerOffsetY + value.translation.height)
+                        .clamped(to: limits.y)
+                    dragDelta = CGSize(
+                        width: x - settings.composerOffsetX,
+                        height: y - settings.composerOffsetY
+                    )
+                    if !dragging { dragging = true }
+                }
                 .onEnded { value in
                     let limits = offsetLimits
                     settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
@@ -215,6 +258,7 @@ struct ComposerBar: View {
                     settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
                         .clamped(to: limits.y)
                     dragDelta = .zero
+                    dragging = false
                 }
         )
         // Double-click the handle to put it back where it started.
@@ -634,5 +678,16 @@ private struct ComposerActionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+/// Carries the composer card's rendered size up to the view that clamps its
+/// drag, so the clamp knows how much card it is keeping on screen.
+private struct ComposerSizeKey: PreferenceKey {
+    static let defaultValue = CGSize.zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
