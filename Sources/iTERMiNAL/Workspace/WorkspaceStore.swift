@@ -281,18 +281,35 @@ final class WorkspaceStore: ObservableObject {
         scheduleSave()
     }
 
-    /// Reopens a closed session in a new tab.
+    /// Reopens a closed session in a new tab, restoring what was on it.
     func reopen(_ recent: RecentSession) {
         let kind: SessionKind = recent.connection
             .flatMap { UUID(uuidString: $0) }
             .map { SessionKind.remote($0) } ?? .localShell
-        newTab(directory: recent.isRemote ? nil : recent.directory, kind: kind)
+        let tab = newTab(directory: recent.isRemote ? nil : recent.directory, kind: kind)
+        if let transcript = TranscriptStore.load(for: recent.id),
+           let session = tab.root.firstTerminal() {
+            // The new shell has to be up before anything is written to the
+            // display, or its own first prompt lands on top of the restored
+            // text. This is a new process, so what is restored is a record of
+            // the old one, not a resumed session.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                session.displayRestored(transcript)
+            }
+        }
+        removeRecent(recent)
+    }
+
+    /// Drops a Recents entry and the transcript kept for it.
+    func removeRecent(_ recent: RecentSession) {
         recentSessions.removeAll { $0.id == recent.id }
+        TranscriptStore.remove(for: recent.id)
         scheduleSave()
     }
 
     func clearRecents() {
         recentSessions.removeAll()
+        TranscriptStore.pruneAll(keeping: [])
         scheduleSave()
     }
 
@@ -310,11 +327,19 @@ final class WorkspaceStore: ObservableObject {
             connection: session.kind.connectionID?.uuidString,
             closedAt: Date()
         )
+        // Capture before the shell is terminated: once the view is gone so is
+        // its buffer.
+        TranscriptStore.save(
+            session.captureScrollback(maxBytes: TranscriptStore.maxBytes),
+            for: session.id
+        )
         recentSessions.removeAll { $0.id == entry.id }
         recentSessions.insert(entry, at: 0)
         if recentSessions.count > 20 {
             recentSessions.removeLast(recentSessions.count - 20)
         }
+        // An entry pushed off the end takes its transcript with it.
+        TranscriptStore.pruneAll(keeping: Set(recentSessions.map(\.id)))
     }
 
     func closeTab(_ tab: WorkspaceTab) {
@@ -572,9 +597,11 @@ final class WorkspaceStore: ObservableObject {
     @discardableResult
     func ensureComposerSession() -> TerminalSession {
         if let composerSession { return composerSession }
+        let shell = AppSettings.shared.composerShell
         let session = TerminalSession(
             kind: .localShell,
-            initialDirectory: focusedSession?.currentDirectory
+            initialDirectory: focusedSession?.currentDirectory,
+            shellOverride: shell.isEmpty ? nil : shell
         )
         session.startIfNeeded()
         composerSession = session

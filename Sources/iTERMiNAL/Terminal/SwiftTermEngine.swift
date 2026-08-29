@@ -13,12 +13,54 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     var onActivity: (() -> Void)?
     var onInput: (() -> Void)?
     var onLink: ((String) -> Void)?
+    /// Reports a finished command line, for naming the tab after what it is
+    /// doing rather than after its directory.
+    var onCommand: ((String) -> Void)?
+
+    /// What has been typed since the last Enter.
+    private var lineBuffer: [UInt8] = []
+    /// Cleared when something happens that makes the buffer stop matching what
+    /// the shell will actually run.
+    private var lineIsTrustworthy = true
 
     /// The keystroke path — `super` writes the bytes to the PTY, so it must
     /// always run first.
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
         super.send(source: source, data: data)
+        accumulateCommand(data)
         onInput?()
+    }
+
+    /// Rebuilds the command line from the bytes heading for the shell.
+    ///
+    /// Deliberately conservative. These are the bytes the user typed, not what
+    /// the shell has after its own line editing, so anything that rewrites the
+    /// line behind our back — history recall, tab completion, any arrow key —
+    /// abandons the buffer rather than reporting a command that was never run.
+    /// A wrong tab name is worse than the directory it would otherwise show.
+    private func accumulateCommand(_ data: ArraySlice<UInt8>) {
+        for byte in data {
+            switch byte {
+            case 0x0D, 0x0A:                    // Enter: the line is complete
+                if lineIsTrustworthy, !lineBuffer.isEmpty,
+                   let line = String(bytes: lineBuffer, encoding: .utf8) {
+                    onCommand?(line)
+                }
+                lineBuffer.removeAll(keepingCapacity: true)
+                lineIsTrustworthy = true
+            case 0x7F, 0x08:                    // Backspace
+                if !lineBuffer.isEmpty { lineBuffer.removeLast() }
+            case 0x1B, 0x09:                    // Escape sequence, or Tab
+                lineIsTrustworthy = false
+            case 0x03, 0x04, 0x15:              // ^C, ^D, ^U abandon the line
+                lineBuffer.removeAll(keepingCapacity: true)
+                lineIsTrustworthy = true
+            case 0x20...0x7E, 0x80...0xFF:      // Printable ASCII and UTF-8
+                lineBuffer.append(byte)
+            default:
+                break
+            }
+        }
     }
 
     /// Fires whenever the terminal repaints a row range: the closest thing
@@ -52,6 +94,8 @@ final class SwiftTermEngine: TerminalEngine {
     var onActivity: (() -> Void)?
     /// Called when the user clicks a link in the terminal.
     var onLinkActivated: ((String) -> Void)?
+    /// Called with each command line the shell is given.
+    var onCommand: ((String) -> Void)?
 
     private let terminalView: InstrumentedTerminalView
     private var started = false
@@ -87,6 +131,9 @@ final class SwiftTermEngine: TerminalEngine {
         }
         terminalView.onActivity = { [weak self] in
             self?.noteActivity()
+        }
+        terminalView.onCommand = { [weak self] command in
+            self?.onCommand?(command)
         }
 
         clickMonitor = NSEvent.addLocalMonitorForEvents(
@@ -190,6 +237,35 @@ final class SwiftTermEngine: TerminalEngine {
             start: Position(col: 0, row: 0),
             end: Position(col: cols - 1, row: rows - 1)
         )
+    }
+
+    /// Everything the terminal still holds — the retained scrollback plus the
+    /// current screen — so a closed session can be reopened showing what was
+    /// on it.
+    ///
+    /// Buffer rows are absolute over the whole circular buffer, with row 0 the
+    /// oldest line still retained, so reading from 0 to the bottom of the
+    /// viewport covers the scrollback too. `buffer.lines.count` is internal to
+    /// SwiftTerm, but `yDisp` plus the row count reaches the same last line
+    /// through public API.
+    func captureScrollback(maxBytes: Int) -> String {
+        let terminal = terminalView.getTerminal()
+        let cols = terminal.cols
+        let rows = terminal.rows
+        guard cols > 0, rows > 0 else { return "" }
+        let lastRow = terminal.buffer.yDisp + rows - 1
+        let text = terminal.getText(
+            start: Position(col: 0, row: 0),
+            end: Position(col: cols - 1, row: lastRow)
+        )
+        // Keep the tail: the end of a session is what you want to see again.
+        guard text.utf8.count > maxBytes else { return text }
+        return String(text.suffix(maxBytes / 4))
+    }
+
+    /// Writes text to the display without sending it to the shell.
+    func display(text: String) {
+        terminalView.feed(text: text)
     }
 
     func terminate() {

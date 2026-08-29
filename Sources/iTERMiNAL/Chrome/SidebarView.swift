@@ -11,6 +11,9 @@ struct SidebarView: View {
     @State private var query = ""
     @State private var searchVisible = false
     @State private var expandedWorkspaces: Set<UUID> = []
+    /// Workspaces whose "Show more" has been used, listing every tab rather
+    /// than the first few.
+    @State private var showAllWorkspaces: Set<UUID> = []
     @State private var renamingTab: WorkspaceTab?
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
@@ -22,7 +25,7 @@ struct SidebarView: View {
     }
 
     /// How many tabs a project shows before "Show more".
-    private let collapsedTabLimit = 6
+    private let collapsedTabLimit = 5
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -209,7 +212,20 @@ struct SidebarView: View {
     private func workspaceGroup(_ workspace: Workspace, theme: Theme) -> some View {
         let tabs = matching(workspace.tabs)
         let isExpanded = expandedWorkspaces.contains(workspace.id) || !query.isEmpty
-        let visible = isExpanded ? tabs : Array(tabs.prefix(collapsedTabLimit))
+        // Three states, not two. A closed folder shows nothing — that is what
+        // closing it is for; it used to still list six. An open one shows the
+        // first few, and "Show more" opens the rest. A search shows every
+        // match, since hiding results behind "Show more" would bury the thing
+        // being searched for.
+        let showsEveryTab = showAllWorkspaces.contains(workspace.id) || !query.isEmpty
+        let visible: [WorkspaceTab]
+        if !isExpanded {
+            visible = []
+        } else if showsEveryTab {
+            visible = tabs
+        } else {
+            visible = Array(tabs.prefix(collapsedTabLimit))
+        }
 
         WorkspaceFolderRow(
             workspace: workspace,
@@ -218,6 +234,9 @@ struct SidebarView: View {
                 withAnimation(Motion.disclosure) {
                     if expandedWorkspaces.contains(workspace.id) {
                         _ = expandedWorkspaces.remove(workspace.id)
+                        // Closing resets "Show more", so reopening starts
+                        // short again rather than dumping the full list.
+                        _ = showAllWorkspaces.remove(workspace.id)
                     } else {
                         _ = expandedWorkspaces.insert(workspace.id)
                     }
@@ -235,13 +254,13 @@ struct SidebarView: View {
             tabRow(tab, indented: true)
         }
 
-        if tabs.count > visible.count {
+        if isExpanded, tabs.count > visible.count {
             Button {
                 withAnimation(Motion.disclosure) {
-                    _ = expandedWorkspaces.insert(workspace.id)
+                    _ = showAllWorkspaces.insert(workspace.id)
                 }
             } label: {
-                Text("Show more")
+                Text("Show \(tabs.count - visible.count) more")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.textSecondary)
                     .padding(.leading, 30)

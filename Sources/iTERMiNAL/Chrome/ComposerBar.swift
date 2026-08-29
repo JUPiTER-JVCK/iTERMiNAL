@@ -516,6 +516,10 @@ private struct ComposerActionsPopover: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(alignment: .leading, spacing: 2) {
+            sectionHeader("This composer", theme: theme)
+
+            ComposerShellPicker(theme: theme)
+
             sectionHeader("Terminal", theme: theme)
 
             ComposerActionRow(
@@ -689,5 +693,70 @@ private struct ComposerSizeKey: PreferenceKey {
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         let next = nextValue()
         if next != .zero { value = next }
+    }
+}
+
+/// Chooses which shell the composer's own session runs.
+///
+/// Scoped to the composer on purpose: this is where you try a one-off command,
+/// and wanting it in bash shouldn't change what every new tab opens as. Only
+/// shells that exist on this Mac are offered — listing one that isn't
+/// installed would just produce a session that fails to launch.
+private struct ComposerShellPicker: View {
+    let theme: Theme
+
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var store: WorkspaceStore
+
+    /// Checked once: the set of installed shells does not change while the
+    /// app is running.
+    private static let available: [(path: String, name: String)] = {
+        ["/bin/zsh", "/bin/bash", "/bin/sh", "/opt/homebrew/bin/fish", "/usr/local/bin/fish"]
+            .filter { FileManager.default.isExecutableFile(atPath: $0) }
+            .map { ($0, ($0 as NSString).lastPathComponent) }
+    }()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "terminal")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textSecondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Shell")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                Text("Applies to the composer only")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.textSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Picker("", selection: shellBinding) {
+                Text("Default").tag("")
+                ForEach(Self.available, id: \.path) { shell in
+                    Text(shell.name).tag(shell.path)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    /// Changing the shell restarts the composer's session — the running one
+    /// is still the old shell, and leaving it would make the picker a lie.
+    private var shellBinding: Binding<String> {
+        Binding(
+            get: { settings.composerShell },
+            set: { newValue in
+                guard newValue != settings.composerShell else { return }
+                settings.composerShell = newValue
+                store.resetComposerSession()
+            }
+        )
     }
 }

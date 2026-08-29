@@ -367,6 +367,14 @@ struct FilePaneView: View {
                         if model.isRemote {
                             Button("Download to Downloads") { model.download(item) }
                         } else {
+                            // A file opens its containing directory: `cd` to a
+                            // file is not a thing, and the directory is what
+                            // you actually wanted to be in.
+                            Button("Open in Terminal") {
+                                store.newTab(directory: item.isDirectory
+                                    ? item.path
+                                    : (item.path as NSString).deletingLastPathComponent)
+                            }
                             Button("Reveal in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
                             }
