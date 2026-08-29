@@ -5,7 +5,14 @@ name: Build
 on:
   push:
     branches: [main]
+    # A version tag cuts a real release. branches and tags are OR'd, so this
+    # does not narrow the main-branch trigger above.
+    tags: ['v*']
   pull_request:
+
+# Read-only by default; only the release job gets write, and only to contents.
+permissions:
+  contents: read
 
 # The artifact people download should be the build they would ship: the
 # unoptimised configuration carries assertions and is not what to test
@@ -29,6 +36,15 @@ jobs:
 
       - name: Build
         run: |
+          # A tag build has to carry the tag's version, or v0.3.0 would ship an
+          # app whose About box still says whatever project.yml last hardcoded.
+          # The empty-array expansion below is safe because Actions runs
+          # `bash -e`, not `bash -u` — under set -u, bash 3.2 on macOS treats
+          # "${ARR[@]}" on an empty array as an unbound variable.
+          VERSION_ARG=()
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION_ARG=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
+          fi
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
@@ -39,6 +55,7 @@ jobs:
             -skipMacroValidation \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
+            "${VERSION_ARG[@]}" \
             build
 
       # The app promises a bundled iterminalctl (Settings → Security installs
@@ -73,9 +90,96 @@ jobs:
             "build/Build/Products/$CONFIGURATION/iTERMiNAL.app" \
             iTERMiNAL.zip
 
+      # Kept alongside the release below: this is how a PR branch that hasn't
+      # merged gets tested, and releases are only cut from pushes.
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
           name: iTERMiNAL-app
           path: iTERMiNAL.zip
           if-no-files-found: error
+
+  # Workflow artifacts need a signed-in GitHub account to download and expire
+  # after 90 days, so they cannot be how anyone actually gets the app. A
+  # release can be downloaded by anyone, keeps its link, and puts a Releases
+  # section in the repo sidebar — which is where people look for an app rather
+  # than the green Code button, which hands over source.
+  release:
+    name: Publish release
+    needs: build
+    # Never from a pull request: a PR branch is not something to publish.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Extracts iTERMiNAL.zip (the packaged bundle) into the working directory.
+      - name: Download the built app
+        uses: actions/download-artifact@v4
+        with:
+          name: iTERMiNAL-app
+
+      # gh is preinstalled on the runner. Using it rather than a third-party
+      # release action keeps the step that publishes a downloadable binary free
+      # of dependencies outside GitHub itself.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Every release says this, because it is the first thing that goes
+          # wrong: macOS quarantines anything downloaded through a browser, and
+          # these builds are unsigned.
+          gatekeeper=$(cat <<'NOTE'
+
+          ## Installing
+
+          ```sh
+          unzip iTERMiNAL-*.zip
+          xattr -dr com.apple.quarantine iTERMiNAL.app
+          open iTERMiNAL.app
+          ```
+
+          This build is **unsigned**, so without the `xattr` line Gatekeeper
+          refuses to open it ("damaged or can't be verified"). Right-click →
+          Open works too. Proper signing needs an Apple Developer ID this
+          project doesn't have yet.
+
+          Universal binary — Intel and Apple Silicon. Requires macOS 14 or later.
+          NOTE
+          )
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            asset="iTERMiNAL-${GITHUB_REF_NAME}-universal.zip"
+            mv iTERMiNAL.zip "$asset"
+            # Ask for the changelog explicitly rather than passing
+            # --generate-notes alongside --notes: which of the two wins when
+            # both are given is a gh implementation detail, and losing the
+            # install instructions would be silent. This endpoint's contract
+            # is documented — it returns the commits since the previous tag.
+            # An empty result is survivable; the install section is not.
+            changelog=$(gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$GITHUB_REF_NAME" --jq .body || true)
+            gh release create "$GITHUB_REF_NAME" "$asset" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "${changelog}
+          $gatekeeper"
+          else
+            asset="iTERMiNAL-latest-universal.zip"
+            mv iTERMiNAL.zip "$asset"
+            subject=$(git log -1 --pretty=%s)
+            # Delete and recreate rather than editing in place: it is idempotent
+            # and re-points the tag at this commit, and the asset URL is stable
+            # across the swap because the tag name never changes.
+            gh release delete latest --yes --cleanup-tag || true
+            gh release create latest "$asset" \
+              --title "Latest build (main)" \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --notes "Built from \`${GITHUB_SHA:0:7}\` — ${subject}
+          $gatekeeper"
+          fi
