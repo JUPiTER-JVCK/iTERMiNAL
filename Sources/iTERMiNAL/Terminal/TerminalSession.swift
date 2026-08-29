@@ -51,6 +51,9 @@ final class TerminalSession: ObservableObject, Identifiable {
             guard let self else { return }
             // Already debounced by the engine, so this is cheap.
             self.lastActivityAt = Date()
+            // A prompt redraw after `cd` is activity, so this is where a
+            // directory change becomes visible in a shell with no OSC 7 hook.
+            self.refreshDirectoryFromProcess()
             EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
         }
         engine.onLinkActivated = { [weak self] link in
@@ -230,6 +233,18 @@ extension TerminalSession: TerminalEngineDelegate {
         ]))
     }
 
+    /// Re-reads the shell's working directory from the kernel.
+    ///
+    /// Only meaningful for local sessions: a remote session's local child is
+    /// `ssh`, whose working directory is this Mac's and says nothing about
+    /// where you are on the far end. Those still depend on OSC 7.
+    func refreshDirectoryFromProcess() {
+        guard !isRemote, isRunning else { return }
+        guard let path = ProcessDirectory.path(forPID: engine.shellPID),
+              path != currentDirectory else { return }
+        applyDirectory(path)
+    }
+
     func engineDirectoryChanged(_ directory: String?) {
         guard let directory else { return }
         // OSC 7 reports a file:// URL; fall back to a plain path.
@@ -240,6 +255,13 @@ extension TerminalSession: TerminalEngineDelegate {
             path = directory
         }
         guard !path.isEmpty, path != currentDirectory else { return }
+        applyDirectory(path)
+    }
+
+    /// Shared by both routes into a directory change — the OSC 7 escape a
+    /// cooperating shell emits, and the kernel read that covers every shell
+    /// that doesn't.
+    private func applyDirectory(_ path: String) {
         currentDirectory = path
         if !isRemote { refreshGitBranch() }
         EventBus.shared.publish(APIEvent("session.directory", [

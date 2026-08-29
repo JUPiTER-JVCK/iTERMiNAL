@@ -40,7 +40,12 @@ final class AppSettings: ObservableObject {
     @Published var defaultDirectory: String { didSet { defaults.set(defaultDirectory, forKey: "defaultDirectory") } }
 
     // MARK: Appearance
-    @Published var theme: ThemeChoice { didSet { defaults.set(theme.rawValue, forKey: "theme") } }
+    @Published var theme: ThemeChoice {
+        didSet {
+            defaults.set(theme.rawValue, forKey: "theme")
+            applyAppearance()
+        }
+    }
     @Published var accentID: String { didSet { defaults.set(accentID, forKey: "accentID") } }
     @Published var backgroundOpacity: Double { didSet { defaults.set(backgroundOpacity, forKey: "backgroundOpacity") } }
     /// The reference app draws a flat sidebar; macOS vibrancy is offered as
@@ -157,6 +162,29 @@ final class AppSettings: ObservableObject {
         case .light: return .light
         case .dark: return .dark
         }
+    }
+
+    /// Forces the whole process's appearance, which `preferredColorScheme`
+    /// alone does not.
+    ///
+    /// Two things went wrong before this existed. SwiftUI does not reliably
+    /// un-force a window when the modifier goes back to nil, so returning to
+    /// System after picking Light or Dark left the window stuck — cycling the
+    /// three settings was the reliable way to see it. And the modifier only
+    /// governs SwiftUI's own views: the terminal is an AppKit view, and the
+    /// menu bar and titlebar are the system's, so all three kept following the
+    /// system while the chrome around them did not.
+    ///
+    /// Setting `NSApp.appearance` covers every one of those, and nil genuinely
+    /// means "follow the system" here.
+    func applyAppearance() {
+        let appearance: NSAppearance?
+        switch theme {
+        case .system: appearance = nil
+        case .light: appearance = NSAppearance(named: .aqua)
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        }
+        NSApp?.appearance = appearance
     }
 
     var accentColor: Color { Accents.color(for: accentID) }

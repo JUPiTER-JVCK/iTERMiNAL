@@ -66,6 +66,11 @@ final class SwiftTermEngine: TerminalEngine {
 
     var view: NSView { terminalView }
 
+    /// PID of the shell running in the PTY, or 0 when nothing is running.
+    /// Used to read the shell's working directory straight from the kernel,
+    /// which is the only way to track `cd` in a shell that doesn't emit OSC 7.
+    var shellPID: pid_t { terminalView.process?.shellPid ?? 0 }
+
     init(options: TerminalOptions) {
         terminalView = InstrumentedTerminalView(
             frame: NSRect(x: 0, y: 0, width: 640, height: 400),
