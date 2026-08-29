@@ -839,7 +839,7 @@ struct ComposerSettingsView: View {
                         .monospacedDigit()
                         .frame(width: 56, alignment: .trailing)
                 }
-                Text("The transcript is the composer's own shell, shown once it has run something. Both can also be dragged directly on the card.")
+                Text("The transcript is the composer's own shell, shown once it has run something. Both can also be dragged directly on the card. A tall transcript is capped to whatever the window can fit, so the input stays reachable.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -859,7 +859,7 @@ struct ComposerSettingsView: View {
                         .frame(width: 56, alignment: .trailing)
                 }
                 Toggle("Background vibrancy", isOn: $settings.composerVibrancy)
-                Text("Vibrancy lets the desktop through the card. Off by default, because the composer is meant to read as sitting above the terminal rather than as a window onto what is behind it.")
+                Text("Vibrancy lets the terminal underneath show through the card — not the desktop, since the composer floats over the app's own content. Off by default, because the card is meant to read as sitting above the terminal rather than as a window onto it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

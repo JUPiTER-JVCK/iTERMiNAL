@@ -76,6 +76,21 @@ struct ComposerBar: View {
         return (-horizontal...horizontal, -vertical...0)
     }
 
+    /// Transcript height that still leaves room for the rest of the card.
+    ///
+    /// The stored preference is a wish, not a guarantee: the window can be as
+    /// short as 560pt, and a transcript that tall would push the input and its
+    /// controls off the bottom — leaving the composer visible but unusable.
+    /// Everything above and below the transcript needs roughly this much.
+    private var maxTranscriptHeight: Double {
+        let chrome: Double = 210
+        return max(100, bounds.height - chrome)
+    }
+
+    private var effectiveTranscriptHeight: Double {
+        min(settings.composerTranscriptHeight, maxTranscriptHeight)
+    }
+
     /// The card's fill, honouring the opacity and vibrancy settings.
     ///
     /// Vibrancy is expressed by letting the fill go translucent so the terminal
@@ -151,7 +166,7 @@ struct ComposerBar: View {
                     // a container still hosting the old terminal.
                     TerminalHostView(session: session)
                         .id(session.id)
-                        .frame(height: settings.composerTranscriptHeight)
+                        .frame(height: effectiveTranscriptHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -160,6 +175,7 @@ struct ComposerBar: View {
 
                     TranscriptResizeHandle(
                         height: $settings.composerTranscriptHeight,
+                        maxHeight: maxTranscriptHeight,
                         theme: theme
                     )
                 }
@@ -378,6 +394,10 @@ struct ComposerBar: View {
 /// for the default height.
 private struct TranscriptResizeHandle: View {
     @Binding var height: Double
+    /// The tallest the transcript can be and still leave the input reachable
+    /// in the current window. Dragging stops here for the same reason the
+    /// rendered height is capped there.
+    let maxHeight: Double
     let theme: Theme
 
     /// Height when the drag began. `DragGesture` reports translation from the
@@ -402,7 +422,8 @@ private struct TranscriptResizeHandle: View {
                     .onChanged { value in
                         let start = startHeight ?? height
                         if startHeight == nil { startHeight = start }
-                        height = (start + value.translation.height).clamped(to: 100...560)
+                        height = (start + value.translation.height)
+                            .clamped(to: 100...max(100, maxHeight))
                     }
                     .onEnded { _ in startHeight = nil }
             )
