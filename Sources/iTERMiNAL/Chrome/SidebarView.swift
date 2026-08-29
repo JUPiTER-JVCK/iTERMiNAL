@@ -208,24 +208,32 @@ struct SidebarView: View {
         }
     }
 
+    /// Which of a workspace's tabs to list.
+    ///
+    /// Three states, not two. A closed folder shows nothing — that is what
+    /// closing it is for; it used to still list six. An open one shows the
+    /// first few, and "Show more" opens the rest. A search shows every match,
+    /// since hiding results behind "Show more" would bury the thing being
+    /// searched for.
+    ///
+    /// Kept out of the ViewBuilder below on purpose: a builder reads plain
+    /// statements as view content, so branching to pick a value has to happen
+    /// in an ordinary function.
+    private func visibleTabs(
+        _ tabs: [WorkspaceTab],
+        in workspace: Workspace,
+        isExpanded: Bool
+    ) -> [WorkspaceTab] {
+        guard isExpanded else { return [] }
+        if showAllWorkspaces.contains(workspace.id) || !query.isEmpty { return tabs }
+        return Array(tabs.prefix(collapsedTabLimit))
+    }
+
     @ViewBuilder
     private func workspaceGroup(_ workspace: Workspace, theme: Theme) -> some View {
         let tabs = matching(workspace.tabs)
         let isExpanded = expandedWorkspaces.contains(workspace.id) || !query.isEmpty
-        // Three states, not two. A closed folder shows nothing — that is what
-        // closing it is for; it used to still list six. An open one shows the
-        // first few, and "Show more" opens the rest. A search shows every
-        // match, since hiding results behind "Show more" would bury the thing
-        // being searched for.
-        let showsEveryTab = showAllWorkspaces.contains(workspace.id) || !query.isEmpty
-        let visible: [WorkspaceTab]
-        if !isExpanded {
-            visible = []
-        } else if showsEveryTab {
-            visible = tabs
-        } else {
-            visible = Array(tabs.prefix(collapsedTabLimit))
-        }
+        let visible = visibleTabs(tabs, in: workspace, isExpanded: isExpanded)
 
         WorkspaceFolderRow(
             workspace: workspace,
