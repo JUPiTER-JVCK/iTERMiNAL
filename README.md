@@ -10,6 +10,11 @@ Built in Swift with SwiftUI/AppKit on top of
 [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) — a real VT100/xterm
 terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 
+> **Just want to run it?**
+> [**Download the app**](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/download/latest/iTERMiNAL-latest-universal.zip)
+> — or browse [all releases](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases).
+> The green **Code** button above gives you the source tree, not the app.
+
 ## Features
 
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
@@ -60,14 +65,13 @@ There are two ways to get it running.
 
 ### Download a build (no Xcode needed)
 
-Every green CI run publishes the built app — an optimised Release build, the
-same configuration a shipped copy would be. Open the
-[Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions), click the
-most recent successful **Build** run, and download **iTERMiNAL-app** from the
-Artifacts section. Then:
+From [Releases](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases). Every
+green build of `main` refreshes **Latest build (main)** — an optimised Release
+build, the same configuration a shipped copy would be — and version tags get
+their own release with a changelog.
 
 ```sh
-unzip iTERMiNAL.zip
+unzip iTERMiNAL-*.zip
 xattr -dr com.apple.quarantine iTERMiNAL.app   # see note below
 open iTERMiNAL.app
 ```
@@ -76,6 +80,12 @@ These builds are **unsigned**, and macOS quarantines anything downloaded
 through a browser — so without that `xattr` line Gatekeeper refuses to open
 it ("damaged or can't be verified"). Right-click → Open works too. Signing
 properly needs an Apple Developer ID, which this project doesn't have yet.
+
+To try a branch that hasn't merged, the same app is attached to every CI run
+as the **iTERMiNAL-app** artifact under the
+[Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions) — note that
+GitHub only lets signed-in accounts download artifacts, and they expire after
+90 days. Releases have neither limitation, which is why they exist.
 
 ### Build from source
 
@@ -87,6 +97,17 @@ open iTERMiNAL.xcodeproj
 
 Then build and run the `iTERMiNAL` scheme. CI builds every push on a macOS
 runner (`.github/workflows/build.yml`).
+
+### Cutting a release
+
+Bump `MARKETING_VERSION` in `project.yml`, then push a matching tag:
+
+```sh
+git tag v0.3.0 && git push origin v0.3.0
+```
+
+CI builds it, overrides `MARKETING_VERSION` from the tag so the app's About box
+agrees with the release, and publishes the zip with a generated changelog.
 
 ## Shell integration (recommended)
 
