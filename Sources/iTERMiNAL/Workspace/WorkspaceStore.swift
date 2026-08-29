@@ -128,6 +128,9 @@ final class WorkspaceStore: ObservableObject {
         if !(AppSettings.shared.restoreSession && restore()) {
             bootstrap()
         }
+        // Covers the launch that skipped restore entirely: Recents is empty,
+        // so every transcript on disk is orphaned.
+        pruneOrphanedTranscripts()
     }
 
     private func bootstrap() {
@@ -289,13 +292,14 @@ final class WorkspaceStore: ObservableObject {
         let tab = newTab(directory: recent.isRemote ? nil : recent.directory, kind: kind)
         if let transcript = TranscriptStore.load(for: recent.id),
            let session = tab.root.firstTerminal() {
-            // The new shell has to be up before anything is written to the
-            // display, or its own first prompt lands on top of the restored
-            // text. This is a new process, so what is restored is a record of
-            // the old one, not a resumed session.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                session.displayRestored(transcript)
-            }
+            // Written before the shell starts, not after a delay. A timer was
+            // a race in both directions: a local shell has already drawn its
+            // prompt within a few hundred milliseconds, so the restore landed
+            // on top of it, and a slow one reversed the order again. Sessions
+            // start lazily when their view appears, so writing here puts the
+            // record in the buffer first and the new prompt necessarily
+            // follows it.
+            session.displayRestored(transcript)
         }
         removeRecent(recent)
     }
@@ -305,6 +309,18 @@ final class WorkspaceStore: ObservableObject {
         recentSessions.removeAll { $0.id == recent.id }
         TranscriptStore.remove(for: recent.id)
         scheduleSave()
+    }
+
+    /// Drops transcripts with no Recents entry left to belong to.
+    ///
+    /// Closing a session prunes as it goes, but that is not the only way the
+    /// list changes: importing an archive replaces it wholesale, and a launch
+    /// that skips restore starts from an empty one. Without a sweep on those
+    /// paths, transcripts for entries the user can no longer see would sit on
+    /// disk indefinitely — which for terminal output is the one outcome worth
+    /// designing against.
+    func pruneOrphanedTranscripts() {
+        TranscriptStore.pruneAll(keeping: Set(recentSessions.map(\.id)))
     }
 
     func clearRecents() {
@@ -820,6 +836,7 @@ final class WorkspaceStore: ObservableObject {
         terminateAllSessions()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
+        pruneOrphanedTranscripts()
         if workspaces.isEmpty {
             bootstrap()
             return
@@ -852,6 +869,7 @@ final class WorkspaceStore: ObservableObject {
 
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
+        pruneOrphanedTranscripts()
         let allTabs = workspaces.flatMap(\.tabs)
         guard !allTabs.isEmpty else { return false }
 

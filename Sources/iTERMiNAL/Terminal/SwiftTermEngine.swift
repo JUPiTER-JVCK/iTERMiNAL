@@ -49,16 +49,27 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
                 lineBuffer.removeAll(keepingCapacity: true)
                 lineIsTrustworthy = true
             case 0x7F, 0x08:                    // Backspace
+                // One keypress deletes one character, which in UTF-8 may be
+                // several bytes: dropping a single byte would leave a broken
+                // sequence that fails to decode on Enter, silently losing an
+                // otherwise perfectly good command.
+                while let last = lineBuffer.last, last & 0xC0 == 0x80 {
+                    lineBuffer.removeLast()
+                }
                 if !lineBuffer.isEmpty { lineBuffer.removeLast() }
-            case 0x1B, 0x09:                    // Escape sequence, or Tab
-                lineIsTrustworthy = false
             case 0x03, 0x04, 0x15:              // ^C, ^D, ^U abandon the line
                 lineBuffer.removeAll(keepingCapacity: true)
                 lineIsTrustworthy = true
             case 0x20...0x7E, 0x80...0xFF:      // Printable ASCII and UTF-8
                 lineBuffer.append(byte)
             default:
-                break
+                // Every other control byte — escape sequences, Tab, and the
+                // readline editing keys (^W, ^K, ^A, ^E, ^Y…) — moves or
+                // rewrites the shell's line somewhere this buffer cannot
+                // follow. Treating them as "no effect" produced titles that
+                // were confidently wrong: `echo old`, ^W, `new` runs
+                // `echo new` and would have been recorded as `echo oldnew`.
+                lineIsTrustworthy = false
             }
         }
     }
@@ -253,14 +264,33 @@ final class SwiftTermEngine: TerminalEngine {
         let cols = terminal.cols
         let rows = terminal.rows
         guard cols > 0, rows > 0 else { return "" }
-        let lastRow = terminal.buffer.yDisp + rows - 1
+        // Deliberately past the end: SwiftTerm clamps the end row to the last
+        // line it holds, so this reaches the true bottom of the buffer. Using
+        // the display offset instead would truncate everything below the
+        // viewport whenever the session was closed while scrolled up — losing
+        // exactly the newest output.
         let text = terminal.getText(
             start: Position(col: 0, row: 0),
-            end: Position(col: cols - 1, row: lastRow)
+            end: Position(col: cols - 1, row: Int.max)
         )
-        // Keep the tail: the end of a session is what you want to see again.
-        guard text.utf8.count > maxBytes else { return text }
-        return String(text.suffix(maxBytes / 4))
+        return Self.trimmedToBytes(text, maxBytes: maxBytes)
+    }
+
+    /// Keeps the last `maxBytes` of UTF-8, cut on a character boundary.
+    ///
+    /// Truncating by `Character` count could not honour a byte cap: one
+    /// grapheme can be many scalars, so a "quarter of the cap" in characters
+    /// still encodes to well over it.
+    static func trimmedToBytes(_ text: String, maxBytes: Int) -> String {
+        var bytes = Array(text.utf8)
+        guard bytes.count > maxBytes else { return text }
+        // The tail is what matters: the end of a session is what you want back.
+        bytes = Array(bytes.suffix(maxBytes))
+        // A byte-aligned cut can land mid-sequence; skip continuation bytes so
+        // what remains is decodable.
+        var start = 0
+        while start < bytes.count, bytes[start] & 0xC0 == 0x80 { start += 1 }
+        return String(decoding: bytes[start...], as: UTF8.self)
     }
 
     /// Writes text to the display without sending it to the shell.

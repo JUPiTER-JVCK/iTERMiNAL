@@ -495,7 +495,13 @@ private struct SessionChip: View {
                 return session.connection?.name ?? "remote"
             }
         }
-        return (settings.resolvedShell().path as NSString).lastPathComponent
+        // The composer's own override, not the global setting: this chip sits
+        // on the composer and its tooltip says input goes to this session, so
+        // naming the app-wide default while the composer runs bash would be
+        // pointing at the wrong shell.
+        let override = settings.composerShell
+        let shell = settings.resolvedShell(override: override.isEmpty ? nil : override)
+        return (shell.path as NSString).lastPathComponent
     }
 }
 
@@ -710,10 +716,35 @@ private struct ComposerShellPicker: View {
 
     /// Checked once: the set of installed shells does not change while the
     /// app is running.
+    ///
+    /// Resolved through the user's own PATH rather than a list of guessed
+    /// locations. Hardcoding the two Homebrew prefixes missed MacPorts, Nix,
+    /// and anything else on PATH, so a shell could be installed and still not
+    /// be offered.
     private static let available: [(path: String, name: String)] = {
-        ["/bin/zsh", "/bin/bash", "/bin/sh", "/opt/homebrew/bin/fish", "/usr/local/bin/fish"]
-            .filter { FileManager.default.isExecutableFile(atPath: $0) }
-            .map { ($0, ($0 as NSString).lastPathComponent) }
+        let names = ["zsh", "bash", "sh", "fish"]
+        let searchPath = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        // /bin last so a user's preferred build shadows the system copy, and
+        // present even when PATH is empty (a GUI app can inherit very little).
+        let directories = searchPath + ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+
+        var seen = Set<String>()
+        var found: [(path: String, name: String)] = []
+        for name in names {
+            for directory in directories {
+                let path = (directory as NSString).appendingPathComponent(name)
+                guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+                // Resolve symlinks so /usr/local/bin/fish and its real target
+                // are not offered as two separate choices.
+                let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+                guard seen.insert(resolved).inserted else { continue }
+                found.append((path, name))
+                break
+            }
+        }
+        return found
     }()
 
     var body: some View {
@@ -734,7 +765,10 @@ private struct ComposerShellPicker: View {
 
             Spacer(minLength: 8)
 
-            Picker("", selection: shellBinding) {
+            // A real label, hidden visually: the "Shell" text beside this is
+            // decoration as far as assistive technology is concerned, so an
+            // empty label would leave the control unnamed.
+            Picker("Shell", selection: shellBinding) {
                 Text("Default").tag("")
                 ForEach(Self.available, id: \.path) { shell in
                     Text(shell.name).tag(shell.path)
