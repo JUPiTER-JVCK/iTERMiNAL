@@ -87,6 +87,27 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Terminal") {
+            // Bound to the same 9...24 range the Appearance slider uses, so
+            // the two can't disagree about what a legal size is.
+            Button("Bigger Text") {
+                settings.terminalFontSize = min(24, settings.terminalFontSize + 1)
+            }
+            .keyboardShortcut("+", modifiers: .command)
+            .disabled(settings.terminalFontSize >= 24)
+
+            Button("Smaller Text") {
+                settings.terminalFontSize = max(9, settings.terminalFontSize - 1)
+            }
+            .keyboardShortcut("-", modifiers: .command)
+            .disabled(settings.terminalFontSize <= 9)
+
+            Button("Actual Size") {
+                settings.terminalFontSize = 13
+            }
+            .keyboardShortcut("0", modifiers: .command)
+
+            Divider()
+
             Button("Split Right") {
                 WorkspaceStore.shared.splitFocusedPane(.horizontal, kind: .terminal)
             }

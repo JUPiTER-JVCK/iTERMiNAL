@@ -75,6 +75,10 @@ final class AppSettings: ObservableObject {
     @Published var composerOffsetY: Double { didSet { defaults.set(composerOffsetY, forKey: "composerOffsetY") } }
     @Published var composerCollapsed: Bool { didSet { defaults.set(composerCollapsed, forKey: "composerCollapsed") } }
     @Published var composerTranscriptHeight: Double { didSet { defaults.set(composerTranscriptHeight, forKey: "composerTranscriptHeight") } }
+    /// Shell the composer's own session runs. Empty means "same as everything
+    /// else"; a path here changes only the composer, so trying something in
+    /// bash doesn't change what every new tab opens as.
+    @Published var composerShell: String { didSet { defaults.set(composerShell, forKey: "composerShell") } }
 
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
@@ -127,6 +131,7 @@ final class AppSettings: ObservableObject {
         composerOffsetY = defaults.object(forKey: "composerOffsetY") as? Double ?? 0
         composerCollapsed = defaults.bool(forKey: "composerCollapsed")
         composerTranscriptHeight = defaults.object(forKey: "composerTranscriptHeight") as? Double ?? 200
+        composerShell = defaults.string(forKey: "composerShell") ?? ""
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -202,8 +207,12 @@ final class AppSettings: ObservableObject {
     }
 
     /// The shell binary, launch args, and argv[0] override for new sessions.
-    func resolvedShell() -> (path: String, args: [String], execName: String?) {
-        var path = shellPath.trimmingCharacters(in: .whitespaces)
+    ///
+    /// `override` lets one session run a different shell from the rest — the
+    /// composer offers this, so you can try something in bash without changing
+    /// what every other terminal opens as.
+    func resolvedShell(override: String? = nil) -> (path: String, args: [String], execName: String?) {
+        var path = (override ?? shellPath).trimmingCharacters(in: .whitespaces)
         if path.isEmpty {
             path = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         }
@@ -272,6 +281,7 @@ final class AppSettings: ObservableObject {
         composerOffsetY = 0
         composerCollapsed = false
         composerTranscriptHeight = 200
+        composerShell = ""
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

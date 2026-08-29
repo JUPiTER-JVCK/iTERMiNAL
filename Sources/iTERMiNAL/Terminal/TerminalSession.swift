@@ -27,14 +27,29 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Nil until it actually starts, so a session that never launched reads
     /// as "not started" rather than claiming zero seconds of uptime.
     @Published private(set) var startedAt: Date?
+    /// The most recent command this shell was given, so a tab can be
+    /// identified by what it is doing rather than by its directory — which is
+    /// the same for every tab opened in one project.
+    @Published private(set) var lastCommand: String?
 
     let engine: SwiftTermEngine
     private var hasStarted = false
 
-    init(id: UUID = UUID(), kind: SessionKind = .localShell, initialDirectory: String? = nil) {
+    /// A shell for this session alone, overriding the global setting. The
+    /// composer uses it so switching to bash there leaves every other terminal
+    /// on whatever the user configured.
+    private let shellOverride: String?
+
+    init(
+        id: UUID = UUID(),
+        kind: SessionKind = .localShell,
+        initialDirectory: String? = nil,
+        shellOverride: String? = nil
+    ) {
         let settings = AppSettings.shared
         self.id = id
         self.kind = kind
+        self.shellOverride = shellOverride
         self.currentDirectory = initialDirectory ?? settings.resolvedInitialDirectory
 
         let options = TerminalOptions(
@@ -65,6 +80,12 @@ final class TerminalSession: ObservableObject, Identifiable {
                 EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
             }
         }
+        engine.onCommand = { [weak self] command in
+            // Same queue caveat as the activity callback above.
+            DispatchQueue.main.async {
+                self?.noteCommand(command)
+            }
+        }
         engine.onLinkActivated = { [weak self] link in
             guard let self else { return }
             EventBus.shared.publish(APIEvent("session.link", [
@@ -82,8 +103,24 @@ final class TerminalSession: ObservableObject, Identifiable {
         return AppSettings.shared.sshConnections.first { $0.id == id }
     }
 
+    /// Records a command line and shortens it for display.
+    ///
+    /// Only the program and its first argument are kept: a full command line
+    /// with paths and flags is far wider than a sidebar row, and the head of
+    /// it is what distinguishes one tab from another.
+    private func noteCommand(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let words = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        let label = words.prefix(2).joined(separator: " ")
+        lastCommand = label.isEmpty ? nil : label
+    }
+
     var displayTitle: String {
+        // A title the shell set itself wins: it is the most deliberate signal
+        // available, and a program that sets one is saying what it is.
         if !title.isEmpty { return title }
+        if let lastCommand { return lastCommand }
         if let connection { return connection.name.isEmpty ? connection.destination : connection.name }
         let component = (currentDirectory as NSString).lastPathComponent
         return component.isEmpty ? "Terminal" : component
@@ -122,7 +159,12 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     private func launch() {
         let settings = AppSettings.shared
-        switch SessionLaunch.configuration(for: kind, settings: settings, directory: isRemote ? nil : currentDirectory) {
+        switch SessionLaunch.configuration(
+            for: kind,
+            settings: settings,
+            directory: isRemote ? nil : currentDirectory,
+            shellOverride: shellOverride
+        ) {
         case .success(let configuration):
             launchError = nil
             engine.start(configuration)
@@ -148,6 +190,20 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Visible screen contents, used by the local API's capture command.
     func captureVisibleText() -> String {
         engine.captureVisibleText()
+    }
+
+    /// Scrollback plus screen, saved when a session closes so Recents can
+    /// show it again.
+    func captureScrollback(maxBytes: Int) -> String {
+        engine.captureScrollback(maxBytes: maxBytes)
+    }
+
+    /// Paints a previous session's contents into this one, above its own
+    /// prompt. Nothing is sent to the shell — this is a record, not a replay.
+    func displayRestored(_ transcript: String) {
+        guard !transcript.isEmpty else { return }
+        engine.display(text: transcript)
+        engine.display(text: "\r\n\u{1B}[2m— end of restored session —\u{1B}[0m\r\n")
     }
 
     /// Pushes font, colors, ANSI palette, and the GPU renderer preference

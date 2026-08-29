@@ -41,11 +41,12 @@ enum SessionLaunch {
     static func configuration(
         for kind: SessionKind,
         settings: AppSettings,
-        directory: String?
+        directory: String?,
+        shellOverride: String? = nil
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         switch kind {
         case .localShell:
-            let shell = settings.resolvedShell()
+            let shell = settings.resolvedShell(override: shellOverride)
             return .success(TerminalLaunchConfiguration(
                 executable: shell.path,
                 args: shell.args,
