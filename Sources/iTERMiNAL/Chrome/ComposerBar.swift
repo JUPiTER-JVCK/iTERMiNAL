@@ -76,6 +76,20 @@ struct ComposerBar: View {
         return (-horizontal...horizontal, -vertical...0)
     }
 
+    /// The card's fill, honouring the opacity and vibrancy settings.
+    ///
+    /// Vibrancy is expressed by letting the fill go translucent so the terminal
+    /// shows through, rather than by adding an NSVisualEffectView: the card
+    /// floats over app content, not over the desktop, so a material would
+    /// sample the wrong thing.
+    private func cardFill(_ theme: Theme) -> Color {
+        let base = theme.floatingSurface
+        let opacity = settings.composerVibrancy
+            ? min(settings.composerOpacity, 0.85)
+            : settings.composerOpacity
+        return base.opacity(opacity)
+    }
+
     /// Re-anchors the card when the window shrinks under it. Writes only on a
     /// real change — this runs on every frame of a live window resize.
     private func clampToBounds() {
@@ -108,7 +122,7 @@ struct ComposerBar: View {
             .foregroundStyle(theme.textSecondary)
             .padding(.horizontal, 14)
             .frame(height: 32)
-            .elevated(cornerRadius: 16, radius: 14, y: 4, fill: theme.floatingSurface)
+            .elevated(cornerRadius: 16, radius: 14, y: 4, fill: cardFill(theme))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -204,7 +218,7 @@ struct ComposerBar: View {
             .padding(14)
             // A distinctly lighter surface and a deeper shadow, so this reads
             // as floating above the terminal rather than painted onto it.
-            .elevated(cornerRadius: 22, radius: 22, y: 8, fill: theme.floatingSurface)
+            .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme))
         }
     }
 
@@ -714,38 +728,6 @@ private struct ComposerShellPicker: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
 
-    /// Checked once: the set of installed shells does not change while the
-    /// app is running.
-    ///
-    /// Resolved through the user's own PATH rather than a list of guessed
-    /// locations. Hardcoding the two Homebrew prefixes missed MacPorts, Nix,
-    /// and anything else on PATH, so a shell could be installed and still not
-    /// be offered.
-    private static let available: [(path: String, name: String)] = {
-        let names = ["zsh", "bash", "sh", "fish"]
-        let searchPath = (ProcessInfo.processInfo.environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        // /bin last so a user's preferred build shadows the system copy, and
-        // present even when PATH is empty (a GUI app can inherit very little).
-        let directories = searchPath + ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]
-
-        var seen = Set<String>()
-        var found: [(path: String, name: String)] = []
-        for name in names {
-            for directory in directories {
-                let path = (directory as NSString).appendingPathComponent(name)
-                guard FileManager.default.isExecutableFile(atPath: path) else { continue }
-                // Resolve symlinks so /usr/local/bin/fish and its real target
-                // are not offered as two separate choices.
-                let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-                guard seen.insert(resolved).inserted else { continue }
-                found.append((path, name))
-                break
-            }
-        }
-        return found
-    }()
 
     var body: some View {
         HStack(spacing: 8) {
@@ -770,7 +752,7 @@ private struct ComposerShellPicker: View {
             // empty label would leave the control unnamed.
             Picker("Shell", selection: shellBinding) {
                 Text("Default").tag("")
-                ForEach(Self.available, id: \.path) { shell in
+                ForEach(ComposerShells.available, id: \.path) { shell in
                     Text(shell.name).tag(shell.path)
                 }
             }
@@ -793,4 +775,43 @@ private struct ComposerShellPicker: View {
             }
         )
     }
+}
+
+/// The shells the composer offers, resolved once.
+///
+/// Shared by the composer's own popover and the Composer settings pane so the
+/// two can never disagree about what is installed.
+enum ComposerShells {
+    /// Checked once: the set of installed shells does not change while the
+    /// app is running.
+    ///
+    /// Resolved through the user's own PATH rather than a list of guessed
+    /// locations. Hardcoding the two Homebrew prefixes missed MacPorts, Nix,
+    /// and anything else on PATH, so a shell could be installed and still not
+    /// be offered.
+    static let available: [(path: String, name: String)] = {
+        let names = ["zsh", "bash", "sh", "fish"]
+        let searchPath = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        // /bin last so a user's preferred build shadows the system copy, and
+        // present even when PATH is empty (a GUI app can inherit very little).
+        let directories = searchPath + ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+
+        var seen = Set<String>()
+        var found: [(path: String, name: String)] = []
+        for name in names {
+            for directory in directories {
+                let path = (directory as NSString).appendingPathComponent(name)
+                guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+                // Resolve symlinks so /usr/local/bin/fish and its real target
+                // are not offered as two separate choices.
+                let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+                guard seen.insert(resolved).inserted else { continue }
+                found.append((path, name))
+                break
+            }
+        }
+        return found
+    }()
 }

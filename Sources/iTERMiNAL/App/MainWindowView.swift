@@ -158,7 +158,7 @@ struct DetailView: View {
             if settings.composerEnabled {
                 GeometryReader { proxy in
                     ComposerBar(bounds: proxy.size)
-                        .frame(maxWidth: 820)
+                        .frame(maxWidth: settings.composerWidth)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
