@@ -83,9 +83,14 @@ properly needs an Apple Developer ID, which this project doesn't have yet.
 
 To try a branch that hasn't merged, the same app is attached to every CI run
 as the **iTERMiNAL-app** artifact under the
-[Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions) — note that
-GitHub only lets signed-in accounts download artifacts, and they expire after
-90 days. Releases have neither limitation, which is why they exist.
+[Actions tab](https://github.com/JUPiTER-JVCK/iTERMiNAL/actions). Prefer a
+release where one exists: artifacts expire after 90 days and are buried inside
+a workflow run, while a release keeps its link forever and sits in the repo
+sidebar.
+
+While this repository is private, both routes need a GitHub account with
+access to it. Making the repository public is what turns the release link into
+one anybody can open — artifacts would still require an account even then.
 
 ### Build from source
 
