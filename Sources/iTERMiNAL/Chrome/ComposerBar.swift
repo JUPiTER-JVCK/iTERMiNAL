@@ -235,8 +235,20 @@ struct ComposerBar: View {
             // made the card feel stuck — it only moved once you had committed
             // to a big gesture.
             DragGesture(minimumDistance: 2)
-                .onChanged {
-                    dragDelta = $0.translation
+                .onChanged { value in
+                    // Clamp while dragging, not only on release. Assigning the
+                    // raw translation let the card follow the pointer clean off
+                    // the surface and then snap back when let go, which is not
+                    // what "stays inside" should feel like.
+                    let limits = offsetLimits
+                    let x = (settings.composerOffsetX + value.translation.width)
+                        .clamped(to: limits.x)
+                    let y = (settings.composerOffsetY + value.translation.height)
+                        .clamped(to: limits.y)
+                    dragDelta = CGSize(
+                        width: x - settings.composerOffsetX,
+                        height: y - settings.composerOffsetY
+                    )
                     if !dragging { dragging = true }
                 }
                 .onEnded { value in

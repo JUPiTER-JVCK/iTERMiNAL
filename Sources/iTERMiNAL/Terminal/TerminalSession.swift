@@ -48,13 +48,22 @@ final class TerminalSession: ObservableObject, Identifiable {
             WorkspaceStore.shared.noteFocused(session: self)
         }
         engine.onActivity = { [weak self] in
-            guard let self else { return }
-            // Already debounced by the engine, so this is cheap.
-            self.lastActivityAt = Date()
-            // A prompt redraw after `cd` is activity, so this is where a
-            // directory change becomes visible in a shell with no OSC 7 hook.
-            self.refreshDirectoryFromProcess()
-            EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+            // SwiftTerm makes no promise about which queue this arrives on —
+            // the engine says so where it coalesces these — and everything
+            // below either publishes observable state or reads an AppKit
+            // view, so the hop has to happen before any of it. The event bus
+            // hops on its own, which is why this was survivable before, but
+            // `lastActivityAt` was already being published off-thread.
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Already debounced by the engine, so this is cheap.
+                self.lastActivityAt = Date()
+                // A prompt redraw after `cd` is activity, so this is where a
+                // directory change becomes visible in a shell with no OSC 7
+                // hook.
+                self.refreshDirectoryFromProcess()
+                EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+            }
         }
         engine.onLinkActivated = { [weak self] link in
             guard let self else { return }
