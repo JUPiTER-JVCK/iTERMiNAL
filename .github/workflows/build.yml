@@ -119,7 +119,7 @@ jobs:
       # Kept alongside the release below: this is how a PR branch that hasn't
       # merged gets tested, and releases are only cut from pushes.
       - name: Upload app
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: iTERMiNAL-app
           path: iTERMiNAL.zip
@@ -143,7 +143,7 @@ jobs:
 
       # Extracts iTERMiNAL.zip (the packaged bundle) into the working directory.
       - name: Download the built app
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: iTERMiNAL-app
 
