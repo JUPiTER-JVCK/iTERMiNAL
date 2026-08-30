@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, terminal, panels, connections, security, sync, shortcuts, advanced
+    case general, appearance, terminal, composer, panels, connections, security, sync, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -10,6 +10,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .appearance: return "Appearance"
+        case .composer: return "Composer"
         case .terminal: return "Terminal"
         case .panels: return "Panels"
         case .connections: return "Connections"
@@ -25,6 +26,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "How iTERMiNAL starts up and which shell it runs."
         case .appearance: return "Theme, accent, and the chrome around your terminals."
+        case .composer: return "The floating command box: size, fill, and which shell it runs."
         case .terminal: return "Colors, font, cursor, scrollback, and rendering."
         case .panels: return "The composer, the browser panel, and the file browser."
         case .connections: return "Saved SSH hosts used for remote sessions and SFTP."
@@ -39,6 +41,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .appearance: return "paintbrush"
+        case .composer: return "text.cursor"
         case .terminal: return "terminal"
         case .panels: return "sidebar.right"
         case .connections: return "network"
@@ -60,7 +63,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
         var sections: [SettingsSection] {
             switch self {
-            case .workspace: return [.general, .appearance, .terminal]
+            case .workspace: return [.general, .appearance, .terminal, .composer]
             case .surfaces: return [.panels, .connections]
             case .system: return [.security, .sync, .shortcuts, .advanced]
             }
@@ -167,6 +170,7 @@ struct SettingsRootView: View {
                 switch selection {
                 case .general: GeneralSettingsView()
                 case .appearance: AppearanceSettingsView()
+                case .composer: ComposerSettingsView()
                 case .terminal: TerminalSettingsView()
                 case .panels: PanelsSettingsView()
                 case .connections: ConnectionsSettingsView()
@@ -327,6 +331,47 @@ struct TerminalSettingsView: View {
         .sorted()
     }()
 
+    /// Twenty coding fonts worth knowing about, all free.
+    ///
+    /// The app can only use what is installed on this Mac — there is no way to
+    /// load a font it doesn't have — so this is a recommendation list, not a
+    /// second source of fonts. Ones you have are selectable; ones you don't are
+    /// shown greyed with somewhere to get them, which is more useful than
+    /// hiding them and leaving you to wonder what to install.
+    static let recommendedFonts: [(family: String, source: String)] = [
+        ("JetBrains Mono", "https://www.jetbrains.com/lp/mono/"),
+        ("Fira Code", "https://github.com/tonsky/FiraCode"),
+        ("Fira Mono", "https://github.com/mozilla/Fira"),
+        ("MesloLGS NF", "https://github.com/romkatv/powerlevel10k#manual-font-installation"),
+        ("Meslo LG S", "https://github.com/andreberg/Meslo-Font"),
+        ("Cascadia Code", "https://github.com/microsoft/cascadia-code"),
+        ("Hack", "https://sourcefoundry.org/hack/"),
+        ("Iosevka", "https://typeof.net/Iosevka/"),
+        ("IBM Plex Mono", "https://github.com/IBM/plex"),
+        ("Source Code Pro", "https://github.com/adobe-fonts/source-code-pro"),
+        ("Victor Mono", "https://rubjo.github.io/victor-mono/"),
+        ("Inconsolata", "https://github.com/googlefonts/Inconsolata"),
+        ("Roboto Mono", "https://fonts.google.com/specimen/Roboto+Mono"),
+        ("Ubuntu Mono", "https://fonts.google.com/specimen/Ubuntu+Mono"),
+        ("Space Mono", "https://fonts.google.com/specimen/Space+Mono"),
+        ("Anonymous Pro", "https://www.marksimonson.com/fonts/view/anonymous-pro"),
+        ("DejaVu Sans Mono", "https://dejavu-fonts.github.io"),
+        ("Monaspace Neon", "https://monaspace.githubnext.com"),
+        ("Geist Mono", "https://vercel.com/font"),
+        ("CommitMono", "https://commitmono.com"),
+    ]
+
+    /// Split once: which recommendations this Mac actually has.
+    private static var installedRecommended: [String] {
+        let installed = Set(monospacedFamilies)
+        return recommendedFonts.map(\.family).filter { installed.contains($0) }
+    }
+
+    private static var missingRecommended: [(family: String, source: String)] {
+        let installed = Set(monospacedFamilies)
+        return recommendedFonts.filter { !installed.contains($0.family) }
+    }
+
     private let cursorStyles: [(tag: String, label: String)] = [
         ("steadyBlock", "Block"),
         ("blinkBlock", "Blinking Block"),
@@ -350,9 +395,21 @@ struct TerminalSettingsView: View {
             Section("Font") {
                 Picker("Font", selection: $settings.terminalFontName) {
                     Text("System monospace (SF Mono)").tag("")
-                    ForEach(Self.monospacedFamilies, id: \.self) { family in
-                        Text(family).tag(family)
+                    if !Self.installedRecommended.isEmpty {
+                        Section("Recommended") {
+                            ForEach(Self.installedRecommended, id: \.self) { family in
+                                Text(family).tag(family)
+                            }
+                        }
                     }
+                    Section("All monospaced fonts") {
+                        ForEach(Self.monospacedFamilies, id: \.self) { family in
+                            Text(family).tag(family)
+                        }
+                    }
+                }
+                if !Self.missingRecommended.isEmpty {
+                    RecommendedFontsNotice(missing: Self.missingRecommended)
                 }
                 HStack {
                     Slider(value: $settings.terminalFontSize, in: 9...24, step: 1)
@@ -724,5 +781,112 @@ struct AdvancedSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Lists the recommended fonts this Mac doesn't have, with somewhere to get
+/// them. Collapsed by default — it is a suggestion, not a task.
+private struct RecommendedFontsNotice: View {
+    let missing: [(family: String, source: String)]
+
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(missing, id: \.family) { font in
+                    if let url = URL(string: font.source) {
+                        Link(font.family, destination: url)
+                            .font(.caption)
+                    } else {
+                        Text(font.family).font(.caption)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Text("\(missing.count) recommended fonts aren't installed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Settings for the floating command box: how big it is, how solid it looks,
+/// and which shell it runs.
+struct ComposerSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        Form {
+            Section("Visibility") {
+                Toggle("Show composer", isOn: $settings.composerEnabled)
+            }
+
+            Section("Size") {
+                HStack {
+                    Text("Width")
+                    Slider(value: $settings.composerWidth, in: 420...1200, step: 10)
+                    Text("\(Int(settings.composerWidth)) pt")
+                        .monospacedDigit()
+                        .frame(width: 56, alignment: .trailing)
+                }
+                HStack {
+                    Text("Transcript height")
+                    Slider(value: $settings.composerTranscriptHeight, in: 100...560, step: 10)
+                    Text("\(Int(settings.composerTranscriptHeight)) pt")
+                        .monospacedDigit()
+                        .frame(width: 56, alignment: .trailing)
+                }
+                Text("The transcript is the composer's own shell, shown once it has run something. Both can also be dragged directly on the card. A tall transcript is capped to whatever the window can fit, so the input stays reachable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Reset position") {
+                    settings.composerOffsetX = 0
+                    settings.composerOffsetY = 0
+                }
+                .help("Return the card to the bottom centre")
+            }
+
+            Section("Fill") {
+                HStack {
+                    Text("Opacity")
+                    Slider(value: $settings.composerOpacity, in: 0.5...1.0)
+                    Text("\(Int(settings.composerOpacity * 100))%")
+                        .monospacedDigit()
+                        .frame(width: 56, alignment: .trailing)
+                }
+                Toggle("Background vibrancy", isOn: $settings.composerVibrancy)
+                Text("Vibrancy lets the terminal underneath show through the card — not the desktop, since the composer floats over the app's own content. Off by default, because the card is meant to read as sitting above the terminal rather than as a window onto it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Shell") {
+                Picker("Shell", selection: shellBinding) {
+                    Text("Same as new terminals").tag("")
+                    ForEach(ComposerShells.available, id: \.path) { shell in
+                        Text(shell.name).tag(shell.path)
+                    }
+                }
+                Text("Applies only to the composer's own session, so trying something in another shell doesn't change what new tabs open as. Changing it restarts that session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var shellBinding: Binding<String> {
+        Binding(
+            get: { settings.composerShell },
+            set: { newValue in
+                guard newValue != settings.composerShell else { return }
+                settings.composerShell = newValue
+                store.resetComposerSession()
+            }
+        )
     }
 }

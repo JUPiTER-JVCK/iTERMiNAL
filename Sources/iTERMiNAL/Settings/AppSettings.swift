@@ -79,6 +79,13 @@ final class AppSettings: ObservableObject {
     /// else"; a path here changes only the composer, so trying something in
     /// bash doesn't change what every new tab opens as.
     @Published var composerShell: String { didSet { defaults.set(composerShell, forKey: "composerShell") } }
+    /// Composer card geometry and fill. Width was hardcoded at 820pt in the
+    /// layout; it lives here so it can be changed without a rebuild.
+    @Published var composerWidth: Double { didSet { defaults.set(composerWidth, forKey: "composerWidth") } }
+    @Published var composerOpacity: Double { didSet { defaults.set(composerOpacity, forKey: "composerOpacity") } }
+    /// Off by default: the card is meant to read as sitting above the
+    /// terminal, and vibrancy pulls the desktop through it instead.
+    @Published var composerVibrancy: Bool { didSet { defaults.set(composerVibrancy, forKey: "composerVibrancy") } }
 
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
@@ -132,6 +139,9 @@ final class AppSettings: ObservableObject {
         composerCollapsed = defaults.bool(forKey: "composerCollapsed")
         composerTranscriptHeight = defaults.object(forKey: "composerTranscriptHeight") as? Double ?? 200
         composerShell = defaults.string(forKey: "composerShell") ?? ""
+        composerWidth = defaults.object(forKey: "composerWidth") as? Double ?? 820
+        composerOpacity = defaults.object(forKey: "composerOpacity") as? Double ?? 1.0
+        composerVibrancy = defaults.bool(forKey: "composerVibrancy")
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -282,6 +292,9 @@ final class AppSettings: ObservableObject {
         composerCollapsed = false
         composerTranscriptHeight = 200
         composerShell = ""
+        composerWidth = 820
+        composerOpacity = 1.0
+        composerVibrancy = false
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

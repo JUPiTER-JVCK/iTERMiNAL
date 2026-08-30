@@ -33,6 +33,16 @@ struct PreferencesArchive: Codable {
     var showHiddenFiles: Bool
     var followTerminalDirectory: Bool
     var composerEnabled: Bool
+    /// Composer look and geometry. Optional so archives written before these
+    /// existed still decode.
+    ///
+    /// `composerShell` is deliberately absent: it is an absolute path to a
+    /// binary on one machine, and carrying it to another would either point at
+    /// nothing or — worse — at a different program with the same name.
+    var composerWidth: Double?
+    var composerOpacity: Double?
+    var composerVibrancy: Bool?
+    var composerTranscriptHeight: Double?
     var connections: [SSHConnection]
 
     init(settings: AppSettings) {
@@ -52,6 +62,10 @@ struct PreferencesArchive: Codable {
         showHiddenFiles = settings.showHiddenFiles
         followTerminalDirectory = settings.followTerminalDirectory
         composerEnabled = settings.composerEnabled
+        composerWidth = settings.composerWidth
+        composerOpacity = settings.composerOpacity
+        composerVibrancy = settings.composerVibrancy
+        composerTranscriptHeight = settings.composerTranscriptHeight
         connections = settings.sshConnections
     }
 
@@ -72,6 +86,14 @@ struct PreferencesArchive: Codable {
         settings.showHiddenFiles = showHiddenFiles
         settings.followTerminalDirectory = followTerminalDirectory
         settings.composerEnabled = composerEnabled
+        // Only overwrite when the archive carried a value: an older export
+        // should leave the current settings alone rather than reset them.
+        if let composerWidth { settings.composerWidth = composerWidth }
+        if let composerOpacity { settings.composerOpacity = composerOpacity }
+        if let composerVibrancy { settings.composerVibrancy = composerVibrancy }
+        if let composerTranscriptHeight {
+            settings.composerTranscriptHeight = composerTranscriptHeight
+        }
         settings.sshConnections = connections
     }
 }
