@@ -1,0 +1,69 @@
+// iTERMiNAL Everforest — fastfetch config
+//
+//   brew install fastfetch
+//
+// Install to ~/.config/fastfetch/config.jsonc, then add it to your shell rc
+// so a new terminal opens on something other than an empty prompt:
+//
+//   echo 'fastfetch' >> ~/.zshrc
+//
+// Colours are named (green, blue, …) rather than hex on purpose: they resolve
+// through the terminal's own ANSI palette, so this follows whichever
+// iTERMiNAL theme Ghostty is set to instead of pinning itself to Everforest.
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+
+  "logo": {
+    "padding": { "top": 1, "left": 2, "right": 3 }
+  },
+
+  "display": {
+    "separator": "  ",
+    "color": {
+      "keys": "green",
+      "title": "blue"
+    }
+  },
+
+  "modules": [
+    "break",
+    {
+      "type": "title",
+      "keyColor": "blue",
+      "format": "{user-name}@{host-name}"
+    },
+    "separator",
+
+    { "type": "os",       "key": "  ", "keyColor": "green" },
+    { "type": "kernel",   "key": "  ", "keyColor": "green" },
+    { "type": "uptime",   "key": "  ", "keyColor": "green" },
+    { "type": "packages", "key": " 󰏖 ", "keyColor": "green" },
+    { "type": "shell",    "key": "  ", "keyColor": "green" },
+
+    "separator",
+
+    { "type": "display",      "key": " 󰍹 ", "keyColor": "blue" },
+    { "type": "terminal",     "key": "  ", "keyColor": "blue" },
+    { "type": "terminalfont", "key": "  ", "keyColor": "blue" },
+
+    "separator",
+
+    { "type": "cpu",    "key": "  ", "keyColor": "yellow" },
+    { "type": "gpu",    "key": " 󰢮 ", "keyColor": "yellow" },
+    { "type": "memory", "key": "  ", "keyColor": "yellow" },
+    { "type": "disk",   "key": " 󰋊 ", "keyColor": "yellow" },
+
+    "separator",
+
+    { "type": "localip", "key": " 󰩟 ", "keyColor": "magenta" },
+    { "type": "battery", "key": "  ", "keyColor": "magenta" },
+
+    "break",
+    {
+      "type": "colors",
+      "paddingLeft": 2,
+      "symbol": "circle"
+    },
+    "break"
+  ]
+}

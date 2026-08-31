@@ -1,0 +1,66 @@
+# iTERMiNAL Everforest — btop theme
+#
+# Install to ~/.config/btop/themes/iterminal-everforest.theme, then set
+# `color_theme = iterminal-everforest` in ~/.config/btop/btop.conf, or press
+# Esc → Options → Color theme inside btop and pick it from the list.
+#
+# Each box gets its own accent so the panels read as separate cards rather
+# than one grey grid. The greys are Everforest's bg2/grey1; everything else
+# comes from the same sixteen colours as themes/iterminal-everforest-dark.
+
+# Main background. Empty would mean "use the terminal's" — set explicitly so
+# btop matches even when launched from a differently themed terminal.
+theme[main_bg]="#2d353b"
+theme[main_fg]="#d3c6aa"
+theme[title]="#d3c6aa"
+theme[hi_fg]="#a7c080"
+theme[selected_bg]="#3d484d"
+theme[selected_fg]="#dbbc7f"
+theme[inactive_fg]="#5c6a72"
+theme[graph_text]="#859289"
+theme[meter_bg]="#3d484d"
+theme[proc_misc]="#83c092"
+
+# Box borders — one accent each.
+theme[cpu_box]="#a7c080"
+theme[mem_box]="#7fbbb3"
+theme[net_box]="#d699b6"
+theme[proc_box]="#e69875"
+theme[div_line]="#3d484d"
+
+# Temperature: green → yellow → red.
+theme[temp_start]="#a7c080"
+theme[temp_mid]="#dbbc7f"
+theme[temp_end]="#e67e80"
+
+# CPU load.
+theme[cpu_start]="#a7c080"
+theme[cpu_mid]="#dbbc7f"
+theme[cpu_end]="#e67e80"
+
+# Memory: free, cached, available, used.
+theme[free_start]="#e67e80"
+theme[free_mid]="#dbbc7f"
+theme[free_end]="#a7c080"
+theme[cached_start]="#7fbbb3"
+theme[cached_mid]="#83c092"
+theme[cached_end]="#a7c080"
+theme[available_start]="#e67e80"
+theme[available_mid]="#dbbc7f"
+theme[available_end]="#a7c080"
+theme[used_start]="#a7c080"
+theme[used_mid]="#dbbc7f"
+theme[used_end]="#e67e80"
+
+# Network throughput.
+theme[download_start]="#a7c080"
+theme[download_mid]="#83c092"
+theme[download_end]="#7fbbb3"
+theme[upload_start]="#dbbc7f"
+theme[upload_mid]="#e69875"
+theme[upload_end]="#e67e80"
+
+# Process list CPU column.
+theme[process_start]="#a7c080"
+theme[process_mid]="#dbbc7f"
+theme[process_end]="#e67e80"

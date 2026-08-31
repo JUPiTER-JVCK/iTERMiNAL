@@ -1,0 +1,125 @@
+# Starship prompt, tuned to the Everforest palette in contrib/ghostty/config.
+#
+#   brew install starship
+#   echo 'eval "$(starship init zsh)"' >> ~/.zshrc
+#
+# Install to ~/.config/starship.toml. Needs a Nerd Font for the powerline
+# separators and icons — the same one Ghostty is configured with.
+
+"$schema" = 'https://starship.rs/config-schema.json'
+
+format = """
+[](fg:bg_dim)\
+$os\
+$username\
+[](fg:bg_dim bg:bg_green)\
+$directory\
+[](fg:bg_green bg:bg_blue)\
+$git_branch\
+$git_status\
+[](fg:bg_blue bg:bg_purple)\
+$nodejs\
+$python\
+$rust\
+$golang\
+$swift\
+[](fg:bg_purple bg:bg_dim)\
+$cmd_duration\
+[](fg:bg_dim)\
+$line_break\
+$character"""
+
+palette = 'everforest'
+add_newline = true
+
+[palettes.everforest]
+fg        = '#d3c6aa'
+bg_dim    = '#3d484d'
+bg_green  = '#425047'
+bg_blue   = '#3a515d'
+bg_purple = '#4c3743'
+green     = '#a7c080'
+blue      = '#7fbbb3'
+aqua      = '#83c092'
+yellow    = '#dbbc7f'
+orange    = '#e69875'
+red       = '#e67e80'
+purple    = '#d699b6'
+grey      = '#859289'
+
+[os]
+disabled = false
+style = "bg:bg_dim fg:fg"
+format = '[ $symbol ]($style)'
+
+[os.symbols]
+Macos = "󰀵"
+Arch = "󰣇"
+Ubuntu = "󰕈"
+Debian = "󰣚"
+Linux = "󰌽"
+Windows = "󰍲"
+
+[username]
+show_always = false
+style_user = "bg:bg_dim fg:fg"
+style_root = "bg:bg_dim fg:red"
+format = '[$user ]($style)'
+
+[directory]
+style = "bg:bg_green fg:green"
+format = '[ $path ]($style)'
+truncation_length = 3
+truncation_symbol = "…/"
+read_only = " 󰌾"
+
+[directory.substitutions]
+"Documents" = "󰈙 "
+"Downloads" = " "
+"Music" = "󰝚 "
+"Pictures" = " "
+"Developer" = "󰲋 "
+
+[git_branch]
+symbol = ""
+style = "bg:bg_blue fg:blue"
+format = '[ $symbol $branch ]($style)'
+
+[git_status]
+style = "bg:bg_blue fg:orange"
+format = '[$all_status$ahead_behind ]($style)'
+
+[nodejs]
+symbol = ""
+style = "bg:bg_purple fg:purple"
+format = '[ $symbol( $version) ]($style)'
+
+[python]
+symbol = ""
+style = "bg:bg_purple fg:purple"
+format = '[ $symbol( $version) ]($style)'
+
+[rust]
+symbol = ""
+style = "bg:bg_purple fg:purple"
+format = '[ $symbol( $version) ]($style)'
+
+[golang]
+symbol = ""
+style = "bg:bg_purple fg:purple"
+format = '[ $symbol( $version) ]($style)'
+
+[swift]
+symbol = ""
+style = "bg:bg_purple fg:purple"
+format = '[ $symbol( $version) ]($style)'
+
+[cmd_duration]
+min_time = 2_000
+style = "bg:bg_dim fg:yellow"
+format = '[  $duration ]($style)'
+
+[character]
+success_symbol = '[](bold green)'
+error_symbol = '[](bold red)'
+vimcmd_symbol = '[](bold yellow)'

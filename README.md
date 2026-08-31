@@ -127,6 +127,20 @@ if [[ "$TERM_PROGRAM" == "iTERMiNAL" ]]; then
 fi
 ```
 
+## Ghostty configuration
+
+The same twenty palettes, exported for [Ghostty](https://ghostty.org), with a
+config that carries the rest of the design — muted slate-green background over
+the usual black, Nerd Font, padding, translucency, tinted split dividers — plus
+matching starship, btop and fastfetch configs.
+
+```sh
+cd contrib/ghostty && ./install.sh
+```
+
+The themes are generated from `TerminalTheme.swift`, so a scheme looks the same
+in both terminals. See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
+
 ## Scripting API
 
 Enable it in **Settings → Security** (it's off by default — it can type into
