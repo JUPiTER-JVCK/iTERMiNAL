@@ -33,8 +33,17 @@ theme = iterminal-everforest-dark
 
 # Paint the window chrome with the terminal's own colours, so the titlebar
 # stops being a grey band bolted onto the top of the theme.
+#
+# The `ghostty` value is Linux-only. On macOS the equivalent comes from
+# `macos-titlebar-style = tabs` further down, which makes the titlebar follow
+# the luminosity of the terminal background on its own; this line is harmless
+# there and applies to Ghostty's non-terminal windows.
 window-theme = ghostty
-window-colorspace = display-p3
+
+# No `window-colorspace = display-p3` here. The palettes in themes/ are sRGB
+# triples — TerminalTheme.swift builds them with NSColor(srgbRed:) — so asking
+# Ghostty to read the same bytes as Display P3 would oversaturate every colour
+# and break the promise that the two terminals match.
 
 # Keep bold text bold instead of silently promoting it to a bright colour —
 # on a low-contrast palette like this one, bright-as-bold washes it out.

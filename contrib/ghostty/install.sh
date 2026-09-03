@@ -45,12 +45,22 @@ run() {
     fi
 }
 
-# Move an existing file or directory aside rather than clobbering it.
+# Move an existing file or directory aside rather than clobbering it. The
+# stamp is only second-precision, so two runs in the same second would
+# otherwise have the second `mv` overwrite the first run's backup — find an
+# unused name instead, since the whole promise here is that nothing is lost.
 back_up() {
     local target="$1"
     [ -e "$target" ] || return 0
-    say "backing up $(basename "$target") -> $(basename "$target").$STAMP.bak"
-    run mv "$target" "$target.$STAMP.bak"
+
+    local backup="$target.$STAMP.bak" n=2
+    while [ -e "$backup" ]; do
+        backup="$target.$STAMP-$n.bak"
+        n=$((n + 1))
+    done
+
+    say "backing up $(basename "$target") -> $(basename "$backup")"
+    run mv "$target" "$backup"
 }
 
 install_file() {
@@ -71,18 +81,43 @@ step "Ghostty configuration directory: $CONFIG_DIR"
 # On macOS Ghostty reads BOTH the XDG path and Application Support. Having a
 # config in each means two configs load and the later one silently wins parts
 # of the first, which is a miserable thing to debug — so say so up front.
+# Ghostty reads four paths and loads *every* one that exists, later files
+# overriding earlier, in this order:
+#
+#   1. <xdg>/ghostty/config.ghostty     3. <app support>/config.ghostty
+#   2. <xdg>/ghostty/config             4. <app support>/config
+#
+# So a leftover file can quietly override what we install and make the whole
+# thing look like it did nothing. List any we are not writing.
 APP_SUPPORT="$HOME/Library/Application Support/com.mitchellh.ghostty"
-if [ "$CONFIG_DIR" != "$APP_SUPPORT" ] && [ -f "$APP_SUPPORT/config" ]; then
+CONFIG_NAME="config.ghostty"
+DEST="$CONFIG_DIR/$CONFIG_NAME"
+
+others=""
+for candidate in \
+    "$CONFIG_DIR/config.ghostty" "$CONFIG_DIR/config" \
+    "$APP_SUPPORT/config.ghostty" "$APP_SUPPORT/config"
+do
+    [ "$candidate" = "$DEST" ] && continue
+    [ -f "$candidate" ] && others="$others$candidate"$'\n'
+done
+
+if [ -n "$others" ]; then
     say ""
-    say "note: you also have a config at"
-    say "      $APP_SUPPORT/config"
-    say "      Ghostty loads both. Move or delete that one, or re-run with"
-    say "      --config-dir \"$APP_SUPPORT\" to install there instead."
+    say "note: Ghostty will also load these existing config files:"
+    printf '%s' "$others" | while IFS= read -r f; do
+        [ -n "$f" ] && say "        $f"
+    done
+    say "      Files later in Ghostty's search order win, and the macOS"
+    say "      Application Support pair is read after the XDG pair. Move or"
+    say "      delete them if this install appears to have no effect."
     say ""
 fi
 
 step "Installing config and themes"
-install_file "$SOURCE_DIR/config" "$CONFIG_DIR/config"
+# config.ghostty is the current name; plain `config` is the pre-1.2.3 spelling
+# and still loads, which is exactly why we warn about it above.
+install_file "$SOURCE_DIR/config" "$DEST"
 
 back_up "$CONFIG_DIR/themes"
 run mkdir -p "$CONFIG_DIR/themes"
@@ -107,18 +142,22 @@ fi
 
 step "Checking the result"
 if command -v ghostty >/dev/null 2>&1; then
+    # Point it at the file we just wrote. Bare +validate-config checks the
+    # live user config, which with --config-dir is a different file entirely
+    # — it would happily report OK while the installed one is broken.
     if [ "$DRY_RUN" -eq 1 ]; then
-        say "would run: ghostty +validate-config"
-    elif ghostty +validate-config >/dev/null 2>&1; then
+        say "would run: ghostty +validate-config --config-file=\"$DEST\""
+    elif ghostty +validate-config --config-file="$DEST" >/dev/null 2>&1; then
         say "ghostty +validate-config: OK"
     else
         say "ghostty +validate-config reported problems:"
-        ghostty +validate-config 2>&1 | sed 's/^/    /' || true
+        ghostty +validate-config --config-file="$DEST" 2>&1 | sed 's/^/    /' || true
     fi
 else
     say "ghostty is not on PATH — skipping validation."
     say "On macOS the CLI lives inside the app bundle; you can run it as:"
-    say "  /Applications/Ghostty.app/Contents/MacOS/ghostty +validate-config"
+    say "  /Applications/Ghostty.app/Contents/MacOS/ghostty \\"
+    say "    +validate-config --config-file=\"$DEST\""
 fi
 
 step "Done."

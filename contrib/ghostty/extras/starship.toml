@@ -4,28 +4,33 @@
 #   echo 'eval "$(starship init zsh)"' >> ~/.zshrc
 #
 # Install to ~/.config/starship.toml. Needs a Nerd Font for the powerline
-# separators and icons — the same one Ghostty is configured with.
+# separators and icons U+2014 the same one Ghostty is configured with.
+#
+# Every glyph below is written as a TOML \u escape rather than a literal
+# character, so the file stays plain ASCII. Pasting it through an editor or
+# terminal that mangles private-use codepoints can silently blank the icons
+# out, which leaves a prompt of empty coloured blocks; escapes survive that.
+# U+E0B0 is the powerline separator and U+E0A0 the git branch glyph.
 
 "$schema" = 'https://starship.rs/config-schema.json'
 
 format = """
-[](fg:bg_dim)\
 $os\
 $username\
-[](fg:bg_dim bg:bg_green)\
+[\uE0B0](fg:bg_dim bg:bg_green)\
 $directory\
-[](fg:bg_green bg:bg_blue)\
+[\uE0B0](fg:bg_green bg:bg_blue)\
 $git_branch\
 $git_status\
-[](fg:bg_blue bg:bg_purple)\
+[\uE0B0](fg:bg_blue bg:bg_purple)\
 $nodejs\
 $python\
 $rust\
 $golang\
 $swift\
-[](fg:bg_purple bg:bg_dim)\
+[\uE0B0](fg:bg_purple bg:bg_dim)\
 $cmd_duration\
-[](fg:bg_dim)\
+[\uE0B0](fg:bg_dim)\
 $line_break\
 $character"""
 
@@ -53,12 +58,12 @@ style = "bg:bg_dim fg:fg"
 format = '[ $symbol ]($style)'
 
 [os.symbols]
-Macos = "󰀵"
-Arch = "󰣇"
-Ubuntu = "󰕈"
-Debian = "󰣚"
-Linux = "󰌽"
-Windows = "󰍲"
+Macos = "\U000F0035"
+Arch = "\U000F08C7"
+Ubuntu = "\U000F0548"
+Debian = "\U000F08DA"
+Linux = "\U000F033D"
+Windows = "\U000F0372"
 
 [username]
 show_always = false
@@ -70,18 +75,15 @@ format = '[$user ]($style)'
 style = "bg:bg_green fg:green"
 format = '[ $path ]($style)'
 truncation_length = 3
-truncation_symbol = "…/"
-read_only = " 󰌾"
+truncation_symbol = "\u2026/"
+read_only = " \uF023"
 
-[directory.substitutions]
-"Documents" = "󰈙 "
-"Downloads" = " "
-"Music" = "󰝚 "
-"Pictures" = " "
-"Developer" = "󰲋 "
+# No [directory.substitutions]: swapping a folder name for an icon hides the
+# name, and gives you a blank segment outright if the font lacks that glyph.
+# Real names cost a few columns and always render.
 
 [git_branch]
-symbol = ""
+symbol = "\uE0A0"
 style = "bg:bg_blue fg:blue"
 format = '[ $symbol $branch ]($style)'
 
@@ -89,37 +91,36 @@ format = '[ $symbol $branch ]($style)'
 style = "bg:bg_blue fg:orange"
 format = '[$all_status$ahead_behind ]($style)'
 
+# The language modules keep starship's own symbols U+2014 it ships a sensible one
+# per language, and they track upstream Nerd Font changes without help here.
 [nodejs]
-symbol = ""
 style = "bg:bg_purple fg:purple"
 format = '[ $symbol( $version) ]($style)'
 
 [python]
-symbol = ""
 style = "bg:bg_purple fg:purple"
 format = '[ $symbol( $version) ]($style)'
 
 [rust]
-symbol = ""
 style = "bg:bg_purple fg:purple"
 format = '[ $symbol( $version) ]($style)'
 
 [golang]
-symbol = ""
 style = "bg:bg_purple fg:purple"
 format = '[ $symbol( $version) ]($style)'
 
 [swift]
-symbol = ""
 style = "bg:bg_purple fg:purple"
 format = '[ $symbol( $version) ]($style)'
 
 [cmd_duration]
 min_time = 2_000
 style = "bg:bg_dim fg:yellow"
-format = '[  $duration ]($style)'
+format = '[ took $duration ]($style)'
 
+# Plain arrows rather than private-use glyphs: the prompt marker is the one
+# thing that must render even when the font is wrong.
 [character]
-success_symbol = '[](bold green)'
-error_symbol = '[](bold red)'
-vimcmd_symbol = '[](bold yellow)'
+success_symbol = "[\u276F](bold green)"
+error_symbol = "[\u276F](bold red)"
+vimcmd_symbol = "[\u276E](bold yellow)"

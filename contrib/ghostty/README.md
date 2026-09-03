@@ -23,6 +23,19 @@ overwritten in place. By default everything lands in `~/.config/ghostty`, which
 Ghostty reads on both macOS and Linux; pass `--config-dir` to put it somewhere
 else.
 
+The config is installed as **`config.ghostty`** — the current filename, with
+plain `config` being the pre-1.2.3 spelling. Ghostty loads *every* config file
+it finds, in this order, later ones overriding earlier:
+
+1. `<xdg>/ghostty/config.ghostty`
+2. `<xdg>/ghostty/config`
+3. `<app support>/config.ghostty` (macOS)
+4. `<app support>/config` (macOS)
+
+So a file you forgot about can quietly override this one and make the install
+look like it did nothing. `install.sh` lists any it finds and leaves them
+alone rather than deleting them for you.
+
 Then restart Ghostty, or press <kbd>⌘⇧R</kbd> to reload.
 
 ### The one thing you have to install yourself
@@ -112,14 +125,20 @@ Ghostty reports config errors on startup rather than refusing to launch, so a
 typo is easy to miss. Ask it directly:
 
 ```sh
-ghostty +validate-config      # parses your live config, names bad lines
+ghostty +validate-config --config-file=~/.config/ghostty/config.ghostty
 ghostty +list-themes          # confirms it can see the iterminal-* themes
 ```
+
+Naming the file matters: bare `+validate-config` checks whichever config
+Ghostty would load for real, so if you installed somewhere else with
+`--config-dir` it can report OK while the file you actually installed is
+broken.
 
 On macOS the CLI lives inside the app bundle, so unless you have it on `PATH`:
 
 ```sh
-/Applications/Ghostty.app/Contents/MacOS/ghostty +validate-config
+/Applications/Ghostty.app/Contents/MacOS/ghostty \
+  +validate-config --config-file=~/.config/ghostty/config.ghostty
 ```
 
 ## Notes on a few settings
@@ -128,8 +147,9 @@ On macOS the CLI lives inside the app bundle, so unless you have it on `PATH`:
   effect. Set opacity to `1.0` if text legibility over a busy wallpaper matters
   more than the effect.
 - **`window-theme = ghostty`** paints the titlebar with the terminal's own
-  colours instead of the system grey. This is a big part of why a riced
-  terminal looks like one window rather than a theme inside a frame.
+  colours instead of the system grey — on Linux, where that value is
+  supported. On macOS the same effect comes from `macos-titlebar-style = tabs`,
+  which makes the titlebar follow the background's luminosity by itself.
 - **`macos-option-as-alt`** is commented out. Turn it on for `alt+f`/`alt+b`
   word motions at the prompt; leave it off if you type accented characters
   with <kbd>⌥</kbd>.
@@ -137,6 +157,10 @@ On macOS the CLI lives inside the app bundle, so unless you have it on `PATH`:
   macOS only, and it needs Accessibility permission before the hotkey fires
   (System Settings → Privacy & Security → Accessibility).
 - **`scrollback-limit`** is in bytes, not lines. 10000000 is about 10 MB.
+- **No `window-colorspace = display-p3`.** The palettes are sRGB triples —
+  `TerminalTheme.swift` builds them with `NSColor(srgbRed:)` — so telling
+  Ghostty to read the same bytes as Display P3 would oversaturate everything
+  and break the point of sharing the palettes.
 
 ## Companion tools
 

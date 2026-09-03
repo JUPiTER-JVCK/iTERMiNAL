@@ -42,6 +42,10 @@ THEME_RE = re.compile(
 
 ANSI_RE = re.compile(r"0x([0-9A-Fa-f]{6})")
 
+# Deliberately loose: it only spots "static let x = TerminalTheme(", so it
+# still counts a declaration whose fields THEME_RE can no longer read.
+DECL_RE = re.compile(r"static\s+let\s+\w+\s*=\s*TerminalTheme\(")
+
 
 class Theme:
     def __init__(self, ident: str, name: str, dark: bool, bg: str, fg: str, ansi: list[str]):
@@ -88,8 +92,21 @@ def parse(source: Path) -> list[Theme]:
                 [c.lower() for c in ansi],
             )
         )
-    if not themes:
-        raise SystemExit(f"no themes parsed out of {source} — has the literal format changed?")
+    # A partial parse is the dangerous case: THEME_RE wants an exact field
+    # order, so reformatting one literal drops just that theme, and a plain
+    # regenerate would then delete its file as "no longer in the Swift
+    # source". Count the declarations independently and refuse to write
+    # anything unless every one of them parsed.
+    declared = len(DECL_RE.findall(text))
+    if len(themes) != declared:
+        parsed = {t.id for t in themes}
+        raise SystemExit(
+            f"parsed {len(themes)} of {declared} themes in {source.name}.\n"
+            "THEME_RE matches a fixed field order, so a reformatted literal "
+            "silently drops out — refusing to write or delete anything.\n"
+            "Check the declarations that did not parse, or update THEME_RE.\n"
+            f"Parsed: {', '.join(sorted(parsed)) or '(none)'}"
+        )
     return themes
 
 
