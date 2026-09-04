@@ -2,9 +2,14 @@
 #
 # Install the iTERMiNAL Ghostty configuration.
 #
-#   ./install.sh              # Ghostty config + all twenty themes
-#   ./install.sh --extras     # also starship, btop and fastfetch configs
-#   ./install.sh --dry-run    # print what would happen, touch nothing
+#   ./install.sh                         # Ghostty config + all twenty themes
+#   ./install.sh --extras                # also btop, starship, yazi, fzf
+#   ./install.sh --theme iterminal-nord  # pick a palette
+#   ./install.sh --dry-run               # print what would happen, touch nothing
+#
+# --theme re-themes the companion configs as well, so btop and starship follow
+# the terminal instead of staying Everforest green under every scheme. Any
+# theme other than the default needs python3 to generate them.
 #
 # Anything already in place is backed up next to itself with a timestamp
 # before being replaced; nothing is deleted.
@@ -16,10 +21,17 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 
 DRY_RUN=0
 EXTRAS=0
+# The committed extras/ are generated for this palette, which is what lets the
+# default install work without python3.
+DEFAULT_THEME="iterminal-everforest-dark"
+THEME="$DEFAULT_THEME"
 CONFIG_DIR="${GHOSTTY_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ghostty}"
 
 usage() {
-    sed -n '3,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Print the header block rather than a fixed line range, so editing the
+    # comment above cannot silently truncate --help.
+    awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' \
+        "${BASH_SOURCE[0]}"
     exit "${1:-0}"
 }
 
@@ -28,11 +40,20 @@ while [ $# -gt 0 ]; do
         --extras)     EXTRAS=1 ;;
         --dry-run|-n) DRY_RUN=1 ;;
         --config-dir) shift; CONFIG_DIR="${1:?--config-dir needs a path}" ;;
+        --theme)      shift; THEME="${1:?--theme needs a theme name}" ;;
         -h|--help)    usage 0 ;;
         *) echo "unknown option: $1" >&2; usage 1 ;;
     esac
     shift
 done
+
+# A typo must not quietly install the default — the user would be left
+# wondering why nothing changed colour.
+if [ ! -f "$SOURCE_DIR/themes/$THEME" ]; then
+    printf 'unknown theme: %s\n\nValid names:\n' "$THEME" >&2
+    (cd "$SOURCE_DIR/themes" && ls) | sed 's/^/  /' >&2
+    exit 1
+fi
 
 say()  { printf '  %s\n' "$*"; }
 step() { printf '\n%s\n' "$*"; }
@@ -119,6 +140,23 @@ step "Installing config and themes"
 # and still loads, which is exactly why we warn about it above.
 install_file "$SOURCE_DIR/config" "$DEST"
 
+# The shipped config names the default palette; point it at whatever --theme
+# asked for. split-divider-color has to move with it — left alone it stays
+# Everforest green while the rest of the window turns Tokyo Night. Take the
+# green from the chosen palette (ANSI 2). Written via a temp file because
+# `sed -i` takes different arguments on BSD and GNU.
+DIVIDER="$(sed -n 's/^palette = 2=#\(.*\)$/\1/p' "$SOURCE_DIR/themes/$THEME")"
+if [ "$DRY_RUN" -eq 1 ]; then
+    say "would set theme = $THEME (divider #$DIVIDER) in $(basename "$DEST")"
+else
+    theme_tmp="$DEST.theme.$$"
+    sed -e "s|^theme = .*|theme = $THEME|" \
+        -e "s|^split-divider-color = .*|split-divider-color = #$DIVIDER|" \
+        "$DEST" > "$theme_tmp"
+    mv "$theme_tmp" "$DEST"
+    say "set theme = $THEME, split-divider-color = #$DIVIDER"
+fi
+
 back_up "$CONFIG_DIR/themes"
 run mkdir -p "$CONFIG_DIR/themes"
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -131,13 +169,45 @@ fi
 if [ "$EXTRAS" -eq 1 ]; then
     step "Installing companion configs"
     CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-    install_file "$SOURCE_DIR/extras/starship.toml"  "$CONFIG_HOME/starship.toml"
+
+    # extras/ is committed pre-generated for the default palette, so the common
+    # path needs nothing but cp. Any other palette has to be generated, which
+    # is the only thing here that wants python3.
+    EXTRAS_SRC="$SOURCE_DIR/extras"
+    if [ "$THEME" != "$DEFAULT_THEME" ]; then
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is needed to generate companion configs for $THEME" >&2
+            echo "(the committed extras/ only cover $DEFAULT_THEME)" >&2
+            exit 1
+        fi
+        EXTRAS_SRC="$(mktemp -d)"
+        trap 'rm -rf "$EXTRAS_SRC"' EXIT
+        say "generating companion configs for $THEME"
+        "$SOURCE_DIR/export-themes.py" --extras "$THEME" --out "$EXTRAS_SRC" \
+            | sed 's/^/  /'
+    fi
+
+    install_file "$EXTRAS_SRC/starship.toml"          "$CONFIG_HOME/starship.toml"
+    install_file "$EXTRAS_SRC/btop.theme"             "$CONFIG_HOME/btop/themes/iterminal.theme"
+    install_file "$EXTRAS_SRC/theme.toml"             "$CONFIG_HOME/yazi/theme.toml"
+    install_file "$EXTRAS_SRC/fzf.sh"                 "$CONFIG_DIR/fzf.sh"
+    # fastfetch is palette-agnostic on purpose — it uses ANSI colour *names*,
+    # so it follows whatever theme is active without being regenerated.
     install_file "$SOURCE_DIR/extras/fastfetch.jsonc" "$CONFIG_HOME/fastfetch/config.jsonc"
-    install_file "$SOURCE_DIR/extras/btop.theme"      "$CONFIG_HOME/btop/themes/iterminal-everforest.theme"
+
+    if [ -f "$EXTRAS_SRC/config.json" ]; then
+        install_file "$EXTRAS_SRC/config.json" "$CONFIG_HOME/neohtop-cli/config.json"
+    else
+        say "no neohtop-cli config: it has no built-in theme matching $THEME"
+    fi
+
     say ""
     say "btop needs telling which theme to use — either set"
-    say "  color_theme = \"iterminal-everforest\""
+    say "  color_theme = \"iterminal\""
     say "in $CONFIG_HOME/btop/btop.conf, or pick it in btop under Esc -> Options."
+    say ""
+    say "fzf reads its colours from a sourced file; add this to your shell rc:"
+    say "  [ -f $CONFIG_DIR/fzf.sh ] && . $CONFIG_DIR/fzf.sh"
 fi
 
 step "Checking the result"
@@ -167,6 +237,8 @@ cat <<'NOTES'
        render as empty boxes:
          brew install --cask font-jetbrains-mono-nerd-font
     2. Restart Ghostty (or press cmd+shift+r to reload the config).
-    3. To try another theme, edit the `theme =` line in the config —
+    3. To try another palette, re-run with --theme; it re-themes btop,
+       starship and yazi to match, not just the terminal:
+         ./install.sh --extras --theme iterminal-tokyo-night
        `ls ~/.config/ghostty/themes` lists all twenty.
 NOTES

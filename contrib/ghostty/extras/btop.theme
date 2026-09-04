@@ -1,34 +1,32 @@
-# iTERMiNAL Everforest — btop theme
+# Everforest Dark — btop theme
 #
-# Install to ~/.config/btop/themes/iterminal-everforest.theme, then set
-# `color_theme = iterminal-everforest` in ~/.config/btop/btop.conf, or press
-# Esc → Options → Color theme inside btop and pick it from the list.
+# Generated for the iterminal-everforest-dark palette by contrib/ghostty/export-themes.py --extras.
+# Install to ~/.config/btop/themes/iterminal.theme and set
+# `color_theme = "iterminal"` in ~/.config/btop/btop.conf, or pick it from
+# Esc -> Options -> Color theme.
 #
 # Each box gets its own accent so the panels read as separate cards rather
-# than one grey grid. The greys are Everforest's bg2/grey1; everything else
-# comes from the same sixteen colours as themes/iterminal-everforest-dark.
+# than one grey grid.
 
-# Main background. Empty would mean "use the terminal's" — set explicitly so
-# btop matches even when launched from a differently themed terminal.
 theme[main_bg]="#2d353b"
 theme[main_fg]="#d3c6aa"
 theme[title]="#d3c6aa"
 theme[hi_fg]="#a7c080"
-theme[selected_bg]="#3d484d"
+theme[selected_bg]="#414648"
 theme[selected_fg]="#dbbc7f"
 theme[inactive_fg]="#5c6a72"
-theme[graph_text]="#859289"
-theme[meter_bg]="#3d484d"
+theme[graph_text]="#888578"
+theme[meter_bg]="#414648"
 theme[proc_misc]="#83c092"
 
 # Box borders — one accent each.
 theme[cpu_box]="#a7c080"
 theme[mem_box]="#7fbbb3"
 theme[net_box]="#d699b6"
-theme[proc_box]="#e69875"
-theme[div_line]="#3d484d"
+theme[proc_box]="#e09d80"
+theme[div_line]="#414648"
 
-# Temperature: green → yellow → red.
+# Temperature: green -> yellow -> red.
 theme[temp_start]="#a7c080"
 theme[temp_mid]="#dbbc7f"
 theme[temp_end]="#e67e80"
@@ -57,7 +55,7 @@ theme[download_start]="#a7c080"
 theme[download_mid]="#83c092"
 theme[download_end]="#7fbbb3"
 theme[upload_start]="#dbbc7f"
-theme[upload_mid]="#e69875"
+theme[upload_mid]="#e09d80"
 theme[upload_end]="#e67e80"
 
 # Process list CPU column.
