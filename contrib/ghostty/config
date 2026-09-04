@@ -1,0 +1,150 @@
+# iTERMiNAL — Ghostty configuration
+#
+# Install with ./install.sh, or copy this file to your Ghostty config path and
+# the themes/ directory next to it. Reload in place with ⌘⇧R (macOS) or by
+# restarting Ghostty. Verify a change parsed with:
+#
+#     ghostty +validate-config
+#
+# Every key below is a real Ghostty option; run `ghostty +show-config --default
+# --docs` to read the built-in documentation for any of them.
+
+
+# ── Colour ────────────────────────────────────────────────────────────────
+#
+# Everforest Dark: a muted slate green rather than black, which is the whole
+# point — it gives the panel borders in btop, yazi and neovim something to sit
+# against instead of a void. The themes/ directory holds all twenty of
+# iTERMiNAL's schemes; swap the name here for any of them.
+#
+#   iterminal-dark              iterminal-light
+#   iterminal-everforest-dark   iterminal-gruvbox-dark      iterminal-gruvbox-light
+#   iterminal-tokyo-night       iterminal-tokyo-night-storm iterminal-kanagawa
+#   iterminal-catppuccin-mocha  iterminal-catppuccin-macchiato
+#   iterminal-catppuccin-frappe iterminal-catppuccin-latte
+#   iterminal-nord              iterminal-dracula           iterminal-monokai
+#   iterminal-one-dark          iterminal-one-light         iterminal-rose-pine
+#   iterminal-solarized-dark    iterminal-solarized-light
+#
+theme = iterminal-everforest-dark
+
+# To follow the system appearance instead, name both halves:
+# theme = light:iterminal-catppuccin-latte,dark:iterminal-everforest-dark
+
+# Paint the window chrome with the terminal's own colours, so the titlebar
+# stops being a grey band bolted onto the top of the theme.
+#
+# The `ghostty` value is Linux-only. On macOS the equivalent comes from
+# `macos-titlebar-style = tabs` further down, which makes the titlebar follow
+# the luminosity of the terminal background on its own; this line is harmless
+# there and applies to Ghostty's non-terminal windows.
+window-theme = ghostty
+
+# No `window-colorspace = display-p3` here. The palettes in themes/ are sRGB
+# triples — TerminalTheme.swift builds them with NSColor(srgbRed:) — so asking
+# Ghostty to read the same bytes as Display P3 would oversaturate every colour
+# and break the promise that the two terminals match.
+
+# Keep bold text bold instead of silently promoting it to a bright colour —
+# on a low-contrast palette like this one, bright-as-bold washes it out.
+bold-is-bright = false
+
+
+# ── Font ──────────────────────────────────────────────────────────────────
+#
+# A Nerd Font is not optional for this look: btop, fastfetch, starship, yazi
+# and lualine all draw powerline separators and glyphs from the private-use
+# range, and without one you get tofu boxes where the icons should be.
+#
+#   brew install --cask font-jetbrains-mono-nerd-font
+#
+# Any of these work — pick one you have and put it here:
+#   JetBrainsMono Nerd Font   MesloLGS NF        Hack Nerd Font
+#   FiraCode Nerd Font        Iosevka Nerd Font  CaskaydiaCove Nerd Font
+font-family = "JetBrainsMono Nerd Font"
+font-size = 13
+
+# A little air between rows. Dense TUI dashboards read much better with it,
+# and it costs nothing but a few pixels of height per line.
+adjust-cell-height = 12%
+
+# Ligatures are on by default in fonts that have them. To turn them off:
+# font-feature = -calt
+# font-feature = -liga
+
+
+# ── Window ────────────────────────────────────────────────────────────────
+#
+# Padding is what separates a riced terminal from a wall of text — content
+# should not touch the window edge.
+window-padding-x = 14
+window-padding-y = 12
+window-padding-balance = true
+
+# Slightly translucent with a blur behind it. Drop to 1.0 for fully opaque if
+# your wallpaper fights the text, or to ~0.85 for a heavier glass effect.
+background-opacity = 0.94
+background-blur = 20
+
+macos-titlebar-style = tabs
+window-save-state = always
+
+
+# ── Cursor ────────────────────────────────────────────────────────────────
+cursor-style = block
+cursor-style-blink = false
+
+# Shell integration reports the cursor shape, the window title and the working
+# directory, which is what lets a new split open in the same directory.
+shell-integration = detect
+shell-integration-features = cursor,sudo,title
+
+
+# ── Splits ────────────────────────────────────────────────────────────────
+#
+# Dim the splits you are not typing in, and tint the divider with the theme's
+# green so panes read as separate panels — the bordered-box look in the
+# screenshots is mostly this plus btop's own borders.
+unfocused-split-opacity = 0.85
+split-divider-color = #a7c080
+
+
+# ── Behaviour ─────────────────────────────────────────────────────────────
+# Roughly 10 MB of history. This is measured in bytes, not lines.
+scrollback-limit = 10000000
+
+copy-on-select = true
+mouse-hide-while-typing = true
+link-url = true
+
+
+# ── Keybinds ──────────────────────────────────────────────────────────────
+#
+# Ghostty's macOS defaults already match iTERMiNAL for the common ones — ⌘T new
+# tab, ⌘D split right, ⌘⇧D split down, ⌘+/⌘-/⌘0 font size — so this section
+# only adds what is missing.
+keybind = super+k=clear_screen
+keybind = super+shift+enter=toggle_split_zoom
+keybind = super+shift+r=reload_config
+keybind = super+alt+left=goto_split:left
+keybind = super+alt+right=goto_split:right
+keybind = super+alt+up=goto_split:up
+keybind = super+alt+down=goto_split:down
+keybind = super+ctrl+left=resize_split:left,20
+keybind = super+ctrl+right=resize_split:right,20
+keybind = super+ctrl+up=resize_split:up,20
+keybind = super+ctrl+down=resize_split:down,20
+keybind = super+shift+e=equalize_splits
+
+# A drop-down terminal over whatever is on screen. macOS only, and it needs
+# accessibility permission granted to Ghostty before the global hotkey fires:
+# System Settings → Privacy & Security → Accessibility.
+keybind = global:super+grave_accent=toggle_quick_terminal
+
+# ⌥ as Meta, so alt+f / alt+b / alt+backspace do word motions at the prompt.
+# Leave this off if you type accented characters with ⌥.
+# macos-option-as-alt = true
+
+# Pick up any machine-local overrides without editing this file. The leading ?
+# means "skip it silently if it doesn't exist".
+config-file = ?config.local

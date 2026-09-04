@@ -1,0 +1,26 @@
+# iTERMiNAL Dark — dark
+#
+# Generated from Sources/iTERMiNAL/Chrome/TerminalTheme.swift by
+# contrib/ghostty/export-themes.py. Edit the Swift source and re-run the
+# script rather than editing this file, or the two drift apart.
+
+background = #212121
+foreground = #ececec
+cursor-color = #ececec
+
+palette = 0=#2b2b2b
+palette = 1=#e05561
+palette = 2=#8cc265
+palette = 3=#d18f52
+palette = 4=#4aa5f0
+palette = 5=#c162de
+palette = 6=#42b3c2
+palette = 7=#d7d7d7
+palette = 8=#666666
+palette = 9=#ff6e6e
+palette = 10=#a5e075
+palette = 11=#f0a45d
+palette = 12=#63b0f2
+palette = 13=#d26fee
+palette = 14=#54c4d4
+palette = 15=#ffffff
