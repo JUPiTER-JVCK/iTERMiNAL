@@ -1,10 +1,12 @@
-# Starship prompt, tuned to the Everforest palette in contrib/ghostty/config.
+# Starship prompt, matching the Everforest Dark palette.
+#
+# Generated for the iterminal-everforest-dark palette by contrib/ghostty/export-themes.py --extras.
 #
 #   brew install starship
 #   echo 'eval "$(starship init zsh)"' >> ~/.zshrc
 #
 # Install to ~/.config/starship.toml. Needs a Nerd Font for the powerline
-# separators and icons U+2014 the same one Ghostty is configured with.
+# separators and icons - the same one Ghostty is configured with.
 #
 # Every glyph below is written as a TOML \u escape rather than a literal
 # character, so the file stays plain ASCII. Pasting it through an editor or
@@ -34,23 +36,23 @@ $cmd_duration\
 $line_break\
 $character"""
 
-palette = 'everforest'
+palette = 'iterminal'
 add_newline = true
 
-[palettes.everforest]
+[palettes.iterminal]
 fg        = '#d3c6aa'
-bg_dim    = '#3d484d'
-bg_green  = '#425047'
-bg_blue   = '#3a515d'
-bg_purple = '#4c3743'
+bg_dim    = '#414648'
+bg_green  = '#455149'
+bg_blue   = '#3d5053'
+bg_purple = '#4f4954'
 green     = '#a7c080'
 blue      = '#7fbbb3'
 aqua      = '#83c092'
 yellow    = '#dbbc7f'
-orange    = '#e69875'
+orange    = '#e09d80'
 red       = '#e67e80'
 purple    = '#d699b6'
-grey      = '#859289'
+grey      = '#888578'
 
 [os]
 disabled = false
@@ -91,7 +93,7 @@ format = '[ $symbol $branch ]($style)'
 style = "bg:bg_blue fg:orange"
 format = '[$all_status$ahead_behind ]($style)'
 
-# The language modules keep starship's own symbols U+2014 it ships a sensible one
+# The language modules keep starship's own symbols - it ships a sensible one
 # per language, and they track upstream Nerd Font changes without help here.
 [nodejs]
 style = "bg:bg_purple fg:purple"

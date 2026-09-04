@@ -13,9 +13,18 @@ compiled, and nothing talks to the network.
 
 ```sh
 cd contrib/ghostty
-./install.sh              # Ghostty config + all twenty themes
-./install.sh --extras     # also starship, btop and fastfetch
-./install.sh --dry-run    # print what it would do, touch nothing
+./install.sh                         # Ghostty config + all twenty themes
+./install.sh --extras                # also btop, starship, yazi, fzf, fastfetch
+./install.sh --theme iterminal-nord  # pick a palette
+./install.sh --dry-run               # print what it would do, touch nothing
+```
+
+`--theme` is the one worth knowing about: it re-themes the **companion configs
+too**, so btop, starship and yazi follow the terminal instead of staying
+Everforest green while everything around them turns Tokyo Night.
+
+```sh
+./install.sh --extras --theme iterminal-tokyo-night
 ```
 
 Existing files are moved aside with a timestamped `.bak` suffix, never
@@ -58,16 +67,35 @@ calls itself, which `fc-list : family` (or Font Book) will tell you.
 | --- | --- |
 | `config` | The Ghostty config: theme, font, padding, transparency, splits, keybinds. Commented throughout. |
 | `themes/` | All twenty iTERMiNAL schemes as Ghostty theme files, named `iterminal-*`. |
-| `export-themes.py` | Regenerates `themes/` from the Swift source. |
-| `extras/starship.toml` | Two-line powerline prompt on the Everforest palette. |
-| `extras/btop.theme` | btop theme with a different accent per panel. |
-| `extras/fastfetch.jsonc` | The system-info block for a new-terminal greeting. |
+| `export-themes.py` | Regenerates `themes/` from the Swift source, and emits the companion configs for any one palette. |
+| `extras/starship.toml` | Two-line powerline prompt. Generated. |
+| `extras/btop.theme` | btop theme with a different accent per panel. Generated. |
+| `extras/theme.toml` | yazi file-manager theme. Generated. |
+| `extras/fzf.sh` | One `FZF_DEFAULT_OPTS` line of fzf colours. Generated. |
+| `extras/fastfetch.jsonc` | The system-info block for a new-terminal greeting. Hand-written, and deliberately palette-agnostic. |
 | `install.sh` | Copies it all into place, with backups. |
+
+Everything marked *generated* is produced by `export-themes.py` from the same
+palette as the Ghostty theme. The committed copies are the default
+(`iterminal-everforest-dark`), which is what lets a plain `--extras` install
+work with nothing but `cp`; any other palette is generated at install time and
+needs `python3`.
+
+`fastfetch.jsonc` is the exception on purpose — it uses ANSI colour *names*
+rather than hex, so it already follows whichever theme is active. Don't
+"fix" it by generating it.
 
 ## Changing the theme
 
-Edit the `theme =` line in the config. `ls ~/.config/ghostty/themes` lists what
-is available:
+Re-run the installer with `--theme`. That rewrites the `theme =` line *and*
+regenerates the companion configs, which hand-editing the config does not:
+
+```sh
+./install.sh --extras --theme iterminal-kanagawa
+```
+
+Editing `theme =` by hand still works if you only care about the terminal.
+`ls ~/.config/ghostty/themes` lists what is available:
 
 ```
 iterminal-dark                iterminal-light
@@ -119,6 +147,20 @@ colour there:
 ./export-themes.py --check    # exit 1 and name the stale files if it drifted
 ```
 
+The same script emits the companion configs for one palette. `--extras` never
+touches `themes/`, so it cannot disturb the check above:
+
+```sh
+./export-themes.py --extras iterminal-nord --out /tmp/nord
+```
+
+The committed `extras/` are this command run for the default palette, so
+regenerate them the same way after a palette change:
+
+```sh
+./export-themes.py --extras iterminal-everforest-dark --out extras
+```
+
 ## Verifying the config
 
 Ghostty reports config errors on startup rather than refusing to launch, so a
@@ -168,7 +210,7 @@ None of these are required, and the Ghostty config works without them — but
 they are what fills the screen in the setups this is modelled on.
 
 ```sh
-brew install starship fastfetch btop
+brew install starship fastfetch btop yazi fzf
 brew install --cask font-jetbrains-mono-nerd-font
 ```
 
@@ -176,13 +218,52 @@ Then, in `~/.zshrc`:
 
 ```sh
 eval "$(starship init zsh)"
+[ -f ~/.config/ghostty/fzf.sh ] && . ~/.config/ghostty/fzf.sh
 fastfetch
 ```
 
-`install.sh --extras` writes the configs for all three. btop additionally needs
-to be told which theme to use — set `color_theme = "iterminal-everforest"` in
-`~/.config/btop/btop.conf`, or pick it from <kbd>Esc</kbd> → Options → Color
-theme.
+`install.sh --extras` writes all of their configs. Two need a nudge afterwards:
+
+- **btop** must be told which theme to use — set `color_theme = "iterminal"` in
+  `~/.config/btop/btop.conf`, or pick it from <kbd>Esc</kbd> → Options → Color
+  theme.
+- **fzf** reads colours from the environment, so its file has to be sourced —
+  the `.zshrc` line above.
+
+### neohtop-cli: a palette it cannot take
+
+[`neohtop-cli`](https://github.com/Abdenasser/neohtop-cli) ships 15 built-in
+themes selected by name in `~/.config/neohtop-cli/config.json` and has **no
+custom-theme format**, so it cannot be given our colours. What the installer
+does instead is name a built-in when one matches the palette — nine do
+(`catppuccin-mocha`, `catppuccin-latte`, `dracula`, `tokyo-night`,
+`gruvbox-dark`, `nord`, `one-dark`, `rose-pine`, `solarized-dark`).
+
+There is **no Everforest built-in**, so the default install writes no neohtop
+config at all rather than a wrong-looking one, and says so.
+
+### bat and delta: documented, not generated
+
+Both are deliberately left to you.
+
+**bat** custom themes are Sublime `.tmTheme` XML plus a cache rebuild, and
+credible syntax highlighting does not fall out of 16 ANSI colours. Point it at
+a close built-in instead — `~/.config/bat/config`:
+
+```
+--theme="Coldark-Dark"
+```
+
+`bat --list-themes` shows the rest.
+
+**delta** is configured through `~/.gitconfig`, and an installer writing into
+your git config is too invasive. Add it yourself:
+
+```gitconfig
+[delta]
+    syntax-theme = Coldark-Dark
+    line-numbers = true
+```
 
 ## Why this lives in the iTERMiNAL repo
 

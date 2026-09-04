@@ -132,14 +132,21 @@ fi
 The same twenty palettes, exported for [Ghostty](https://ghostty.org), with a
 config that carries the rest of the design — muted slate-green background over
 the usual black, Nerd Font, padding, translucency, tinted split dividers — plus
-matching starship, btop and fastfetch configs.
+matching btop, starship, yazi, fzf and fastfetch configs.
 
 ```sh
-cd contrib/ghostty && ./install.sh
+cd contrib/ghostty && ./install.sh --extras
 ```
 
 The themes are generated from `TerminalTheme.swift`, so a scheme looks the same
-in both terminals. See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
+in both terminals — and `--theme` re-themes the companions too, so btop and
+starship follow the terminal rather than staying one palette behind:
+
+```sh
+./install.sh --extras --theme iterminal-tokyo-night
+```
+
+See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
 
 ## Scripting API
 
