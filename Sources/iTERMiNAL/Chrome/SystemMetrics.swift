@@ -3,12 +3,12 @@ import Darwin
 import IOKit
 
 /// Live CPU, memory, GPU and network for *the machine*, sampled on a timer for
-/// the sidebar's status row.
+/// the strip in the window's bottom-right corner (`DetailBottomStrip`).
 ///
 /// The sibling of `ProcessMetrics`, which reports this app's own footprint.
 /// Keeping them apart is deliberate: the two answer different questions, and
 /// showing both under one "CPU" label would be a lie. The app's own figures
-/// still appear, in this row's tooltip.
+/// still appear, in that strip's tooltip.
 ///
 /// Note the different basis for CPU. `ProcessMetrics` reports a share of one
 /// core, so it can exceed 100. This reports a share of the whole machine, so it

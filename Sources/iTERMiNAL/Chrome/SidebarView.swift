@@ -772,46 +772,50 @@ private struct SidebarRecentRow: View {
     }
 }
 
-/// Bottom-left status: what the machine is doing right now, and a way into
+/// Bottom-left status: what the app is doing right now, and a way into
 /// Settings and the shortcut list.
+///
+/// These two numbers are the app's own. The machine's live in the detail
+/// column's bottom strip — see `DetailBottomStrip`.
 private struct SidebarStatusRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject private var process = ProcessMetrics.shared
-    @ObservedObject private var system = SystemMetrics.shared
+    @ObservedObject private var metrics = ProcessMetrics.shared
     @State private var showShortcuts = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
             FadedDivider()
-            HStack(alignment: .top, spacing: 8) {
+            HStack(spacing: 8) {
                 SettingsLink {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(spacing: 8) {
                         // The API's on/off state keeps a home in this dot
                         // rather than a line of text, leaving the row for
                         // numbers that actually change.
                         Circle()
                             .fill(settings.localAPIEnabled ? settings.accentColor : theme.textSecondary.opacity(0.35))
                             .frame(width: 7, height: 7)
-                            // Nudged down onto the first row's text now that the
-                            // readouts can stack two rows deep.
-                            .padding(.top, 4)
                             .help(settings.localAPIEnabled
                                   ? "Local scripting API is listening"
                                   : "Local scripting API is off")
 
-                        if settings.showSystemMetrics {
-                            readouts(theme: theme)
+                        HStack(spacing: 8) {
+                            MetricReadout(label: "CPU", value: metrics.cpuText, theme: theme)
+                            MetricReadout(label: "RAM", value: metrics.memoryText, theme: theme)
                         }
+                        // Spelt out, because the bottom strip shows a second
+                        // pair of numbers under the same two labels and these
+                        // are not measuring the same thing.
+                        .help("iTERMiNAL's own CPU and memory. The machine's are in the bottom right.")
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Open Settings")
 
-                Spacer(minLength: 4)
+                Spacer()
 
                 Button {
                     showShortcuts = true
@@ -829,63 +833,16 @@ private struct SidebarStatusRow: View {
         .popover(isPresented: $showShortcuts, arrowEdge: .top) {
             ShortcutsPopover()
         }
-        .onAppear { startSampling() }
-        .onDisappear { stopSampling() }
-        .onChange(of: settings.showSystemMetrics) { _, isOn in
-            if isOn { startSampling() } else { stopSampling() }
-        }
-    }
-
-    /// Four figures in two rows. The sidebar takes the macOS default width and
-    /// sets no `navigationSplitViewColumnWidth`, so CPU/RAM/GPU/NET on one line
-    /// would not fit.
-    private func readouts(theme: Theme) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
-            GridRow {
-                MetricReadout(label: "CPU", value: system.cpuText, theme: theme)
-                MetricReadout(label: "RAM", value: system.memoryText, theme: theme)
-            }
-            GridRow {
-                // Dropped rather than shown as 0% when no accelerator is
-                // readable, so the row never states a figure it hasn't got.
-                if let gpu = system.gpuText {
-                    MetricReadout(label: "GPU", value: gpu, theme: theme)
-                } else {
-                    Color.clear.frame(width: 0, height: 0)
-                }
-                MetricReadout(label: "NET", value: system.networkText, theme: theme)
-            }
-        }
-        // A tooltip rather than a hover popover: these readouts sit inside a
-        // SettingsLink, and a popover would fight it for the same pointer.
-        .help(tooltip)
-    }
-
-    /// The detail four cells have no room for — including the app's own
-    /// footprint, which is what stops two different numbers both reading "CPU".
-    private var tooltip: String {
-        """
-        \(system.detailText)
-
-        iTERMiNAL itself  \(process.cpuText) CPU · \(process.memoryText)
-        """
-    }
-
-    private func startSampling() {
-        guard settings.showSystemMetrics else { return }
-        system.start()
-        process.start()
-    }
-
-    private func stopSampling() {
-        system.stop()
-        process.stop()
+        .onAppear { metrics.start() }
+        .onDisappear { metrics.stop() }
     }
 }
 
 /// One footer statistic: a muted label and a monospaced-digit value, so the
 /// row doesn't jitter as the numbers change width.
-private struct MetricReadout: View {
+///
+/// Shared with the detail column's bottom strip, so not file-private.
+struct MetricReadout: View {
     let label: String
     let value: String
     let theme: Theme

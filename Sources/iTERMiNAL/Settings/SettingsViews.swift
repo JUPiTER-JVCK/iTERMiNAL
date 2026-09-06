@@ -317,7 +317,7 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("System monitor", isOn: $settings.showSystemMetrics)
-                Text("Live CPU, memory, GPU and network for this Mac in the status row at the bottom of the sidebar. Hover the numbers for detail. Off stops the sampling as well as hiding the row.")
+                Text("Live CPU, memory, GPU and network for this Mac, in a strip along the bottom right of the window. Hover the numbers for detail. Off stops the sampling as well as hiding the strip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

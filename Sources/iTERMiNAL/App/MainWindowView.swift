@@ -90,6 +90,14 @@ struct DetailView: View {
                     .frame(height: settings.bottomDockHeight)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            // Last in the column, so it lands in the window's bottom-right
+            // corner: the detail column runs to the trailing edge, the sidebar
+            // does not.
+            if settings.showSystemMetrics {
+                FadedDivider()
+                DetailBottomStrip()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background)
@@ -242,6 +250,53 @@ private struct StripToggle: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
+    }
+}
+
+/// The machine's vital signs, in the window's bottom-right corner.
+///
+/// A strip rather than a floating card: that corner is exactly where a terminal
+/// writes its newest output, and something hovering over it would cover the one
+/// line you are actually reading.
+///
+/// One line, not the sidebar's two — the detail column has the width for it.
+private struct DetailBottomStrip: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var system = SystemMetrics.shared
+    @ObservedObject private var process = ProcessMetrics.shared
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 0) {
+            Spacer(minLength: 12)
+            HStack(spacing: 14) {
+                MetricReadout(label: "CPU", value: system.cpuText, theme: theme)
+                MetricReadout(label: "RAM", value: system.memoryText, theme: theme)
+                // Dropped rather than shown as 0% when no accelerator is
+                // readable, so the strip never states a figure it hasn't got.
+                if let gpu = system.gpuText {
+                    MetricReadout(label: "GPU", value: gpu, theme: theme)
+                }
+                MetricReadout(label: "NET", value: system.networkText, theme: theme)
+            }
+            .help(tooltip)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 26)
+        // Sampling is tied to the strip being on screen, so switching the
+        // setting off stops the timer rather than just hiding its output.
+        .onAppear { system.start() }
+        .onDisappear { system.stop() }
+    }
+
+    /// The detail four figures have no room for — including the app's own
+    /// footprint, which is what stops two different numbers both reading "CPU".
+    private var tooltip: String {
+        """
+        \(system.detailText)
+
+        iTERMiNAL itself  \(process.cpuText) CPU · \(process.memoryText)
+        """
     }
 }
 
