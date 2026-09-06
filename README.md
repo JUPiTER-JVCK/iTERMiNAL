@@ -32,6 +32,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
+- **System monitor** — live CPU, memory, GPU and network for the machine in the
+  sidebar's status row; hover for the detail, including the app's own footprint.
+  Switch it off in Settings → Appearance and the sampling stops with it.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
   per tab, snapshotted to Application Support and restored on launch. A tab
   with one pane renders flush; focus rings appear only once it is split.
