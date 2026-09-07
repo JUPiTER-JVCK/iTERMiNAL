@@ -195,15 +195,27 @@ jobs:
               --notes "${changelog}
           $gatekeeper"
           else
-            asset="iTERMiNAL-latest-universal.zip"
+            # One release per build, with a tag that has never been used.
+            #
+            # This repository has immutable releases enabled, under which a tag
+            # name that has ever backed a published release is reserved
+            # permanently. The previous design deleted and recreated a release
+            # tagged `latest` on every build, which that forbids outright: three
+            # consecutive main builds failed with "tag_name was used by an
+            # immutable release", and `latest` is now burned on this repo for
+            # good — the tag itself is gone, deleted by the old --cleanup-tag,
+            # and creating it still 422s.
+            #
+            # run_number is monotonic per repository, so it is unique by
+            # construction. Nothing is deleted: under immutability that cannot
+            # succeed, and the old `|| true` on the delete is what let a broken
+            # publish path look survivable.
+            tag="build-${GITHUB_RUN_NUMBER}"
+            asset="iTERMiNAL-${tag}-universal.zip"
             mv iTERMiNAL.zip "$asset"
             subject=$(git log -1 --pretty=%s)
-            # Delete and recreate rather than editing in place: it is idempotent
-            # and re-points the tag at this commit, and the asset URL is stable
-            # across the swap because the tag name never changes.
-            gh release delete latest --yes --cleanup-tag || true
-            gh release create latest "$asset" \
-              --title "Latest build (main)" \
+            gh release create "$tag" "$asset" \
+              --title "Build ${GITHUB_RUN_NUMBER} — ${GITHUB_SHA:0:7}" \
               --prerelease \
               --target "$GITHUB_SHA" \
               --notes "Built from \`${GITHUB_SHA:0:7}\` — ${subject}
