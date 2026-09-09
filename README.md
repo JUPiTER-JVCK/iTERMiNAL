@@ -116,17 +116,26 @@ runner (`.github/workflows/build.yml`).
 
 ### Cutting a release
 
-Bump `MARKETING_VERSION` in `project.yml`, then push a matching tag:
+Push a tag. There is no version to bump first — CI supplies it.
 
 ```sh
 git tag v0.3.0 && git push origin v0.3.0
 ```
 
-CI builds it, overrides `MARKETING_VERSION` from the tag so the app's About box
-agrees with the release, and publishes the zip with a generated changelog. That
-changelog runs from the previous `v*` tag — stated explicitly, because the
-default baseline would be the `build-*` prerelease published minutes earlier at
-the same commit, which is no range at all.
+CI builds it and publishes the zip with a generated changelog, running from the
+previous `v*` tag — stated explicitly, because the default baseline would be the
+`build-*` prerelease published minutes earlier at the same commit, which is no
+range at all.
+
+You can also just draft a release in the GitHub UI: publishing it builds the app
+and attaches it automatically. A release with no file on it is the one failure
+mode worth knowing about, because GitHub still offers "Source code (zip)" there,
+so an empty release quietly becomes a source-code download.
+
+**Versions are not hand-maintained.** The app reports `0.<commit count>`,
+supplied by CI at build time, so the version always matches the build it came
+from. `project.yml` says `0.0`; an app reporting that was built locally rather
+than by CI.
 
 ## Shell integration (recommended)
 

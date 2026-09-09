@@ -9,6 +9,20 @@ on:
     # does not narrow the main-branch trigger above.
     tags: ['v*']
   pull_request:
+  # A release drafted in the web UI has no files on it, and GitHub then offers
+  # "Source code (zip)" as the only download — on the release that holds the
+  # Latest badge. Building here and attaching the app is what stops the most
+  # prominent download on the page from being source.
+  release:
+    types: [published]
+  # Repairs a release that was published before this existed. Run it from the
+  # Actions tab with the tag to attach the app to.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach the app to (e.g. v3.9)'
+        required: false
+        type: string
 
 # Read-only by default; only the release job gets write, and only to contents.
 permissions:
@@ -26,7 +40,17 @@ jobs:
     name: Build (macOS)
     runs-on: macos-15
     steps:
+      # fetch-depth: 0 because the version below is the commit count, and a
+      # depth-1 checkout would make that 1 — silently shipping 0.1.
+      #
+      # `ref` is empty for a push or a pull request, which checks out the
+      # triggering ref as usual. For a release or a manual repair it is the
+      # tag, so the app attached to a release is built from the code that
+      # release names.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.event.release.tag_name || '' }}
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
@@ -62,15 +86,20 @@ jobs:
 
       - name: Build
         run: |
-          # A tag build has to carry the tag's version, or v0.3.0 would ship an
-          # app whose About box still says whatever project.yml last hardcoded.
-          # The empty-array expansion below is safe because Actions runs
-          # `bash -e`, not `bash -u` — under set -u, bash 3.2 on macOS treats
-          # "${ARR[@]}" on an empty array as an unbound variable.
-          VERSION_ARG=()
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            VERSION_ARG=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
-          fi
+          # The version is the commit count, so nothing is hand-maintained and
+          # nothing can drift. Hand-kept versions are what left 0.2.0, 0.3.0,
+          # the tag v3.9 and the tag Main all disagreeing at once.
+          #
+          # Deliberately not GITHUB_RUN_NUMBER: that counts runs of *this
+          # workflow file* and restarts at 1 if the file is renamed. A release
+          # title that restarts is untidy; a version that goes backwards breaks
+          # update checks and confuses every bug report.
+          #
+          # This also replaces deriving the version from the tag name, which
+          # was fine for v0.3.0 and produced MARKETING_VERSION=Main for the tag
+          # `Main` — now reachable, since a hand-drafted release's tag is not
+          # always version-shaped.
+          build_number=$(git rev-list --count HEAD)
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
@@ -81,7 +110,8 @@ jobs:
             -skipMacroValidation \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
-            "${VERSION_ARG[@]}" \
+            "MARKETING_VERSION=0.$build_number" \
+            "CURRENT_PROJECT_VERSION=$build_number" \
             build
 
       # The app promises a bundled iterminalctl (Settings → Security installs
@@ -134,7 +164,10 @@ jobs:
     name: Publish release
     needs: build
     # Never from a pull request: a PR branch is not something to publish.
-    if: github.event_name == 'push'
+    # Everything else may: a push to main or a tag, a release published by
+    # hand, and a manual repair. Gating this on `== 'push'` is what let a
+    # hand-drafted release sit there with no app on it — the job never ran.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,6 +191,11 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          # Resolved here rather than from GITHUB_REF_TYPE, which reads
+          # `branch` for a manual dispatch even when the run is repairing a
+          # tag. Empty means this is an ordinary main build, which gets a
+          # build-* prerelease of its own.
+          TARGET_TAG: ${{ inputs.tag || github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
 
@@ -183,8 +221,8 @@ jobs:
           NOTE
           )
 
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            asset="iTERMiNAL-${GITHUB_REF_NAME}-universal.zip"
+          if [ -n "$TARGET_TAG" ]; then
+            asset="iTERMiNAL-${TARGET_TAG}-universal.zip"
             mv iTERMiNAL.zip "$asset"
 
             # State where the changelog starts rather than letting the API
@@ -202,7 +240,7 @@ jobs:
             # ascending version order and keep the last tag seen before this
             # one. Empty means this is the earliest version tag.
             prev=$(git tag --list 'v*' --sort=v:refname \
-              | awk -v cur="$GITHUB_REF_NAME" '$0 == cur { exit } { last = $0 } END { print last }')
+              | awk -v cur="$TARGET_TAG" '$0 == cur { exit } { last = $0 } END { print last }')
 
             if [ -n "$prev" ]; then
               # Ask for the changelog explicitly rather than passing
@@ -212,7 +250,7 @@ jobs:
               # survivable; the install section is not.
               changelog=$(gh api --method POST \
                 "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-                -f tag_name="$GITHUB_REF_NAME" \
+                -f tag_name="$TARGET_TAG" \
                 -f previous_tag_name="$prev" --jq .body || true)
             else
               # The first version tag has no predecessor to diff against, and
@@ -233,15 +271,15 @@ jobs:
             # Recreating it is impossible under immutable releases, so attach
             # the app to the release that is already there rather than failing
             # and leaving it empty.
-            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              echo "Release $GITHUB_REF_NAME already exists; attaching the app to it."
-              if ! gh release upload "$GITHUB_REF_NAME" "$asset" --clobber; then
-                echo "::error::Could not attach $asset to the existing $GITHUB_REF_NAME release. Immutable releases may forbid changing a published release. Delete that release and push a new, unused tag -- a tag name that has backed a release cannot be reused."
+            if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
+              echo "Release $TARGET_TAG already exists; attaching the app to it."
+              if ! gh release upload "$TARGET_TAG" "$asset" --clobber; then
+                echo "::error::Could not attach $asset to the existing $TARGET_TAG release. Immutable releases may forbid changing a published release. Delete that release and push a new, unused tag -- a tag name that has backed a release cannot be reused."
                 exit 1
               fi
             else
-              gh release create "$GITHUB_REF_NAME" "$asset" \
-                --title "$GITHUB_REF_NAME" \
+              gh release create "$TARGET_TAG" "$asset" \
+                --title "$TARGET_TAG" \
                 --notes "${changelog}
           $gatekeeper"
             fi

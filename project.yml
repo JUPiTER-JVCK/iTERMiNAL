@@ -61,8 +61,11 @@ targets:
         # XcodeGen doesn't set this the way Xcode's own app template does, so
         # without it actool compiles the icon set and nothing ever uses it.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: 0.3.0
-        CURRENT_PROJECT_VERSION: 3
+        # CI supplies the real version: 0.<commit count>, so nothing here is
+        # hand-maintained and nothing drifts. A local build reports 0.0, which
+        # makes "not built by CI" visible in a bug report.
+        MARKETING_VERSION: 0.0
+        CURRENT_PROJECT_VERSION: 0
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
         # Universal so the app runs natively on Intel and Apple Silicon.
