@@ -235,12 +235,24 @@ fastfetch
 [`neohtop-cli`](https://github.com/Abdenasser/neohtop-cli) ships 15 built-in
 themes selected by name in `~/.config/neohtop-cli/config.json` and has **no
 custom-theme format**, so it cannot be given our colours. What the installer
-does instead is name a built-in when one matches the palette — nine do
-(`catppuccin-mocha`, `catppuccin-latte`, `dracula`, `tokyo-night`,
-`gruvbox-dark`, `nord`, `one-dark`, `rose-pine`, `solarized-dark`).
+does instead is name a built-in when one matches the palette — nine do, listed
+in `NEOHTOP_THEME_MAP` in `export-themes.py`.
 
 There is **no Everforest built-in**, so the default install writes no neohtop
-config at all rather than a wrong-looking one, and says so.
+config at all rather than a wrong-looking one, and says so. Switching from a
+mapped palette back to an unmapped one retires a config this installer wrote —
+tracked by a `.iterminal-managed` marker beside it — and leaves a config you
+wrote yourself completely alone.
+
+**If neohtop comes up looking untouched, the theme name did not match.** An
+unrecognised name is not an error: neohtop falls back to its `charm` default,
+which looks exactly like "this palette just doesn't suit the tool". Worth
+knowing, because the identifiers in `NEOHTOP_THEME_MAP` are the one part of this
+bundle nobody has confirmed against the running program — they were read off a
+README table of *display* names ("Catppuccin Mocha"), not a schema, and the only
+value that table shows verbatim is `charm`. If yours falls back, try the other
+plausible spelling for your palette — `tokyo-night` against `tokyoNight`,
+`catppuccin-mocha` against `mocha` — and please correct the map.
 
 ### bat and delta: documented, not generated
 
