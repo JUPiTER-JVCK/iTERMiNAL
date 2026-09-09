@@ -139,7 +139,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Full history, because the v* arm below picks the previous version tag
+      # out of the tag list and the default depth-1 checkout fetches no tags
+      # at all. The repository is small enough that the cost is noise.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       # Extracts iTERMiNAL.zip (the packaged bundle) into the working directory.
       - name: Download the built app
@@ -181,15 +186,42 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             asset="iTERMiNAL-${GITHUB_REF_NAME}-universal.zip"
             mv iTERMiNAL.zip "$asset"
-            # Ask for the changelog explicitly rather than passing
-            # --generate-notes alongside --notes: which of the two wins when
-            # both are given is a gh implementation detail, and losing the
-            # install instructions would be silent. This endpoint's contract
-            # is documented — it returns the commits since the previous tag.
-            # An empty result is survivable; the install section is not.
-            changelog=$(gh api --method POST \
-              "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f tag_name="$GITHUB_REF_NAME" --jq .body || true)
+
+            # State where the changelog starts rather than letting the API
+            # choose. Left to itself generate-notes picks the previous
+            # release, and every main build now publishes a `build-*`
+            # prerelease — so the baseline would be a build from minutes
+            # earlier at this very commit, and the one release people are
+            # meant to download would ship an empty changelog. What the
+            # endpoint does when previous_tag_name is omitted is not
+            # documented either way, which is reason enough to say it.
+            # The previous version is the highest tag sorting *below* this
+            # one, which is not the same as the newest tag that isn't this
+            # one: cutting a v0.9.1 hotfix once v0.10.0 exists would pick
+            # v0.10.0 and ask for a range running backwards. Walk the list in
+            # ascending version order and keep the last tag seen before this
+            # one. Empty means this is the earliest version tag.
+            prev=$(git tag --list 'v*' --sort=v:refname \
+              | awk -v cur="$GITHUB_REF_NAME" '$0 == cur { exit } { last = $0 } END { print last }')
+
+            if [ -n "$prev" ]; then
+              # Ask for the changelog explicitly rather than passing
+              # --generate-notes alongside --notes: which of the two wins when
+              # both are given is a gh implementation detail, and losing the
+              # install instructions would be silent. An empty changelog is
+              # survivable; the install section is not.
+              changelog=$(gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+                -f tag_name="$GITHUB_REF_NAME" \
+                -f previous_tag_name="$prev" --jq .body || true)
+            else
+              # The first version tag has no predecessor to diff against, and
+              # every other tag in this repository is a build tag rather than
+              # a version. Say so instead of asking for a range that has no
+              # meaningful start.
+              changelog="First v-prefixed release — see the commit history for what came before."
+            fi
+
             gh release create "$GITHUB_REF_NAME" "$asset" \
               --title "$GITHUB_REF_NAME" \
               --notes "${changelog}
