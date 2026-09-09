@@ -198,6 +198,9 @@ fi
 if [ "$EXTRAS" -eq 1 ]; then
     step "Installing companion configs"
     CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+    NEOHTOP_DIR="$CONFIG_HOME/neohtop-cli"
+    NEOHTOP_CONFIG="$NEOHTOP_DIR/config.json"
+    NEOHTOP_MARKER="$NEOHTOP_DIR/.iterminal-managed"
 
     # extras/ is committed pre-generated for the default palette, so the common
     # path needs nothing but cp. Any other palette has to be generated, which
@@ -211,18 +214,32 @@ if [ "$EXTRAS" -eq 1 ]; then
     install_file "$SOURCE_DIR/extras/fastfetch.jsonc" "$CONFIG_HOME/fastfetch/config.jsonc"
 
     if [ -f "$EXTRAS_SRC/config.json" ]; then
-        install_file "$EXTRAS_SRC/config.json" "$CONFIG_HOME/neohtop-cli/config.json"
+        install_file "$EXTRAS_SRC/config.json" "$NEOHTOP_CONFIG"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            say "would mark $NEOHTOP_CONFIG as iTERMiNAL-managed"
+        else
+            printf '%s\n' "$STAMP" > "$NEOHTOP_MARKER"
+        fi
     else
         say "no neohtop-cli config: it has no built-in theme matching $THEME"
-        # Switching from a mapped palette (Nord) to an unmapped one (Everforest)
-        # used to leave the Nord config in place, so neohtop stayed on a theme
-        # nothing else in the install was using. Move it aside instead: the same
-        # back_up() every other companion here gets, so nothing is destroyed and
-        # neohtop falls back to its own default rather than a stale claim.
-        if [ -f "$CONFIG_HOME/neohtop-cli/config.json" ]; then
-            back_up "$CONFIG_HOME/neohtop-cli/config.json"
+        # Only retire configs this installer previously managed.
+        if [ -f "$NEOHTOP_MARKER" ] && [ -f "$NEOHTOP_CONFIG" ]; then
+            back_up "$NEOHTOP_CONFIG"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                say "would remove $NEOHTOP_MARKER"
+            else
+                rm -f "$NEOHTOP_MARKER"
+            fi
             say "moved the previous neohtop-cli config aside; it named a theme"
             say "  this palette does not use"
+        elif [ -f "$NEOHTOP_CONFIG" ]; then
+            say "leaving existing neohtop-cli config untouched (not iTERMiNAL-managed)"
+        elif [ -f "$NEOHTOP_MARKER" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                say "would remove stale $NEOHTOP_MARKER"
+            else
+                rm -f "$NEOHTOP_MARKER"
+            fi
         fi
     fi
 
