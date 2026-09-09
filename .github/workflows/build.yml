@@ -195,15 +195,41 @@ jobs:
               --notes "${changelog}
           $gatekeeper"
           else
-            asset="iTERMiNAL-latest-universal.zip"
+            # One release per build, with a tag that has never been used.
+            #
+            # This repository has immutable releases enabled, under which a tag
+            # name that has ever backed a published release is reserved
+            # permanently. The previous design deleted and recreated a release
+            # tagged `latest` on every build, which that forbids outright: three
+            # consecutive main builds failed with "tag_name was used by an
+            # immutable release", and `latest` is now burned on this repo for
+            # good — the tag itself is gone, deleted by the old --cleanup-tag,
+            # and creating it still 422s.
+            #
+            # The tag is built from run_id and run_attempt, not run_number.
+            # Uniqueness has to be structural here: a collision is not a failed
+            # build you retry, it burns that tag on this repository for good.
+            #
+            # run_number counts runs of *one workflow*, so renaming or
+            # recreating this file restarts it at 1 and walks back over
+            # build-1, build-2… It also does not change when a run is re-run,
+            # so a retry after a partly-successful publish would reuse the tag
+            # it just created. run_id is unique per repository and never
+            # reissued; run_attempt separates re-runs of the same run. Between
+            # them there is no path back to a name already used.
+            #
+            # run_number stays in the title and asset name, where it is for
+            # humans and need not be unique.
+            #
+            # Nothing is deleted: under immutability that cannot succeed, and
+            # the old `|| true` on the delete is what let a broken publish path
+            # look survivable.
+            tag="build-${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            asset="iTERMiNAL-build-${GITHUB_RUN_NUMBER}-universal.zip"
             mv iTERMiNAL.zip "$asset"
             subject=$(git log -1 --pretty=%s)
-            # Delete and recreate rather than editing in place: it is idempotent
-            # and re-points the tag at this commit, and the asset URL is stable
-            # across the swap because the tag name never changes.
-            gh release delete latest --yes --cleanup-tag || true
-            gh release create latest "$asset" \
-              --title "Latest build (main)" \
+            gh release create "$tag" "$asset" \
+              --title "Build ${GITHUB_RUN_NUMBER} — ${GITHUB_SHA:0:7}" \
               --prerelease \
               --target "$GITHUB_SHA" \
               --notes "Built from \`${GITHUB_SHA:0:7}\` — ${subject}

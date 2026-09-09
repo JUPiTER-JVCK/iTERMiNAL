@@ -11,8 +11,8 @@ Built in Swift with SwiftUI/AppKit on top of
 terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 
 > **Just want to run it?**
-> [**Download the app**](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/download/latest/iTERMiNAL-latest-universal.zip)
-> — or browse [all releases](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases).
+> [**Download the app**](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases)
+> — the newest build is at the top of that page.
 > The green **Code** button above gives you the source tree, not the app.
 
 ## Features
@@ -65,10 +65,15 @@ There are two ways to get it running.
 
 ### Download a build (no Xcode needed)
 
-From [Releases](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases). Every
-green build of `main` refreshes **Latest build (main)** — an optimised Release
-build, the same configuration a shipped copy would be — and version tags get
-their own release with a changelog.
+From [Releases](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases), where the
+newest is at the top. Every green build of `main` publishes its own
+**Build _n_** — an optimised Release build, the same configuration a shipped
+copy would be — and version tags get a release of their own with a changelog.
+
+There is no fixed "latest" download link. This repository has immutable
+releases enabled, so a tag can back exactly one release for all time and
+cannot be reused for a rolling one; each build therefore gets a tag of its
+own.
 
 ```sh
 unzip iTERMiNAL-*.zip
