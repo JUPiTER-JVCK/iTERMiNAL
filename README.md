@@ -12,7 +12,8 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 
 > **Just want to run it?**
 > [**Download the app**](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases)
-> — the newest build is at the top of that page.
+> — the newest build is at the top of that page. For the newest *version*
+> rather than the newest build, [releases/latest](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/latest).
 > The green **Code** button above gives you the source tree, not the app.
 
 ## Features
@@ -73,10 +74,12 @@ newest is at the top. Every green build of `main` publishes its own
 **Build _n_** — an optimised Release build, the same configuration a shipped
 copy would be — and version tags get a release of their own with a changelog.
 
-There is no fixed "latest" download link. This repository has immutable
-releases enabled, so a tag can back exactly one release for all time and
-cannot be reused for a rolling one; each build therefore gets a tag of its
-own.
+Version releases are the only ones with a fixed link:
+[`releases/latest`](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/latest)
+resolves to the newest of them, since they are the releases *not* marked as
+prereleases. Per-build downloads have no rolling link — this repository has
+immutable releases enabled, so a tag can back exactly one release for all time
+and cannot be reused, which is why each build gets a tag of its own.
 
 ```sh
 unzip iTERMiNAL-*.zip
@@ -120,7 +123,10 @@ git tag v0.3.0 && git push origin v0.3.0
 ```
 
 CI builds it, overrides `MARKETING_VERSION` from the tag so the app's About box
-agrees with the release, and publishes the zip with a generated changelog.
+agrees with the release, and publishes the zip with a generated changelog. That
+changelog runs from the previous `v*` tag — stated explicitly, because the
+default baseline would be the `build-*` prerelease published minutes earlier at
+the same commit, which is no range at all.
 
 ## Shell integration (recommended)
 
