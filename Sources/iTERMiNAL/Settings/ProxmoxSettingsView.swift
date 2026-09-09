@@ -257,8 +257,9 @@ private struct ProxmoxGuestRow: View {
     /// in the app's browser panel is the whole feature — no VNC client, and no
     /// dependence on a port that Proxmox does not actually leave listening.
     private func openConsole() {
-        let client = ProxmoxClient(host: host)
-        guard let url = client.consoleURL(for: guest) else { return }
+        // Straight off the host: building this URL is pure string work, and
+        // constructing a client to do it would spin up a URLSession per click.
+        guard let url = host.consoleURL(for: guest) else { return }
         WorkspaceStore.shared.openLinkFromTerminal(url.absoluteString)
     }
 }
