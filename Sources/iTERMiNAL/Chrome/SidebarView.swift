@@ -833,8 +833,6 @@ private struct SidebarStatusRow: View {
         .popover(isPresented: $showShortcuts, arrowEdge: .top) {
             ShortcutsPopover()
         }
-        .onAppear { metrics.start() }
-        .onDisappear { metrics.stop() }
     }
 }
 

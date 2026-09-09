@@ -5,6 +5,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    private let process = ProcessMetrics.shared
 
     var body: some View {
         NavigationSplitView {
@@ -19,6 +20,8 @@ struct MainWindowView: View {
                 .environmentObject(store)
                 .environmentObject(settings)
         }
+        .onAppear { process.start() }
+        .onDisappear { process.stop() }
     }
 }
 
@@ -283,15 +286,11 @@ private struct DetailBottomStrip: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 26)
-        // Sampling is tied to the strip being on screen, so switching the
-        // setting off stops the timer rather than just hiding its output.
         .onAppear {
             system.start()
-            process.start()
         }
         .onDisappear {
             system.stop()
-            process.stop()
         }
     }
 
