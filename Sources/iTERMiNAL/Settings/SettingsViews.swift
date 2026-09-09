@@ -534,6 +534,8 @@ struct ConnectionsSettingsView: View {
                 }
             }
 
+            ProxmoxSettingsSection()
+
             Section("Authentication") {
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.

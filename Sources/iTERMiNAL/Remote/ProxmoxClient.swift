@@ -1,0 +1,340 @@
+import CryptoKit
+import Foundation
+
+// MARK: - Wire types
+
+/// Every Proxmox API response wraps its payload in `data`.
+private struct PVEEnvelope<T: Decodable>: Decodable {
+    let data: T
+}
+
+struct ProxmoxNode: Decodable, Identifiable, Hashable {
+    let node: String
+    let status: String?
+
+    var id: String { node }
+}
+
+enum ProxmoxGuestKind: String, Codable, Hashable {
+    case qemu
+    case lxc
+
+    /// What the console query parameter calls this kind. `qemu` guests are
+    /// `kvm` in console URLs — the API name and the console name differ.
+    var consoleValue: String {
+        switch self {
+        case .qemu: return "kvm"
+        case .lxc: return "lxc"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .qemu: return "VM"
+        case .lxc: return "Container"
+        }
+    }
+}
+
+/// One VM or container as the node listing reports it.
+struct ProxmoxGuest: Identifiable, Hashable {
+    let vmid: Int
+    let name: String
+    let status: String
+    let node: String
+    let kind: ProxmoxGuestKind
+    /// Populated separately from the guest agent, which is often not installed.
+    var addresses: [String] = []
+
+    var id: String { "\(node)/\(kind.rawValue)/\(vmid)" }
+
+    var isRunning: Bool { status == "running" }
+
+    var displayName: String { name.isEmpty ? "\(vmid)" : name }
+
+    /// The first IPv4 address the agent reported, which is the one worth
+    /// offering an SSH action for.
+    var primaryAddress: String? { addresses.first }
+}
+
+/// The node listing's shape. `name` is absent on a guest that has never been
+/// given one, so it decodes optionally and is defaulted at the call site.
+private struct GuestListEntry: Decodable {
+    let vmid: Int
+    let name: String?
+    let status: String?
+}
+
+// MARK: - Errors
+
+enum ProxmoxError: LocalizedError {
+    case notConfigured
+    case missingToken
+    case http(status: Int, body: String)
+    case malformedResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            return "This Proxmox host has no address yet."
+        case .missingToken:
+            return "No API token is saved for this host. Add one in Settings → Connections."
+        case .http(let status, let body):
+            if status == 401 {
+                return "Proxmox rejected the API token (401). Check the token ID and secret, and that the token has permission on this node."
+            }
+            return "Proxmox returned HTTP \(status). \(body)"
+        case .malformedResponse:
+            return "Proxmox returned a response this app could not read."
+        }
+    }
+}
+
+// MARK: - Certificate pinning
+
+/// Accepts a server certificate only if the system already trusts it, or if it
+/// is exactly the one the user pinned for this host.
+///
+/// A default Proxmox install serves a self-signed certificate, so without this
+/// nothing here would connect at all. The tempting fix — disabling validation,
+/// or widening the app's App Transport Security exemption beyond web content —
+/// would weaken every connection the app makes. Trust-on-first-use against a
+/// fingerprint the user confirmed is narrower than either: exactly one
+/// certificate is accepted, and only for this host.
+final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
+    private let pinnedFingerprint: String?
+    /// Set when a challenge is refused, so the caller can offer the user the
+    /// fingerprint it actually saw rather than a bare failure.
+    private(set) var lastSeenFingerprint: String?
+
+    init(pinnedFingerprint: String?) {
+        self.pinnedFingerprint = pinnedFingerprint.map(CertificateFingerprint.normalized)
+    }
+
+    /// SHA-256 of a certificate's DER encoding, lowercase hex — the same value
+    /// `openssl x509 -fingerprint -sha256` prints, and what Proxmox displays.
+    static func fingerprint(of certificate: SecCertificate) -> String {
+        let der = SecCertificateCopyData(certificate) as Data
+        return SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func leafCertificate(of trust: SecTrust) -> SecCertificate? {
+        // SecTrustCopyCertificateChain replaces the per-index accessor
+        // deprecated in macOS 12; this app targets 14.
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate] else {
+            return nil
+        }
+        return chain.first
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // A properly signed certificate needs no pin. Let the system decide
+        // first so a host with a real certificate behaves normally, and the
+        // pin only ever *adds* an accepted certificate.
+        if SecTrustEvaluateWithError(trust, nil) {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        guard let leaf = Self.leafCertificate(of: trust) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        let seen = Self.fingerprint(of: leaf)
+        lastSeenFingerprint = seen
+
+        guard let pinned = pinnedFingerprint, !pinned.isEmpty, seen == pinned else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+}
+
+// MARK: - Client
+
+/// Reads a Proxmox VE cluster over its REST API.
+///
+/// Discovery is deliberately API-driven rather than a port scan. Proxmox does
+/// not leave a VNC port listening per VM — a console is created on demand by
+/// `vncproxy` behind a one-time ticket — and it never exposes a guest's RDP at
+/// all, since that is a service inside the guest on the guest's own address. A
+/// scan would therefore find almost nothing and miss every VM worth listing,
+/// while the API returns names, status and agent-reported addresses directly.
+///
+/// A class, not a struct: a URLSession holds a strong reference to its
+/// delegate until it is invalidated, so the session has to be torn down when
+/// the client goes away or every refresh leaks one.
+final class ProxmoxClient {
+    let host: ProxmoxHost
+    private let session: URLSession
+    private let delegate: ProxmoxTrustDelegate
+
+    init(host: ProxmoxHost) {
+        self.host = host
+        let delegate = ProxmoxTrustDelegate(pinnedFingerprint: host.pinnedFingerprint)
+        self.delegate = delegate
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 15
+        self.session = URLSession(
+            configuration: configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+    }
+
+    /// The certificate this client last refused, if any — worth showing when
+    /// a connection fails so the user can compare it with what Proxmox lists.
+    var lastSeenFingerprint: String? { delegate.lastSeenFingerprint }
+
+    deinit {
+        session.invalidateAndCancel()
+    }
+
+    // MARK: Requests
+
+    private func request(path: String) throws -> URLRequest {
+        guard let base = host.baseURL,
+              let url = URL(string: "/api2/json\(path)", relativeTo: base) else {
+            throw ProxmoxError.notConfigured
+        }
+        guard let secret = KeychainStore.get(host.keychainAccount), !secret.isEmpty else {
+            throw ProxmoxError.missingToken
+        }
+        var request = URLRequest(url: url)
+        // Token auth rather than a password: it is revocable on the server and
+        // sidesteps two-factor, and the app never sees a user password.
+        request.setValue(
+            "PVEAPIToken=\(host.tokenID)=\(secret)",
+            forHTTPHeaderField: "Authorization"
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
+
+    private func fetch<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
+        let urlRequest = try request(path: path)
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProxmoxError.malformedResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw ProxmoxError.http(status: http.statusCode, body: body.prefix(200).description)
+        }
+        do {
+            return try JSONDecoder().decode(PVEEnvelope<T>.self, from: data).data
+        } catch {
+            throw ProxmoxError.malformedResponse
+        }
+    }
+
+    // MARK: API
+
+    func nodes() async throws -> [ProxmoxNode] {
+        try await fetch("/nodes", as: [ProxmoxNode].self)
+    }
+
+    func guests(on node: String, kind: ProxmoxGuestKind) async throws -> [ProxmoxGuest] {
+        let entries = try await fetch("/nodes/\(node)/\(kind.rawValue)", as: [GuestListEntry].self)
+        return entries.map { entry in
+            ProxmoxGuest(
+                vmid: entry.vmid,
+                name: entry.name ?? "",
+                status: entry.status ?? "unknown",
+                node: node,
+                kind: kind
+            )
+        }
+    }
+
+    /// IPv4 addresses the guest agent reports, or an empty array.
+    ///
+    /// Most guests do not have qemu-guest-agent installed, and a stopped guest
+    /// never answers, so a failure here is ordinary rather than exceptional —
+    /// it degrades to "no address known" instead of failing the whole refresh.
+    func addresses(for guest: ProxmoxGuest) async -> [String] {
+        guard guest.kind == .qemu, guest.isRunning else { return [] }
+        let path = "/nodes/\(guest.node)/qemu/\(guest.vmid)/agent/network-get-interfaces"
+        guard let payload = try? await fetch(path, as: AgentInterfaces.self) else { return [] }
+        return payload.result
+            .flatMap { $0.addresses ?? [] }
+            .filter { $0.type == "ipv4" && $0.address != "127.0.0.1" }
+            .map { $0.address }
+    }
+
+    /// The whole cluster: every node, its VMs and containers, with addresses
+    /// filled in where the agent answers.
+    func discover() async throws -> [ProxmoxGuest] {
+        var all: [ProxmoxGuest] = []
+        for node in try await nodes() {
+            for kind in [ProxmoxGuestKind.qemu, .lxc] {
+                // One kind failing (an unconfigured container store, say)
+                // should not hide the other.
+                guard let found = try? await guests(on: node.node, kind: kind) else { continue }
+                all.append(contentsOf: found)
+            }
+        }
+        for index in all.indices {
+            all[index].addresses = await addresses(for: all[index])
+        }
+        return all.sorted { $0.vmid < $1.vmid }
+    }
+
+    /// Fetches the certificate the host presents, so the user can confirm it
+    /// before anything is pinned. Returns the fingerprint it saw.
+    ///
+    /// Deliberately its own session with no pin: this runs precisely when
+    /// nothing is trusted yet, and its only job is to report what is there.
+    static func probeFingerprint(for host: ProxmoxHost) async -> String? {
+        guard let base = host.baseURL else { return nil }
+        let probe = ProxmoxTrustDelegate(pinnedFingerprint: nil)
+        let session = URLSession(
+            configuration: .ephemeral,
+            delegate: probe,
+            delegateQueue: nil
+        )
+        defer { session.invalidateAndCancel() }
+        // The request is expected to fail on an untrusted certificate; the
+        // delegate records the fingerprint on its way past.
+        _ = try? await session.data(from: base)
+        return probe.lastSeenFingerprint
+    }
+}
+
+// MARK: - Guest agent shapes
+
+/// `network-get-interfaces` uses hyphenated keys, which need mapping by hand.
+private struct AgentInterfaces: Decodable {
+    struct Interface: Decodable {
+        let name: String?
+        let addresses: [Address]?
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case addresses = "ip-addresses"
+        }
+    }
+
+    struct Address: Decodable {
+        let address: String
+        let type: String
+
+        enum CodingKeys: String, CodingKey {
+            case address = "ip-address"
+            case type = "ip-address-type"
+        }
+    }
+
+    let result: [Interface]
+}
