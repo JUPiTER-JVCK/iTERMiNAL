@@ -222,10 +222,29 @@ jobs:
               changelog="First v-prefixed release — see the commit history for what came before."
             fi
 
-            gh release create "$GITHUB_REF_NAME" "$asset" \
-              --title "$GITHUB_REF_NAME" \
-              --notes "${changelog}
+            # A release may already exist for this tag, because someone drafted
+            # it by hand in the web UI before CI got here. That is not an exotic
+            # mistake, it is the obvious thing to do, and the result is nasty: a
+            # hand-made release carries no files, GitHub still offers "Source
+            # code (zip)" on it, and since a version release is not a prerelease
+            # it takes the Latest badge. The download then hands source to
+            # everyone who trusts that badge.
+            #
+            # Recreating it is impossible under immutable releases, so attach
+            # the app to the release that is already there rather than failing
+            # and leaving it empty.
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              echo "Release $GITHUB_REF_NAME already exists; attaching the app to it."
+              if ! gh release upload "$GITHUB_REF_NAME" "$asset" --clobber; then
+                echo "::error::Could not attach $asset to the existing $GITHUB_REF_NAME release. Immutable releases may forbid changing a published release. Delete that release and push a new, unused tag -- a tag name that has backed a release cannot be reused."
+                exit 1
+              fi
+            else
+              gh release create "$GITHUB_REF_NAME" "$asset" \
+                --title "$GITHUB_REF_NAME" \
+                --notes "${changelog}
           $gatekeeper"
+            fi
           else
             # One release per build, with a tag that has never been used.
             #
