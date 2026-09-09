@@ -106,6 +106,9 @@ shell-integration-features = cursor,sudo,title
 # green so panes read as separate panels — the bordered-box look in the
 # screenshots is mostly this plus btop's own borders.
 unfocused-split-opacity = 0.85
+# install.sh --theme rewrites this line along with `theme =` above, taking the
+# green from whichever palette you picked. Left alone it would stay Everforest
+# while the rest of the window changed.
 split-divider-color = #a7c080
 
 

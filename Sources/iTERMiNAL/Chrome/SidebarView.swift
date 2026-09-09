@@ -774,6 +774,9 @@ private struct SidebarRecentRow: View {
 
 /// Bottom-left status: what the app is doing right now, and a way into
 /// Settings and the shortcut list.
+///
+/// These two numbers are the app's own. The machine's live in the detail
+/// column's bottom strip — see `DetailBottomStrip`.
 private struct SidebarStatusRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
@@ -798,8 +801,14 @@ private struct SidebarStatusRow: View {
                                   ? "Local scripting API is listening"
                                   : "Local scripting API is off")
 
-                        MetricReadout(label: "CPU", value: metrics.cpuText, theme: theme)
-                        MetricReadout(label: "RAM", value: metrics.memoryText, theme: theme)
+                        HStack(spacing: 8) {
+                            MetricReadout(label: "CPU", value: metrics.cpuText, theme: theme)
+                            MetricReadout(label: "RAM", value: metrics.memoryText, theme: theme)
+                        }
+                        // Spelt out, because the bottom strip shows a second
+                        // pair of numbers under the same two labels and these
+                        // are not measuring the same thing.
+                        .help("iTERMiNAL's own CPU and memory. The machine's are in the bottom right.")
                     }
                     .contentShape(Rectangle())
                 }
@@ -824,14 +833,14 @@ private struct SidebarStatusRow: View {
         .popover(isPresented: $showShortcuts, arrowEdge: .top) {
             ShortcutsPopover()
         }
-        .onAppear { metrics.start() }
-        .onDisappear { metrics.stop() }
     }
 }
 
 /// One footer statistic: a muted label and a monospaced-digit value, so the
 /// row doesn't jitter as the numbers change width.
-private struct MetricReadout: View {
+///
+/// Shared with the detail column's bottom strip, so not file-private.
+struct MetricReadout: View {
     let label: String
     let value: String
     let theme: Theme

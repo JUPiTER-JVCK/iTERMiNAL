@@ -32,6 +32,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
+- **System monitor** — live CPU, memory, GPU and network for the machine along
+  the bottom right of the window; hover for the detail, including the app's own
+  footprint. Switch it off in Settings → Appearance and the sampling stops too.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
   per tab, snapshotted to Application Support and restored on launch. A tab
   with one pane renders flush; focus rings appear only once it is split.
@@ -137,14 +140,21 @@ fi
 The same twenty palettes, exported for [Ghostty](https://ghostty.org), with a
 config that carries the rest of the design — muted slate-green background over
 the usual black, Nerd Font, padding, translucency, tinted split dividers — plus
-matching starship, btop and fastfetch configs.
+matching btop, starship, yazi, fzf and fastfetch configs.
 
 ```sh
-cd contrib/ghostty && ./install.sh
+cd contrib/ghostty && ./install.sh --extras
 ```
 
 The themes are generated from `TerminalTheme.swift`, so a scheme looks the same
-in both terminals. See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
+in both terminals — and `--theme` re-themes the companions too, so btop and
+starship follow the terminal rather than staying one palette behind:
+
+```sh
+./install.sh --extras --theme iterminal-tokyo-night
+```
+
+See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
 
 ## Scripting API
 
