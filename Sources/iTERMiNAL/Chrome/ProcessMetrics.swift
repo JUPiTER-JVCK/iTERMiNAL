@@ -21,9 +21,19 @@ final class ProcessMetrics: ObservableObject {
 
     private var timer: Timer?
 
+    /// Two views read these numbers — the sidebar status row and the bottom
+    /// strip's tooltip — so the timer is owned by however many are on screen
+    /// rather than by whichever one disappears first. Without this, collapsing
+    /// the sidebar froze the figures the strip was still showing.
+    ///
+    /// Both callers drive this from onAppear/onDisappear, which run on the main
+    /// thread, so the count needs no locking.
+    private var subscribers = 0
+
     private init() {}
 
     func start() {
+        subscribers += 1
         guard timer == nil else { return }
         sample()
         // Two seconds is frequent enough to feel live and cheap enough to be
@@ -36,6 +46,8 @@ final class ProcessMetrics: ObservableObject {
     }
 
     func stop() {
+        subscribers = max(0, subscribers - 1)
+        guard subscribers == 0 else { return }
         timer?.invalidate()
         timer = nil
     }

@@ -29,7 +29,7 @@ rules = [
     { mime = "{audio,video}/*", fg = "#d699b6" },
     { mime = "application/{zip,rar,7z-compressed,xz,zstd,tar,gzip,bzip}*", fg = "#e67e80" },
     { mime = "application/{pdf,doc,rtf}", fg = "#83c092" },
-    { name = "*", is = "orphan", fg = "#e67e80" },
-    { name = "*", is = "exec", fg = "#a7c080" },
-    { name = "*/", fg = "#7fbbb3" },
+    { url = "*", is = "orphan", fg = "#e67e80" },
+    { url = "*", is = "exec", fg = "#a7c080" },
+    { url = "*/", fg = "#7fbbb3" },
 ]

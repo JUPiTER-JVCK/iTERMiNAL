@@ -49,6 +49,17 @@ done
 
 # A typo must not quietly install the default — the user would be left
 # wondering why nothing changed colour.
+#
+# The separator check has to come first: -f alone tests a path, not membership,
+# so `--theme ../config` resolves onto the shipped config file, passes, and then
+# gets written into `theme =` with an empty divider colour.
+case "$THEME" in
+    */*|"."|"..")
+        echo "invalid theme name: $THEME" >&2
+        echo "(a theme is a file name in themes/, not a path)" >&2
+        exit 1
+        ;;
+esac
 if [ ! -f "$SOURCE_DIR/themes/$THEME" ]; then
     printf 'unknown theme: %s\n\nValid names:\n' "$THEME" >&2
     (cd "$SOURCE_DIR/themes" && ls) | sed 's/^/  /' >&2
@@ -135,6 +146,24 @@ if [ -n "$others" ]; then
     say ""
 fi
 
+# Everything above this line is read-only. Companion configs are generated
+# here, before the first mutation, so a machine without python3 fails with
+# nothing changed — rather than with the terminal already switched and every
+# companion left on the old palette.
+EXTRAS_SRC="$SOURCE_DIR/extras"
+if [ "$EXTRAS" -eq 1 ] && [ "$THEME" != "$DEFAULT_THEME" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 is needed to generate companion configs for $THEME" >&2
+        echo "(the committed extras/ only cover $DEFAULT_THEME)" >&2
+        exit 1
+    fi
+    EXTRAS_SRC="$(mktemp -d)"
+    trap 'rm -rf "$EXTRAS_SRC"' EXIT
+    say "generating companion configs for $THEME"
+    "$SOURCE_DIR/export-themes.py" --extras "$THEME" --out "$EXTRAS_SRC" \
+        | sed 's/^/  /'
+fi
+
 step "Installing config and themes"
 # config.ghostty is the current name; plain `config` is the pre-1.2.3 spelling
 # and still loads, which is exactly why we warn about it above.
@@ -173,20 +202,6 @@ if [ "$EXTRAS" -eq 1 ]; then
     # extras/ is committed pre-generated for the default palette, so the common
     # path needs nothing but cp. Any other palette has to be generated, which
     # is the only thing here that wants python3.
-    EXTRAS_SRC="$SOURCE_DIR/extras"
-    if [ "$THEME" != "$DEFAULT_THEME" ]; then
-        if ! command -v python3 >/dev/null 2>&1; then
-            echo "python3 is needed to generate companion configs for $THEME" >&2
-            echo "(the committed extras/ only cover $DEFAULT_THEME)" >&2
-            exit 1
-        fi
-        EXTRAS_SRC="$(mktemp -d)"
-        trap 'rm -rf "$EXTRAS_SRC"' EXIT
-        say "generating companion configs for $THEME"
-        "$SOURCE_DIR/export-themes.py" --extras "$THEME" --out "$EXTRAS_SRC" \
-            | sed 's/^/  /'
-    fi
-
     install_file "$EXTRAS_SRC/starship.toml"          "$CONFIG_HOME/starship.toml"
     install_file "$EXTRAS_SRC/btop.theme"             "$CONFIG_HOME/btop/themes/iterminal.theme"
     install_file "$EXTRAS_SRC/theme.toml"             "$CONFIG_HOME/yazi/theme.toml"
@@ -199,6 +214,16 @@ if [ "$EXTRAS" -eq 1 ]; then
         install_file "$EXTRAS_SRC/config.json" "$CONFIG_HOME/neohtop-cli/config.json"
     else
         say "no neohtop-cli config: it has no built-in theme matching $THEME"
+        # Switching from a mapped palette (Nord) to an unmapped one (Everforest)
+        # used to leave the Nord config in place, so neohtop stayed on a theme
+        # nothing else in the install was using. Move it aside instead: the same
+        # back_up() every other companion here gets, so nothing is destroyed and
+        # neohtop falls back to its own default rather than a stale claim.
+        if [ -f "$CONFIG_HOME/neohtop-cli/config.json" ]; then
+            back_up "$CONFIG_HOME/neohtop-cli/config.json"
+            say "moved the previous neohtop-cli config aside; it named a theme"
+            say "  this palette does not use"
+        fi
     fi
 
     say ""

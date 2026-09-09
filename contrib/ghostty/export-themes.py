@@ -414,6 +414,11 @@ def emit_yazi(t: Theme) -> str:
     a = t.ansi
     # Only [mgr] and [filetype] — those key names are confirmed upstream.
     # Guessing at [pick]/[tabs] keys would buy very little.
+    #
+    # [filetype] selectors are `url` or `mime`, never `name` (`name` belongs to
+    # [icon]), and `is` has to accompany one of them. An earlier revision emitted
+    # `name` here, which a plain TOML parser accepts and yazi then rejects at
+    # config-load time — so parsing the output is not enough to validate it.
     return f"""# {t.name} — yazi theme
 #
 # Generated for the {t.filename} palette by {GENERATED_BY}.
@@ -445,9 +450,9 @@ rules = [
     {{ mime = "{{audio,video}}/*", fg = "#{a[5]}" }},
     {{ mime = "application/{{zip,rar,7z-compressed,xz,zstd,tar,gzip,bzip}}*", fg = "#{a[1]}" }},
     {{ mime = "application/{{pdf,doc,rtf}}", fg = "#{a[6]}" }},
-    {{ name = "*", is = "orphan", fg = "#{a[1]}" }},
-    {{ name = "*", is = "exec", fg = "#{a[2]}" }},
-    {{ name = "*/", fg = "#{a[4]}" }},
+    {{ url = "*", is = "orphan", fg = "#{a[1]}" }},
+    {{ url = "*", is = "exec", fg = "#{a[2]}" }},
+    {{ url = "*/", fg = "#{a[4]}" }},
 ]
 """
 
@@ -516,9 +521,15 @@ def write_extras(theme: Theme, out: Path) -> list[str]:
     written = []
     for filename, emitter in EXTRAS.items():
         text = emitter(theme)
+        target = out / filename
         if text is None:
+            # Clear it rather than skipping: generating a mapped palette and then
+            # an unmapped one into the same directory would otherwise leave the
+            # first palette's file behind, and --out has to describe the palette
+            # it was asked for.
+            target.unlink(missing_ok=True)
             continue
-        (out / filename).write_text(text, encoding="utf-8")
+        target.write_text(text, encoding="utf-8")
         written.append(filename)
     return written
 

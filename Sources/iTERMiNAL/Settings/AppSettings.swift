@@ -51,9 +51,12 @@ final class AppSettings: ObservableObject {
     /// The reference app draws a flat sidebar; macOS vibrancy is offered as
     /// an opt-in for people who prefer the native translucent look.
     @Published var sidebarTranslucent: Bool { didSet { defaults.set(sidebarTranslucent, forKey: "sidebarTranslucent") } }
-    /// The sidebar status row reports the machine's CPU, memory, GPU and
-    /// network. Off also stops the sampling — someone who does not want the
-    /// numbers does not want a timer taking them either.
+    /// The strip along the window's bottom right reports the machine's CPU,
+    /// memory, GPU and network. Not the sidebar status row, which goes on
+    /// showing the app's own figures from `ProcessMetrics` either way.
+    ///
+    /// Off also stops the sampling — someone who does not want the numbers does
+    /// not want a timer taking them either.
     @Published var showSystemMetrics: Bool { didSet { defaults.set(showSystemMetrics, forKey: "showSystemMetrics") } }
 
     // MARK: Terminal
@@ -280,6 +283,7 @@ final class AppSettings: ObservableObject {
         accentID = "green"
         backgroundOpacity = 1.0
         sidebarTranslucent = false
+        showSystemMetrics = true
         terminalFontName = ""
         terminalFontSize = 13
         cursorStyleTag = "steadyBlock"

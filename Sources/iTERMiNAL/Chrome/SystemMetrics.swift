@@ -254,8 +254,13 @@ final class SystemMetrics: ObservableObject {
     /// Reads the accelerator's utilisation counter without taking a
     /// measurement, to close whatever interval another process left open. See
     /// sampleGPU() for why that matters.
+    ///
+    /// Only a read that actually succeeded counts as priming. Marking it done
+    /// after a failed registry lookup would let the next successful read publish
+    /// the inherited window this exists to throw away — the ~98%-on-idle bug,
+    /// reintroduced by a transient failure.
     private func primeGPU() {
-        _ = readGPU()
+        guard readGPU() != nil else { return }
         hasPrimedGPU = true
     }
 
