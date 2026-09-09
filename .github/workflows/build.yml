@@ -219,7 +219,7 @@ jobs:
               # every other tag in this repository is a build tag rather than
               # a version. Say so instead of asking for a range that has no
               # meaningful start.
-              changelog="First tagged release — see the commit history for what came before."
+              changelog="First v-prefixed release — see the commit history for what came before."
             fi
 
             gh release create "$GITHUB_REF_NAME" "$asset" \
