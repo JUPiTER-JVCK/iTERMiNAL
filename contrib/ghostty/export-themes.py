@@ -53,21 +53,18 @@ ANSI_RE = re.compile(r"0x([0-9A-Fa-f]{6})")
 # still counts a declaration whose fields THEME_RE can no longer read.
 DECL_RE = re.compile(r"static\s+let\s+\w+\s*=\s*TerminalTheme\(")
 
-# neohtop-cli ships 15 built-in themes and has no custom-theme format, so the
-# best we can do is name one. Nine of its built-ins happen to be spelled
-# exactly like our ids, so membership is the whole mapping — no translation
-# table to drift. Everything else (Everforest included) gets no config at all
-# rather than a wrong-looking one.
-NEOHTOP_BUILTINS = {
-    "catppuccin-latte",
-    "catppuccin-mocha",
-    "dracula",
-    "gruvbox-dark",
-    "nord",
-    "one-dark",
-    "rose-pine",
-    "solarized-dark",
-    "tokyo-night",
+# neohtop-cli ships named built-ins and has no custom-theme format, so the
+# only safe output is an explicit id -> built-in map.
+NEOHTOP_THEME_MAP = {
+    "catppuccin-latte": "latte",
+    "catppuccin-mocha": "mocha",
+    "dracula": "dracula",
+    "gruvbox-dark": "gruvbox",
+    "nord": "nord",
+    "one-dark": "oneDark",
+    "rose-pine": "rosePine",
+    "solarized-dark": "solarizedDark",
+    "tokyo-night": "tokyoNight",
 }
 
 
@@ -490,8 +487,8 @@ export FZF_DEFAULT_OPTS="${{FZF_DEFAULT_OPTS:-}} --color={colours}"
 
 
 def emit_neohtop(t: Theme) -> str | None:
-    name = FILENAME_ALIASES.get(t.id, t.id)
-    if name not in NEOHTOP_BUILTINS:
+    name = NEOHTOP_THEME_MAP.get(t.id)
+    if name is None:
         return None
     # neohtop-cli has no custom-theme format, so this only selects one of its
     # built-ins. The names were read off the README's theme table rather than

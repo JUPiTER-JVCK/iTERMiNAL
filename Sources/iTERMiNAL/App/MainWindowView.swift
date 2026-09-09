@@ -285,8 +285,14 @@ private struct DetailBottomStrip: View {
         .frame(height: 26)
         // Sampling is tied to the strip being on screen, so switching the
         // setting off stops the timer rather than just hiding its output.
-        .onAppear { system.start() }
-        .onDisappear { system.stop() }
+        .onAppear {
+            system.start()
+            process.start()
+        }
+        .onDisappear {
+            system.stop()
+            process.stop()
+        }
     }
 
     /// The detail four figures have no room for — including the app's own
