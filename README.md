@@ -170,6 +170,8 @@ live shells), then install the CLI from the same panel and run:
 ```sh
 iterminalctl ping
 iterminalctl tab.create directory=~/code
+iterminalctl connection.add name=Kali host=192.168.1.147 username=kali
+iterminalctl tab.create connection=Kali
 iterminalctl terminal.send text="git status" newline=true
 iterminalctl terminal.capture
 iterminalctl browser.open url=localhost:3000
@@ -183,14 +185,20 @@ iterminalctl browser.screenshot path=~/shot.png
 | --- | --- |
 | `help`, `ping`, `app.info` | — |
 | `workspace.list`, `workspace.create` | `name` |
-| `tab.list`, `tab.create`, `tab.select`, `tab.close` | `id`, `workspace`, `directory` |
-| `pane.list`, `pane.split`, `pane.close` | `direction`, `kind` |
+| `tab.list`, `tab.create`, `tab.select`, `tab.close` | `id`, `workspace`, `directory`, `connection` |
+| `pane.list`, `pane.split`, `pane.close` | `direction`, `kind`, `connection` |
 | `terminal.send`, `terminal.capture` | `text`, `newline`, `session` |
 | `browser.open` / `newTab` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
 | `files.list` | `path`, `connection`, `hidden` |
 | `connection.list` | — |
+| `connection.add` | `name`, `host`, `port`, `username`, `transport`, `identity`, `path`, `args`, `command` |
+| `connection.remove` | `connection` |
 | `terminal.reconnect` | `session` |
 | `subscribe` / `unsubscribe` | `events` |
+
+`connection.add` saves the same fields as **Settings → Connections** and no
+password: a session opened against the host runs the system's own `ssh` in a
+PTY, so it prompts for a password or 2FA itself.
 
 The wire protocol is newline-delimited JSON over a Unix socket, so any language
 can speak it:
@@ -227,6 +235,7 @@ iterminalctl subscribe events=session.exited,tab.created
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
+| `connection.added` / `connection.removed` | a saved SSH host is created or deleted |
 
 ## Remote sessions and files
 

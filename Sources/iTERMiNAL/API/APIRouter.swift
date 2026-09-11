@@ -16,7 +16,7 @@ final class APIRouter {
     static let commands: [String] = [
         "help", "ping", "app.info",
         "subscribe", "unsubscribe",
-        "connection.list",
+        "connection.list", "connection.add", "connection.remove",
         "workspace.list", "workspace.create",
         "tab.list", "tab.create", "tab.select", "tab.close",
         "pane.list", "pane.split", "pane.close",
@@ -82,17 +82,38 @@ final class APIRouter {
             let tab = store.newTab(in: workspace, directory: request.string("directory"), kind: kind)
             ok(["tab": Self.describe(tab, workspaceName: workspace?.name)])
 
+        // MARK: Connections
+
         case "connection.list":
-            ok(["connections": settings.sshConnections.map { connection in
-                [
-                    "id": connection.id.uuidString,
+            ok(["connections": settings.sshConnections.map(Self.describe)])
+
+        case "connection.add":
+            switch Self.makeConnection(from: request, existing: settings.sshConnections) {
+            case .failure(let error):
+                return fail(error.message)
+            case .success(let connection):
+                settings.sshConnections.append(connection)
+                EventBus.shared.publish(APIEvent("connection.added", [
+                    "connection": connection.id.uuidString,
                     "name": connection.name,
                     "host": connection.host,
-                    "port": connection.port,
-                    "username": connection.username,
-                    "transport": connection.transport.rawValue,
-                ] as [String: Any]
-            }])
+                ]))
+                ok(["connection": Self.describe(connection)])
+            }
+
+        case "connection.remove":
+            guard let identifier = request.string("connection") else {
+                return fail("Missing \"connection\" — pass a saved connection's name or id.")
+            }
+            guard let connection = settings.connection(withID: identifier) else {
+                return fail("No saved connection named \(identifier).")
+            }
+            settings.sshConnections.removeAll { $0.id == connection.id }
+            EventBus.shared.publish(APIEvent("connection.removed", [
+                "connection": connection.id.uuidString,
+                "name": connection.name,
+            ]))
+            ok(["connection": Self.describe(connection)])
 
         case "tab.select":
             guard let identifier = request.string("id"),
@@ -363,6 +384,104 @@ final class APIRouter {
         case .success(let value): ok(["value": value])
         case .failure(let error): fail(error.localizedDescription)
         }
+    }
+
+    private static func describe(_ connection: SSHConnection) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": connection.id.uuidString,
+            "name": connection.name,
+            "host": connection.host,
+            "port": connection.port,
+            "username": connection.username,
+            "transport": connection.transport.rawValue,
+        ]
+        if let identity = connection.identityFile { payload["identity"] = identity }
+        if let path = connection.initialPath { payload["path"] = path }
+        if !connection.extraArguments.isEmpty { payload["args"] = connection.extraArguments }
+        if !connection.customCommand.isEmpty { payload["command"] = connection.customCommand }
+        return payload
+    }
+
+    /// Why a `connection.add` request was rejected. Carrying the sentence
+    /// rather than a code keeps the failure readable in `iterminalctl`, which
+    /// prints the error verbatim.
+    private struct ConnectionInputError: Error {
+        let message: String
+    }
+
+    /// Builds a saved connection from `connection.add` parameters.
+    ///
+    /// This stores no secret, exactly like the Settings pane it mirrors: a
+    /// host, a port, a username and flags. Authentication still happens in the
+    /// system's own ssh client when a session dials the host, so a password or
+    /// 2FA code is typed at the terminal and never passes through the API.
+    private static func makeConnection(
+        from request: APIRequest,
+        existing: [SSHConnection]
+    ) -> Result<SSHConnection, ConnectionInputError> {
+        func reject(_ message: String) -> Result<SSHConnection, ConnectionInputError> {
+            .failure(ConnectionInputError(message: message))
+        }
+
+        let transportName = request.string("transport") ?? SSHTransport.ssh.rawValue
+        guard let transport = SSHTransport(rawValue: transportName) else {
+            let known = SSHTransport.allCases.map(\.rawValue).joined(separator: ", ")
+            return reject("Unknown transport \"\(transportName)\" — use one of: \(known).")
+        }
+
+        let host = (request.string("host") ?? "").trimmingCharacters(in: .whitespaces)
+        let customCommand = (request.string("command") ?? "").trimmingCharacters(in: .whitespaces)
+
+        if transport == .custom {
+            if customCommand.isEmpty {
+                return reject("A custom-transport connection needs \"command\" — the command line to run.")
+            }
+        } else if host.isEmpty {
+            return reject("Missing \"host\".")
+        }
+        if host.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+            return reject("\"host\" cannot contain spaces.")
+        }
+
+        // `string` also renders a JSON number, which is what the CLI sends
+        // (it coerces bare digits to Double), so one path covers 2222 and
+        // "2222" alike — and rejects 22.5 instead of silently rounding it.
+        var port = 22
+        if let rawPort = request.string("port") {
+            guard let parsed = Int(rawPort), (1...65535).contains(parsed) else {
+                return reject("\"port\" must be a whole number between 1 and 65535.")
+            }
+            port = parsed
+        }
+
+        let fallbackName = host.isEmpty ? "New Host" : host
+        let name = (request.string("name") ?? fallbackName).trimmingCharacters(in: .whitespaces)
+        if name.isEmpty {
+            return reject("\"name\" cannot be empty.")
+        }
+        // `connection(withID:)` resolves a name or a uuid, so a duplicate of
+        // either would make every later lookup ambiguous.
+        if existing.contains(where: { $0.name == name || $0.id.uuidString == name }) {
+            return reject("A saved connection named \(name) already exists.")
+        }
+
+        func optional(_ key: String) -> String? {
+            guard let value = request.string(key)?.trimmingCharacters(in: .whitespaces),
+                  !value.isEmpty else { return nil }
+            return value
+        }
+
+        return .success(SSHConnection(
+            name: name,
+            host: host,
+            port: port,
+            username: request.string("username") ?? NSUserName(),
+            identityFile: optional("identity"),
+            initialPath: optional("path"),
+            transport: transport,
+            extraArguments: request.string("args") ?? "",
+            customCommand: customCommand
+        ))
     }
 
     private static func describe(_ workspace: Workspace) -> [String: Any] {

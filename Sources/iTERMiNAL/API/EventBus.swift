@@ -33,6 +33,7 @@ final class EventBus {
         "browser.navigated", "browser.tab.created", "browser.tab.closed",
         "dock.session.created", "dock.session.closed",
         "composer.session.created",
+        "connection.added", "connection.removed",
     ]
 
     private var subscribers: [UUID: (names: Set<String>, deliver: (APIEvent) -> Void)] = [:]

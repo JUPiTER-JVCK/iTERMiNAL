@@ -5,6 +5,7 @@ import Darwin
 //
 //   iterminalctl ping
 //   iterminalctl terminal.send text="ls -la" newline=true
+//   iterminalctl connection.add name=Kali host=192.168.1.147 username=kali
 //   iterminalctl browser.open url=localhost:3000
 //   iterminalctl browser.click selector="#submit"
 //   iterminalctl browser.screenshot path=~/shot.png
@@ -37,6 +38,8 @@ func usage() -> Never {
     Examples:
       iterminalctl help
       iterminalctl tab.create directory=~/code
+      iterminalctl connection.add name=Kali host=192.168.1.147 username=kali
+      iterminalctl tab.create connection=Kali
       iterminalctl terminal.send text="git status" newline=true
       iterminalctl browser.open url=localhost:3000
       iterminalctl browser.fill selector="#email" value=me@example.com
