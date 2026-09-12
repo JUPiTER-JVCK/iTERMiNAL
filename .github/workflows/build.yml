@@ -9,20 +9,10 @@ on:
     # does not narrow the main-branch trigger above.
     tags: ['v*']
   pull_request:
-  # A release drafted in the web UI has no files on it, and GitHub then offers
-  # "Source code (zip)" as the only download — on the release that holds the
-  # Latest badge. Building here and attaching the app is what stops the most
-  # prominent download on the page from being source.
+  # Saving a draft release in the web UI is the pre-publication path that lets
+  # CI attach the app before immutable release assets lock on publish.
   release:
-    types: [published]
-  # Repairs a release that was published before this existed. Run it from the
-  # Actions tab with the tag to attach the app to.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing tag to build and attach the app to (e.g. v3.9)'
-        required: false
-        type: string
+    types: [created]
 
 # Read-only by default; only the release job gets write, and only to contents.
 permissions:
@@ -44,13 +34,12 @@ jobs:
       # depth-1 checkout would make that 1 — silently shipping 0.1.
       #
       # `ref` is empty for a push or a pull request, which checks out the
-      # triggering ref as usual. For a release or a manual repair it is the
-      # tag, so the app attached to a release is built from the code that
-      # release names.
+      # triggering ref as usual. For a draft release it is the tag, so the app
+      # attached there is built from the code that release names.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag || github.event.release.tag_name || '' }}
+          ref: ${{ github.event.release.tag_name || '' }}
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
@@ -164,9 +153,8 @@ jobs:
     name: Publish release
     needs: build
     # Never from a pull request: a PR branch is not something to publish.
-    # Everything else may: a push to main or a tag, a release published by
-    # hand, and a manual repair. Gating this on `== 'push'` is what let a
-    # hand-drafted release sit there with no app on it — the job never ran.
+    # Everything else may: a push to main or a tag, or a draft release saved in
+    # the UI so CI can attach the app before publication locks the asset set.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -191,11 +179,9 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          # Resolved here rather than from GITHUB_REF_TYPE, which reads
-          # `branch` for a manual dispatch even when the run is repairing a
-          # tag. Empty means this is an ordinary main build, which gets a
-          # build-* prerelease of its own.
-          TARGET_TAG: ${{ inputs.tag || github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          # Empty means this is an ordinary main build, which gets a build-*
+          # prerelease of its own.
+          TARGET_TAG: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
 
@@ -260,21 +246,18 @@ jobs:
               changelog="First v-prefixed release — see the commit history for what came before."
             fi
 
-            # A release may already exist for this tag, because someone drafted
-            # it by hand in the web UI before CI got here. That is not an exotic
-            # mistake, it is the obvious thing to do, and the result is nasty: a
-            # hand-made release carries no files, GitHub still offers "Source
-            # code (zip)" on it, and since a version release is not a prerelease
-            # it takes the Latest badge. The download then hands source to
-            # everyone who trusts that badge.
-            #
-            # Recreating it is impossible under immutable releases, so attach
-            # the app to the release that is already there rather than failing
-            # and leaving it empty.
+            # A release may already exist for this tag because someone saved a
+            # draft in the web UI first. That is the supported UI path here:
+            # immutable releases lock assets on publication, so the app has to
+            # be attached while the release is still a draft.
             if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
-              echo "Release $TARGET_TAG already exists; attaching the app to it."
+              if [ "$(gh release view "$TARGET_TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+                echo "::error::Release $TARGET_TAG is already published. Immutable releases lock published assets, so create the release as a draft first or push a new unused tag."
+                exit 1
+              fi
+              echo "Draft release $TARGET_TAG already exists; attaching the app to it."
               if ! gh release upload "$TARGET_TAG" "$asset" --clobber; then
-                echo "::error::Could not attach $asset to the existing $TARGET_TAG release. Immutable releases may forbid changing a published release. Delete that release and push a new, unused tag -- a tag name that has backed a release cannot be reused."
+                echo "::error::Could not attach $asset to the draft $TARGET_TAG release."
                 exit 1
               fi
             else

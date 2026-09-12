@@ -127,10 +127,9 @@ previous `v*` tag — stated explicitly, because the default baseline would be t
 `build-*` prerelease published minutes earlier at the same commit, which is no
 range at all.
 
-You can also just draft a release in the GitHub UI: publishing it builds the app
-and attaches it automatically. A release with no file on it is the one failure
-mode worth knowing about, because GitHub still offers "Source code (zip)" there,
-so an empty release quietly becomes a source-code download.
+You can also save a **draft** release in the GitHub UI: CI builds the app and
+attaches it there before you publish it. Immutable releases lock assets on
+publication, so publishing first leaves you with source-code downloads only.
 
 **Versions are not hand-maintained.** The app reports `0.<commit count>`,
 supplied by CI at build time, so the version always matches the build it came
