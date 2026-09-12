@@ -93,7 +93,7 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
             URLQueryItem(name: "node", value: guest.node),
             URLQueryItem(
                 name: "path",
-                value: "api2/json/nodes/\(guest.node)/\(guest.kind.rawValue)/\(guest.vmid)/vncwebsocket"
+                value: "/api2/json/nodes/\(guest.node)/\(guest.kind.rawValue)/\(guest.vmid)/vncwebsocket"
             ),
             URLQueryItem(name: "resize", value: "off"),
         ]
