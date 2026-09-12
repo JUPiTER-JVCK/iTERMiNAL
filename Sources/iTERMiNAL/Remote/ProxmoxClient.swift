@@ -313,18 +313,33 @@ final class ProxmoxClient {
 
     /// IPv4 addresses the guest agent reports, or an empty array.
     ///
-    /// Most guests do not have qemu-guest-agent installed, and a stopped guest
-    /// never answers, so a failure here is ordinary rather than exceptional —
-    /// it degrades to "no address known" instead of failing the whole refresh.
+    /// A stopped guest never answers, and VMs often lack qemu-guest-agent, so
+    /// a failure here is ordinary rather than exceptional — it degrades to
+    /// "no address known" instead of failing the whole refresh.
     func addresses(for guest: ProxmoxGuest) async -> [String] {
-        guard guest.kind == .qemu, guest.isRunning else { return [] }
+        guard guest.isRunning else { return [] }
         let nodePath = encodedPathSegment(guest.node)
-        let path = "/nodes/\(nodePath)/qemu/\(guest.vmid)/agent/network-get-interfaces"
-        guard let payload = try? await fetchRaw(path, as: AgentInterfaces.self) else { return [] }
-        return payload.data.result
-            .flatMap { $0.addresses ?? [] }
-            .filter { $0.type == "ipv4" && $0.address != "127.0.0.1" }
-            .map { $0.address }
+        switch guest.kind {
+        case .qemu:
+            let path = "/nodes/\(nodePath)/qemu/\(guest.vmid)/agent/network-get-interfaces"
+            guard let payload = try? await fetchRaw(path, as: AgentInterfaces.self) else { return [] }
+            return payload.data.result
+                .flatMap { $0.addresses ?? [] }
+                .filter { $0.type == "ipv4" && $0.address != "127.0.0.1" }
+                .map { $0.address }
+        case .lxc:
+            let path = "/nodes/\(nodePath)/lxc/\(guest.vmid)/interfaces"
+            guard let payload = try? await fetch(path, as: [LXCInterface].self) else { return [] }
+            let explicit = payload
+                .flatMap { $0.addresses ?? [] }
+                .filter { $0.type == "ipv4" && $0.address != "127.0.0.1" }
+                .map { $0.address }
+            if !explicit.isEmpty { return explicit }
+            return payload
+                .compactMap(\.inet)
+                .compactMap { $0.split(separator: "/").first.map(String.init) }
+                .filter { $0 != "127.0.0.1" }
+        }
     }
 
     /// The whole cluster: every node, its VMs and containers, with addresses
@@ -372,7 +387,7 @@ final class ProxmoxClient {
     /// a large cluster could hang for minutes. Bounded rather than unbounded so
     /// a big cluster does not open a connection per VM at once.
     private func resolveAddresses(for guests: inout [ProxmoxGuest]) async {
-        let targets = guests.indices.filter { guests[$0].kind == .qemu && guests[$0].isRunning }
+        let targets = guests.indices.filter { guests[$0].isRunning }
         guard !targets.isEmpty else { return }
 
         let snapshot = guests
@@ -453,4 +468,14 @@ private struct AgentInterfaces: Decodable {
     }
 
     let data: Payload
+}
+
+private struct LXCInterface: Decodable {
+    let inet: String?
+    let addresses: [AgentInterfaces.Address]?
+
+    enum CodingKeys: String, CodingKey {
+        case inet
+        case addresses = "ip-addresses"
+    }
 }
