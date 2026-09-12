@@ -43,9 +43,11 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     /// older build must still load rather than being silently dropped.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        host = try container.decode(String.self, forKey: .host)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        let decodedName = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        let decodedHost = try container.decodeIfPresent(String.self, forKey: .host) ?? ""
+        host = decodedHost.isEmpty ? decodedName : decodedHost
+        name = decodedName.isEmpty ? (host.isEmpty ? "Proxmox" : host) : decodedName
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 8006
         tokenID = try container.decodeIfPresent(String.self, forKey: .tokenID) ?? ""
         pinnedFingerprint = try container.decodeIfPresent(String.self, forKey: .pinnedFingerprint)

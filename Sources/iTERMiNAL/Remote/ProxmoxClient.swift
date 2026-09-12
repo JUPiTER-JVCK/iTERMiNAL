@@ -207,6 +207,11 @@ final class ProxmoxClient {
     let host: ProxmoxHost
     private let session: URLSession
     private let delegate: ProxmoxTrustDelegate
+    private static let pathSegmentAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return allowed
+    }()
 
     init(host: ProxmoxHost) {
         self.host = host
@@ -271,12 +276,17 @@ final class ProxmoxClient {
 
     // MARK: API
 
+    private func encodedPathSegment(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? value
+    }
+
     func nodes() async throws -> [ProxmoxNode] {
         try await fetch("/nodes", as: [ProxmoxNode].self)
     }
 
     func guests(on node: String, kind: ProxmoxGuestKind) async throws -> [ProxmoxGuest] {
-        let entries = try await fetch("/nodes/\(node)/\(kind.rawValue)", as: [GuestListEntry].self)
+        let nodePath = encodedPathSegment(node)
+        let entries = try await fetch("/nodes/\(nodePath)/\(kind.rawValue)", as: [GuestListEntry].self)
         return entries.map { entry in
             ProxmoxGuest(
                 vmid: entry.vmid,
@@ -295,7 +305,8 @@ final class ProxmoxClient {
     /// it degrades to "no address known" instead of failing the whole refresh.
     func addresses(for guest: ProxmoxGuest) async -> [String] {
         guard guest.kind == .qemu, guest.isRunning else { return [] }
-        let path = "/nodes/\(guest.node)/qemu/\(guest.vmid)/agent/network-get-interfaces"
+        let nodePath = encodedPathSegment(guest.node)
+        let path = "/nodes/\(nodePath)/qemu/\(guest.vmid)/agent/network-get-interfaces"
         guard let payload = try? await fetch(path, as: AgentInterfaces.self) else { return [] }
         return payload.result
             .flatMap { $0.addresses ?? [] }
