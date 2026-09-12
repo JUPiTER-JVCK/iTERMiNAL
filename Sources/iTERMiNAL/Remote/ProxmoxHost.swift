@@ -56,28 +56,14 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     /// Keychain account for the token's secret half.
     var keychainAccount: String { "proxmox.\(id.uuidString)" }
 
-    private var normalizedEndpoint: (host: String, port: Int)? {
+    private var normalizedEndpoint: (host: String, port: Int, path: String)? {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-
-        if trimmed.hasPrefix("[") {
-            guard let endBracket = trimmed.lastIndex(of: "]") else { return nil }
-            let address = String(trimmed[trimmed.index(after: trimmed.startIndex)..<endBracket])
-            let suffix = trimmed[trimmed.index(after: endBracket)...]
-            if suffix.isEmpty {
-                return (address, port)
-            } else if suffix.hasPrefix(":"), let embeddedPort = Int(suffix.dropFirst()) {
-                return (address, embeddedPort)
-            } else {
-                return nil
-            }
-        } else if trimmed.filter({ $0 == ":" }).count == 1,
-                  let colon = trimmed.lastIndex(of: ":"),
-                  let embeddedPort = Int(trimmed[trimmed.index(after: colon)...]) {
-            return (String(trimmed[..<colon]), embeddedPort)
-        } else {
-            return (trimmed, port)
-        }
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(string: candidate),
+              let parsedHost = components.host, !parsedHost.isEmpty else { return nil }
+        let parsedPath = components.path == "/" ? "" : components.path
+        return (parsedHost, components.port ?? port, parsedPath)
     }
 
     var baseURL: URL? {
@@ -86,6 +72,7 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
         components.scheme = "https"
         components.host = normalizedEndpoint.host
         components.port = normalizedEndpoint.port
+        components.path = normalizedEndpoint.path
         return components.url
     }
 
@@ -95,9 +82,10 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
             let displayHost = normalizedEndpoint.host.contains(":")
                 ? "[\(normalizedEndpoint.host)]"
                 : normalizedEndpoint.host
-            endpoint = normalizedEndpoint.port == 8006
+            let authority = normalizedEndpoint.port == 8006
                 ? displayHost
                 : "\(displayHost):\(normalizedEndpoint.port)"
+            endpoint = authority + normalizedEndpoint.path
         } else {
             endpoint = port == 8006 ? host : "\(host):\(port)"
         }

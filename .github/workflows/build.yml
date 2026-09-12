@@ -9,10 +9,15 @@ on:
     # does not narrow the main-branch trigger above.
     tags: ['v*']
   pull_request:
-  # Saving a draft release in the web UI is the pre-publication path that lets
-  # CI attach the app before immutable release assets lock on publish.
-  release:
-    types: [created]
+  # GitHub does not emit draft-release workflow events before publication, so
+  # the pre-publication UI path is: save a draft, then run this workflow
+  # manually with that tag before publishing it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Draft release tag to build and attach before publication (e.g. v3.9)'
+        required: true
+        type: string
 
 # Read-only by default; only the release job gets write, and only to contents.
 permissions:
@@ -34,12 +39,13 @@ jobs:
       # depth-1 checkout would make that 1 — silently shipping 0.1.
       #
       # `ref` is empty for a push or a pull request, which checks out the
-      # triggering ref as usual. For a draft release it is the tag, so the app
-      # attached there is built from the code that release names.
+      # triggering ref as usual. For a manual draft-release build it is the
+      # tag, so the app attached there is built from the code that release
+      # names.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.event.release.tag_name || '' }}
+          ref: ${{ inputs.tag || '' }}
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
@@ -153,8 +159,8 @@ jobs:
     name: Publish release
     needs: build
     # Never from a pull request: a PR branch is not something to publish.
-    # Everything else may: a push to main or a tag, or a draft release saved in
-    # the UI so CI can attach the app before publication locks the asset set.
+    # Everything else may: a push to main or a tag, or a manual build for a
+    # saved draft release before publication locks the asset set.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -181,8 +187,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Empty means this is an ordinary main build, which gets a build-*
           # prerelease of its own.
-          TARGET_TAG: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
-          RELEASE_ID: ${{ github.event.release.id || '' }}
+          TARGET_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
 
@@ -208,11 +213,8 @@ jobs:
           NOTE
           )
 
-          if [ "$GITHUB_EVENT_NAME" = release ] && [ -z "$TARGET_TAG" ] && [ -n "$RELEASE_ID" ]; then
-            TARGET_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .tag_name)
-          fi
-          if [ "$GITHUB_EVENT_NAME" = release ] && [ -z "$TARGET_TAG" ]; then
-            echo "::error::Draft releases must be associated with a tag before CI can attach the app."
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -z "$TARGET_TAG" ]; then
+            echo "::error::Provide the draft release tag before running this workflow manually."
             exit 1
           fi
 
