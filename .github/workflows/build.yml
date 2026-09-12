@@ -182,6 +182,7 @@ jobs:
           # Empty means this is an ordinary main build, which gets a build-*
           # prerelease of its own.
           TARGET_TAG: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          RELEASE_ID: ${{ github.event.release.id || '' }}
         run: |
           set -euo pipefail
 
@@ -207,6 +208,9 @@ jobs:
           NOTE
           )
 
+          if [ "$GITHUB_EVENT_NAME" = release ] && [ -z "$TARGET_TAG" ] && [ -n "$RELEASE_ID" ]; then
+            TARGET_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .tag_name)
+          fi
           if [ "$GITHUB_EVENT_NAME" = release ] && [ -z "$TARGET_TAG" ]; then
             echo "::error::Draft releases must be associated with a tag before CI can attach the app."
             exit 1

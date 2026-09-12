@@ -57,14 +57,34 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     var keychainAccount: String { "proxmox.\(id.uuidString)" }
 
     var baseURL: URL? {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let normalized: (host: String, port: Int)?
+        if trimmed.hasPrefix("[") {
+            guard let endBracket = trimmed.lastIndex(of: "]") else { return nil }
+            let address = String(trimmed[trimmed.index(after: trimmed.startIndex)..<endBracket])
+            let suffix = trimmed[trimmed.index(after: endBracket)...]
+            if suffix.isEmpty {
+                normalized = (address, port)
+            } else if suffix.hasPrefix(":"), let embeddedPort = Int(suffix.dropFirst()) {
+                normalized = (address, embeddedPort)
+            } else {
+                normalized = nil
+            }
+        } else if trimmed.filter({ $0 == ":" }).count == 1,
+                  let colon = trimmed.lastIndex(of: ":"),
+                  let embeddedPort = Int(trimmed[trimmed.index(after: colon)...]) {
+            normalized = (String(trimmed[..<colon]), embeddedPort)
+        } else {
+            normalized = (trimmed, port)
+        }
+
+        guard let normalized else { return nil }
         var components = URLComponents()
         components.scheme = "https"
-        if host.hasPrefix("[") && host.hasSuffix("]") {
-            components.host = String(host.dropFirst().dropLast())
-        } else {
-            components.host = host
-        }
-        components.port = port
+        components.host = normalized.host
+        components.port = normalized.port
         return components.url
     }
 
