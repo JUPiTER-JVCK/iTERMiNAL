@@ -408,7 +408,8 @@ final class ProxmoxClient {
     /// Deliberately its own session with no pin: this runs precisely when
     /// nothing is trusted yet, and its only job is to report what is there.
     static func probeFingerprint(for host: ProxmoxHost) async -> String? {
-        guard let base = host.baseURL else { return nil }
+        guard let base = host.baseURL,
+              let probeURL = URL(string: "/api2/json/version", relativeTo: base) else { return nil }
         let probe = ProxmoxTrustDelegate(pinnedFingerprint: nil)
         let session = URLSession(
             configuration: .ephemeral,
@@ -418,7 +419,7 @@ final class ProxmoxClient {
         defer { session.invalidateAndCancel() }
         // Whether the certificate is already trusted or not, the delegate sees
         // the leaf certificate during trust evaluation and records it.
-        _ = try? await session.data(from: base)
+        _ = try? await session.data(from: probeURL)
         return probe.lastSeenFingerprint
     }
 }

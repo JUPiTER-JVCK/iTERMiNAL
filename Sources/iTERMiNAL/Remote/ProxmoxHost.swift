@@ -56,40 +56,51 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     /// Keychain account for the token's secret half.
     var keychainAccount: String { "proxmox.\(id.uuidString)" }
 
-    var baseURL: URL? {
+    private var normalizedEndpoint: (host: String, port: Int)? {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let normalized: (host: String, port: Int)?
         if trimmed.hasPrefix("[") {
             guard let endBracket = trimmed.lastIndex(of: "]") else { return nil }
             let address = String(trimmed[trimmed.index(after: trimmed.startIndex)..<endBracket])
             let suffix = trimmed[trimmed.index(after: endBracket)...]
             if suffix.isEmpty {
-                normalized = (address, port)
+                return (address, port)
             } else if suffix.hasPrefix(":"), let embeddedPort = Int(suffix.dropFirst()) {
-                normalized = (address, embeddedPort)
+                return (address, embeddedPort)
             } else {
-                normalized = nil
+                return nil
             }
         } else if trimmed.filter({ $0 == ":" }).count == 1,
                   let colon = trimmed.lastIndex(of: ":"),
                   let embeddedPort = Int(trimmed[trimmed.index(after: colon)...]) {
-            normalized = (String(trimmed[..<colon]), embeddedPort)
+            return (String(trimmed[..<colon]), embeddedPort)
         } else {
-            normalized = (trimmed, port)
+            return (trimmed, port)
         }
+    }
 
-        guard let normalized else { return nil }
+    var baseURL: URL? {
+        guard let normalizedEndpoint else { return nil }
         var components = URLComponents()
         components.scheme = "https"
-        components.host = normalized.host
-        components.port = normalized.port
+        components.host = normalizedEndpoint.host
+        components.port = normalizedEndpoint.port
         return components.url
     }
 
     var subtitle: String {
-        let endpoint = port == 8006 ? host : "\(host):\(port)"
+        let endpoint: String
+        if let normalizedEndpoint {
+            let displayHost = normalizedEndpoint.host.contains(":")
+                ? "[\(normalizedEndpoint.host)]"
+                : normalizedEndpoint.host
+            endpoint = normalizedEndpoint.port == 8006
+                ? displayHost
+                : "\(displayHost):\(normalizedEndpoint.port)"
+        } else {
+            endpoint = port == 8006 ? host : "\(host):\(port)"
+        }
         guard !tokenID.isEmpty else { return endpoint }
         return "\(endpoint) · \(tokenID)"
     }
