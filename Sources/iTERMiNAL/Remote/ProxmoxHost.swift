@@ -59,7 +59,11 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     var baseURL: URL? {
         var components = URLComponents()
         components.scheme = "https"
-        components.host = host
+        if host.hasPrefix("[") && host.hasSuffix("]") {
+            components.host = String(host.dropFirst().dropLast())
+        } else {
+            components.host = host
+        }
         components.port = port
         return components.url
     }

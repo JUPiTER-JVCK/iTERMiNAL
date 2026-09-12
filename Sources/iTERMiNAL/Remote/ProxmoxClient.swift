@@ -234,6 +234,7 @@ final class ProxmoxClient {
     /// certificate trouble.
     var lastRefusedFingerprint: String? { delegate.lastRefusedFingerprint }
     var lastSeenFingerprint: String? { delegate.lastSeenFingerprint }
+    private(set) var lastPartialFailureDescription: String?
 
     deinit {
         session.invalidateAndCancel()
@@ -262,7 +263,16 @@ final class ProxmoxClient {
 
     private func fetch<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
         let urlRequest = try request(path: path)
-        let (data, response) = try await session.data(for: urlRequest)
+        return try await fetch(urlRequest, as: PVEEnvelope<T>.self).data
+    }
+
+    private func fetchRaw<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
+        let urlRequest = try request(path: path)
+        return try await fetch(urlRequest, as: type)
+    }
+
+    private func fetch<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw ProxmoxError.malformedResponse
         }
@@ -271,7 +281,7 @@ final class ProxmoxClient {
             throw ProxmoxError.http(status: http.statusCode, body: body.prefix(200).description)
         }
         do {
-            return try JSONDecoder().decode(PVEEnvelope<T>.self, from: data).data
+            return try JSONDecoder().decode(type, from: data)
         } catch {
             throw ProxmoxError.malformedResponse
         }
@@ -310,8 +320,8 @@ final class ProxmoxClient {
         guard guest.kind == .qemu, guest.isRunning else { return [] }
         let nodePath = encodedPathSegment(guest.node)
         let path = "/nodes/\(nodePath)/qemu/\(guest.vmid)/agent/network-get-interfaces"
-        guard let payload = try? await fetch(path, as: AgentInterfaces.self) else { return [] }
-        return payload.result
+        guard let payload = try? await fetchRaw(path, as: AgentInterfaces.self) else { return [] }
+        return payload.data.result
             .flatMap { $0.addresses ?? [] }
             .filter { $0.type == "ipv4" && $0.address != "127.0.0.1" }
             .map { $0.address }
@@ -320,6 +330,7 @@ final class ProxmoxClient {
     /// The whole cluster: every node, its VMs and containers, with addresses
     /// filled in where the agent answers.
     func discover() async throws -> [ProxmoxGuest] {
+        lastPartialFailureDescription = nil
         var all: [ProxmoxGuest] = []
         var succeeded = 0
         var lastFailure: Error?
@@ -343,6 +354,9 @@ final class ProxmoxClient {
         // results are still worth keeping; a clean sweep of failures is not.
         if succeeded == 0, let failure = lastFailure {
             throw failure
+        }
+        if let lastFailure {
+            lastPartialFailureDescription = lastFailure.localizedDescription
         }
 
         await resolveAddresses(for: &all)
@@ -413,6 +427,10 @@ final class ProxmoxClient {
 
 /// `network-get-interfaces` uses hyphenated keys, which need mapping by hand.
 private struct AgentInterfaces: Decodable {
+    struct Payload: Decodable {
+        let result: [Interface]
+    }
+
     struct Interface: Decodable {
         let name: String?
         let addresses: [Address]?
@@ -433,5 +451,5 @@ private struct AgentInterfaces: Decodable {
         }
     }
 
-    let result: [Interface]
+    let data: Payload
 }

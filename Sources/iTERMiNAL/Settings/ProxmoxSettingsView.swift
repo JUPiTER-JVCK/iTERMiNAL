@@ -52,6 +52,9 @@ final class ProxmoxBrowserModel: ObservableObject {
             status = found.isEmpty
                 ? "Connected. This cluster reports no VMs or containers."
                 : "\(found.count) found, \(running) running."
+            if let partial = client.lastPartialFailureDescription {
+                status += " Some guests could not be listed: \(partial)"
+            }
         } catch {
             guard hostID == host.id else { return }
             guests = []
