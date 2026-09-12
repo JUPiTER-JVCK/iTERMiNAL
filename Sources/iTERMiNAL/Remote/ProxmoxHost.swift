@@ -59,7 +59,14 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
     private var normalizedEndpoint: (host: String, port: Int, path: String)? {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let candidate: String
+        if trimmed.contains("://") {
+            candidate = trimmed
+        } else if let slash = trimmed.firstIndex(of: "/") {
+            candidate = "https://\(trimmed[..<slash])\(trimmed[slash...])"
+        } else {
+            candidate = "https://\(trimmed)"
+        }
         guard let components = URLComponents(string: candidate),
               let parsedHost = components.host, !parsedHost.isEmpty else { return nil }
         let parsedPath = components.path == "/" ? "" : components.path

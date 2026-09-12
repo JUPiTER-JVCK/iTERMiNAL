@@ -266,6 +266,11 @@ jobs:
                 echo "::error::Release $TARGET_TAG is already published. Immutable releases lock published assets, so create the release as a draft first or push a new unused tag."
                 exit 1
               fi
+              gh release view "$TARGET_TAG" --json assets --jq '.assets[].name' \
+                | while IFS= read -r existing; do
+                    [ -n "$existing" ] || continue
+                    gh release delete-asset "$TARGET_TAG" "$existing" --yes
+                  done
               echo "Draft release $TARGET_TAG already exists; attaching the app to it."
               if ! gh release upload "$TARGET_TAG" "$asset" --clobber; then
                 echo "::error::Could not attach $asset to the draft $TARGET_TAG release."
