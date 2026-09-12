@@ -191,6 +191,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// The certificate the user pinned for a saved Proxmox host, if any.
+    ///
+    /// Matched on host and port together, so pinning `pve.lan:8006` says
+    /// nothing about anything else running on that machine.
+    func pinnedFingerprint(forHost host: String, port: Int) -> String? {
+        proxmoxHosts.first {
+            $0.host.caseInsensitiveCompare(host) == .orderedSame
+                && $0.port == port
+                && $0.isPinned
+        }?.pinnedFingerprint
+    }
+
     private func persistProxmoxHosts() {
         if let data = try? JSONEncoder().encode(proxmoxHosts) {
             defaults.set(data, forKey: "proxmoxHosts")

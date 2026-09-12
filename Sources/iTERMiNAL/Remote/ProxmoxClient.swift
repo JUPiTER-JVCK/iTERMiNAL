@@ -101,14 +101,23 @@ enum ProxmoxError: LocalizedError {
 /// would weaken every connection the app makes. Trust-on-first-use against a
 /// fingerprint the user confirmed is narrower than either: exactly one
 /// certificate is accepted, and only for this host.
-final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
-    private let pinnedFingerprint: String?
-    /// Set when a challenge is refused, so the caller can offer the user the
-    /// fingerprint it actually saw rather than a bare failure.
-    private(set) var lastSeenFingerprint: String?
-
-    init(pinnedFingerprint: String?) {
-        self.pinnedFingerprint = pinnedFingerprint.map(CertificateFingerprint.normalized)
+/// The pinning decision itself, with no opinion about who is asking.
+///
+/// Both the API's URLSession and the browser panel's WKWebView have to reach
+/// the same verdict about the same host. WKWebView performs its own trust
+/// evaluation and does not consult URLSession's delegate, so without this
+/// shared here a Proxmox host could be discovered over a pinned API connection
+/// and still fail to open its console — the pin has to be applied in both
+/// places or it only half exists.
+enum PinnedTrust {
+    enum Verdict {
+        /// The system already trusts it; nothing to override.
+        case systemTrusted
+        /// Not system-trusted, but exactly the certificate the user pinned.
+        case pinned
+        /// Refused. Carries what was actually presented, so the caller can
+        /// show the user a fingerprint to compare rather than a bare failure.
+        case refused(seen: String?)
     }
 
     /// SHA-256 of a certificate's DER encoding, lowercase hex — the same value
@@ -118,13 +127,52 @@ final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
         return SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func leafCertificate(of trust: SecTrust) -> SecCertificate? {
+    static func leafCertificate(of trust: SecTrust) -> SecCertificate? {
         // SecTrustCopyCertificateChain replaces the per-index accessor
         // deprecated in macOS 12; this app targets 14.
         guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate] else {
             return nil
         }
         return chain.first
+    }
+
+    static func evaluate(_ trust: SecTrust, against pinnedFingerprint: String?) -> Verdict {
+        // A properly signed certificate needs no pin. Let the system decide
+        // first so a host with a real certificate behaves normally, and the
+        // pin only ever *adds* an accepted certificate.
+        if SecTrustEvaluateWithError(trust, nil) {
+            return .systemTrusted
+        }
+        guard let leaf = leafCertificate(of: trust) else {
+            return .refused(seen: nil)
+        }
+        let seen = fingerprint(of: leaf)
+        guard let pinned = pinnedFingerprint.map(CertificateFingerprint.normalized),
+              !pinned.isEmpty, seen == pinned else {
+            return .refused(seen: seen)
+        }
+        return .pinned
+    }
+}
+
+/// Accepts a server certificate only if the system already trusts it, or if it
+/// is exactly the one the user pinned for this host.
+///
+/// A default Proxmox install serves a self-signed certificate, so without this
+/// nothing here would connect at all. The tempting fix — disabling validation,
+/// or widening the app's App Transport Security exemption beyond web content —
+/// would weaken every connection the app makes. Trust-on-first-use against a
+/// fingerprint the user confirmed is narrower than either: exactly one
+/// certificate is accepted, and only for this host.
+final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
+    private let pinnedFingerprint: String?
+    /// Set when a challenge is refused, so the caller can tell a certificate
+    /// problem from an address typo, a missing token, or a dead network —
+    /// which look nothing alike to a user but identically like "failed" here.
+    private(set) var lastRefusedFingerprint: String?
+
+    init(pinnedFingerprint: String?) {
+        self.pinnedFingerprint = pinnedFingerprint
     }
 
     func urlSession(
@@ -138,26 +186,15 @@ final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // A properly signed certificate needs no pin. Let the system decide
-        // first so a host with a real certificate behaves normally, and the
-        // pin only ever *adds* an accepted certificate.
-        if SecTrustEvaluateWithError(trust, nil) {
+        switch PinnedTrust.evaluate(trust, against: pinnedFingerprint) {
+        case .systemTrusted:
             completionHandler(.performDefaultHandling, nil)
-            return
-        }
-
-        guard let leaf = Self.leafCertificate(of: trust) else {
+        case .pinned:
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        case .refused(let seen):
+            lastRefusedFingerprint = seen
             completionHandler(.cancelAuthenticationChallenge, nil)
-            return
         }
-        let seen = Self.fingerprint(of: leaf)
-        lastSeenFingerprint = seen
-
-        guard let pinned = pinnedFingerprint, !pinned.isEmpty, seen == pinned else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
 
@@ -193,9 +230,11 @@ final class ProxmoxClient {
         )
     }
 
-    /// The certificate this client last refused, if any — worth showing when
-    /// a connection fails so the user can compare it with what Proxmox lists.
-    var lastSeenFingerprint: String? { delegate.lastSeenFingerprint }
+    /// The certificate this client actually refused, if any. Non-nil means the
+    /// failure really was a trust problem — as opposed to a missing token, a
+    /// mistyped address, or an unreachable host, which must not be reported as
+    /// certificate trouble.
+    var lastRefusedFingerprint: String? { delegate.lastRefusedFingerprint }
 
     deinit {
         session.invalidateAndCancel()
@@ -277,18 +316,69 @@ final class ProxmoxClient {
     /// filled in where the agent answers.
     func discover() async throws -> [ProxmoxGuest] {
         var all: [ProxmoxGuest] = []
+        var succeeded = 0
+        var lastFailure: Error?
+
         for node in try await nodes() {
             for kind in [ProxmoxGuestKind.qemu, .lxc] {
-                // One kind failing (an unconfigured container store, say)
+                // One kind failing — an unconfigured container store, say —
                 // should not hide the other.
-                guard let found = try? await guests(on: node.node, kind: kind) else { continue }
-                all.append(contentsOf: found)
+                do {
+                    all.append(contentsOf: try await guests(on: node.node, kind: kind))
+                    succeeded += 1
+                } catch {
+                    lastFailure = error
+                }
             }
         }
-        for index in all.indices {
-            all[index].addresses = await addresses(for: all[index])
+
+        // Swallowing every listing error would turn a token without the right
+        // permission into a cheerful "no VMs or containers", which reads as an
+        // empty cluster rather than as the access problem it is. Partial
+        // results are still worth keeping; a clean sweep of failures is not.
+        if succeeded == 0, let failure = lastFailure {
+            throw failure
         }
+
+        await resolveAddresses(for: &all)
         return all.sorted { $0.vmid < $1.vmid }
+    }
+
+    /// Fills in agent-reported addresses, several at a time.
+    ///
+    /// Serially, one stalled guest agent costs the whole refresh its 15-second
+    /// timeout, and a cluster of N running VMs takes N of them end to end — so
+    /// a large cluster could hang for minutes. Bounded rather than unbounded so
+    /// a big cluster does not open a connection per VM at once.
+    private func resolveAddresses(for guests: inout [ProxmoxGuest]) async {
+        let targets = guests.indices.filter { guests[$0].kind == .qemu && guests[$0].isRunning }
+        guard !targets.isEmpty else { return }
+
+        let snapshot = guests
+        let resolved = await withTaskGroup(
+            of: (Int, [String]).self,
+            returning: [Int: [String]].self
+        ) { group in
+            var pending = targets.makeIterator()
+            var results: [Int: [String]] = [:]
+            let limit = 6
+
+            for _ in 0..<limit {
+                guard let index = pending.next() else { break }
+                group.addTask { (index, await self.addresses(for: snapshot[index])) }
+            }
+            while let (index, addresses) = await group.next() {
+                results[index] = addresses
+                if let next = pending.next() {
+                    group.addTask { (next, await self.addresses(for: snapshot[next])) }
+                }
+            }
+            return results
+        }
+
+        for (index, addresses) in resolved {
+            guests[index].addresses = addresses
+        }
     }
 
     /// Fetches the certificate the host presents, so the user can confirm it
@@ -308,7 +398,7 @@ final class ProxmoxClient {
         // The request is expected to fail on an untrusted certificate; the
         // delegate records the fingerprint on its way past.
         _ = try? await session.data(from: base)
-        return probe.lastSeenFingerprint
+        return probe.lastRefusedFingerprint
     }
 }
 

@@ -354,6 +354,43 @@ extension BrowserModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         finishNavigation(.failure(error))
     }
+
+    /// Honour the certificate a user pinned for a saved Proxmox host.
+    ///
+    /// WKWebView runs its own trust evaluation and never consults URLSession's
+    /// delegate, so pinning on the API client alone leaves the console — which
+    /// is a web page on the very same self-signed host — failing TLS. A host
+    /// could be discovered fine and then refuse to open.
+    ///
+    /// This is not a bypass. Anything the system already trusts is left to the
+    /// system, and the only additional certificate accepted is the exact one
+    /// the user confirmed for that exact host and port. An unpinned host, or a
+    /// pinned host presenting a different certificate, is refused as before.
+    func webView(
+        _ webView: WKWebView,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        let pin = AppSettings.shared.pinnedFingerprint(
+            forHost: challenge.protectionSpace.host,
+            port: challenge.protectionSpace.port
+        )
+
+        switch PinnedTrust.evaluate(trust, against: pin) {
+        case .systemTrusted:
+            completionHandler(.performDefaultHandling, nil)
+        case .pinned:
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        case .refused:
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
 }
 
 private struct WebViewRepresentable: NSViewRepresentable {
