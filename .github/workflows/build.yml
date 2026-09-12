@@ -207,6 +207,11 @@ jobs:
           NOTE
           )
 
+          if [ "$GITHUB_EVENT_NAME" = release ] && [ -z "$TARGET_TAG" ]; then
+            echo "::error::Draft releases must be associated with a tag before CI can attach the app."
+            exit 1
+          fi
+
           if [ -n "$TARGET_TAG" ]; then
             asset="iTERMiNAL-${TARGET_TAG}-universal.zip"
             mv iTERMiNAL.zip "$asset"

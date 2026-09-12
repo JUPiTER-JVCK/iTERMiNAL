@@ -157,6 +157,7 @@ enum PinnedTrust {
 /// certificate is accepted, and only for this host.
 final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
     private let pinnedFingerprint: String?
+    private(set) var lastSeenFingerprint: String?
     /// Set when a challenge is refused, so the caller can tell a certificate
     /// problem from an address typo, a missing token, or a dead network —
     /// which look nothing alike to a user but identically like "failed" here.
@@ -176,6 +177,7 @@ final class ProxmoxTrustDelegate: NSObject, URLSessionDelegate {
             completionHandler(.performDefaultHandling, nil)
             return
         }
+        lastSeenFingerprint = PinnedTrust.leafCertificate(of: trust).map(PinnedTrust.fingerprint)
 
         switch PinnedTrust.evaluate(trust, against: pinnedFingerprint) {
         case .systemTrusted:
@@ -231,6 +233,7 @@ final class ProxmoxClient {
     /// mistyped address, or an unreachable host, which must not be reported as
     /// certificate trouble.
     var lastRefusedFingerprint: String? { delegate.lastRefusedFingerprint }
+    var lastSeenFingerprint: String? { delegate.lastSeenFingerprint }
 
     deinit {
         session.invalidateAndCancel()
@@ -343,7 +346,9 @@ final class ProxmoxClient {
         }
 
         await resolveAddresses(for: &all)
-        return all.sorted { $0.vmid < $1.vmid }
+        return all.sorted {
+            ($0.node, $0.kind.rawValue, $0.vmid) < ($1.node, $1.kind.rawValue, $1.vmid)
+        }
     }
 
     /// Fills in agent-reported addresses, several at a time.
@@ -397,10 +402,10 @@ final class ProxmoxClient {
             delegateQueue: nil
         )
         defer { session.invalidateAndCancel() }
-        // The request is expected to fail on an untrusted certificate; the
-        // delegate records the fingerprint on its way past.
+        // Whether the certificate is already trusted or not, the delegate sees
+        // the leaf certificate during trust evaluation and records it.
         _ = try? await session.data(from: base)
-        return probe.lastRefusedFingerprint
+        return probe.lastSeenFingerprint
     }
 }
 
