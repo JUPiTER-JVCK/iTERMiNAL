@@ -73,32 +73,6 @@ struct ProxmoxHost: Codable, Identifiable, Hashable {
         !(pinnedFingerprint ?? "").isEmpty
     }
 
-    /// The noVNC console for a guest, as served by the Proxmox web UI.
-    ///
-    /// Opening this in the app's browser pane is what makes a console reachable
-    /// without implementing VNC: Proxmox already ships a web console, and it
-    /// handles the ticket exchange itself. The exact parameters have varied
-    /// between Proxmox releases, so treat a blank console as a URL-shape
-    /// problem to confirm against the running version rather than an auth one.
-    func consoleURL(for guest: ProxmoxGuest) -> URL? {
-        guard let base = baseURL,
-              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        components.path = "/"
-        components.queryItems = [
-            URLQueryItem(name: "console", value: guest.kind.consoleValue),
-            URLQueryItem(name: "novnc", value: "1"),
-            URLQueryItem(name: "vmid", value: String(guest.vmid)),
-            URLQueryItem(name: "node", value: guest.node),
-            URLQueryItem(
-                name: "path",
-                value: "/api2/json/nodes/\(guest.node)/\(guest.kind.rawValue)/\(guest.vmid)/vncwebsocket"
-            ),
-            URLQueryItem(name: "resize", value: "off"),
-        ]
-        return components.url
-    }
 }
 
 // MARK: - Fingerprints
