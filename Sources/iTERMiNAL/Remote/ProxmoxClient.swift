@@ -78,7 +78,7 @@ enum ProxmoxError: LocalizedError {
         case .notConfigured:
             return "This Proxmox host has no address yet."
         case .missingToken:
-            return "No API token is saved for this host. Add one in Settings → Connections."
+            return "No API token is saved for this host. Add one in Settings → Connections → Proxmox."
         case .http(let status, let body):
             if status == 401 {
                 return "Proxmox rejected the API token (401). Check the token ID and secret, and that the token has permission on this node."

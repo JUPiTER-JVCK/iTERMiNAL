@@ -260,6 +260,10 @@ jobs:
                 echo "::error::Could not attach $asset to the draft $TARGET_TAG release."
                 exit 1
               fi
+              gh release edit "$TARGET_TAG" \
+                --title "$TARGET_TAG" \
+                --notes "${changelog}
+          $gatekeeper"
             else
               gh release create "$TARGET_TAG" "$asset" \
                 --title "$TARGET_TAG" \
