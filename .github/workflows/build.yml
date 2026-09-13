@@ -222,10 +222,22 @@ jobs:
               changelog="First v-prefixed release — see the commit history for what came before."
             fi
 
-            gh release create "$GITHUB_REF_NAME" "$asset" \
-              --title "$GITHUB_REF_NAME" \
-              --notes "${changelog}
+            notes="${changelog}
           $gatekeeper"
+
+            # A release can already exist for this tag if it was created from
+            # the Releases UI before this workflow runs. Update it to the
+            # workflow's asset and notes rather than failing on re-create.
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+              gh release edit "$GITHUB_REF_NAME" \
+                --title "$GITHUB_REF_NAME" \
+                --notes "$notes"
+            else
+              gh release create "$GITHUB_REF_NAME" "$asset" \
+                --title "$GITHUB_REF_NAME" \
+                --notes "$notes"
+            fi
           else
             # One release per build, with a tag that has never been used.
             #
