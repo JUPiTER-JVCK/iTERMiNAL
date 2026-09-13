@@ -19,6 +19,15 @@ enum ProxmoxGuestKind: String, Codable, Hashable {
     case qemu
     case lxc
 
+    /// What the console query parameter calls this kind. `qemu` guests are
+    /// `kvm` in console URLs — the API name and the console name differ.
+    var consoleValue: String {
+        switch self {
+        case .qemu: return "kvm"
+        case .lxc: return "lxc"
+        }
+    }
+
     var label: String {
         switch self {
         case .qemu: return "VM"

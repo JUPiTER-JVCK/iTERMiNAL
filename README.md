@@ -127,10 +127,13 @@ previous `v*` tag — stated explicitly, because the default baseline would be t
 `build-*` prerelease published minutes earlier at the same commit, which is no
 range at all.
 
-You can also save a **draft** release in the GitHub UI, then run the Build
-workflow manually with that tag before you publish it. Immutable releases lock
-assets on publication, so publishing first leaves you with source-code
-downloads only.
+Or just draft a release in the GitHub UI and publish it: that builds the app
+and attaches it automatically. A release with no file on it is the failure mode
+worth knowing about, because GitHub offers "Source code (zip)" on every release
+either way — so an empty release quietly becomes a source-code download.
+
+You can also run the Build workflow by hand against any tag, which attaches the
+app to that release whether it is still a draft or already published.
 
 **Versions are not hand-maintained.** The app reports `0.<commit count>`,
 supplied by CI at build time, so the version always matches the build it came

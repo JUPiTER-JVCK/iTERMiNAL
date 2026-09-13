@@ -112,7 +112,7 @@ struct ProxmoxSettingsSection: View {
     var body: some View {
         Section("Proxmox") {
             if settings.proxmoxHosts.isEmpty {
-                Text("No Proxmox hosts yet. Add one to list its VMs and containers.")
+                Text("No Proxmox hosts yet. Add one to list its VMs and open their consoles in the browser panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -189,7 +189,7 @@ struct ProxmoxSettingsSection: View {
                     let host = binding.wrappedValue
                     Task { await model.probe(host: host) }
                 }
-                Text("Pinning applies to this host and port alone.")
+                Text("Pinning applies to this host and port alone, and covers both the API and the console in the browser panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -303,6 +303,8 @@ private struct ProxmoxGuestRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
+            Button("Console") { openConsole() }
+                .disabled(!guest.isRunning)
             if guest.primaryAddress != nil {
                 Button("Add SSH") { onAddSSH(guest) }
             }
@@ -313,5 +315,15 @@ private struct ProxmoxGuestRow: View {
         var parts = ["\(guest.kind.label) \(guest.vmid)", guest.status]
         if let address = guest.primaryAddress { parts.append(address) }
         return parts.joined(separator: " · ")
+    }
+
+    /// Proxmox already serves a noVNC console over its web UI, so opening it
+    /// in the app's browser panel is the whole feature — no VNC client, and no
+    /// dependence on a port that Proxmox does not actually leave listening.
+    private func openConsole() {
+        // Straight off the host: building this URL is pure string work, and
+        // constructing a client to do it would spin up a URLSession per click.
+        guard let url = host.consoleURL(for: guest) else { return }
+        WorkspaceStore.shared.openLinkFromTerminal(url.absoluteString)
     }
 }
