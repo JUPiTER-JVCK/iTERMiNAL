@@ -51,10 +51,11 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, Sync, Shortcuts, and
-  Advanced, all applying live.
-- **AI seam** — the composer reserves `@ai …` and the app ships an
-  `AssistantService` protocol; a real assistant plugs in without UI changes.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, Sync, Shortcuts,
+  and Advanced, all applying live.
+- **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
+  endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
+  replies appear above the input and are never auto-run in a PTY.
 
 ## Requirements
 
@@ -292,7 +293,7 @@ Sources/
 │   ├── Security/    keychain wrapper
 │   ├── Sync/        sync seam, workspace export/import
 │   ├── Settings/    preferences store + settings window
-│   └── AI/          AssistantService seam (null implementation for now)
+│   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
 ```
 
@@ -302,9 +303,31 @@ The terminal backend sits behind `TerminalEngine`
 either can be swapped (libghostty, an in-process SSH stack) without touching
 the UI.
 
+## AI assistant (`@ai`)
+
+Configure a provider in **Settings → AI**, then type `@ai …` in the composer.
+Replies appear in a banner above the input — suggested commands are never
+executed automatically.
+
+### OpenAI
+
+1. Preset **OpenAI** (base URL `https://api.openai.com/v1`).
+2. Pick a model (default `gpt-4o-mini`).
+3. Paste an API key and click **Save Key** (stored in the keychain as
+   `assistant.apiKey`, never in preferences or export snapshots).
+
+### Ollama (local)
+
+1. Run Ollama and pull a model, e.g. `ollama pull llama3.2`.
+2. In Settings → AI, choose **Ollama (local)** or set the base URL to
+   `http://127.0.0.1:11434/v1`.
+3. Set the model name to match (e.g. `llama3.2`). No API key is required for
+   localhost; App Transport Security stays on — use the loopback URL above
+   rather than a LAN hostname over plain HTTP.
+
 ## Roadmap
 
-- [ ] AI assistant behind the `@ai` composer prefix (provider-pluggable)
+- [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
 - [ ] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
 - [ ] iCloud sync (needs a signing/entitlement story)
