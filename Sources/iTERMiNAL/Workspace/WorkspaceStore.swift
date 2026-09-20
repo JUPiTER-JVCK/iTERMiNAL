@@ -1,1 +1,1 @@
-file:///tmp/ws_only.txt
+${file:/tmp/ws_only.txt}
