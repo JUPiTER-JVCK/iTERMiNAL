@@ -35,7 +35,7 @@ final class AttentionNotifier {
         session: TerminalSession,
         sessionFocused: Bool
     ) {
-        let mode = AppSettings.shared.attentionMode
+        let mode = AttentionSettings.shared.mode
         guard mode == .inAppAndSystem else { return }
 
         let appActive = NSApp?.isActive ?? false

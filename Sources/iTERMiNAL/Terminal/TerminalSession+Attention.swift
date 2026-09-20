@@ -7,7 +7,7 @@ extension TerminalSession {
     /// the timestamp without stacking another event; a fresh kind/text still
     /// waits for the debounce window so a ringing bell cannot flood the bus.
     func noteAttention(_ attention: TerminalAttention) {
-        let mode = AppSettings.shared.attentionMode
+        let mode = AttentionSettings.shared.mode
         let focused = WorkspaceStore.shared.focusedSessionID == id
         let fingerprint = attentionFingerprint(attention)
         let now = Date()
