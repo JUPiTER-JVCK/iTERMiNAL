@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
+        // Pull iCloud state once the store has finished restoring from disk.
+        SyncEngineProvider.pullIfNeeded()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        SyncEngineProvider.pullIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
