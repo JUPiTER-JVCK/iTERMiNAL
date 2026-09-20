@@ -1,9 +1,9 @@
 import Foundation
 import Security
 
-/// Thin wrapper over the login keychain for the app's secrets (currently the
-/// local API token). Secrets never touch UserDefaults or the workspace state
-/// file, and export/import deliberately omits them.
+/// Thin wrapper over the login keychain for the app's secrets (local API
+/// token, assistant API key). Secrets never touch UserDefaults or the
+/// workspace state file, and export/import deliberately omits them.
 enum KeychainStore {
     static let service = "com.jupiterjvck.iterminal"
 
