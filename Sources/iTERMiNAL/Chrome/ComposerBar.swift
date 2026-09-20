@@ -19,7 +19,8 @@ struct ComposerBar: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var text = ""
-    @State private var assistantNotice = false
+    @StateObject private var ai = ComposerAIController()
+    @State private var recallHistory: [String] = []
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
     @State private var dragDelta: CGSize = .zero
@@ -149,10 +150,8 @@ struct ComposerBar: View {
     private var expandedCard: some View {
         let theme = Theme.current(for: colorScheme)
         return VStack(spacing: 8) {
-            if assistantNotice {
-                Text("The AI assistant isn't configured yet — @ai commands will be supported in a future release.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary)
+            if let banner = ai.banner {
+                ComposerAIBannerView(banner: banner, theme: theme)
                     .transition(Motion.bannerTransition)
             }
 
@@ -339,20 +338,40 @@ struct ComposerBar: View {
         let command = trimmedText
         guard !command.isEmpty else { return }
         if command.lowercased().hasPrefix("@ai") {
-            withAnimation(Motion.banner) {
-                assistantNotice = !NullAssistantService.shared.isConfigured
-            }
+            recordLocalHistory(command)
             text = ""
+            historyIndex = nil
+            draft = ""
+            withAnimation(Motion.banner) {
+                ai.submit(
+                    prompt: ComposerAIController.stripAIPrefix(command),
+                    store: store,
+                    settings: settings
+                )
+            }
             return
         }
-        assistantNotice = false
+        ai.cancel()
+        ai.clearBanner()
         // Its own shell — never the pane behind it.
         withAnimation(Motion.panel) {
             store.sendToComposer(command + "\n")
         }
+        recordLocalHistory(command)
         text = ""
         historyIndex = nil
         draft = ""
+    }
+
+    private func recordLocalHistory(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if recallHistory.last != trimmed {
+            recallHistory.append(trimmed)
+        }
+        if recallHistory.count > 100 {
+            recallHistory.removeFirst(recallHistory.count - 100)
+        }
     }
 
     // MARK: Arrow-key recall
@@ -361,7 +380,7 @@ struct ComposerBar: View {
     /// does. Multi-line input is left alone: there the arrows have to move
     /// the caret, and stealing them would make the field unusable.
     private func recallEarlier() -> KeyPress.Result {
-        let history = store.composerHistory
+        let history = recallHistory
         guard !text.contains("\n"), !history.isEmpty else { return .ignored }
         if let historyIndex {
             guard historyIndex > 0 else { return .handled }
@@ -377,7 +396,7 @@ struct ComposerBar: View {
     }
 
     private func recallLater() -> KeyPress.Result {
-        let history = store.composerHistory
+        let history = recallHistory
         guard !text.contains("\n"), let historyIndex else { return .ignored }
         if historyIndex + 1 < history.count {
             self.historyIndex = historyIndex + 1
@@ -388,451 +407,4 @@ struct ComposerBar: View {
         }
         return .handled
     }
-}
-
-/// Drag to change how much of the composer's shell is visible; double-click
-/// for the default height.
-private struct TranscriptResizeHandle: View {
-    @Binding var height: Double
-    /// The tallest the transcript can be and still leave the input reachable
-    /// in the current window. Dragging stops here for the same reason the
-    /// rendered height is capped there.
-    let maxHeight: Double
-    let theme: Theme
-
-    /// Height when the drag began. `DragGesture` reports translation from the
-    /// start of the gesture, not since the last event, so it has to be added
-    /// to a fixed starting height rather than to the live one.
-    @State private var startHeight: Double?
-    @State private var hovering = false
-
-    var body: some View {
-        Capsule()
-            .fill(theme.textSecondary.opacity(hovering ? 0.45 : 0.2))
-            .frame(width: 44, height: 4)
-            .frame(maxWidth: .infinity)
-            .frame(height: 12)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeUpDown.set() } else { NSCursor.arrow.set() }
-            }
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        let start = startHeight ?? height
-                        if startHeight == nil { startHeight = start }
-                        height = (start + value.translation.height)
-                            .clamped(to: 100...max(100, maxHeight))
-                    }
-                    .onEnded { _ in startHeight = nil }
-            )
-            .onTapGesture(count: 2) {
-                withAnimation(Motion.panel) { height = 200 }
-            }
-            .help("Drag to resize the transcript · double-click to reset")
-    }
-}
-
-/// `workspace · Local|host · branch`, sitting above the input the way the
-/// reference app shows a project, its environment, and its git branch.
-private struct ContextChipRow: View {
-    @EnvironmentObject private var store: WorkspaceStore
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        HStack(spacing: 6) {
-            Menu {
-                ForEach(store.workspaces) { workspace in
-                    Button(workspace.name) { store.newTab(in: workspace) }
-                }
-                Divider()
-                Button("New Workspace") { store.newWorkspace() }
-            } label: {
-                ComposerChip(
-                    icon: "folder",
-                    text: store.currentWorkspace?.name ?? "Workspace",
-                    theme: theme
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-
-            if let session = store.focusedSession {
-                LocationChip(session: session, theme: theme)
-            } else {
-                ComposerChip(icon: "desktopcomputer", text: "Local", theme: theme)
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct LocationChip: View {
-    @ObservedObject var session: TerminalSession
-    let theme: Theme
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ComposerChip(
-                icon: session.isRemote ? "network" : "desktopcomputer",
-                text: session.isRemote ? (session.connection?.name ?? "Remote") : "Local",
-                theme: theme
-            )
-            if let branch = session.gitBranch {
-                ComposerChip(icon: "arrow.triangle.branch", text: branch, theme: theme)
-            }
-        }
-    }
-}
-
-private struct ComposerChip: View {
-    let icon: String
-    let text: String
-    let theme: Theme
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9))
-            Text(text)
-                .font(.system(size: 11))
-                .lineLimit(1)
-        }
-        .foregroundStyle(theme.textSecondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(theme.surfaceHover.opacity(0.6)))
-    }
-}
-
-/// Where input is going — the shell name, or the host for a remote session.
-private struct SessionChip: View {
-    @EnvironmentObject private var store: WorkspaceStore
-    @EnvironmentObject private var settings: AppSettings
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        Text(label)
-            .font(.system(size: 11))
-            .foregroundStyle(theme.textSecondary)
-            .lineLimit(1)
-            .help("Input goes to this session")
-    }
-
-    private var label: String {
-        if let session = store.focusedSession {
-            if session.isRemote {
-                return session.connection?.name ?? "remote"
-            }
-        }
-        // The composer's own override, not the global setting: this chip sits
-        // on the composer and its tooltip says input goes to this session, so
-        // naming the app-wide default while the composer runs bash would be
-        // pointing at the wrong shell.
-        let override = settings.composerShell
-        let shell = settings.resolvedShell(override: override.isEmpty ? nil : override)
-        return (shell.path as NSString).lastPathComponent
-    }
-}
-
-// MARK: - Actions popover
-
-/// The composer's "+" surface: grouped rows with a title, a line of
-/// explanation and the shortcut that does the same thing.
-///
-/// A `Menu` can render none of that — no section headings, no secondary text —
-/// which is why this is a popover over hand-built rows.
-private struct ComposerActionsPopover: View {
-    @Binding var isPresented: Bool
-
-    @EnvironmentObject private var store: WorkspaceStore
-    @EnvironmentObject private var settings: AppSettings
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        VStack(alignment: .leading, spacing: 2) {
-            sectionHeader("This composer", theme: theme)
-
-            ComposerShellPicker(theme: theme)
-
-            sectionHeader("Terminal", theme: theme)
-
-            ComposerActionRow(
-                icon: "plus.square",
-                title: "New terminal",
-                detail: "A shell in the current workspace",
-                shortcut: "⌘T"
-            ) {
-                store.newTab()
-            }
-
-            ComposerActionRow(
-                icon: "rectangle.split.2x1",
-                title: "Split right",
-                detail: "Another shell beside this one",
-                shortcut: "⌘D"
-            ) {
-                store.splitFocusedPane(.horizontal, kind: .terminal)
-            }
-
-            ComposerActionRow(
-                icon: "rectangle.split.1x2",
-                title: "Split down",
-                detail: "Another shell below this one",
-                shortcut: "⇧⌘D"
-            ) {
-                store.splitFocusedPane(.vertical, kind: .terminal)
-            }
-
-            ComposerActionRow(
-                icon: "rectangle.bottomthird.inset.filled",
-                title: "Terminal dock",
-                detail: "A scratch shell along the bottom",
-                shortcut: "⌘J"
-            ) {
-                store.toggleBottomDock()
-            }
-
-            sectionHeader("Panels", theme: theme)
-
-            ComposerActionRow(
-                icon: "globe",
-                title: "Browser",
-                detail: "Open a web view beside the terminal",
-                shortcut: "⌥⌘B"
-            ) {
-                store.openPanel(.browser)
-            }
-
-            ComposerActionRow(
-                icon: "folder",
-                title: "Files",
-                detail: "Browse this Mac or a saved host",
-                shortcut: "⌥⌘F"
-            ) {
-                store.openPanel(.files)
-            }
-
-            sectionHeader("Connect", theme: theme)
-
-            if settings.sshConnections.isEmpty {
-                // An empty state that says where to fix it beats a disabled
-                // row that says nothing.
-                Text("No saved hosts. Add one in Settings → Connections.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-            } else {
-                ForEach(settings.sshConnections) { connection in
-                    ComposerActionRow(
-                        icon: "network",
-                        title: connection.name.isEmpty ? connection.destination : connection.name,
-                        detail: connection.subtitle,
-                        shortcut: nil
-                    ) {
-                        store.newTab(kind: .remote(connection.id))
-                    }
-                }
-            }
-        }
-        .padding(6)
-        .frame(width: 330)
-        .environment(\.composerActionDismiss) { isPresented = false }
-    }
-
-    private func sectionHeader(_ title: String, theme: Theme) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(theme.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-    }
-}
-
-/// Lets a row close the popover without every row taking a binding.
-private struct ComposerActionDismissKey: EnvironmentKey {
-    static let defaultValue: () -> Void = {}
-}
-
-private extension EnvironmentValues {
-    var composerActionDismiss: () -> Void {
-        get { self[ComposerActionDismissKey.self] }
-        set { self[ComposerActionDismissKey.self] = newValue }
-    }
-}
-
-/// Icon, title, a muted line of explanation, and the shortcut for the same
-/// action — the reference app's row anatomy.
-private struct ComposerActionRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let shortcut: String?
-    let action: () -> Void
-
-    @State private var hovering = false
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.composerActionDismiss) private var dismiss
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        Button {
-            action()
-            dismiss()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 18)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.textPrimary)
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                if let shortcut {
-                    Text(shortcut)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovering ? theme.surfaceHover : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-    }
-}
-
-/// Carries the composer card's rendered size up to the view that clamps its
-/// drag, so the clamp knows how much card it is keeping on screen.
-private struct ComposerSizeKey: PreferenceKey {
-    static let defaultValue = CGSize.zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        let next = nextValue()
-        if next != .zero { value = next }
-    }
-}
-
-/// Chooses which shell the composer's own session runs.
-///
-/// Scoped to the composer on purpose: this is where you try a one-off command,
-/// and wanting it in bash shouldn't change what every new tab opens as. Only
-/// shells that exist on this Mac are offered — listing one that isn't
-/// installed would just produce a session that fails to launch.
-private struct ComposerShellPicker: View {
-    let theme: Theme
-
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var store: WorkspaceStore
-
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.system(size: 12))
-                .foregroundStyle(theme.textSecondary)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Shell")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.textPrimary)
-                Text("Applies to the composer only")
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.textSecondary)
-            }
-
-            Spacer(minLength: 8)
-
-            // A real label, hidden visually: the "Shell" text beside this is
-            // decoration as far as assistive technology is concerned, so an
-            // empty label would leave the control unnamed.
-            Picker("Shell", selection: shellBinding) {
-                Text("Default").tag("")
-                ForEach(ComposerShells.available, id: \.path) { shell in
-                    Text(shell.name).tag(shell.path)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
-    /// Changing the shell restarts the composer's session — the running one
-    /// is still the old shell, and leaving it would make the picker a lie.
-    private var shellBinding: Binding<String> {
-        Binding(
-            get: { settings.composerShell },
-            set: { newValue in
-                guard newValue != settings.composerShell else { return }
-                settings.composerShell = newValue
-                store.resetComposerSession()
-            }
-        )
-    }
-}
-
-/// The shells the composer offers, resolved once.
-///
-/// Shared by the composer's own popover and the Composer settings pane so the
-/// two can never disagree about what is installed.
-enum ComposerShells {
-    /// Checked once: the set of installed shells does not change while the
-    /// app is running.
-    ///
-    /// Resolved through the user's own PATH rather than a list of guessed
-    /// locations. Hardcoding the two Homebrew prefixes missed MacPorts, Nix,
-    /// and anything else on PATH, so a shell could be installed and still not
-    /// be offered.
-    static let available: [(path: String, name: String)] = {
-        let names = ["zsh", "bash", "sh", "fish"]
-        let searchPath = (ProcessInfo.processInfo.environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        // /bin last so a user's preferred build shadows the system copy, and
-        // present even when PATH is empty (a GUI app can inherit very little).
-        let directories = searchPath + ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]
-
-        var seen = Set<String>()
-        var found: [(path: String, name: String)] = []
-        for name in names {
-            for directory in directories {
-                let path = (directory as NSString).appendingPathComponent(name)
-                guard FileManager.default.isExecutableFile(atPath: path) else { continue }
-                // Resolve symlinks so /usr/local/bin/fish and its real target
-                // are not offered as two separate choices.
-                let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-                guard seen.insert(resolved).inserted else { continue }
-                found.append((path, name))
-                break
-            }
-        }
-        return found
-    }()
 }
