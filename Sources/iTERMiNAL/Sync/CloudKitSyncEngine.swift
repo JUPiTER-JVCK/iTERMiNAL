@@ -60,9 +60,6 @@ final class CloudKitSyncEngine: SyncEngine {
     }
 
     var isAvailable: Bool {
-        // Mode is checked by the provider; when this engine is active the
-        // user asked for iCloud. Availability then depends on account and
-        // whether the container accepted a probe.
         guard AppSettings.shared.syncMode == .icloud else { return false }
         guard containerUsable else { return false }
         return accountStatus == .available
@@ -106,25 +103,19 @@ final class CloudKitSyncEngine: SyncEngine {
         return parts.joined(separator: " ")
     }
 
-    /// Marks local workspace/preference changes as newer than the last sync.
-    /// Ignored while a remote apply is writing through `saveNow`.
     func noteLocalEdit() {
         guard !isApplyingRemote else { return }
         localModifiedAt = Date()
     }
 
-    /// Called when the user turns iCloud mode on so the first sync prefers
-    /// this Mac's existing layout over a stale remote, unless the remote is
-    /// genuinely newer than "now" (it won't be).
     func prepareForEnablingICloud() {
         if localModifiedAt == nil {
             localModifiedAt = Date()
         }
         refreshAvailability()
+        SyncEngineProvider.startWatchingStateFileIfNeeded()
     }
 
-    /// Re-queries account status. Safe to call from the main thread; the
-    /// CloudKit callback updates cached fields for the next status read.
     func refreshAvailability(completion: (() -> Void)? = nil) {
         container.accountStatus { [weak self] status, error in
             DispatchQueue.main.async {
@@ -146,7 +137,7 @@ final class CloudKitSyncEngine: SyncEngine {
 
     func syncNow(completion: @escaping (Result<Void, Error>) -> Void) {
         // Always persist locally first so a CloudKit outage never loses work.
-        WorkspaceStore.shared.saveNow(triggerSync: false)
+        WorkspaceStore.shared.saveNow()
 
         refreshAvailability { [weak self] in
             guard let self else {
@@ -155,8 +146,6 @@ final class CloudKitSyncEngine: SyncEngine {
             }
 
             guard self.isAvailable else {
-                // Fall back to LocalOnlySyncEngine behaviour: local save is
-                // already done above. Surface the reason via statusDescription.
                 completion(.success(()))
                 return
             }
@@ -164,8 +153,6 @@ final class CloudKitSyncEngine: SyncEngine {
             self.performSync(completion: completion)
         }
     }
-
-    // MARK: - Sync pipeline
 
     private func performSync(completion: @escaping (Result<Void, Error>) -> Void) {
         let store = WorkspaceStore.shared
@@ -198,12 +185,7 @@ final class CloudKitSyncEngine: SyncEngine {
                 }
 
                 if let error = error as? CKError, error.code == .unknownItem {
-                    self.upload(
-                        payload: localPayload,
-                        modifiedAt: now,
-                        existing: nil,
-                        completion: completion
-                    )
+                    self.upload(payload: localPayload, modifiedAt: now, existing: nil, completion: completion)
                     return
                 }
 
@@ -218,12 +200,7 @@ final class CloudKitSyncEngine: SyncEngine {
                 }
 
                 guard let remoteRecord else {
-                    self.upload(
-                        payload: localPayload,
-                        modifiedAt: now,
-                        existing: nil,
-                        completion: completion
-                    )
+                    self.upload(payload: localPayload, modifiedAt: now, existing: nil, completion: completion)
                     return
                 }
 
@@ -327,13 +304,8 @@ final class CloudKitSyncEngine: SyncEngine {
         }
     }
 
-    // MARK: - Helpers
-
     private static func payloadData(from record: CKRecord) -> Data? {
-        if let data = record["payload"] as? Data {
-            return data
-        }
-        // CloudKit may promote large values to assets; accept both.
+        if let data = record["payload"] as? Data { return data }
         if let asset = record["payload"] as? CKAsset, let url = asset.fileURL {
             return try? Data(contentsOf: url)
         }
@@ -342,21 +314,13 @@ final class CloudKitSyncEngine: SyncEngine {
 
     private static func looksLikeMissingEntitlement(_ error: Error) -> Bool {
         let text = error.localizedDescription.lowercased()
-        if text.contains("entitlement") {
-            return true
-        }
-        if text.contains("container"), text.contains("not available") {
-            return true
-        }
+        if text.contains("entitlement") { return true }
+        if text.contains("container"), text.contains("not available") { return true }
         if let ck = error as? CKError {
-            // Missing entitlement / bad container show up under several codes
-            // depending on the OS build and whether the app is signed.
             switch ck.code {
             case .notAuthenticated, .permissionFailure, .badDatabase:
                 return true
             default:
-                // CKError.Code.missingEntitlement (and similar) vary by SDK;
-                // string matching above already covers entitlement failures.
                 break
             }
         }
