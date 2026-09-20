@@ -1,1 +1,1 @@
-@/tmp/attn-final/WorkspaceStore.swift
+file:///tmp/ws_only.txt
