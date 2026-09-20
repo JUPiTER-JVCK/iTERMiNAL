@@ -1,1 +1,1 @@
-PLACEHOLDER_WILL_FAIL_SIZE_TEST
+@file:///tmp/content_workspace.txt
