@@ -137,7 +137,13 @@ final class CloudKitSyncEngine: SyncEngine {
 
     func syncNow(completion: @escaping (Result<Void, Error>) -> Void) {
         // Always persist locally first so a CloudKit outage never loses work.
-        WorkspaceStore.shared.saveNow()
+        // Suppress the state-file mtime watcher around this save: otherwise the
+        // watcher treats sync's own write as a user edit, bumps localModifiedAt
+        // past a newer remote, and last-writer-wins uploads stale data (then
+        // loops every poll).
+        SyncEngineProvider.withMtimeWatchSuppressed {
+            WorkspaceStore.shared.saveNow()
+        }
 
         refreshAvailability { [weak self] in
             guard let self else {
@@ -243,8 +249,12 @@ final class CloudKitSyncEngine: SyncEngine {
         do {
             let archive = try SyncCodec.decode(payload)
             isApplyingRemote = true
-            archive.preferences.apply(to: AppSettings.shared)
-            WorkspaceStore.shared.applySnapshot(archive.state)
+            // applySnapshot persists state; keep the mtime watcher from treating
+            // that write as a local edit (which would invert LWW against remote).
+            SyncEngineProvider.withMtimeWatchSuppressed {
+                archive.preferences.apply(to: AppSettings.shared)
+                WorkspaceStore.shared.applySnapshot(archive.state)
+            }
             isApplyingRemote = false
             localModifiedAt = record["modifiedAt"] as? Date
             lastSyncedAt = Date()
