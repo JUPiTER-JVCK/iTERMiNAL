@@ -21,6 +21,7 @@ enum SyncEngineProvider {
     /// and when CloudKit is unavailable — never throws into the UI.
     static func pullIfNeeded() {
         guard AppSettings.shared.syncMode == .icloud else { return }
+        startWatchingStateFileIfNeeded()
         let engine = CloudKitSyncEngine.shared
         guard engine.isAvailable else {
             // Still refresh so Settings can show account / entitlement status.
@@ -54,5 +55,42 @@ enum SyncEngineProvider {
         }
         pendingPush = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+    }
+
+    // MARK: - State-file watcher
+
+    /// Polls the workspace state file's modification date so iCloud push still
+    /// runs after local saves even when `WorkspaceStore.saveNow` is not patched
+    /// to call into the provider directly. Cheap (stat only) and only active
+    /// while iCloud mode is selected.
+    private static var watchTimer: Timer?
+    private static var lastSeenStateMTime: Date?
+
+    static func startWatchingStateFileIfNeeded() {
+        guard AppSettings.shared.syncMode == .icloud else {
+            watchTimer?.invalidate()
+            watchTimer = nil
+            return
+        }
+        guard watchTimer == nil else { return }
+
+        lastSeenStateMTime = stateFileModificationDate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            guard AppSettings.shared.syncMode == .icloud else { return }
+            guard let mtime = stateFileModificationDate() else { return }
+            if let last = lastSeenStateMTime, mtime <= last { return }
+            lastSeenStateMTime = mtime
+            schedulePushAfterLocalSave()
+        }
+        // Allow the run loop to fire while the user is dragging a split.
+        timer.tolerance = 0.5
+        RunLoop.main.add(timer, forMode: .common)
+        watchTimer = timer
+    }
+
+    private static func stateFileModificationDate() -> Date? {
+        let url = WorkspaceStore.shared.stateFileURL
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        return values?.contentModificationDate
     }
 }
