@@ -1,0 +1,33 @@
+name: restore-workspace-store
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.b64"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode WorkspaceStore.swift
+        run: |
+          set -euo pipefail
+          b64="Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.b64"
+          out="Sources/iTERMiNAL/Workspace/WorkspaceStore.swift"
+          base64 -d "$b64" | gzip -d > "$out"
+          rm -f "$b64" .github/workflows/restore-workspace-store.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          b = Path("Sources/iTERMiNAL/Workspace/WorkspaceStore.swift").read_bytes()
+          blob = hashlib.sha1(b"blob %d\0" % len(b) + b).hexdigest()
+          print("restored_bytes", len(b), "blob", blob)
+          assert blob == "b18086732c5aa728e54f6dc699557a0f18799652"
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: restore WorkspaceStore.swift from gzip payload"
+          git push
