@@ -45,6 +45,10 @@ extension TerminalSession {
         guard needsAttention || lastAttention != nil else { return }
         needsAttention = false
         lastAttention = nil
+        // Reset debounce so a new bell/OSC after the user leaves this pane is
+        // not swallowed by the previous attention's 1s window.
+        lastAttentionAt = .distantPast
+        lastAttentionFingerprint = nil
     }
 
     private func attentionFingerprint(_ attention: TerminalAttention) -> String {
