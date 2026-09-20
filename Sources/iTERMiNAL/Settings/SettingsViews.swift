@@ -328,6 +328,7 @@ struct AppearanceSettingsView: View {
 
 struct TerminalSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var attention = AttentionSettings.shared
 
     private static let monospacedFamilies: [String] = {
         NSFontManager.shared.availableFontFamilies.filter { family in
@@ -439,6 +440,16 @@ struct TerminalSettingsView: View {
                         .monospacedDigit()
                 }
                 Text("Applies to new terminals.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Notifications") {
+                Picker("Pane attention", selection: $attention.mode) {
+                    ForEach(AttentionSettings.Mode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                Text("Bell and OSC 9/777 from background panes show an in-app mark. System banners are optional and only fire when the app is inactive or the pane is unfocused.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -779,6 +790,7 @@ struct AdvancedSettingsView: View {
             Section("Reset") {
                 Button("Reset All Settings", role: .destructive) {
                     settings.resetToDefaults()
+                    AttentionSettings.shared.resetToInApp()
                 }
             }
             Section("About") {

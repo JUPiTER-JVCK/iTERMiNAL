@@ -188,7 +188,12 @@ struct SidebarView: View {
             title: "Projects",
             isExpanded: $settings.projectsExpanded,
             showsDot: store.workspaces.contains { workspace in
-                workspace.tabs.contains { $0.id != store.selectedTabID && ($0.primarySession?.isRunning ?? false) }
+                workspace.tabs.contains {
+                    $0.id != store.selectedTabID && (
+                        ($0.primarySession?.isRunning ?? false)
+                        || ($0.primarySession?.needsAttention ?? false)
+                    )
+                }
             }
         ) {
             Button {
@@ -693,7 +698,8 @@ private struct SessionRowContent: View {
 
     /// Blue dot = a live process in a tab you're not currently looking at.
     private var showsActivityDot: Bool {
-        session.isRunning && store.selectedTabID != tab.id
+        if session.needsAttention { return true }
+        return session.isRunning && store.selectedTabID != tab.id
     }
 
     private var tooltip: String {
