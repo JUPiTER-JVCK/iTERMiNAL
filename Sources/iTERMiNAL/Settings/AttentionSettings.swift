@@ -7,8 +7,12 @@ final class AttentionSettings: ObservableObject {
     static let shared = AttentionSettings()
 
     enum Mode: String, CaseIterable, Identifiable {
-        case off, inApp, inAppAndSystem
+        case off
+        case inApp
+        case inAppAndSystem
+
         var id: String { rawValue }
+
         var label: String {
             switch self {
             case .off: return "Off"
