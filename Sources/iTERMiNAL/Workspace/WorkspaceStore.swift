@@ -1,1 +1,1 @@
-@file:///tmp/content_workspace.txt
+REDIRECT
