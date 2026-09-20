@@ -54,11 +54,11 @@ final class SwiftTermEngine: TerminalEngine {
         terminalView.onActivity = { [weak self] in
             self?.noteActivity()
         }
-        terminalView.onAttention = { [weak self] attention in
-            self?.onAttention?(attention)
-        }
         terminalView.onCommand = { [weak self] command in
             self?.onCommand?(command)
+        }
+        terminalView.onAttention = { [weak self] attention in
+            self?.onAttention?(attention)
         }
         terminalView.installAttentionOSCHandlers()
 
