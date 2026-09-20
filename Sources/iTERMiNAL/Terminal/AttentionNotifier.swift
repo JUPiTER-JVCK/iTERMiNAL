@@ -35,10 +35,9 @@ final class AttentionNotifier {
         session: TerminalSession,
         sessionFocused: Bool
     ) {
-        let mode = AttentionSettings.shared.mode
-        guard mode == .inAppAndSystem else { return }
+        guard AttentionSettings.shared.mode == .inAppAndSystem else { return }
 
-        let appActive = NSApp?.isActive ?? false
+        let appActive = NSApp.isActive
         guard !appActive || !sessionFocused else { return }
 
         let content = UNMutableNotificationContent()

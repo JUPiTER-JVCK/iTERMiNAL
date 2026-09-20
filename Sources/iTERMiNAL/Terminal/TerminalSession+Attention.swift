@@ -40,6 +40,13 @@ extension TerminalSession {
         AttentionNotifier.shared.maybeNotify(attention, session: self, sessionFocused: focused)
     }
 
+    /// Clears the sidebar attention mark once the user is looking at this pane.
+    func clearAttention() {
+        guard needsAttention || lastAttention != nil else { return }
+        needsAttention = false
+        lastAttention = nil
+    }
+
     private func attentionFingerprint(_ attention: TerminalAttention) -> String {
         switch attention {
         case .bell:

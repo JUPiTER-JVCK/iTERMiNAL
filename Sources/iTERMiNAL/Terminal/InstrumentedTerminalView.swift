@@ -8,7 +8,7 @@ import SwiftTerm
 /// this class (`sizeChanged`, `setTerminalTitle`, and `becomeFirstResponder`
 /// on the view) are `public` but not `open`, so they cannot be overridden from
 /// outside the module; those signals come through `processDelegate` and a
-/// mouse monitor instead. OSC 9 / 777 are hooked via `parser.oscHandlers`.
+/// mouse monitor instead. OSC 9 / 777 are hooked via `registerOscHandler`.
 final class InstrumentedTerminalView: LocalProcessTerminalView {
     var onActivity: (() -> Void)?
     var onInput: (() -> Void)?
@@ -93,28 +93,27 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// BEL — SwiftTerm exposes this as an open TerminalDelegate method, so
-    /// subclasses can observe it without replacing `terminalDelegate`.
+    /// BEL — SwiftTerm exposes this as an open TerminalDelegate method.
     override func bell(source: Terminal) {
         onAttention?(.bell)
         super.bell(source: source)
     }
 
-    /// Hooks OSC 9 (iTerm Growl message) and OSC 777 (notify) via the public
-    /// `parser.oscHandlers` map. Custom handlers run before built-ins, so OSC 9
-    /// must still forward `9;4` progress reports to keep Dock progress working.
+    /// Hooks OSC 9 (Growl-style message) and OSC 777 (notify). Custom handlers
+    /// run before built-ins, so OSC 9 must still forward `9;4` progress reports
+    /// to keep Dock progress working.
     func installAttentionOSCHandlers() {
         let terminal = getTerminal()
-        terminal.parser.oscHandlers[9] = { [weak self] data in
+        terminal.registerOscHandler(code: 9) { [weak self] data in
             guard let self else { return }
             if let report = Self.parseProgressReport(data) {
-                self.progressReport(source: self.getTerminal(), report: report)
+                self.progressReport(source: terminal, report: report)
                 return
             }
             let message = String(bytes: data, encoding: .utf8) ?? ""
             self.onAttention?(.osc9(message: message))
         }
-        terminal.parser.oscHandlers[777] = { [weak self] data in
+        terminal.registerOscHandler(code: 777) { [weak self] data in
             guard let self else { return }
             // Same shape SwiftTerm's oscNotification expects:
             //   ESC ] 777 ; notify ; [title] ; [body] BEL
