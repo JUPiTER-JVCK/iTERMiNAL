@@ -3,7 +3,9 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.b64"
+      - "Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.hex.1"
+      - "Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.hex.2"
+      - ".github/workflows/restore-workspace-store.yml"
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -11,13 +13,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Decode WorkspaceStore.swift
+      - name: Decode WorkspaceStore.swift from hex gzip chunks
         run: |
           set -euo pipefail
-          b64="Sources/iTERMiNAL/Workspace/WorkspaceStore.swift.gz.b64"
-          out="Sources/iTERMiNAL/Workspace/WorkspaceStore.swift"
-          base64 -d "$b64" | gzip -d > "$out"
-          rm -f "$b64" .github/workflows/restore-workspace-store.yml
+          d="Sources/iTERMiNAL/Workspace"
+          cat "$d/WorkspaceStore.swift.gz.hex.1" "$d/WorkspaceStore.swift.gz.hex.2" | tr -d ' \n\r\t' | xxd -r -p | gzip -d > "$d/WorkspaceStore.swift"
+          rm -f "$d/WorkspaceStore.swift.gz.hex.1" "$d/WorkspaceStore.swift.gz.hex.2" \
+                "$d/WorkspaceStore.swift.gz.b64" .github/workflows/restore-workspace-store.yml
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
@@ -29,5 +31,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "fix: restore WorkspaceStore.swift from gzip payload"
+          git commit -m "fix: restore WorkspaceStore.swift from hex gzip chunks"
           git push
