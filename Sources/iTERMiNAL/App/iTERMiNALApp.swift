@@ -43,8 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
-        // Clear pane-attention marks when focus / tab selection changes.
-        AttentionFocusBinder.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

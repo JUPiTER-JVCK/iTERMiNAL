@@ -31,16 +31,16 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// identified by what it is doing rather than by its directory — which is
     /// the same for every tab opened in one project.
     @Published private(set) var lastCommand: String?
-    /// True after a bell / OSC attention while this pane was not focused.
-    /// Cleared when the session (or its tab) becomes focused.
-    @Published var needsAttention = false
-    /// Most recent attention payload, for tooltips and system notifications.
-    @Published var lastAttention: TerminalAttention?
+    /// True after a bell / OSC attention while this pane was not in front of
+    /// the user. Cleared when the session (or its tab) becomes focused.
+    @Published private(set) var needsAttention = false
 
     let engine: SwiftTermEngine
-    /// Coalesces rapid bells / identical OSC text to about one mark per second.
-    var lastAttentionAt = Date.distantPast
-    var lastAttentionFingerprint: String?
+    /// Coalesces rapid bells / identical OSC text to about one event per
+    /// second. Private because nothing outside `noteAttention` has any business
+    /// moving the debounce window.
+    private var lastAttentionAt = Date.distantPast
+    private var lastAttentionFingerprint: String?
     private var hasStarted = false
 
     /// A shell for this session alone, overriding the global setting. The
@@ -241,6 +241,71 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard hasStarted, isRunning else { return }
         engine.terminate()
         isRunning = false
+    }
+
+    // MARK: Attention
+
+    /// Marks this session as needing attention and publishes `session.attention`.
+    ///
+    /// Rapid repeats within ~1s are coalesced: identical OSC text refreshes
+    /// the timestamp without stacking another event; a fresh kind/text still
+    /// waits for the debounce window so a ringing bell cannot flood the bus.
+    func noteAttention(_ attention: TerminalAttention) {
+        let mode = AttentionSettings.shared.mode
+        let focused = WorkspaceStore.shared.focusedSessionID == id
+        let fingerprint = attentionFingerprint(attention)
+        let now = Date()
+        let withinWindow = now.timeIntervalSince(lastAttentionAt) < 1.0
+        if withinWindow, lastAttentionFingerprint == fingerprint {
+            lastAttentionAt = now
+            return
+        }
+        if withinWindow {
+            return
+        }
+        lastAttentionAt = now
+        lastAttentionFingerprint = fingerprint
+
+        if mode != .off, !focused {
+            needsAttention = true
+        }
+
+        // Off means off. Publishing regardless meant a user who had turned
+        // pane attention off still saw every bell — and every OSC title and
+        // body — on `iterminalctl subscribe events=*`.
+        guard mode != .off else { return }
+
+        var data: [String: Any] = [
+            "session": id.uuidString,
+            "kind": attention.kindName,
+            "focused": focused,
+        ]
+        if let title = attention.title { data["title"] = title }
+        if let body = attention.body { data["body"] = body }
+        EventBus.shared.publish(APIEvent("session.attention", data))
+
+        AttentionNotifier.shared.maybeNotify(attention, session: self, sessionFocused: focused)
+    }
+
+    /// Clears the sidebar attention mark once the user is looking at this pane.
+    func clearAttention() {
+        guard needsAttention || lastAttentionFingerprint != nil else { return }
+        needsAttention = false
+        // Reset debounce so a new bell/OSC after the user leaves this pane is
+        // not swallowed by the previous attention's 1s window.
+        lastAttentionAt = .distantPast
+        lastAttentionFingerprint = nil
+    }
+
+    private func attentionFingerprint(_ attention: TerminalAttention) -> String {
+        switch attention {
+        case .bell:
+            return "bell"
+        case .osc9(let message):
+            return "osc9:" + message
+        case .osc777(let title, let body):
+            return "osc777:" + (title ?? "") + "|" + (body ?? "")
+        }
     }
 
     // MARK: Git metadata
