@@ -47,8 +47,12 @@ final class AttentionNotifier {
         }
         content.sound = .default
 
+        // One identifier per pane, not per post, so a pane that keeps asking
+        // replaces its own banner. A fresh UUID each time never coalesces, and
+        // a test runner ringing once per failure leaves hundreds of separate
+        // entries for the user to clear by hand.
         let request = UNNotificationRequest(
-            identifier: "attention-\(session.id.uuidString)-\(UUID().uuidString)",
+            identifier: "attention-\(session.id.uuidString)",
             content: content,
             trigger: nil
         )
