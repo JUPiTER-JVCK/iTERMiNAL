@@ -1,6 +1,8 @@
 # Design: iCloud sync
 
-Status: design only — not implemented yet.
+Status: **implemented** (PR #22). Kept as the design record; see
+*What shipped differently* at the end — including one line of reasoning
+below that should not be reused.
 
 ## Goal
 
@@ -118,3 +120,42 @@ same spirit as skipping `composerShell`.
 
 Signed/notarized release pipeline, multi-record merge, syncing shell history
 or scrollback, public iCloud / sharing between Apple IDs.
+
+## What shipped differently
+
+**Do not reuse this document's reasoning about last-writer-wins.** The line
+"One record per iCloud account …, last-writer-wins. That matches how import
+already replaces state wholesale" is the origin of two data-loss bugs, and it
+is wrong in a way that is easy to miss: Import and sync do not have the same
+licence. Import replaces everything because the user clicked a button asking
+for exactly that. A sync runs on its own schedule with nobody watching, so
+reusing the same wholesale-replace path meant a remote update killed every
+running shell (`applySnapshot` begins with `terminateAllSessions()`) and
+permanently deleted local transcripts, which are deliberately never uploaded
+and so could not come back.
+
+Last-writer-wins on the *record* is fine. What does not follow is that
+applying the winning record may destroy local state. The shipped code splits
+the two: `applySnapshot` keeps its destructive behaviour for Import, and
+`applyRemoteSnapshot` — the only path sync may use — merges recents instead of
+replacing them and holds a layout change back while any shell is still
+running, surfacing it in Settings so closing those shells stays a decision
+someone makes.
+
+**The push signal is the one place the design was right and the code was
+not.** "Also push after a debounced local save (reuse whatever debounce
+`WorkspaceStore.saveNow` already uses)" is exactly correct. The first
+implementation instead polled the state file's mtime every two seconds to
+*infer* that a save had happened, which cannot distinguish sync's own writes
+from the user's and needed a suppression counter held open across an async
+save it could not see the end of. It now does what this paragraph said.
+
+**Preferences needed their own signal.** They live in `UserDefaults`, not the
+state file, so nothing about a theme or connection change reaches `saveNow`.
+Without a separate observer they synced one way only: uploaded when an
+unrelated layout edit happened to follow, and otherwise overwritten by the
+next remote apply.
+
+**Entitlements need `com.apple.developer.icloud-container-environment`**, which
+the signing section above does not mention. Container identifier and CloudKit
+service alone are not enough for any build outside the Mac App Store.

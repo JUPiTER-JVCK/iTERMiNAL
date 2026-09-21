@@ -1,6 +1,7 @@
 # Design: `@ai` assistant
 
-Status: design only — not implemented yet.
+Status: **implemented** (PR #23). Kept as the design record; see
+*What shipped differently* at the end.
 
 ## Goal
 
@@ -131,3 +132,26 @@ Security panel stays focused on the scripting API token.
 Agentic tool use (driving panes/browser via the scripting API), multi-turn chat
 threads with persistence, image/vision, multiple named assistants, and anything
 that auto-executes shell from model output.
+
+## What shipped differently
+
+**Recent output is off by default.** The context list above reads as though
+every field travels; `recentOutput` is the one that uploads the visible screen
+to a third party, and the screen may be showing `cat .env`. Nothing downstream
+redacts secrets — "strip ANSI for the model" is a formatting step, not a
+safety one — so it is opt-in, and the Settings copy says so plainly rather
+than claiming secrets are excluded.
+
+**`workspaceName` has its own switch.** It shipped sent unconditionally, which
+contradicted the Settings caption promising only the listed fields travel.
+Workspace names routinely name a client or an internal project.
+
+**The cap is 6,000 characters**, at the lower end of the "~4–8 KB" suggested
+here, and applied to what is on screen rather than to scrollback.
+
+One caution for anyone extending this: the ANSI stripper is a regex built in a
+Swift *raw* string, so the escape reaches ICU untouched and must be written
+`\x{001B}`, not `\u{001B}`. Written the other way the pattern silently fails
+to compile, `try?` yields nil, and the sanitiser returns its input unchanged —
+which is indistinguishable from working until you look at what was actually
+sent.

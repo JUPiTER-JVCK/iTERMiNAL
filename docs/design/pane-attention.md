@@ -1,6 +1,8 @@
 # Design: pane attention notifications (OSC 9 / 777)
 
-Status: design only — not implemented yet.
+Status: **implemented** (PR #24). Kept as the design record; see
+*What shipped differently* at the end for where the code and this document
+diverge, and why.
 
 ## Goal
 
@@ -108,3 +110,31 @@ stacking indicators.
 - Custom notification sounds per profile
 - Attention for browser panes (separate signal if ever needed)
 - Changing the meaning or rate of `session.activity`
+
+## What shipped differently
+
+Three places where the implementation deliberately departs from the design
+above. Recorded here because each was a bug first.
+
+**Deduping (§5) is the important one.** "OSC 9/777 with identical text within
+that window update the timestamp rather than stacking indicators" was
+implemented literally, and it meant a pane ringing faster than once a second
+refreshed its own window forever and was therefore *never* marked — the exact
+case the feature exists for. The shipped code does not refresh the window on a
+repeat: the window expires on its own, so a persistent bell reports about once
+a second instead of falling silent after the first.
+
+**The mark is set before the debounce, not after.** `needsAttention` is an
+idempotent flag rather than an event, so throttling it bought nothing and cost
+the case above. Only the bus event and the system banner are throttled.
+
+**§2 and §4 have to ask the same question.** §4 correctly says a system banner
+fires when "the app is inactive or the pane is unfocused". §2 says only that
+the mark is cleared when a pane "becomes focused", and the code followed §2 —
+so a single-pane tab, which always holds focus, never got an in-app mark while
+the app was in the background, while §4's banner fired anyway. Both now test
+`!focused || !NSApp.isActive`.
+
+**`lastAttention` was dropped.** §2's "optionally stash last message / kind /
+timestamp" was built, then removed: nothing ever read it, and the tooltip it
+was meant to feed composes only directory and branch.
