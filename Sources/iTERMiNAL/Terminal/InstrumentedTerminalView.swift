@@ -103,11 +103,16 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// run before built-ins, so OSC 9 must still forward `9;4` progress reports
     /// to keep Dock progress working.
     func installAttentionOSCHandlers() {
+        // `terminal` is used to register and must NOT be captured: the handler
+        // is stored on this same terminal's parser, so a strong reference from
+        // inside the closure is a cycle (Terminal → parser → handler →
+        // Terminal) that keeps the whole scrollback alive after the pane
+        // closes. Reach it through `self` instead, which is already weak.
         let terminal = getTerminal()
         terminal.registerOscHandler(code: 9) { [weak self] data in
             guard let self else { return }
             if let report = Self.parseProgressReport(data) {
-                self.progressReport(source: terminal, report: report)
+                self.progressReport(source: self.getTerminal(), report: report)
                 return
             }
             let message = String(bytes: data, encoding: .utf8) ?? ""
@@ -115,13 +120,17 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
         }
         terminal.registerOscHandler(code: 777) { [weak self] data in
             guard let self else { return }
-            // Same shape SwiftTerm's oscNotification expects:
-            //   ESC ] 777 ; notify ; [title] ; [body] BEL
+            // ESC ] 777 ; notify ; [title] ; [body] BEL
+            //
+            // The body is optional: `777;notify;Build finished` is a title on
+            // its own and must still raise attention. SwiftTerm's own
+            // `oscNotification` delegate is an empty no-op at the pinned
+            // revision, so nothing else picks this up if we drop it.
             guard let text = String(bytes: data, encoding: .utf8) else { return }
             let parts = text.components(separatedBy: ";")
-            guard parts.count >= 3, parts[0] == "notify" else { return }
+            guard parts.count >= 2, parts[0] == "notify" else { return }
             let title = parts[1]
-            let body = parts[2...].joined(separator: ";")
+            let body = parts.count >= 3 ? parts[2...].joined(separator: ";") : ""
             self.onAttention?(.osc777(
                 title: title.isEmpty ? nil : title,
                 body: body.isEmpty ? nil : body
@@ -141,10 +150,22 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
               let state = Terminal.ProgressReportState(rawValue: stateValue) else {
             return nil
         }
+        // Clamp rather than reject, exactly as SwiftTerm does. Returning nil
+        // for an out-of-range percentage does not merely drop the progress
+        // update — the handler above then treats the sequence as a message and
+        // raises attention, so `9;4;1;150` lit a sidebar dot and posted a
+        // banner titled "4;1;150".
         var progress: UInt8?
         if parts.count >= 3, !parts[2].isEmpty {
-            guard let raw = Int(parts[2]), raw >= 0, raw <= 100 else { return nil }
-            progress = UInt8(raw)
+            guard let raw = Int(parts[2]) else { return nil }
+            progress = UInt8(max(0, min(raw, 100)))
+        } else if state == .set {
+            // Without this, `9;4;1` leaves progress nil and the bar redraws at
+            // the previous run's value instead of resetting.
+            progress = 0
+        }
+        if state == .remove {
+            progress = nil
         }
         return Terminal.ProgressReport(state: state, progress: progress)
     }
