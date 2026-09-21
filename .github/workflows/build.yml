@@ -9,6 +9,20 @@ on:
     # does not narrow the main-branch trigger above.
     tags: ['v*']
   pull_request:
+  # Cuts a version release without anyone pushing a tag.
+  #
+  # Tag writes are not available to every client that drives this repository
+  # (the Claude Code GitHub relay refuses refs/tags/* and the releases API
+  # outright), so "push a tag" is not a step everyone can perform. GITHUB_TOKEN
+  # inside Actions is not subject to that, and `gh release create --target`
+  # creates the tag as a side effect — the same mechanism the per-build
+  # releases below already rely on.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, with or without the v (e.g. 0.112 or v0.112)'
+        required: true
+        type: string
 
 # Read-only by default; only the release job gets write, and only to contents.
 permissions:
@@ -27,6 +41,33 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
+
+      # Check this before spending three minutes on a build. Immutable
+      # releases reserve a tag name permanently once it has backed a published
+      # release, so a name that is already taken cannot be recovered by
+      # deleting anything — the run has to stop before it creates one.
+      - name: Check the version is free
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION#v}"
+          # A malformed tag is as permanent as a duplicate one.
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*$'; then
+            echo "::error::'$tag' is not a version tag (expected v1, v0.112, v1.2.3)."
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists. Immutable releases reserve a tag name for good, so pick the next version."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists without a release. Delete it by hand, or pick the next version."
+            exit 1
+          fi
+          echo "$tag is free."
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
@@ -61,14 +102,22 @@ jobs:
         run: xcodegen generate
 
       - name: Build
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           # A tag build has to carry the tag's version, or v0.3.0 would ship an
           # app whose About box still says whatever project.yml last hardcoded.
           # The empty-array expansion below is safe because Actions runs
           # `bash -e`, not `bash -u` — under set -u, bash 3.2 on macOS treats
           # "${ARR[@]}" on an empty array as an unbound variable.
+          # A manual run reports GITHUB_REF_TYPE as "branch" even though it is
+          # cutting a version, so the input has to be checked first — keying
+          # off the ref alone would ship the version hardcoded in project.yml
+          # under a v-numbered release.
           VERSION_ARG=()
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+          if [ -n "${RELEASE_VERSION:-}" ]; then
+            VERSION_ARG=("MARKETING_VERSION=${RELEASE_VERSION#v}")
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             VERSION_ARG=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
           fi
           xcodebuild \
@@ -134,7 +183,8 @@ jobs:
     name: Publish release
     needs: build
     # Never from a pull request: a PR branch is not something to publish.
-    if: github.event_name == 'push'
+    # Everything else — a push to main, a v* tag, a manual version run — does.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,8 +208,20 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+
+          # Which tag this run is publishing, if any. A manual run supplies it
+          # as an input; a tag push carries it on the ref; a main build has
+          # none and takes the per-build path at the bottom.
+          if [ -n "${RELEASE_VERSION:-}" ]; then
+            TARGET_TAG="v${RELEASE_VERSION#v}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TARGET_TAG="$GITHUB_REF_NAME"
+          else
+            TARGET_TAG=""
+          fi
 
           # Every release says this, because it is the first thing that goes
           # wrong: macOS quarantines anything downloaded through a browser, and
@@ -183,8 +245,8 @@ jobs:
           NOTE
           )
 
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            asset="iTERMiNAL-${GITHUB_REF_NAME}-universal.zip"
+          if [ -n "$TARGET_TAG" ]; then
+            asset="iTERMiNAL-${TARGET_TAG}-universal.zip"
             mv iTERMiNAL.zip "$asset"
 
             # State where the changelog starts rather than letting the API
@@ -201,8 +263,15 @@ jobs:
             # v0.10.0 and ask for a range running backwards. Walk the list in
             # ascending version order and keep the last tag seen before this
             # one. Empty means this is the earliest version tag.
-            prev=$(git tag --list 'v*' --sort=v:refname \
-              | awk -v cur="$GITHUB_REF_NAME" '$0 == cur { exit } { last = $0 } END { print last }')
+            # On a manual run this tag does not exist yet, so walking only
+            # the existing tags would never reach it and `last` would end up
+            # as the newest tag of all — which for a v0.9.1 cut after v0.10.0
+            # is the same backwards range the ascending walk exists to avoid.
+            # Fold the target into the list first, so its position is real
+            # whether or not the tag has been created.
+            prev=$( { printf '%s\n' "$TARGET_TAG"; git tag --list 'v*'; } \
+              | sort -u -V \
+              | awk -v cur="$TARGET_TAG" '$0 == cur { exit } { last = $0 } END { print last }')
 
             if [ -n "$prev" ]; then
               # Ask for the changelog explicitly rather than passing
@@ -212,7 +281,7 @@ jobs:
               # survivable; the install section is not.
               changelog=$(gh api --method POST \
                 "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-                -f tag_name="$GITHUB_REF_NAME" \
+                -f tag_name="$TARGET_TAG" \
                 -f previous_tag_name="$prev" --jq .body || true)
             else
               # The first version tag has no predecessor to diff against, and
@@ -228,14 +297,19 @@ jobs:
             # A release can already exist for this tag if it was created from
             # the Releases UI before this workflow runs. Update it to the
             # workflow's asset and notes rather than failing on re-create.
-            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
-              gh release edit "$GITHUB_REF_NAME" \
-                --title "$GITHUB_REF_NAME" \
+            if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
+              gh release upload "$TARGET_TAG" "$asset" --clobber
+              gh release edit "$TARGET_TAG" \
+                --title "$TARGET_TAG" \
                 --notes "$notes"
             else
-              gh release create "$GITHUB_REF_NAME" "$asset" \
-                --title "$GITHUB_REF_NAME" \
+              # --target is what creates the tag on a manual run, pinned to the
+              # commit this run actually built rather than to wherever the
+              # branch has moved since. On a tag push it names the same commit
+              # the ref already points at, so it changes nothing there.
+              gh release create "$TARGET_TAG" "$asset" \
+                --title "$TARGET_TAG" \
+                --target "$GITHUB_SHA" \
                 --notes "$notes"
             fi
           else
