@@ -17,6 +17,7 @@ struct AdvancedSettingsView: View {
             Section("Reset") {
                 Button("Reset All Settings", role: .destructive) {
                     settings.resetToDefaults()
+                    AttentionSettings.shared.resetToInApp()
                 }
             }
             Section("About") {

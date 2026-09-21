@@ -222,12 +222,25 @@ iterminalctl subscribe events=session.exited,tab.created
 | `session.started` / `session.exited` | a session launches or its process ends |
 | `session.directory` / `session.title` | the shell reports a new cwd or title |
 | `session.activity` | a session repaints (debounced to 4/sec) |
+| `session.attention` | bell / OSC 9 / 777 from a pane (debounced ~1s; separate from activity) |
 | `session.link` | the user clicks a link in a terminal |
 | `tab.created` / `tab.closed` / `tab.selected` | tab lifecycle |
 | `workspace.created`, `pane.split`, `pane.closed` | layout changes |
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
+
+From an unfocused pane (or while the app is in the background), try:
+
+```sh
+printf '\a'                                          # bell
+printf '\033]9;build done\007'                      # OSC 9
+printf '\033]777;notify;title;body\007'             # OSC 777
+```
+
+With **Settings → Terminal → Notifications** set to in-app (default), the
+sidebar shows a blue attention mark. System banners require the in-app +
+system mode.
 
 ## Remote sessions and files
 
@@ -328,7 +341,7 @@ executed automatically.
 ## Roadmap
 
 - [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
-- [ ] Pane attention notifications (OSC 9/777) via the event bus
+- [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
 - [ ] iCloud sync (needs a signing/entitlement story)
 - [ ] Optional libghostty engine

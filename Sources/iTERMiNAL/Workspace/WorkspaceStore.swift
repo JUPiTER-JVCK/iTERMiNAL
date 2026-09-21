@@ -65,7 +65,19 @@ final class WorkspaceStore: ObservableObject {
             }
         }
     }
-    @Published var focusedSessionID: UUID?
+    /// Looking at a pane dismisses its attention mark, however focus got
+    /// there. Doing it here rather than at each call site covers the paths
+    /// that assign this directly — closing a pane, closing a session,
+    /// revealing a task — which an observer of this property used to catch and
+    /// nothing else did.
+    @Published var focusedSessionID: UUID? {
+        didSet {
+            guard oldValue != focusedSessionID else { return }
+            if let focusedSessionID, let session = session(withID: focusedSessionID) {
+                session.clearAttention()
+            }
+        }
+    }
     /// Panels currently in the trailing region. A set rather than one
     /// optional, so opening Files no longer evicts the browser — every panel
     /// keeps its place until you close it yourself.
@@ -214,14 +226,19 @@ final class WorkspaceStore: ObservableObject {
 
     func noteFocused(session: TerminalSession) {
         if focusedSessionID != session.id {
-            focusedSessionID = session.id
+            focusedSessionID = session.id   // didSet dismisses the mark
+        } else {
+            // Already focused, so the didSet will not fire — but clicking back
+            // into a pane still dismisses its mark.
+            session.clearAttention()
         }
     }
 
     private func focusSelectedTab() {
         guard let tab = selectedTab else { return }
         let sessions = tab.root.allSessions()
-        if let focusedSessionID, sessions.contains(where: { $0.id == focusedSessionID }) {
+        if let focusedSessionID, let session = sessions.first(where: { $0.id == focusedSessionID }) {
+            session.clearAttention()   // id unchanged, so the didSet stays quiet
             return
         }
         focusedSessionID = sessions.first?.id

@@ -27,7 +27,7 @@ final class EventBus {
     /// Event names a subscriber can ask for. `*` means everything.
     static let allEvents = [
         "session.started", "session.exited", "session.directory",
-        "session.title", "session.activity", "session.link",
+        "session.title", "session.activity", "session.attention", "session.link",
         "tab.created", "tab.closed", "tab.selected",
         "workspace.created", "pane.split", "pane.closed",
         "browser.navigated", "browser.tab.created", "browser.tab.closed",
