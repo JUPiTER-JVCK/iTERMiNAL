@@ -188,7 +188,19 @@ struct SidebarView: View {
             title: "Projects",
             isExpanded: $settings.projectsExpanded,
             showsDot: store.workspaces.contains { workspace in
-                workspace.tabs.contains { $0.id != store.selectedTabID && ($0.primarySession?.isRunning ?? false) }
+                workspace.tabs.contains { tab in
+                    // Attention counts wherever it happened: in the tab you
+                    // are looking at (another pane of a split can ring), and
+                    // in any pane, not just the tab's primary one. Gating it
+                    // on "some other tab" and on primarySession meant a
+                    // collapsed Projects header showed nothing at all for a
+                    // split pane that was asking for you.
+                    if tab.root.allSessions().contains(where: \.needsAttention) {
+                        return true
+                    }
+                    return tab.id != store.selectedTabID
+                        && (tab.primarySession?.isRunning ?? false)
+                }
             }
         ) {
             Button {
@@ -648,9 +660,9 @@ private struct SessionRowContent: View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 6) {
             ZStack {
-                if showsActivityDot {
+                if let color = activityDotColor {
                     Circle()
-                        .fill(Color(hex: 0x3B82F6))
+                        .fill(color)
                         .frame(width: 6, height: 6)
                 }
             }
@@ -691,9 +703,18 @@ private struct SessionRowContent: View {
         .help(tooltip)
     }
 
-    /// Blue dot = a live process in a tab you're not currently looking at.
-    private var showsActivityDot: Bool {
-        session.isRunning && store.selectedTabID != tab.id
+    /// Amber dot = this pane asked for you (bell / OSC). Blue dot = a live
+    /// process in a tab you're not currently looking at.
+    ///
+    /// Two different signals, so two different colours: attention was
+    /// deliberately kept distinct from activity at the engine level, and
+    /// painting both the same blue threw that distinction away at the one
+    /// place the user actually sees it. Attention wins when both apply — it is
+    /// the one asking for a response.
+    private var activityDotColor: Color? {
+        if session.needsAttention { return Color(hex: 0xF59E0B) }
+        if session.isRunning && store.selectedTabID != tab.id { return Color(hex: 0x3B82F6) }
+        return nil
     }
 
     private var tooltip: String {
