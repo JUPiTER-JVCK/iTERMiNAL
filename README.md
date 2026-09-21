@@ -117,17 +117,35 @@ runner (`.github/workflows/build.yml`).
 
 ### Cutting a release
 
-Bump `MARKETING_VERSION` in `project.yml`, then push a matching tag:
+Two routes, and neither needs `MARKETING_VERSION` bumped in `project.yml` — CI
+overrides it from the version being released, so the About box always agrees
+with the release it came from.
+
+**From the Actions tab.** Run the **Build** workflow with a `version` input
+(`0.112` or `v0.112` — the `v` is optional). It builds first and only then
+creates the tag and the release, using `GITHUB_TOKEN` from inside the run.
+
+This exists because pushing a tag is not something every client driving this
+repository can do. The Claude Code GitHub relay refuses `refs/tags/*` writes
+and the releases API outright, so an agent can open and merge pull requests but
+cannot cut a release. `GITHUB_TOKEN` inside Actions is not subject to that.
+
+**Or push a tag**, if you have a checkout and the access:
 
 ```sh
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.112 && git push origin v0.112
 ```
 
-CI builds it, overrides `MARKETING_VERSION` from the tag so the app's About box
-agrees with the release, and publishes the zip with a generated changelog. That
-changelog runs from the previous `v*` tag — stated explicitly, because the
-default baseline would be the `build-*` prerelease published minutes earlier at
-the same commit, which is no range at all.
+Either way CI publishes the zip with a generated changelog, and the changelog
+runs from the previous `v*` tag — stated explicitly, because the default
+baseline would be the `build-*` prerelease published minutes earlier at the
+same commit, which is no range at all.
+
+The version is checked before anything is built: the workflow refuses a tag
+that already exists or is not shaped like a version. That check is not
+politeness. This repository has immutable releases enabled, so a tag name that
+has ever backed a published release is reserved permanently — a typo cannot be
+deleted and retried, which is how `latest` was burned here for good.
 
 ## Shell integration (recommended)
 
