@@ -21,8 +21,15 @@ struct ITerminalApp: App {
                 // hierarchy is tinted.
                 .tint(settings.accentColor)
         }
+        // Hides the title and makes the bar transparent. It does not remove
+        // the title-bar-height safe area SwiftUI still insets content below —
+        // `MainWindowView.framelessWindow()` does that, and the same call in
+        // SettingsRootView does it for the settings window, which this scene
+        // modifier cannot reach.
+        //
+        // `.windowToolbarStyle` is gone with no replacement: this window has no
+        // toolbar for it to style.
         .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified(showsTitle: false))
         .commands { AppCommands() }
 
         Settings {

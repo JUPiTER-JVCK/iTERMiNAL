@@ -15,6 +15,10 @@ struct SettingsRootView: View {
             contentColumn(theme: theme)
         }
         .frame(width: 940, height: 640)
+        // No title bar above the rail: the search field and the section icons
+        // start at the top edge, with the traffic lights floating over the
+        // band the rail clears for them.
+        .framelessWindow()
     }
 
     // MARK: Navigation
@@ -35,8 +39,11 @@ struct SettingsRootView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.surface)
             )
             .padding(.horizontal, 12)
-            .padding(.top, 14)
+            // Clears the traffic lights, which now float over the top of the
+            // rail rather than sitting in a title bar above it.
+            .padding(.top, WindowChrome.titleBarHeight + 10)
             .padding(.bottom, 10)
+            .background(WindowDragArea())
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -92,8 +99,12 @@ struct SettingsRootView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 26)
-            .padding(.top, 22)
+            // Sits level with the rail's search field now that neither has a
+            // title bar above it.
+            .padding(.top, WindowChrome.titleBarHeight + 16)
             .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(WindowDragArea())
 
             Group {
                 switch selection {

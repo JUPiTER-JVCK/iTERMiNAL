@@ -7,14 +7,27 @@ struct MainWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
     private let process = ProcessMetrics.shared
 
+    /// Tracked rather than left to SwiftUI because hiding the sidebar slides
+    /// the detail column under the traffic lights, and the top strip has to
+    /// know to get out of their way — there is no title bar holding them any
+    /// more.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 285, max: 360)
         } detail: {
-            DetailView()
+            DetailView(
+                trafficLightInset: columnVisibility == .detailOnly
+                    ? WindowChrome.trafficLightWidth
+                    : 0
+            )
         }
         .frame(minWidth: 900, minHeight: 560)
+        // Sidebar and detail column run to the top edge; the traffic lights
+        // float over the sidebar header, which insets itself to clear them.
+        .framelessWindow()
         .sheet(isPresented: $store.showCommandPalette) {
             CommandPaletteView()
                 .environmentObject(store)
@@ -30,6 +43,10 @@ struct MainWindowView: View {
 /// them both. The dock sits inside this column, so it spans the content and
 /// the right panel but stops at the sidebar — matching the reference app.
 struct DetailView: View {
+    /// Leading space the top strip keeps clear for the traffic lights, which
+    /// float over this column whenever the sidebar is hidden.
+    var trafficLightInset: CGFloat = 0
+
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -49,7 +66,7 @@ struct DetailView: View {
             // The strip spans the whole detail column rather than living
             // inside the content VStack: nested there, it narrowed whenever a
             // panel opened and the right-aligned toggles slid with it.
-            DetailTopStrip()
+            DetailTopStrip(leadingInset: trafficLightInset)
             FadedDivider()
 
             // The trailing panel can never take so much width that the
@@ -182,16 +199,24 @@ struct DetailView: View {
 /// Title on the left, panel toggles on the right. Each toggle fills in when
 /// its panel is open, the way the reference app marks an active panel.
 private struct DetailTopStrip: View {
+    /// Extra leading padding so the tab name does not appear under the traffic
+    /// lights when this column starts at the window's left edge.
+    var leadingInset: CGFloat = 0
+
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 6) {
+            // Hit-testing off so the drag area behind it gets the click: with
+            // no title bar left, this strip is what the user grabs to move the
+            // window.
             Text(store.selectedTab?.displayName ?? "iTERMiNAL")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
+                .allowsHitTesting(false)
 
             Spacer(minLength: 12)
 
@@ -224,7 +249,11 @@ private struct DetailTopStrip: View {
             .help("Settings")
         }
         .padding(.horizontal, 14)
+        .padding(.leading, leadingInset)
         .frame(height: 40)
+        // This strip sits at the very top of a frameless window, so it is the
+        // window's title bar in every sense but the system's.
+        .background(WindowDragArea())
     }
 }
 
