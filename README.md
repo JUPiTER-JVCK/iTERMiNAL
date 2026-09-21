@@ -24,12 +24,16 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions); a landing screen with quick-start cards and
-  recent commands from your shell history; and a floating composer that runs
-  in its own shell — drag it anywhere, minimise it to a pill, resize its
-  transcript, and recall earlier commands with the arrow keys.
+  recent commands from your shell history; and a floating composer that types
+  into whichever terminal has focus — drag it anywhere, minimise it to a pill,
+  and recall earlier commands with the arrow keys. The chip above the input
+  names the terminal it will run in, and switches it to a private shell of its
+  own if you want one.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file
   panel down the right, opened independently from the toggles at the top right
-  of the content area, with draggable dividers whose sizes persist.
+  of the content area, with draggable dividers whose sizes persist. A dock tab
+  can be a local shell, a saved connection, or a running shell moved down from
+  a pane, and it reopens as whatever it was.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
@@ -246,7 +250,8 @@ iterminalctl subscribe events=session.exited,tab.created
 | `workspace.created`, `pane.split`, `pane.closed` | layout changes |
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
-| `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
+| `dock.session.created` / `dock.session.closed` | terminal dock lifecycle (`connection` set on a remote tab) |
+| `dock.session.moved` | a running shell was moved from a pane into the dock |
 
 From an unfocused pane (or while the app is in the background), try:
 
@@ -263,7 +268,8 @@ system mode.
 ## Remote sessions and files
 
 Add hosts in **Settings → Connections**, then open one from the sidebar's
-**Connect** row, the composer's `+` menu, or the palette. Transport can be
+**Connect** row, the composer's `+` menu, the terminal dock's `+` menu, or the
+palette. Transport can be
 `ssh`, `mosh`, or a custom command (which is how Tailscale SSH or Eternal
 Terminal fit — `%h`, `%p`, `%u`, `%d` expand to host, port, user, and
 user@host). The same hosts appear in the Files panel's source menu for SFTP.

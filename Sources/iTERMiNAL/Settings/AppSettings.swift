@@ -87,6 +87,9 @@ final class AppSettings: ObservableObject {
     /// else"; a path here changes only the composer, so trying something in
     /// bash doesn't change what every new tab opens as.
     @Published var composerShell: String { didSet { defaults.set(composerShell, forKey: "composerShell") } }
+    /// Which terminal a composer command runs in. Defaults to the focused one,
+    /// so the composer types where its own context chips say it is typing.
+    @Published var composerTarget: ComposerTarget { didSet { defaults.set(composerTarget.rawValue, forKey: "composerTarget") } }
     /// Composer card geometry and fill. Width was hardcoded at 820pt in the
     /// layout; it lives here so it can be changed without a rebuild.
     @Published var composerWidth: Double { didSet { defaults.set(composerWidth, forKey: "composerWidth") } }
@@ -167,6 +170,7 @@ final class AppSettings: ObservableObject {
         composerCollapsed = defaults.bool(forKey: "composerCollapsed")
         composerTranscriptHeight = defaults.object(forKey: "composerTranscriptHeight") as? Double ?? 200
         composerShell = defaults.string(forKey: "composerShell") ?? ""
+        composerTarget = ComposerTarget(rawValue: defaults.string(forKey: "composerTarget") ?? "") ?? .activeTerminal
         composerWidth = defaults.object(forKey: "composerWidth") as? Double ?? 820
         composerOpacity = defaults.object(forKey: "composerOpacity") as? Double ?? 1.0
         composerVibrancy = defaults.bool(forKey: "composerVibrancy")
@@ -328,6 +332,7 @@ final class AppSettings: ObservableObject {
         composerCollapsed = false
         composerTranscriptHeight = 200
         composerShell = ""
+        composerTarget = .activeTerminal
         composerWidth = 820
         composerOpacity = 1.0
         composerVibrancy = false

@@ -375,9 +375,10 @@ struct ComposerBar: View {
         }
         ai.cancel()
         ai.clearBanner()
-        // Its own shell — never the pane behind it.
+        // Wherever the chip above the input says: the focused terminal by
+        // default, the composer's own shell if the user asked for that.
         withAnimation(Motion.panel) {
-            store.sendToComposer(command + "\n")
+            store.sendFromComposer(command + "\n")
         }
         text = ""
         historyIndex = nil

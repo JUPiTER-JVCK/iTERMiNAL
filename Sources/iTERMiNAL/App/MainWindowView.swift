@@ -1096,11 +1096,15 @@ private struct PickerRow: View {
     }
 }
 
-/// The bottom terminal dock: a tab strip of working directories over a live
-/// shell. Separate from the tab's own panes, so it stays put while you move
-/// between tabs.
+/// The bottom terminal dock: a tab strip over a live shell. Separate from the
+/// tab's own panes, so it stays put while you move between tabs.
+///
+/// A dock tab is a terminal like any other — it can be a local shell, a saved
+/// connection, or a shell moved down here from a pane to keep an eye on while
+/// the tab above it gets used for something else.
 struct TerminalDockView: View {
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -1120,8 +1124,29 @@ struct TerminalDockView: View {
                     }
                 }
 
-                Button {
-                    store.newDockSession()
+                Menu {
+                    Button("Local Shell") { store.newDockSession() }
+
+                    if !settings.sshConnections.isEmpty {
+                        Section("Connect") {
+                            ForEach(settings.sshConnections) { connection in
+                                Button("\(connection.name) — \(connection.subtitle)") {
+                                    store.newDockSession(kind: .remote(connection.id))
+                                }
+                            }
+                        }
+                    }
+
+                    let movable = store.paneSessionsMovableToDock()
+                    if !movable.isEmpty {
+                        Section("Move a running shell here") {
+                            ForEach(movable) { session in
+                                Button(session.displayTitle) {
+                                    store.moveSessionToDock(session.id)
+                                }
+                            }
+                        }
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .medium))
@@ -1129,8 +1154,10 @@ struct TerminalDockView: View {
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .help("New dock terminal")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("New dock terminal — local, a saved connection, or a shell moved down from a pane")
 
                 Spacer(minLength: 0)
 
@@ -1178,7 +1205,7 @@ private struct DockTabChip: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 6) {
-            Image(systemName: "apple.terminal")
+            Image(systemName: session.isRemote ? "network" : "apple.terminal")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.textSecondary)
             Text(label)
@@ -1208,9 +1235,13 @@ private struct DockTabChip: View {
     }
 }
 
-/// Working directory, shortened the way a shell prompt would show it.
+/// Working directory, shortened the way a shell prompt would show it — or the
+/// host, for a tab that is a connection rather than a directory on this Mac.
 private extension DockTabChip {
     var label: String {
+        if session.isRemote {
+            return session.connection?.name ?? "Remote"
+        }
         let directory = session.abbreviatedDirectory
         if directory.isEmpty { return session.displayTitle }
         if directory == "/" || directory == "~" { return directory }
