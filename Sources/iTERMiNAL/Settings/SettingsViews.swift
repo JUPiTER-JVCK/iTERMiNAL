@@ -105,7 +105,7 @@ struct SettingsRootView: View {
                 case .connections: ConnectionsSettingsView()
                 case .security: SecuritySettingsView()
                 case .ai: AISettingsView()
-                case .sync: SyncSettingsView()
+                case .backup: BackupSettingsView()
                 case .shortcuts: ShortcutsSettingsView()
                 case .advanced: AdvancedSettingsView()
                 }

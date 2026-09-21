@@ -51,8 +51,8 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, AI, Sync, Shortcuts,
-  and Advanced, all applying live.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, Backup,
+  Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY.
@@ -328,7 +328,7 @@ Sources/
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
-│   ├── Sync/        sync seam (local + CloudKit), workspace export/import
+│   ├── Backup/      workspace snapshot archive, export/import
 │   ├── Settings/    preferences store + settings window
 │   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
@@ -363,26 +363,32 @@ executed automatically.
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
 
-## Sync
+## Backup and restore
 
-Workspaces and non-secret preferences can stay on this Mac or sync through
-iCloud (Settings → Sync). The payload is the same JSON snapshot Export writes:
-secrets, keychain items, and machine-local paths such as `composerShell` are
-never included.
+Workspaces and preferences live on this Mac, under Application Support.
+Settings → Backup shows where, and moves them: **Export Workspaces…** writes a
+single `.iterminal` JSON snapshot, **Import Workspaces…** reads one back and
+replaces the current layout.
 
-iCloud uses CloudKit (`CloudKitSyncEngine`) against the private database
-container `iCloud.com.jupiterjvck.iterminal`. The code ships in every build;
-it only becomes available when the app is signed with an Apple Developer
-account that has the iCloud capability. Unsigned CI and ad-hoc
-(`CODE_SIGN_IDENTITY "-"`) builds keep **This Mac only** and show why iCloud
-is unavailable in Settings. App Sandbox stays off; Hardened Runtime stays on.
+A snapshot carries workspaces, tabs, the split layout, and non-secret
+preferences. It deliberately leaves out secrets — the API token stays in the
+keychain, SSH has no passwords to carry — and machine-local paths such as
+`composerShell`, so importing on another Mac cannot point the app at a shell
+that isn't there. Terminal scrollback is excluded too: transcripts stay in
+their own 0600 files on this Mac.
+
+There is no background sync and nothing leaves the machine unless you export
+it. An earlier version offered iCloud through CloudKit; it needed an Apple
+Developer iCloud container to bind, so it was visible in every build and usable
+only in a signed one, and it has been removed along with the app's entitlements
+file. App Sandbox stays off; Hardened Runtime stays on.
 
 ## Roadmap
 
 - [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
 - [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
-- [x] iCloud sync via CloudKit (`SyncEngine`) — requires Apple Developer signing + iCloud capability; unsigned CI builds stay local-only
+- [x] Workspace snapshots: export/import with no account required
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 

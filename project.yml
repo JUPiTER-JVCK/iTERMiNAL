@@ -94,9 +94,12 @@ targets:
         # restrict spawned processes.
         ENABLE_APP_SANDBOX: "NO"
         ENABLE_HARDENED_RUNTIME: "YES"
-        # CloudKit container entitlement. Unsigned CI builds still sign with
-        # "-" and report iCloud unavailable; a Developer-signed build lights it up.
-        CODE_SIGN_ENTITLEMENTS: Resources/iTERMiNAL.entitlements
+        # No entitlements file. The only one this project ever had existed for
+        # a CloudKit container, which needed an Apple Developer account to
+        # bind — so the feature behind it was dead in every build anyone could
+        # actually make. Backups are snapshot files now and need no
+        # entitlement. Hardened Runtime is what notarization requires and is
+        # set above; it needs no entitlements of its own.
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
     scheme:
