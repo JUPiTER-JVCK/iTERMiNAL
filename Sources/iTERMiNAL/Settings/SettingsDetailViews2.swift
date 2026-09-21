@@ -1,42 +1,6 @@
 import SwiftUI
 import AppKit
 
-struct ShortcutsSettingsView: View {
-    private let shortcuts: [(action: String, keys: String)] = [
-        ("Command palette", "⌘K"),
-        ("New terminal tab", "⌘T"),
-        ("New workspace", "⇧⌘N"),
-        ("Split right", "⌘D"),
-        ("Split down", "⇧⌘D"),
-        ("Split with browser", "⇧⌘B"),
-        ("Close pane", "⇧⌘W"),
-        ("Close tab", "⌥⌘W"),
-        ("Toggle browser panel", "⌥⌘B"),
-        ("Toggle files panel", "⌥⌘F"),
-        ("Settings", "⌘,"),
-    ]
-
-    var body: some View {
-        Form {
-            Section("Keyboard shortcuts") {
-                ForEach(shortcuts, id: \.action) { shortcut in
-                    HStack {
-                        Text(shortcut.action)
-                        Spacer()
-                        Text(shortcut.keys)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text("Custom key bindings are on the roadmap.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-}
-
 struct AdvancedSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
@@ -52,7 +16,7 @@ struct AdvancedSettingsView: View {
             Section("Reset") {
                 Button("Reset All Settings", role: .destructive) {
                     settings.resetToDefaults()
-                    settings.resetSyncModeToLocal()
+                    AttentionSettings.shared.resetToInApp()
                 }
             }
             Section("About") {
@@ -60,34 +24,6 @@ struct AdvancedSettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-}
-
-/// Lists the recommended fonts this Mac doesn't have, with somewhere to get
-/// them. Collapsed by default — it is a suggestion, not a task.
-struct RecommendedFontsNotice: View {
-    let missing: [(family: String, source: String)]
-
-    @State private var expanded = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(missing, id: \.family) { font in
-                    if let url = URL(string: font.source) {
-                        Link(font.family, destination: url)
-                            .font(.caption)
-                    } else {
-                        Text(font.family).font(.caption)
-                    }
-                }
-            }
-            .padding(.top, 4)
-        } label: {
-            Text("\(missing.count) recommended fonts aren't installed")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 

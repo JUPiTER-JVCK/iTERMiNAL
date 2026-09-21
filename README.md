@@ -51,10 +51,11 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, Sync, Shortcuts, and
-  Advanced, all applying live.
-- **AI seam** — the composer reserves `@ai …` and the app ships an
-  `AssistantService` protocol; a real assistant plugs in without UI changes.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, Sync, Shortcuts,
+  and Advanced, all applying live.
+- **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
+  endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
+  replies appear above the input and are never auto-run in a PTY.
 
 ## Requirements
 
@@ -221,12 +222,25 @@ iterminalctl subscribe events=session.exited,tab.created
 | `session.started` / `session.exited` | a session launches or its process ends |
 | `session.directory` / `session.title` | the shell reports a new cwd or title |
 | `session.activity` | a session repaints (debounced to 4/sec) |
+| `session.attention` | bell / OSC 9 / 777 from a pane (debounced ~1s; separate from activity) |
 | `session.link` | the user clicks a link in a terminal |
 | `tab.created` / `tab.closed` / `tab.selected` | tab lifecycle |
 | `workspace.created`, `pane.split`, `pane.closed` | layout changes |
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
+
+From an unfocused pane (or while the app is in the background), try:
+
+```sh
+printf '\a'                                          # bell
+printf '\033]9;build done\007'                      # OSC 9
+printf '\033]777;notify;title;body\007'             # OSC 777
+```
+
+With **Settings → Terminal → Notifications** set to in-app (default), the
+sidebar shows a blue attention mark. System banners require the in-app +
+system mode.
 
 ## Remote sessions and files
 
@@ -251,8 +265,14 @@ non-interactively and therefore **requires key-based authentication**.
   constant time.
 - **Secrets live only in the keychain** — never in preferences, the saved
   layout, or exported snapshots.
-- **App Transport Security stays on**; only web-view content is exempt, so the
-  browser pane can preview a plain-http dev server.
+- **The assistant sends only what you switch on.** Working directory, git
+  branch and workspace name travel by default; the visible terminal screen
+  does not, and has to be turned on in Settings → AI. Nothing redacts secrets
+  from that screen, so it is off until you say otherwise.
+- **App Transport Security stays on**, with two narrow exemptions: web-view
+  content, so the browser pane can preview a plain-http dev server, and local
+  networking, so the assistant can reach a model server on loopback. Anything
+  routable still has to be HTTPS.
 - **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
   programs, and sandboxed children inherit the sandbox — a sandboxed build
   could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
@@ -292,7 +312,7 @@ Sources/
 │   ├── Security/    keychain wrapper
 │   ├── Sync/        sync seam (local + CloudKit), workspace export/import
 │   ├── Settings/    preferences store + settings window
-│   └── AI/          AssistantService seam (null implementation for now)
+│   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
 ```
 
@@ -301,6 +321,29 @@ The terminal backend sits behind `TerminalEngine`
 `FileSystemProvider` (`Sources/iTERMiNAL/Files/FileSystemProvider.swift`), so
 either can be swapped (libghostty, an in-process SSH stack) without touching
 the UI.
+
+## AI assistant (`@ai`)
+
+Configure a provider in **Settings → AI**, then type `@ai …` in the composer.
+Replies appear in a banner above the input — suggested commands are never
+executed automatically.
+
+### OpenAI
+
+1. Preset **OpenAI** (base URL `https://api.openai.com/v1`).
+2. Pick a model (default `gpt-4o-mini`).
+3. Paste an API key and click **Save Key** (stored in the keychain as
+   `assistant.apiKey`, never in preferences or export snapshots).
+
+### Ollama (local)
+
+1. Run Ollama and pull a model, e.g. `ollama pull llama3.2`.
+2. In Settings → AI, choose **Ollama (local)** or set the base URL to
+   `http://127.0.0.1:11434/v1`.
+3. Set the model name to match (e.g. `llama3.2`). No API key is required for
+   localhost. Plain HTTP works here only because ATS is given the
+   `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
+   addresses alone — a LAN hostname over plain HTTP is still refused.
 
 ## Sync
 
@@ -318,8 +361,8 @@ is unavailable in Settings. App Sandbox stays off; Hardened Runtime stays on.
 
 ## Roadmap
 
-- [ ] AI assistant behind the `@ai` composer prefix (provider-pluggable)
-- [ ] Pane attention notifications (OSC 9/777) via the event bus
+- [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
+- [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
 - [x] iCloud sync via CloudKit (`SyncEngine`) — requires Apple Developer signing + iCloud capability; unsigned CI builds stay local-only
 - [ ] Optional libghostty engine

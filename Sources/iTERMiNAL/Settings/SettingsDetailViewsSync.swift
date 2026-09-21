@@ -21,7 +21,7 @@ struct SyncSettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: settings.syncMode) { _ in
+                .onChange(of: settings.syncMode) { _, _ in
                     CloudKitSyncEngine.shared.refreshAvailability {
                         statusTick += 1
                     }
@@ -116,5 +116,41 @@ struct SyncSettingsView: View {
                 syncMessage = error.localizedDescription
             }
         }
+    }
+}
+
+struct ShortcutsSettingsView: View {
+    private let shortcuts: [(action: String, keys: String)] = [
+        ("Command palette", "⌘K"),
+        ("New terminal tab", "⌘T"),
+        ("New workspace", "⇧⌘N"),
+        ("Split right", "⌘D"),
+        ("Split down", "⇧⌘D"),
+        ("Split with browser", "⇧⌘B"),
+        ("Close pane", "⇧⌘W"),
+        ("Close tab", "⌥⌘W"),
+        ("Toggle browser panel", "⌥⌘B"),
+        ("Toggle files panel", "⌥⌘F"),
+        ("Settings", "⌘,"),
+    ]
+
+    var body: some View {
+        Form {
+            Section("Keyboard shortcuts") {
+                ForEach(shortcuts, id: \.action) { shortcut in
+                    HStack {
+                        Text(shortcut.action)
+                        Spacer()
+                        Text(shortcut.keys)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("Custom key bindings are on the roadmap.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }

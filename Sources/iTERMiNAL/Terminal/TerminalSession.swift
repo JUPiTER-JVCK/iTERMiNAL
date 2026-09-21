@@ -31,8 +31,16 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// identified by what it is doing rather than by its directory — which is
     /// the same for every tab opened in one project.
     @Published private(set) var lastCommand: String?
+    /// True after a bell / OSC attention while this pane was not in front of
+    /// the user. Cleared when the session (or its tab) becomes focused.
+    @Published private(set) var needsAttention = false
 
     let engine: SwiftTermEngine
+    /// Coalesces rapid bells / identical OSC text to about one event per
+    /// second. Private because nothing outside `noteAttention` has any business
+    /// moving the debounce window.
+    private var lastAttentionAt = Date.distantPast
+    private var lastAttentionFingerprint: String?
     private var hasStarted = false
 
     /// A shell for this session alone, overriding the global setting. The
@@ -78,6 +86,11 @@ final class TerminalSession: ObservableObject, Identifiable {
                 // hook.
                 self.refreshDirectoryFromProcess()
                 EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+            }
+        }
+        engine.onAttention = { [weak self] attention in
+            DispatchQueue.main.async {
+                self?.noteAttention(attention)
             }
         }
         engine.onCommand = { [weak self] command in
@@ -228,6 +241,92 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard hasStarted, isRunning else { return }
         engine.terminate()
         isRunning = false
+    }
+
+    // MARK: Attention
+
+    /// Marks this session as needing attention and publishes `session.attention`.
+    ///
+    /// Identical repeats within ~1s are coalesced so a ringing bell cannot
+    /// flood the bus, but a genuinely different message is reported straight
+    /// away rather than being swallowed by an unrelated bell a moment earlier.
+    func noteAttention(_ attention: TerminalAttention) {
+        // Off means off, for the mark, the bus and the banner alike.
+        // Publishing regardless meant a user who had turned pane attention off
+        // still saw every bell — and every OSC title and body — on
+        // `iterminalctl subscribe events=*`.
+        let mode = AttentionSettings.shared.mode
+        guard mode != .off else { return }
+
+        let focused = WorkspaceStore.shared.focusedSessionID == id
+
+        // Two separate questions, and the mark answers the one the debounce
+        // does not.
+        //
+        // Pane focus alone is not "the user can see this": a tab with a single
+        // pane always holds focus, so a backgrounded app left the headline
+        // case — build finishes while you are in another app — marking
+        // nothing at all. This is the same test the system banner already
+        // applies; the two disagreeing is what made a banner fire with no
+        // matching sidebar mark.
+        //
+        // The mark is also set before the debounce, not after. It is an
+        // idempotent flag rather than an event, so throttling it gains
+        // nothing, and setting it afterwards meant a pane ringing faster than
+        // once a second was never marked at all.
+        if !focused || !NSApp.isActive {
+            needsAttention = true
+        }
+
+        // Only the event and the banner are throttled. The window is not
+        // extended by a repeat, so a pane that keeps ringing keeps reporting
+        // about once a second instead of falling silent after the first.
+        let now = Date()
+        let fingerprint = attentionFingerprint(attention)
+        if now.timeIntervalSince(lastAttentionAt) < 1.0,
+           lastAttentionFingerprint == fingerprint {
+            return
+        }
+        lastAttentionAt = now
+        lastAttentionFingerprint = fingerprint
+
+        var data: [String: Any] = [
+            "session": id.uuidString,
+            "kind": attention.kindName,
+            "focused": focused,
+        ]
+        if let title = attention.title { data["title"] = title }
+        if let body = attention.body { data["body"] = body }
+        EventBus.shared.publish(APIEvent("session.attention", data))
+
+        // Checked here, not only inside maybeNotify: touching `.shared` builds
+        // a UNUserNotificationCenter, which raises in a process without a
+        // valid bundle and signature. Behind the guard it is only ever built
+        // when the user has actually asked for system banners.
+        if mode == .inAppAndSystem {
+            AttentionNotifier.shared.maybeNotify(attention, session: self, sessionFocused: focused)
+        }
+    }
+
+    /// Clears the sidebar attention mark once the user is looking at this pane.
+    func clearAttention() {
+        guard needsAttention || lastAttentionFingerprint != nil else { return }
+        needsAttention = false
+        // Reset debounce so a new bell/OSC after the user leaves this pane is
+        // not swallowed by the previous attention's 1s window.
+        lastAttentionAt = .distantPast
+        lastAttentionFingerprint = nil
+    }
+
+    private func attentionFingerprint(_ attention: TerminalAttention) -> String {
+        switch attention {
+        case .bell:
+            return "bell"
+        case .osc9(let message):
+            return "osc9:" + message
+        case .osc777(let title, let body):
+            return "osc777:" + (title ?? "") + "|" + (body ?? "")
+        }
     }
 
     // MARK: Git metadata

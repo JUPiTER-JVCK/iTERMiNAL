@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// SSH hosts for the file panel's remote mode.
 struct ConnectionsSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var selectedID: UUID?

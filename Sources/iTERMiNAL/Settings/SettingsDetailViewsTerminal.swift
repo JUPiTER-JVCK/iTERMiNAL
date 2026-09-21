@@ -3,6 +3,7 @@ import AppKit
 
 struct TerminalSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var attention = AttentionSettings.shared
 
     private static let monospacedFamilies: [String] = {
         NSFontManager.shared.availableFontFamilies.filter { family in
@@ -117,6 +118,16 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Notifications") {
+                Picker("Pane attention", selection: $attention.mode) {
+                    ForEach(AttentionSettings.Mode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                Text("Bell and OSC 9/777 from background panes show an in-app mark. System banners are optional and only fire when the app is inactive or the pane is unfocused.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Performance") {
                 Toggle("GPU rendering (experimental)", isOn: $settings.useGPURendering)
                 Text("Draws the terminal with Metal for smoother scrolling. The renderer is still experimental upstream; if it can't start, terminals silently keep using the CPU renderer.")
@@ -125,5 +136,53 @@ struct TerminalSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct PanelsSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Form {
+            Section("Composer") {
+                Toggle("Show composer bar", isOn: $settings.composerEnabled)
+            }
+            Section("Browser") {
+                TextField("Homepage", text: $settings.browserHomepage)
+            }
+            Section("Files") {
+                Toggle("Show hidden files", isOn: $settings.showHiddenFiles)
+                Toggle("Follow the focused terminal's directory", isOn: $settings.followTerminalDirectory)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Lists the recommended fonts this Mac doesn't have, with somewhere to get
+/// them. Collapsed by default — it is a suggestion, not a task.
+struct RecommendedFontsNotice: View {
+    let missing: [(family: String, source: String)]
+
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(missing, id: \.family) { font in
+                    if let url = URL(string: font.source) {
+                        Link(font.family, destination: url)
+                            .font(.caption)
+                    } else {
+                        Text(font.family).font(.caption)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Text("\(missing.count) recommended fonts aren't installed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

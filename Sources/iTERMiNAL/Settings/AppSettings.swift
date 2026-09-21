@@ -7,9 +7,10 @@ import ServiceManagement
 /// UI labels "applies to new terminals" (cursor style, scrollback), which are
 /// read when a terminal session is created.
 ///
-/// Secrets are never stored here — the local API token lives in the keychain
-/// (see `KeychainStore`), and SSH authentication is delegated to the system
-/// ssh-agent and key files rather than stored by this app.
+/// Secrets are never stored here — the local API token and assistant API key
+/// live in the keychain (see `KeychainStore`), and SSH authentication is
+/// delegated to the system ssh-agent and key files rather than stored by this
+/// app.
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -111,6 +112,25 @@ final class AppSettings: ObservableObject {
     @Published var apiAllowBrowserControl: Bool { didSet { defaults.set(apiAllowBrowserControl, forKey: "apiAllowBrowserControl") } }
     @Published var apiAllowTerminalInput: Bool { didSet { defaults.set(apiAllowTerminalInput, forKey: "apiAllowTerminalInput") } }
 
+    // MARK: Assistant
+    /// OpenAI-compatible API root (no trailing `/chat/completions` required).
+    /// Non-secret; the API key lives in the keychain under `assistant.apiKey`.
+    @Published var assistantBaseURL: String { didSet { defaults.set(assistantBaseURL, forKey: "assistantBaseURL") } }
+    @Published var assistantModel: String { didSet { defaults.set(assistantModel, forKey: "assistantModel") } }
+    @Published var assistantIncludeCwd: Bool { didSet { defaults.set(assistantIncludeCwd, forKey: "assistantIncludeCwd") } }
+    /// Off by default, unlike the other context switches. This one uploads the
+    /// visible screen to a third party, and the screen may be showing the
+    /// output of `cat .env` or `aws configure list`. Nothing downstream
+    /// redacts secrets — the sanitiser strips escape sequences and truncates,
+    /// nothing more — so sending it is the user's call to make, not a default
+    /// they discover afterwards.
+    @Published var assistantIncludeRecentOutput: Bool { didSet { defaults.set(assistantIncludeRecentOutput, forKey: "assistantIncludeRecentOutput") } }
+    @Published var assistantIncludeGitBranch: Bool { didSet { defaults.set(assistantIncludeGitBranch, forKey: "assistantIncludeGitBranch") } }
+    /// Workspace names routinely name a client or an internal project, so this
+    /// gets a switch like everything else that leaves the machine rather than
+    /// riding along unconditionally.
+    @Published var assistantIncludeWorkspace: Bool { didSet { defaults.set(assistantIncludeWorkspace, forKey: "assistantIncludeWorkspace") } }
+
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
         didSet { persistConnections() }
@@ -158,6 +178,13 @@ final class AppSettings: ObservableObject {
         localAPIEnabled = defaults.bool(forKey: "localAPIEnabled")
         apiAllowBrowserControl = defaults.object(forKey: "apiAllowBrowserControl") as? Bool ?? true
         apiAllowTerminalInput = defaults.object(forKey: "apiAllowTerminalInput") as? Bool ?? true
+
+        assistantBaseURL = defaults.string(forKey: "assistantBaseURL") ?? "https://api.openai.com/v1"
+        assistantModel = defaults.string(forKey: "assistantModel") ?? "gpt-4o-mini"
+        assistantIncludeCwd = defaults.object(forKey: "assistantIncludeCwd") as? Bool ?? true
+        assistantIncludeRecentOutput = defaults.object(forKey: "assistantIncludeRecentOutput") as? Bool ?? false
+        assistantIncludeGitBranch = defaults.object(forKey: "assistantIncludeGitBranch") as? Bool ?? true
+        assistantIncludeWorkspace = defaults.object(forKey: "assistantIncludeWorkspace") as? Bool ?? true
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -304,6 +331,13 @@ final class AppSettings: ObservableObject {
         composerWidth = 820
         composerOpacity = 1.0
         composerVibrancy = false
+
+        assistantBaseURL = "https://api.openai.com/v1"
+        assistantModel = "gpt-4o-mini"
+        assistantIncludeCwd = true
+        assistantIncludeRecentOutput = false
+        assistantIncludeGitBranch = true
+        assistantIncludeWorkspace = true
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true
