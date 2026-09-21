@@ -92,6 +92,10 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var rightPanelExpanded = false
     @Published private(set) var bottomDockOpen = false
     @Published var showCommandPalette = false
+    /// How many closed sessions the Recents list keeps. An entry pushed off
+    /// the end takes its transcript with it, so anything that rebuilds this
+    /// list has to respect the same cap.
+    static let maxRecentSessions = 20
     /// Sessions the user closed, newest first, so they can be reopened.
     @Published private(set) var recentSessions: [RecentSession] = []
 
@@ -368,8 +372,8 @@ final class WorkspaceStore: ObservableObject {
         )
         recentSessions.removeAll { $0.id == entry.id }
         recentSessions.insert(entry, at: 0)
-        if recentSessions.count > 20 {
-            recentSessions.removeLast(recentSessions.count - 20)
+        if recentSessions.count > Self.maxRecentSessions {
+            recentSessions.removeLast(recentSessions.count - Self.maxRecentSessions)
         }
         // An entry pushed off the end takes its transcript with it.
         TranscriptStore.pruneAll(keeping: Set(recentSessions.map(\.id)))
@@ -852,8 +856,76 @@ final class WorkspaceStore: ObservableObject {
         selectedDockSessionID = dockSessions.first?.id
     }
 
+    /// What `applyRemoteSnapshot` was able to do.
+    enum RemoteApplyOutcome {
+        /// The layout was adopted.
+        case applied
+        /// Live shells are running, so the layout was left alone. Preferences
+        /// and recents still merged — neither can destroy anything.
+        case deferredLiveSessions(count: Int)
+    }
+
+    /// Applies a snapshot that arrived from another Mac.
+    ///
+    /// Deliberately NOT `applySnapshot`. That one backs Import, where wiping
+    /// the current layout is exactly what the user asked for by clicking the
+    /// button. A sync runs on its own schedule with nobody watching, so the
+    /// same two steps become a background process destroying work: killing
+    /// every live shell mid-build, and — because the outgoing `recentSessions`
+    /// takes the remote's list with it — pruning away transcripts that are
+    /// deliberately never uploaded and so can never come back.
+    ///
+    /// So this one destroys nothing. Recents merge rather than replace, and a
+    /// layout change waits while anything is still running; the caller
+    /// surfaces that so the user can apply it when they are ready.
+    func applyRemoteSnapshot(_ snapshot: AppStateSnapshot) -> RemoteApplyOutcome {
+        // Union, never replace. Pruning against a merged list can only drop
+        // transcripts whose sessions neither Mac still lists.
+        mergeRecents(snapshot.recents ?? [])
+
+        let live = liveSessionCount()
+        guard live == 0 else {
+            saveNow()
+            return .deferredLiveSessions(count: live)
+        }
+
+        applySnapshot(snapshot)
+        return .applied
+    }
+
+    /// Sessions with a process still attached. Adopting a remote layout drops
+    /// the current one, which would orphan these.
+    private func liveSessionCount() -> Int {
+        var count = workspaces
+            .flatMap(\.tabs)
+            .flatMap { $0.root.allSessions() }
+            .filter(\.isRunning)
+            .count
+        count += dockSessions.filter(\.isRunning).count
+        if composerSession?.isRunning == true { count += 1 }
+        return count
+    }
+
+    /// Adds recents this Mac has not seen, newest first, without dropping any
+    /// of its own. Same cap the local list uses.
+    private func mergeRecents(_ incoming: [RecentSession]) {
+        guard !incoming.isEmpty else { return }
+        let known = Set(recentSessions.map(\.id))
+        let additions = incoming.filter { !known.contains($0.id) }
+        guard !additions.isEmpty else { return }
+        recentSessions = (recentSessions + additions)
+            .sorted { $0.closedAt > $1.closedAt }
+        if recentSessions.count > Self.maxRecentSessions {
+            recentSessions.removeLast(recentSessions.count - Self.maxRecentSessions)
+        }
+        pruneOrphanedTranscripts()
+    }
+
     /// Replaces every workspace with the contents of a snapshot, shutting down
     /// the processes that belonged to the outgoing layout.
+    ///
+    /// This is the Import path and it is destructive by design — see
+    /// `applyRemoteSnapshot` for the one that a sync is allowed to use.
     func applySnapshot(_ snapshot: AppStateSnapshot) {
         terminateAllSessions()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
@@ -873,6 +945,15 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func saveNow() {
+        // A queued debounced save is redundant once we save here, and letting
+        // it fire later is actively harmful during a remote apply: adopting a
+        // snapshot rebuilds the dock, each dock session calls scheduleSave,
+        // and that work item lands a second later — after sync has stopped
+        // treating saves as its own. It then reads as a user edit, stamps this
+        // Mac newer than the remote it just adopted, and uploads it straight
+        // back.
+        pendingSave?.cancel()
+        pendingSave = nil
         let snapshot = currentSnapshot()
         do {
             let encoder = JSONEncoder()
@@ -882,6 +963,12 @@ final class WorkspaceStore: ObservableObject {
         } catch {
             NSLog("Failed to save workspace state: \(error.localizedDescription)")
         }
+        // The layout just changed on disk, which is precisely the signal sync
+        // needs. Saying so here replaced a 2s timer that stat()ed this same
+        // file to infer it — along with the seen-mtime tracking and
+        // suppression counter that inference required. The provider ignores
+        // this while it is the one doing the writing.
+        SyncEngineProvider.schedulePushAfterLocalSave()
     }
 
     private func restore() -> Bool {

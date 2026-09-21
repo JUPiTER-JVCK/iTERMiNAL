@@ -92,9 +92,30 @@ struct PreferencesArchive: Codable {
         settings.theme = AppSettings.ThemeChoice(rawValue: theme) ?? .system
         settings.accentID = accentID
         settings.backgroundOpacity = backgroundOpacity
-        settings.shellPath = shellPath
+        // Both of these are absolute paths, and the Mac this archive came from
+        // is not necessarily this one: /opt/homebrew/bin/fish does not exist on
+        // an Intel Mac, and a home-relative project directory may not either.
+        //
+        // `composerShell` is excluded from the archive outright for this exact
+        // reason. These two are kept, because an Export carried to a similar
+        // machine should bring the user's shell with it — but only adopted
+        // when the path actually resolves here. Otherwise the setting silently
+        // reads as something this Mac cannot honour, and `resolvedShell` drops
+        // to /bin/zsh with nothing explaining why.
+        if shellPath.isEmpty || FileManager.default.isExecutableFile(atPath: shellPath) {
+            settings.shellPath = shellPath
+        }
         settings.loginShell = loginShell
-        settings.defaultDirectory = defaultDirectory
+        if defaultDirectory.isEmpty {
+            settings.defaultDirectory = defaultDirectory
+        } else {
+            var isDirectory: ObjCBool = false
+            let expanded = (defaultDirectory as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                settings.defaultDirectory = defaultDirectory
+            }
+        }
         settings.terminalFontName = terminalFontName
         settings.terminalFontSize = terminalFontSize
         settings.cursorStyleTag = cursorStyleTag

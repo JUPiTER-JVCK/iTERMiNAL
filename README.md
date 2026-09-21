@@ -310,7 +310,7 @@ Sources/
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
-│   ├── Sync/        sync seam, workspace export/import
+│   ├── Sync/        sync seam (local + CloudKit), workspace export/import
 │   ├── Settings/    preferences store + settings window
 │   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
@@ -345,12 +345,26 @@ executed automatically.
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
 
+## Sync
+
+Workspaces and non-secret preferences can stay on this Mac or sync through
+iCloud (Settings → Sync). The payload is the same JSON snapshot Export writes:
+secrets, keychain items, and machine-local paths such as `composerShell` are
+never included.
+
+iCloud uses CloudKit (`CloudKitSyncEngine`) against the private database
+container `iCloud.com.jupiterjvck.iterminal`. The code ships in every build;
+it only becomes available when the app is signed with an Apple Developer
+account that has the iCloud capability. Unsigned CI and ad-hoc
+(`CODE_SIGN_IDENTITY "-"`) builds keep **This Mac only** and show why iCloud
+is unavailable in Settings. App Sandbox stays off; Hardened Runtime stays on.
+
 ## Roadmap
 
 - [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
 - [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
-- [ ] iCloud sync (needs a signing/entitlement story)
+- [x] iCloud sync via CloudKit (`SyncEngine`) — requires Apple Developer signing + iCloud capability; unsigned CI builds stay local-only
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 
