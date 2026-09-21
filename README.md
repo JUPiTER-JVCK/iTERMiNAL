@@ -265,8 +265,14 @@ non-interactively and therefore **requires key-based authentication**.
   constant time.
 - **Secrets live only in the keychain** — never in preferences, the saved
   layout, or exported snapshots.
-- **App Transport Security stays on**; only web-view content is exempt, so the
-  browser pane can preview a plain-http dev server.
+- **The assistant sends only what you switch on.** Working directory, git
+  branch and workspace name travel by default; the visible terminal screen
+  does not, and has to be turned on in Settings → AI. Nothing redacts secrets
+  from that screen, so it is off until you say otherwise.
+- **App Transport Security stays on**, with two narrow exemptions: web-view
+  content, so the browser pane can preview a plain-http dev server, and local
+  networking, so the assistant can reach a model server on loopback. Anything
+  routable still has to be HTTPS.
 - **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
   programs, and sandboxed children inherit the sandbox — a sandboxed build
   could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
@@ -335,8 +341,9 @@ executed automatically.
 2. In Settings → AI, choose **Ollama (local)** or set the base URL to
    `http://127.0.0.1:11434/v1`.
 3. Set the model name to match (e.g. `llama3.2`). No API key is required for
-   localhost; App Transport Security stays on — use the loopback URL above
-   rather than a LAN hostname over plain HTTP.
+   localhost. Plain HTTP works here only because ATS is given the
+   `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
+   addresses alone — a LAN hostname over plain HTTP is still refused.
 
 ## Roadmap
 

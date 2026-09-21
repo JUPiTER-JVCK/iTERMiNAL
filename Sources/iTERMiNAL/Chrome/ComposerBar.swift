@@ -20,7 +20,6 @@ struct ComposerBar: View {
 
     @State private var text = ""
     @StateObject private var ai = ComposerAIController()
-    @State private var recallHistory: [String] = []
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
     @State private var dragDelta: CGSize = .zero
@@ -61,6 +60,9 @@ struct ComposerBar: View {
         .animation(Motion.panel, value: settings.composerCollapsed)
         .onChange(of: bounds) { _, _ in clampToBounds() }
         .onChange(of: store.composerFocusRequest) { _, _ in inputFocused = true }
+        // Hiding the composer mid-request used to leave the call running with
+        // nothing left to show its answer.
+        .onDisappear { ai.cancel() }
     }
 
     /// How far the card may travel from home while staying fully on the
@@ -151,8 +153,27 @@ struct ComposerBar: View {
         let theme = Theme.current(for: colorScheme)
         return VStack(spacing: 8) {
             if let banner = ai.banner {
-                ComposerAIBannerView(banner: banner, theme: theme)
-                    .transition(Motion.bannerTransition)
+                // A dismiss (and, while a request is in flight, a stop) —
+                // without one the banner sat above the input until the user
+                // happened to run a non-`@ai` command, and a hung endpoint
+                // left a spinner with nothing to cancel it.
+                HStack(alignment: .top, spacing: 6) {
+                    ComposerAIBannerView(banner: banner, theme: theme)
+                    Spacer(minLength: 0)
+                    Button {
+                        withAnimation(Motion.banner) {
+                            ai.cancel()
+                            ai.clearBanner()
+                        }
+                    } label: {
+                        Image(systemName: banner == .thinking ? "stop.circle" : "xmark")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(banner == .thinking ? "Stop the request" : "Dismiss")
+                }
+                .transition(Motion.bannerTransition)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -338,16 +359,17 @@ struct ComposerBar: View {
         let command = trimmedText
         guard !command.isEmpty else { return }
         if command.lowercased().hasPrefix("@ai") {
-            recordLocalHistory(command)
+            // A bare `@ai` is a typo, not a prompt. Without this it reached
+            // submit with an empty string and spent a real chat-completions
+            // call on whatever the model made of the context alone.
+            let prompt = ComposerAIController.stripAIPrefix(command)
+            guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            store.recordComposerCommand(command)
             text = ""
             historyIndex = nil
             draft = ""
             withAnimation(Motion.banner) {
-                ai.submit(
-                    prompt: ComposerAIController.stripAIPrefix(command),
-                    store: store,
-                    settings: settings
-                )
+                ai.submit(prompt: prompt, store: store, settings: settings)
             }
             return
         }
@@ -357,21 +379,9 @@ struct ComposerBar: View {
         withAnimation(Motion.panel) {
             store.sendToComposer(command + "\n")
         }
-        recordLocalHistory(command)
         text = ""
         historyIndex = nil
         draft = ""
-    }
-
-    private func recordLocalHistory(_ command: String) {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if recallHistory.last != trimmed {
-            recallHistory.append(trimmed)
-        }
-        if recallHistory.count > 100 {
-            recallHistory.removeFirst(recallHistory.count - 100)
-        }
     }
 
     // MARK: Arrow-key recall
@@ -380,7 +390,7 @@ struct ComposerBar: View {
     /// does. Multi-line input is left alone: there the arrows have to move
     /// the caret, and stealing them would make the field unusable.
     private func recallEarlier() -> KeyPress.Result {
-        let history = recallHistory
+        let history = store.composerHistory
         guard !text.contains("\n"), !history.isEmpty else { return .ignored }
         if let historyIndex {
             guard historyIndex > 0 else { return .handled }
@@ -396,7 +406,7 @@ struct ComposerBar: View {
     }
 
     private func recallLater() -> KeyPress.Result {
-        let history = recallHistory
+        let history = store.composerHistory
         guard !text.contains("\n"), let historyIndex else { return .ignored }
         if historyIndex + 1 < history.count {
             self.historyIndex = historyIndex + 1

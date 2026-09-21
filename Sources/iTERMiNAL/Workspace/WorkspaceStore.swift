@@ -618,7 +618,12 @@ final class WorkspaceStore: ObservableObject {
 
     /// Keeps the recall list free of adjacent duplicates and bounded, so a
     /// command run in a loop doesn't crowd out everything before it.
-    private func recordComposerCommand(_ text: String) {
+    ///
+    /// Internal rather than private because `@ai …` lines belong in recall too
+    /// and never reach `sendToComposer` — they go to the assistant, not the
+    /// shell. One extra caller here is what that needs; a second copy of this
+    /// list in the view was not.
+    func recordComposerCommand(_ text: String) {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty, composerHistory.last != command else { return }
         composerHistory.append(command)

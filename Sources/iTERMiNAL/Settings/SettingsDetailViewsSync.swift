@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 struct SyncSettingsView: View {
     @EnvironmentObject private var settings: AppSettings

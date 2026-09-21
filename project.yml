@@ -55,6 +55,16 @@ targets:
         # transport policy for the rest of the app.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
+          # Lets the assistant reach a local model server over plain HTTP
+          # (Ollama on 127.0.0.1), which the web-content key above does not
+          # cover: that one governs WKWebView, while the assistant uses
+          # URLSession, so without this the documented loopback preset fails
+          # with -1022 before a request is ever sent.
+          #
+          # This is the narrow key, not a widening of the exemption:
+          # NSAllowsLocalNetworking permits loopback and local-link addresses
+          # only. Anything routable still has to be HTTPS with ATS intact.
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jupiterjvck.iterminal

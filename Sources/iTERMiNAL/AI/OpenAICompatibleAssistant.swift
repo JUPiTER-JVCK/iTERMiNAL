@@ -85,12 +85,17 @@ final class OpenAICompatibleAssistant: AssistantService {
 
     /// Accepts either `…/v1` or a full `…/v1/chat/completions` base.
     static func chatCompletionsURL(from base: String) -> URL? {
-        let trimmed = base.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Build from `trimmed`, not `base`. Testing the trimmed string and
+        // then returning the original meant a pasted
+        // `…/v1/chat/completions/` kept its trailing slash and 404'd, with
+        // nothing in the error to suggest the URL was at fault.
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmed.isEmpty else { return nil }
         if trimmed.lowercased().hasSuffix("/chat/completions") {
-            return URL(string: base)
+            return URL(string: trimmed)
         }
-        let root = base.hasSuffix("/") ? String(base.dropLast()) : base
-        return URL(string: root + "/chat/completions")
+        return URL(string: trimmed + "/chat/completions")
     }
 
     // MARK: - Prompt

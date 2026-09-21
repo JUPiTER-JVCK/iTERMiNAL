@@ -72,7 +72,9 @@ final class ComposerAIController: ObservableObject {
         if settings.assistantIncludeGitBranch {
             context.gitBranch = session?.gitBranch
         }
-        context.workspaceName = store.currentWorkspace?.name
+        if settings.assistantIncludeWorkspace {
+            context.workspaceName = store.currentWorkspace?.name
+        }
         if settings.assistantIncludeRecentOutput, let session {
             context.recentOutput = ContextSanitizer.sanitizeRecentOutput(
                 session.captureVisibleText()

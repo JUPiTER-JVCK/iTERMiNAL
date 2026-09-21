@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 struct ConnectionsSettingsView: View {
     @EnvironmentObject private var settings: AppSettings

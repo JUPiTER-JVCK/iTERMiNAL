@@ -1,6 +1,4 @@
 import SwiftUI
-import AppKit
-import UniformTypeIdentifiers
 
 // Section enum: SettingsSection.swift · AI pane: AISettingsView.swift
 

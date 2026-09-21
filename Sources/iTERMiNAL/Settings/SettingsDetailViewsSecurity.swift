@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 /// The local scripting API's controls, plus a plain statement of what the app
 /// does and doesn't do with the user's data.

@@ -94,11 +94,17 @@ struct AISettingsView: View {
 
             Section("Context") {
                 Toggle("Include working directory", isOn: $settings.assistantIncludeCwd)
-                Toggle("Include recent terminal output", isOn: $settings.assistantIncludeRecentOutput)
                 Toggle("Include git branch", isOn: $settings.assistantIncludeGitBranch)
-                Text("Only these fields are sent with a prompt. Full scrollback and secrets are not included.")
+                Toggle("Include workspace name", isOn: $settings.assistantIncludeWorkspace)
+                Toggle("Include recent terminal output", isOn: $settings.assistantIncludeRecentOutput)
+                Text("Only the fields switched on above are sent with a prompt, and full scrollback never is — only what is on screen, trimmed to the last 6,000 characters.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if settings.assistantIncludeRecentOutput {
+                    Text("Recent output is sent as-is. Control sequences are stripped, but nothing redacts secrets — if the screen is showing a key, an env dump or a token, that goes too.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("Privacy") {
@@ -138,8 +144,12 @@ struct AISettingsView: View {
     }
 
     private func clearKey() {
-        KeychainStore.delete(OpenAICompatibleAssistant.apiKeyAccount)
+        // Report what actually happened. Claiming "Key cleared." regardless of
+        // the result left the Status row still reading "Key saved in keychain"
+        // right below it, and the user believing a credential was revoked when
+        // a locked keychain had refused.
+        let deleted = KeychainStore.delete(OpenAICompatibleAssistant.apiKeyAccount)
         apiKeyDraft = ""
-        keyMessage = "Key cleared."
+        keyMessage = deleted ? "Key cleared." : "Couldn't remove the key from your keychain."
     }
 }
