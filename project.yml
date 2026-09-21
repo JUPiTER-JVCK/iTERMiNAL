@@ -71,7 +71,16 @@ targets:
         # XcodeGen doesn't set this the way Xcode's own app template does, so
         # without it actool compiles the icon set and nothing ever uses it.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: 0.3.0
+        # The version a build reports when it is NOT a release: local Xcode
+        # builds and the per-build `build-*` CI releases. A tagged or
+        # dispatched release overrides this from the version being cut, so
+        # this value is never what a real release ships.
+        #
+        # It is the version being worked toward, not the last one published —
+        # otherwise an untagged build would claim to be a release it is not.
+        # Left at 0.3.0 it claimed to be two major versions behind: Build 116
+        # reported 0.3.0 while the newest release was v3.9.5.
+        MARKETING_VERSION: 3.9.6
         CURRENT_PROJECT_VERSION: 3
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal

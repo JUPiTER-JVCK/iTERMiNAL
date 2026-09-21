@@ -40,7 +40,12 @@ jobs:
     name: Build (macOS)
     runs-on: macos-15
     steps:
+      # fetch-depth: 0 because CFBundleVersion below is the commit count, and
+      # the default depth-1 checkout would make that 1 — every build claiming
+      # to be the first. The repository is small enough that the cost is noise.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       # Check this before spending three minutes on a build. Immutable
       # releases reserve a tag name permanently once it has backed a published
@@ -115,11 +120,36 @@ jobs:
           # off the ref alone would ship the version hardcoded in project.yml
           # under a v-numbered release.
           VERSION_ARG=()
+          short_version=""
           if [ -n "${RELEASE_VERSION:-}" ]; then
-            VERSION_ARG=("MARKETING_VERSION=${RELEASE_VERSION#v}")
+            short_version="${RELEASE_VERSION#v}"
           elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            VERSION_ARG=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
+            short_version="${GITHUB_REF_NAME#v}"
           fi
+          if [ -n "$short_version" ]; then
+            VERSION_ARG+=("MARKETING_VERSION=$short_version")
+          else
+            # Not a release, so project.yml's value stands. Read it back rather
+            # than restating it here, or the two drift and the check below
+            # starts asserting a number nothing produces.
+            short_version=$(awk '/^ *MARKETING_VERSION:/ { print $2; exit }' project.yml)
+          fi
+
+          # CFBundleVersion is how macOS decides which of two bundles is newer.
+          # It was a constant 3 in project.yml, so all 116 builds published so
+          # far are indistinguishable to the system. The commit count is
+          # monotonic and survives what GITHUB_RUN_NUMBER does not: that one is
+          # scoped to a single workflow and restarts at 1 if this file is ever
+          # renamed, walking back over numbers already shipped.
+          build_number=$(git rev-list --count HEAD)
+          VERSION_ARG+=("CURRENT_PROJECT_VERSION=$build_number")
+
+          # Hand both to the verification step, so it checks what this step
+          # actually asked for instead of a value copied by hand.
+          {
+            echo "EXPECTED_SHORT_VERSION=$short_version"
+            echo "EXPECTED_BUNDLE_VERSION=$build_number"
+          } >> "$GITHUB_ENV"
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
@@ -156,6 +186,26 @@ jobs:
               fail=1
             fi
           done
+
+          # The versions the build was told to use have to be the versions in
+          # the bundle. Nothing checked this before, which is how
+          # MARKETING_VERSION sat two major versions behind the release series
+          # and CFBundleVersion stayed a constant 3 across every build
+          # published — both silent, both only visible in an About box nobody
+          # opens.
+          plist="$APP/Contents/Info.plist"
+          got_short=$(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null || echo "")
+          got_bundle=$(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null || echo "")
+          if [ "$got_short" != "$EXPECTED_SHORT_VERSION" ]; then
+            echo "::error::CFBundleShortVersionString is '$got_short', expected '$EXPECTED_SHORT_VERSION'"
+            fail=1
+          fi
+          if [ "$got_bundle" != "$EXPECTED_BUNDLE_VERSION" ]; then
+            echo "::error::CFBundleVersion is '$got_bundle', expected '$EXPECTED_BUNDLE_VERSION'"
+            fail=1
+          fi
+          echo "version: $got_short (build $got_bundle)"
+
           exit $fail
 
       # ditto preserves the bundle structure; a plain zip would mangle it.
