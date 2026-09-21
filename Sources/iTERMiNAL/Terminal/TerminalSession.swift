@@ -247,33 +247,48 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     /// Marks this session as needing attention and publishes `session.attention`.
     ///
-    /// Rapid repeats within ~1s are coalesced: identical OSC text refreshes
-    /// the timestamp without stacking another event; a fresh kind/text still
-    /// waits for the debounce window so a ringing bell cannot flood the bus.
+    /// Identical repeats within ~1s are coalesced so a ringing bell cannot
+    /// flood the bus, but a genuinely different message is reported straight
+    /// away rather than being swallowed by an unrelated bell a moment earlier.
     func noteAttention(_ attention: TerminalAttention) {
+        // Off means off, for the mark, the bus and the banner alike.
+        // Publishing regardless meant a user who had turned pane attention off
+        // still saw every bell — and every OSC title and body — on
+        // `iterminalctl subscribe events=*`.
         let mode = AttentionSettings.shared.mode
+        guard mode != .off else { return }
+
         let focused = WorkspaceStore.shared.focusedSessionID == id
-        let fingerprint = attentionFingerprint(attention)
-        let now = Date()
-        let withinWindow = now.timeIntervalSince(lastAttentionAt) < 1.0
-        if withinWindow, lastAttentionFingerprint == fingerprint {
-            lastAttentionAt = now
-            return
+
+        // Two separate questions, and the mark answers the one the debounce
+        // does not.
+        //
+        // Pane focus alone is not "the user can see this": a tab with a single
+        // pane always holds focus, so a backgrounded app left the headline
+        // case — build finishes while you are in another app — marking
+        // nothing at all. This is the same test the system banner already
+        // applies; the two disagreeing is what made a banner fire with no
+        // matching sidebar mark.
+        //
+        // The mark is also set before the debounce, not after. It is an
+        // idempotent flag rather than an event, so throttling it gains
+        // nothing, and setting it afterwards meant a pane ringing faster than
+        // once a second was never marked at all.
+        if !focused || !NSApp.isActive {
+            needsAttention = true
         }
-        if withinWindow {
+
+        // Only the event and the banner are throttled. The window is not
+        // extended by a repeat, so a pane that keeps ringing keeps reporting
+        // about once a second instead of falling silent after the first.
+        let now = Date()
+        let fingerprint = attentionFingerprint(attention)
+        if now.timeIntervalSince(lastAttentionAt) < 1.0,
+           lastAttentionFingerprint == fingerprint {
             return
         }
         lastAttentionAt = now
         lastAttentionFingerprint = fingerprint
-
-        if mode != .off, !focused {
-            needsAttention = true
-        }
-
-        // Off means off. Publishing regardless meant a user who had turned
-        // pane attention off still saw every bell — and every OSC title and
-        // body — on `iterminalctl subscribe events=*`.
-        guard mode != .off else { return }
 
         var data: [String: Any] = [
             "session": id.uuidString,
@@ -284,7 +299,13 @@ final class TerminalSession: ObservableObject, Identifiable {
         if let body = attention.body { data["body"] = body }
         EventBus.shared.publish(APIEvent("session.attention", data))
 
-        AttentionNotifier.shared.maybeNotify(attention, session: self, sessionFocused: focused)
+        // Checked here, not only inside maybeNotify: touching `.shared` builds
+        // a UNUserNotificationCenter, which raises in a process without a
+        // valid bundle and signature. Behind the guard it is only ever built
+        // when the user has actually asked for system banners.
+        if mode == .inAppAndSystem {
+            AttentionNotifier.shared.maybeNotify(attention, session: self, sessionFocused: focused)
+        }
     }
 
     /// Clears the sidebar attention mark once the user is looking at this pane.

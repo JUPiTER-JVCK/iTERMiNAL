@@ -8,7 +8,13 @@ final class AttentionNotifier {
     static let shared = AttentionNotifier()
 
     private static let maxTextLength = 200
-    private let center = UNUserNotificationCenter.current()
+    /// Lazy so merely reaching this singleton cannot build a notification
+    /// centre. `UNUserNotificationCenter.current()` raises
+    /// NSInternalInconsistencyException in a process without a valid bundle
+    /// and signature — an unsigned local build, say — and a stored property
+    /// would run it the moment anything touched `.shared`, whatever the
+    /// notification mode. Callers gate on the mode; this is the backstop.
+    private lazy var center = UNUserNotificationCenter.current()
 
     private init() {}
 
