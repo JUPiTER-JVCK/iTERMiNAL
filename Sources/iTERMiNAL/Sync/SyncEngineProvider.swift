@@ -21,7 +21,6 @@ enum SyncEngineProvider {
     /// and when CloudKit is unavailable — never throws into the UI.
     static func pullIfNeeded() {
         guard AppSettings.shared.syncMode == .icloud else { return }
-        startWatchingStateFileIfNeeded()
         let engine = CloudKitSyncEngine.shared
         guard engine.isAvailable else {
             // Still refresh so Settings can show account / entitlement status.
@@ -37,10 +36,15 @@ enum SyncEngineProvider {
 
     private static var pendingPush: DispatchWorkItem?
 
-    /// Called after a local workspace save. Debounced so a burst of layout
-    /// edits collapses into one CloudKit write.
+    /// Called after a local save — of the workspace layout by
+    /// `WorkspaceStore.saveNow`, or of a preference by the observer below.
+    /// Debounced so a burst of edits collapses into one CloudKit write.
     static func schedulePushAfterLocalSave() {
         guard AppSettings.shared.syncMode == .icloud else { return }
+        // Sync's own writes are not user edits. Treating them as such bumped
+        // the local stamp past a just-fetched remote and re-uploaded what had
+        // only just been downloaded, every poll, forever.
+        guard suppressionDepth == 0 else { return }
 
         CloudKitSyncEngine.shared.noteLocalEdit()
         guard CloudKitSyncEngine.shared.isAvailable else { return }
@@ -57,67 +61,49 @@ enum SyncEngineProvider {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
     }
 
-    // MARK: - State-file watcher
+    // MARK: - Suppression
 
-    /// Polls the workspace state file's modification date so iCloud push still
-    /// runs after local saves even when `WorkspaceStore.saveNow` is not patched
-    /// to call into the provider directly. Cheap (stat only) and only active
-    /// while iCloud mode is selected.
-    private static var watchTimer: Timer?
-    private static var lastSeenStateMTime: Date?
+    /// While > 0, local saves are sync's own and must not count as edits.
+    ///
+    /// This replaced a state-file mtime poller. The poller existed only to
+    /// infer "the user changed something" from a file timestamp, and could not
+    /// tell sync's writes from the user's — hence a suppression window that had
+    /// to be held open across an asynchronous, debounced save it could not see
+    /// the end of. Now `saveNow` says so directly and the window is exactly the
+    /// call it wraps.
+    private static var suppressionDepth = 0
 
-    /// While > 0, mtime changes only refresh `lastSeenStateMTime` — they must
-    /// not call `noteLocalEdit()`. `syncNow` and remote apply both write the
-    /// state file; treating those writes as user edits would bump
-    /// `localModifiedAt` past a just-fetched remote and upload stale data
-    /// (last-writer-wins inversion), then loop every poll interval.
-    private static var mtimeWatchSuppressionDepth = 0
+    /// Runs `body` with local saves attributed to sync rather than the user.
+    static func suppressingPush<T>(_ body: () -> T) -> T {
+        suppressionDepth += 1
+        defer { suppressionDepth -= 1 }
+        return body()
+    }
 
-    static func startWatchingStateFileIfNeeded() {
-        guard AppSettings.shared.syncMode == .icloud else {
-            watchTimer?.invalidate()
-            watchTimer = nil
-            return
-        }
-        guard watchTimer == nil else { return }
+    // MARK: - Preference changes
 
-        lastSeenStateMTime = stateFileModificationDate()
-        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+    private static var defaultsObserver: NSObjectProtocol?
+    private static var pendingPreferencePush: DispatchWorkItem?
+
+    /// Preferences live in `UserDefaults`, not the state file, so nothing about
+    /// a theme, font or SSH connection change touches `saveNow`. Without this
+    /// they synced in only one direction: uploaded whenever some *layout* edit
+    /// happened to follow, and otherwise silently overwritten by the next
+    /// remote apply.
+    static func startObservingPreferenceChanges() {
+        guard defaultsObserver == nil else { return }
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { _ in
             guard AppSettings.shared.syncMode == .icloud else { return }
-            guard let mtime = stateFileModificationDate() else { return }
-            if let last = lastSeenStateMTime, mtime <= last { return }
-            lastSeenStateMTime = mtime
-            if mtimeWatchSuppressionDepth > 0 { return }
-            schedulePushAfterLocalSave()
+            guard suppressionDepth == 0 else { return }
+            // Coalesce: a slider emits a write per frame.
+            pendingPreferencePush?.cancel()
+            let work = DispatchWorkItem { schedulePushAfterLocalSave() }
+            pendingPreferencePush = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
         }
-        // Allow the run loop to fire while the user is dragging a split.
-        timer.tolerance = 0.5
-        RunLoop.main.add(timer, forMode: .common)
-        watchTimer = timer
-    }
-
-    /// Runs `body` without treating state-file mtime bumps as local edits.
-    /// Always refreshes the seen mtime afterward so a deferred timer tick
-    /// does not mis-attribute the write.
-    static func withMtimeWatchSuppressed(_ body: () -> Void) {
-        mtimeWatchSuppressionDepth += 1
-        defer {
-            mtimeWatchSuppressionDepth -= 1
-            acknowledgeStateFileMTime()
-        }
-        body()
-    }
-
-    /// Records the current state-file mtime as already seen (no push).
-    static func acknowledgeStateFileMTime() {
-        if let mtime = stateFileModificationDate() {
-            lastSeenStateMTime = mtime
-        }
-    }
-
-    private static func stateFileModificationDate() -> Date? {
-        let url = WorkspaceStore.shared.stateFileURL
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-        return values?.contentModificationDate
     }
 }

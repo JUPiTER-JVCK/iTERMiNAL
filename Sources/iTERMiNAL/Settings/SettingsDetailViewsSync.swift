@@ -25,7 +25,6 @@ struct SyncSettingsView: View {
                     CloudKitSyncEngine.shared.refreshAvailability {
                         statusTick += 1
                     }
-                    SyncEngineProvider.startWatchingStateFileIfNeeded()
                 }
             }
 
@@ -45,6 +44,24 @@ struct SyncSettingsView: View {
                         Text(syncMessage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+                if let pending = CloudKitSyncEngine.shared.pendingRemoteLayout {
+                    // A sync must not close running shells on its own, so the
+                    // decision comes here instead.
+                    LabeledContent("Layout waiting", value: "from \(pending.deviceName)")
+                    Text("Applying it closes the \(pending.liveSessions) shell\(pending.liveSessions == 1 ? "" : "s") still running on this Mac. Keeping this layout uploads it instead on the next sync.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    HStack {
+                        Button("Apply Layout") {
+                            CloudKitSyncEngine.shared.applyPendingLayout()
+                            statusTick += 1
+                        }
+                        Button("Keep This Mac's") {
+                            CloudKitSyncEngine.shared.discardPendingLayout()
+                            statusTick += 1
+                        }
                     }
                 }
                 LabeledContent("State file") {
@@ -86,7 +103,6 @@ struct SyncSettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             if settings.syncMode == .icloud {
-                SyncEngineProvider.startWatchingStateFileIfNeeded()
                 CloudKitSyncEngine.shared.refreshAvailability {
                     statusTick += 1
                 }

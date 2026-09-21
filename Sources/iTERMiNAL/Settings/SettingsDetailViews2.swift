@@ -17,6 +17,11 @@ struct AdvancedSettingsView: View {
                 Button("Reset All Settings", role: .destructive) {
                     settings.resetToDefaults()
                     AttentionSettings.shared.resetToInApp()
+                    // syncMode lives in its own UserDefaults key, so
+                    // resetToDefaults never touched it — a user resetting
+                    // everything to stop the app talking to iCloud kept
+                    // syncing.
+                    settings.resetSyncModeToLocal()
                 }
             }
             Section("About") {

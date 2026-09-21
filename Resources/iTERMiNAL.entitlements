@@ -10,5 +10,18 @@
 	<array>
 		<string>CloudKit</string>
 	</array>
+	<!--
+	  Required for anything not distributed through the Mac App Store.
+	  A Developer ID or development-signed build with the two keys above but
+	  no environment cannot bind the container at runtime: CloudKit refuses,
+	  the app reads that as a missing entitlement, and the user is told to fix
+	  their signing — which they already did.
+
+	  "Development" is what a development-signed build needs. A Developer ID
+	  build for distribution wants "Production"; that is a release-time
+	  change, alongside a real signing identity.
+	-->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>Development</string>
 </dict>
 </plist>
