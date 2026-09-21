@@ -80,7 +80,7 @@ targets:
         # otherwise an untagged build would claim to be a release it is not.
         # Left at 0.3.0 it claimed to be two major versions behind: Build 116
         # reported 0.3.0 while the newest release was v3.9.5.
-        MARKETING_VERSION: 3.9.6
+        MARKETING_VERSION: 4.0.0
         CURRENT_PROJECT_VERSION: 3
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
