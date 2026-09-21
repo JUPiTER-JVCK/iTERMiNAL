@@ -55,6 +55,16 @@ targets:
         # transport policy for the rest of the app.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
+          # Lets the assistant reach a local model server over plain HTTP
+          # (Ollama on 127.0.0.1), which the web-content key above does not
+          # cover: that one governs WKWebView, while the assistant uses
+          # URLSession, so without this the documented loopback preset fails
+          # with -1022 before a request is ever sent.
+          #
+          # This is the narrow key, not a widening of the exemption:
+          # NSAllowsLocalNetworking permits loopback and local-link addresses
+          # only. Anything routable still has to be HTTPS with ATS intact.
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jupiterjvck.iterminal
@@ -75,6 +85,9 @@ targets:
         # restrict spawned processes.
         ENABLE_APP_SANDBOX: "NO"
         ENABLE_HARDENED_RUNTIME: "YES"
+        # CloudKit container entitlement. Unsigned CI builds still sign with
+        # "-" and report iCloud unavailable; a Developer-signed build lights it up.
+        CODE_SIGN_ENTITLEMENTS: Resources/iTERMiNAL.entitlements
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
     scheme:

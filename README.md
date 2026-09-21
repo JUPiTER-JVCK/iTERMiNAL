@@ -51,10 +51,11 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, Sync, Shortcuts, and
-  Advanced, all applying live.
-- **AI seam** — the composer reserves `@ai …` and the app ships an
-  `AssistantService` protocol; a real assistant plugs in without UI changes.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, Sync, Shortcuts,
+  and Advanced, all applying live.
+- **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
+  endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
+  replies appear above the input and are never auto-run in a PTY.
 
 ## Requirements
 
@@ -264,8 +265,14 @@ non-interactively and therefore **requires key-based authentication**.
   constant time.
 - **Secrets live only in the keychain** — never in preferences, the saved
   layout, or exported snapshots.
-- **App Transport Security stays on**; only web-view content is exempt, so the
-  browser pane can preview a plain-http dev server.
+- **The assistant sends only what you switch on.** Working directory, git
+  branch and workspace name travel by default; the visible terminal screen
+  does not, and has to be turned on in Settings → AI. Nothing redacts secrets
+  from that screen, so it is off until you say otherwise.
+- **App Transport Security stays on**, with two narrow exemptions: web-view
+  content, so the browser pane can preview a plain-http dev server, and local
+  networking, so the assistant can reach a model server on loopback. Anything
+  routable still has to be HTTPS.
 - **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
   programs, and sandboxed children inherit the sandbox — a sandboxed build
   could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
@@ -303,9 +310,9 @@ Sources/
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
-│   ├── Sync/        sync seam, workspace export/import
+│   ├── Sync/        sync seam (local + CloudKit), workspace export/import
 │   ├── Settings/    preferences store + settings window
-│   └── AI/          AssistantService seam (null implementation for now)
+│   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
 ```
 
@@ -315,12 +322,49 @@ The terminal backend sits behind `TerminalEngine`
 either can be swapped (libghostty, an in-process SSH stack) without touching
 the UI.
 
+## AI assistant (`@ai`)
+
+Configure a provider in **Settings → AI**, then type `@ai …` in the composer.
+Replies appear in a banner above the input — suggested commands are never
+executed automatically.
+
+### OpenAI
+
+1. Preset **OpenAI** (base URL `https://api.openai.com/v1`).
+2. Pick a model (default `gpt-4o-mini`).
+3. Paste an API key and click **Save Key** (stored in the keychain as
+   `assistant.apiKey`, never in preferences or export snapshots).
+
+### Ollama (local)
+
+1. Run Ollama and pull a model, e.g. `ollama pull llama3.2`.
+2. In Settings → AI, choose **Ollama (local)** or set the base URL to
+   `http://127.0.0.1:11434/v1`.
+3. Set the model name to match (e.g. `llama3.2`). No API key is required for
+   localhost. Plain HTTP works here only because ATS is given the
+   `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
+   addresses alone — a LAN hostname over plain HTTP is still refused.
+
+## Sync
+
+Workspaces and non-secret preferences can stay on this Mac or sync through
+iCloud (Settings → Sync). The payload is the same JSON snapshot Export writes:
+secrets, keychain items, and machine-local paths such as `composerShell` are
+never included.
+
+iCloud uses CloudKit (`CloudKitSyncEngine`) against the private database
+container `iCloud.com.jupiterjvck.iterminal`. The code ships in every build;
+it only becomes available when the app is signed with an Apple Developer
+account that has the iCloud capability. Unsigned CI and ad-hoc
+(`CODE_SIGN_IDENTITY "-"`) builds keep **This Mac only** and show why iCloud
+is unavailable in Settings. App Sandbox stays off; Hardened Runtime stays on.
+
 ## Roadmap
 
-- [ ] AI assistant behind the `@ai` composer prefix (provider-pluggable)
+- [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
 - [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
-- [ ] iCloud sync (needs a signing/entitlement story)
+- [x] iCloud sync via CloudKit (`SyncEngine`) — requires Apple Developer signing + iCloud capability; unsigned CI builds stay local-only
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 
