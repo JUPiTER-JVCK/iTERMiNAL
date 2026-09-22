@@ -47,10 +47,16 @@ struct TranscriptResizeHandle: View {
     }
 }
 
-/// `workspace · Local|host · branch`, sitting above the input the way the
+/// `workspace · destination · branch`, sitting above the input the way the
 /// reference app shows a project, its environment, and its git branch.
+///
+/// The middle chip names the terminal the composer will type into, and is a
+/// menu for changing it. It used to show the *focused* session unconditionally
+/// while every command went to the composer's own local shell, so over a
+/// connection it read "Remote — my-host" and ran on this Mac.
 struct ContextChipRow: View {
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -73,31 +79,55 @@ struct ContextChipRow: View {
             .menuIndicator(.hidden)
             .fixedSize()
 
-            if let session = store.focusedSession {
-                LocationChip(session: session, theme: theme)
-            } else {
-                ComposerChip(icon: "desktopcomputer", text: "Local", theme: theme)
+            Menu {
+                Picker("Run commands in", selection: $settings.composerTarget) {
+                    ForEach(ComposerTarget.allCases) { target in
+                        Text(target.label).tag(target)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                ComposerChip(icon: destinationIcon, text: destinationText, theme: theme)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Where the composer runs what you type")
+
+            if case .terminal(let session) = store.composerDestination {
+                BranchChip(session: session, theme: theme)
             }
 
             Spacer(minLength: 0)
         }
     }
+
+    private var destinationIcon: String {
+        switch store.composerDestination {
+        case .ownShell: return "text.cursor"
+        case .terminal(let session): return session.isRemote ? "network" : "desktopcomputer"
+        }
+    }
+
+    private var destinationText: String {
+        switch store.composerDestination {
+        case .ownShell:
+            return "Composer shell"
+        case .terminal(let session):
+            return session.isRemote ? (session.connection?.name ?? "Remote") : "Local"
+        }
+    }
 }
 
-struct LocationChip: View {
+/// The destination's git branch, observed separately so it refreshes as the
+/// shell moves around without the whole chip row depending on one session.
+struct BranchChip: View {
     @ObservedObject var session: TerminalSession
     let theme: Theme
 
     var body: some View {
-        HStack(spacing: 6) {
-            ComposerChip(
-                icon: session.isRemote ? "network" : "desktopcomputer",
-                text: session.isRemote ? (session.connection?.name ?? "Remote") : "Local",
-                theme: theme
-            )
-            if let branch = session.gitBranch {
-                ComposerChip(icon: "arrow.triangle.branch", text: branch, theme: theme)
-            }
+        if let branch = session.gitBranch {
+            ComposerChip(icon: "arrow.triangle.branch", text: branch, theme: theme)
         }
     }
 }

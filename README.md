@@ -24,12 +24,16 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions); a landing screen with quick-start cards and
-  recent commands from your shell history; and a floating composer that runs
-  in its own shell — drag it anywhere, minimise it to a pill, resize its
-  transcript, and recall earlier commands with the arrow keys.
+  recent commands from your shell history; and a floating composer that types
+  into whichever terminal has focus — drag it anywhere, minimise it to a pill,
+  and recall earlier commands with the arrow keys. The chip above the input
+  names the terminal it will run in, and switches it to a private shell of its
+  own if you want one.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file
   panel down the right, opened independently from the toggles at the top right
-  of the content area, with draggable dividers whose sizes persist.
+  of the content area, with draggable dividers whose sizes persist. A dock tab
+  can be a local shell, a saved connection, or a running shell moved down from
+  a pane, and it reopens as whatever it was.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
@@ -46,13 +50,17 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop.
+- **Proxmox VE** — list the VMs and containers on a cluster over its API, open
+  a guest's console in the browser panel, and save a guest as an SSH host. The
+  API token's secret half stays in the keychain; a self-signed certificate is
+  handled by pinning one you confirm, never by relaxing trust.
 - **Local scripting API + CLI** — a Unix-socket JSON API and the `iterminalctl`
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, AI, Sync, Shortcuts,
-  and Advanced, all applying live.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, Backup,
+  Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY.
@@ -246,7 +254,8 @@ iterminalctl subscribe events=session.exited,tab.created
 | `workspace.created`, `pane.split`, `pane.closed` | layout changes |
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
-| `dock.session.created` / `dock.session.closed` | terminal dock lifecycle |
+| `dock.session.created` / `dock.session.closed` | terminal dock lifecycle (`connection` set on a remote tab) |
+| `dock.session.moved` | a running shell was moved from a pane into the dock |
 
 From an unfocused pane (or while the app is in the background), try:
 
@@ -263,7 +272,8 @@ system mode.
 ## Remote sessions and files
 
 Add hosts in **Settings → Connections**, then open one from the sidebar's
-**Connect** row, the composer's `+` menu, or the palette. Transport can be
+**Connect** row, the composer's `+` menu, the terminal dock's `+` menu, or the
+palette. Transport can be
 `ssh`, `mosh`, or a custom command (which is how Tailscale SSH or Eternal
 Terminal fit — `%h`, `%p`, `%u`, `%d` expand to host, port, user, and
 user@host). The same hosts appear in the Files panel's source menu for SFTP.
@@ -273,6 +283,35 @@ Both features run the system's own clients, reusing your `~/.ssh/config`,
 transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
 you for a password or 2FA code itself; the file browser runs `sftp`
 non-interactively and therefore **requires key-based authentication**.
+
+### Proxmox VE
+
+**Settings → Connections → Proxmox** takes an endpoint and an API token id
+(`user@realm!tokenid`); the token's secret half goes to the keychain, and the
+host record itself carries no secret — the same rule saved SSH hosts follow.
+
+Discovery is API-driven, not a port scan. Proxmox does not leave a VNC port
+listening per VM — a console is created on demand by `vncproxy` behind a
+one-time ticket — and it never exposes a guest's RDP at all, since that is a
+service inside the guest on the guest's own address. A scan would find almost
+nothing and miss every VM worth listing, so the app reads `/nodes`, then the
+`qemu` and `lxc` guests per node, and asks the guest agent for addresses. No
+agent means no address, not a failed refresh.
+
+From the list, a guest's console opens in the app's browser panel (Proxmox
+already serves noVNC over its own web UI, so there is no VNC client involved),
+and a guest with a reported address can be saved as an SSH host in one click.
+
+**Certificates.** A default Proxmox install serves a self-signed certificate,
+and this app's ATS exemption covers web content only — which relaxes transport
+*policy*, not certificate *trust* — so neither the API calls nor the console
+page would load. Rather than disabling validation or widening the exemption,
+which would weaken every connection the app makes, the system's verdict is
+tried first and you confirm a SHA-256 fingerprint once; exactly that
+certificate is then accepted, for that host and port alone. A host with a real
+certificate needs no pin. The pin is honoured by both the API client and the
+browser panel, because WKWebView runs its own trust evaluation and never
+consults URLSession's delegate.
 
 ## Security model
 
@@ -291,6 +330,10 @@ non-interactively and therefore **requires key-based authentication**.
   content, so the browser pane can preview a plain-http dev server, and local
   networking, so the assistant can reach a model server on loopback. Anything
   routable still has to be HTTPS.
+- **Certificate validation is never disabled.** A self-signed Proxmox host is
+  reached by pinning the one certificate you confirmed by fingerprint, for that
+  host and port alone — the system's own verdict is tried first, so pinning can
+  only ever *add* an accepted certificate, never subtract a check.
 - **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
   programs, and sandboxed children inherit the sandbox — a sandboxed build
   could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
@@ -326,9 +369,10 @@ Sources/
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
 │   ├── Panels/      scriptable browser pane, file pane
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
+│   ├── Remote/      Proxmox VE client, host records, pinned trust
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
-│   ├── Sync/        sync seam (local + CloudKit), workspace export/import
+│   ├── Backup/      workspace snapshot archive, export/import
 │   ├── Settings/    preferences store + settings window
 │   └── AI/          AssistantService + OpenAI-compatible client
 └── iterminalctl/    command-line client, bundled into the app
@@ -363,26 +407,32 @@ executed automatically.
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
 
-## Sync
+## Backup and restore
 
-Workspaces and non-secret preferences can stay on this Mac or sync through
-iCloud (Settings → Sync). The payload is the same JSON snapshot Export writes:
-secrets, keychain items, and machine-local paths such as `composerShell` are
-never included.
+Workspaces and preferences live on this Mac, under Application Support.
+Settings → Backup shows where, and moves them: **Export Workspaces…** writes a
+single `.iterminal` JSON snapshot, **Import Workspaces…** reads one back and
+replaces the current layout.
 
-iCloud uses CloudKit (`CloudKitSyncEngine`) against the private database
-container `iCloud.com.jupiterjvck.iterminal`. The code ships in every build;
-it only becomes available when the app is signed with an Apple Developer
-account that has the iCloud capability. Unsigned CI and ad-hoc
-(`CODE_SIGN_IDENTITY "-"`) builds keep **This Mac only** and show why iCloud
-is unavailable in Settings. App Sandbox stays off; Hardened Runtime stays on.
+A snapshot carries workspaces, tabs, the split layout, and non-secret
+preferences. It deliberately leaves out secrets — the API token stays in the
+keychain, SSH has no passwords to carry — and machine-local paths such as
+`composerShell`, so importing on another Mac cannot point the app at a shell
+that isn't there. Terminal scrollback is excluded too: transcripts stay in
+their own 0600 files on this Mac.
+
+There is no background sync and nothing leaves the machine unless you export
+it. An earlier version offered iCloud through CloudKit; it needed an Apple
+Developer iCloud container to bind, so it was visible in every build and usable
+only in a signed one, and it has been removed along with the app's entitlements
+file. App Sandbox stays off; Hardened Runtime stays on.
 
 ## Roadmap
 
 - [x] AI assistant behind the `@ai` composer prefix (OpenAI-compatible; no tool calling)
 - [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
-- [x] iCloud sync via CloudKit (`SyncEngine`) — requires Apple Developer signing + iCloud capability; unsigned CI builds stay local-only
+- [x] Workspace snapshots: export/import with no account required
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 

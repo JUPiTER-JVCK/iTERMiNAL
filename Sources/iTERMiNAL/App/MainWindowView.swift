@@ -7,14 +7,27 @@ struct MainWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
     private let process = ProcessMetrics.shared
 
+    /// Tracked rather than left to SwiftUI because hiding the sidebar slides
+    /// the detail column under the traffic lights, and the top strip has to
+    /// know to get out of their way — there is no title bar holding them any
+    /// more.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 285, max: 360)
         } detail: {
-            DetailView()
+            DetailView(
+                trafficLightInset: columnVisibility == .detailOnly
+                    ? WindowChrome.trafficLightWidth
+                    : 0
+            )
         }
         .frame(minWidth: 900, minHeight: 560)
+        // Sidebar and detail column run to the top edge; the traffic lights
+        // float over the sidebar header, which insets itself to clear them.
+        .framelessWindow()
         .sheet(isPresented: $store.showCommandPalette) {
             CommandPaletteView()
                 .environmentObject(store)
@@ -30,6 +43,10 @@ struct MainWindowView: View {
 /// them both. The dock sits inside this column, so it spans the content and
 /// the right panel but stops at the sidebar — matching the reference app.
 struct DetailView: View {
+    /// Leading space the top strip keeps clear for the traffic lights, which
+    /// float over this column whenever the sidebar is hidden.
+    var trafficLightInset: CGFloat = 0
+
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -49,7 +66,7 @@ struct DetailView: View {
             // The strip spans the whole detail column rather than living
             // inside the content VStack: nested there, it narrowed whenever a
             // panel opened and the right-aligned toggles slid with it.
-            DetailTopStrip()
+            DetailTopStrip(leadingInset: trafficLightInset)
             FadedDivider()
 
             // The trailing panel can never take so much width that the
@@ -182,16 +199,24 @@ struct DetailView: View {
 /// Title on the left, panel toggles on the right. Each toggle fills in when
 /// its panel is open, the way the reference app marks an active panel.
 private struct DetailTopStrip: View {
+    /// Extra leading padding so the tab name does not appear under the traffic
+    /// lights when this column starts at the window's left edge.
+    var leadingInset: CGFloat = 0
+
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 6) {
+            // Hit-testing off so the drag area behind it gets the click: with
+            // no title bar left, this strip is what the user grabs to move the
+            // window.
             Text(store.selectedTab?.displayName ?? "iTERMiNAL")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
+                .allowsHitTesting(false)
 
             Spacer(minLength: 12)
 
@@ -224,7 +249,11 @@ private struct DetailTopStrip: View {
             .help("Settings")
         }
         .padding(.horizontal, 14)
+        .padding(.leading, leadingInset)
         .frame(height: 40)
+        // This strip sits at the very top of a frameless window, so it is the
+        // window's title bar in every sense but the system's.
+        .background(WindowDragArea())
     }
 }
 
@@ -1067,11 +1096,15 @@ private struct PickerRow: View {
     }
 }
 
-/// The bottom terminal dock: a tab strip of working directories over a live
-/// shell. Separate from the tab's own panes, so it stays put while you move
-/// between tabs.
+/// The bottom terminal dock: a tab strip over a live shell. Separate from the
+/// tab's own panes, so it stays put while you move between tabs.
+///
+/// A dock tab is a terminal like any other — it can be a local shell, a saved
+/// connection, or a shell moved down here from a pane to keep an eye on while
+/// the tab above it gets used for something else.
 struct TerminalDockView: View {
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -1091,8 +1124,29 @@ struct TerminalDockView: View {
                     }
                 }
 
-                Button {
-                    store.newDockSession()
+                Menu {
+                    Button("Local Shell") { store.newDockSession() }
+
+                    if !settings.sshConnections.isEmpty {
+                        Section("Connect") {
+                            ForEach(settings.sshConnections) { connection in
+                                Button("\(connection.name) — \(connection.subtitle)") {
+                                    store.newDockSession(kind: .remote(connection.id))
+                                }
+                            }
+                        }
+                    }
+
+                    let movable = store.paneSessionsMovableToDock()
+                    if !movable.isEmpty {
+                        Section("Move a running shell here") {
+                            ForEach(movable) { session in
+                                Button(session.displayTitle) {
+                                    store.moveSessionToDock(session.id)
+                                }
+                            }
+                        }
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .medium))
@@ -1100,8 +1154,10 @@ struct TerminalDockView: View {
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .help("New dock terminal")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("New dock terminal — local, a saved connection, or a shell moved down from a pane")
 
                 Spacer(minLength: 0)
 
@@ -1149,7 +1205,7 @@ private struct DockTabChip: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         HStack(spacing: 6) {
-            Image(systemName: "apple.terminal")
+            Image(systemName: session.isRemote ? "network" : "apple.terminal")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.textSecondary)
             Text(label)
@@ -1179,9 +1235,13 @@ private struct DockTabChip: View {
     }
 }
 
-/// Working directory, shortened the way a shell prompt would show it.
+/// Working directory, shortened the way a shell prompt would show it — or the
+/// host, for a tab that is a connection rather than a directory on this Mac.
 private extension DockTabChip {
     var label: String {
+        if session.isRemote {
+            return session.connection?.name ?? "Remote"
+        }
         let directory = session.abbreviatedDirectory
         if directory.isEmpty { return session.displayTitle }
         if directory == "/" || directory == "~" { return directory }

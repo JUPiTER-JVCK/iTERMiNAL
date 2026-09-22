@@ -17,11 +17,6 @@ struct AdvancedSettingsView: View {
                 Button("Reset All Settings", role: .destructive) {
                     settings.resetToDefaults()
                     AttentionSettings.shared.resetToInApp()
-                    // syncMode lives in its own UserDefaults key, so
-                    // resetToDefaults never touched it — a user resetting
-                    // everything to stop the app talking to iCloud kept
-                    // syncing.
-                    settings.resetSyncModeToLocal()
                 }
             }
             Section("About") {
@@ -84,6 +79,20 @@ struct ComposerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Where commands run") {
+                Picker("Run commands in", selection: $settings.composerTarget) {
+                    ForEach(ComposerTarget.allCases) { target in
+                        Text(target.label).tag(target)
+                    }
+                }
+                Text(settings.composerTarget.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("The chip above the composer's input always names the destination, and doubles as a menu for changing it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Shell") {
                 Picker("Shell", selection: shellBinding) {
                     Text("Same as new terminals").tag("")
@@ -94,6 +103,11 @@ struct ComposerSettingsView: View {
                 Text("Applies only to the composer's own session, so trying something in another shell doesn't change what new tabs open as. Changing it restarts that session.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if settings.composerTarget != .ownShell {
+                    Text("Only used while \"Run commands in\" is set to the composer's own shell.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

@@ -21,8 +21,15 @@ struct ITerminalApp: App {
                 // hierarchy is tinted.
                 .tint(settings.accentColor)
         }
+        // Hides the title and makes the bar transparent. It does not remove
+        // the title-bar-height safe area SwiftUI still insets content below —
+        // `MainWindowView.framelessWindow()` does that, and the same call in
+        // SettingsRootView does it for the settings window, which this scene
+        // modifier cannot reach.
+        //
+        // `.windowToolbarStyle` is gone with no replacement: this window has no
+        // toolbar for it to style.
         .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified(showsTitle: false))
         .commands { AppCommands() }
 
         Settings {
@@ -43,17 +50,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
-        // Preferences live in UserDefaults, not the state file, so a theme or
-        // connection change never reaches WorkspaceStore.saveNow. Without this
-        // they uploaded only when some unrelated layout edit happened to
-        // follow, and were otherwise overwritten by the next remote apply.
-        SyncEngineProvider.startObservingPreferenceChanges()
-        // Pull iCloud state once the store has finished restoring from disk.
-        SyncEngineProvider.pullIfNeeded()
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        SyncEngineProvider.pullIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

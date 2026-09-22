@@ -602,21 +602,39 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Composer routing
 
-    func sendToFocusedTerminal(_ text: String) {
-        if let session = focusedSession {
-            session.send(text: text)
-            return
-        }
-        let tab = newTab()
-        tab.primarySession?.send(text: text)
+    /// Where a composer command will run right now.
+    ///
+    /// Read by the composer's chip row as well as by `sendFromComposer`, so
+    /// what the composer says and what it does cannot disagree — which is
+    /// exactly how they used to.
+    enum ComposerDestination {
+        /// A terminal that already exists: a tab pane or a dock tab.
+        case terminal(TerminalSession)
+        /// The composer's private shell, started on first use.
+        case ownShell
     }
 
-    /// Runs a command in the composer's own shell, starting it if this is the
-    /// first one. Deliberately does not touch `focusedSession`.
-    func sendToComposer(_ text: String) {
-        let session = ensureComposerSession()
-        session.send(text: text)
-        if !composerHasRun { composerHasRun = true }
+    var composerDestination: ComposerDestination {
+        guard AppSettings.shared.composerTarget == .activeTerminal else { return .ownShell }
+        // `focusedSession` falls back to the selected tab's first terminal, so
+        // this still resolves when nothing has been clicked into yet — the
+        // visible terminal is the one the user means. It also resolves dock
+        // tabs, which take focus like any other terminal.
+        guard let session = focusedSession else { return .ownShell }
+        return .terminal(session)
+    }
+
+    /// Runs a command typed in the composer, in whatever it is pointed at.
+    func sendFromComposer(_ text: String) {
+        switch composerDestination {
+        case .terminal(let session):
+            session.send(text: text)
+        case .ownShell:
+            ensureComposerSession().send(text: text)
+            // Gates the inline transcript, so it only appears when there is a
+            // composer shell whose output has nowhere else to go.
+            if !composerHasRun { composerHasRun = true }
+        }
         recordComposerCommand(text)
     }
 
@@ -624,7 +642,7 @@ final class WorkspaceStore: ObservableObject {
     /// command run in a loop doesn't crowd out everything before it.
     ///
     /// Internal rather than private because `@ai …` lines belong in recall too
-    /// and never reach `sendToComposer` — they go to the assistant, not the
+    /// and never reach `sendFromComposer` — they go to the assistant, not the
     /// shell. One extra caller here is what that needs; a second copy of this
     /// list in the view was not.
     func recordComposerCommand(_ text: String) {
@@ -763,18 +781,106 @@ final class WorkspaceStore: ObservableObject {
         withAnimation(Motion.panel) { bottomDockOpen = false }
     }
 
+    /// Opens a dock terminal.
+    ///
+    /// The kind is a parameter rather than always `.localShell`: a dock tab is
+    /// a terminal like any other and there is no reason it cannot be a remote
+    /// host. Inheriting the focused session's directory only makes sense for a
+    /// local shell — a remote one starts wherever the connection says.
     @discardableResult
-    func newDockSession(directory: String? = nil) -> TerminalSession {
+    func newDockSession(
+        kind: SessionKind = .localShell,
+        directory: String? = nil
+    ) -> TerminalSession {
+        let inherited = kind.isRemote ? nil : focusedSession?.currentDirectory
         let session = TerminalSession(
-            kind: .localShell,
-            initialDirectory: directory ?? focusedSession?.currentDirectory
+            kind: kind,
+            initialDirectory: directory ?? inherited
         )
         session.startIfNeeded()
         dockSessions.append(session)
         selectedDockSessionID = session.id
-        EventBus.shared.publish(APIEvent("dock.session.created", ["session": session.id.uuidString]))
+        var payload = ["session": session.id.uuidString]
+        if let connectionID = kind.connectionID {
+            payload["connection"] = connectionID.uuidString
+        }
+        EventBus.shared.publish(APIEvent("dock.session.created", payload))
         scheduleSave()
         return session
+    }
+
+    /// Shells running in a tab pane, which could be moved into the dock.
+    ///
+    /// Exited ones are left out: the point of moving a session down here is to
+    /// keep watching something that is still going.
+    func paneSessionsMovableToDock() -> [TerminalSession] {
+        workspaces
+            .flatMap(\.tabs)
+            .flatMap { $0.root.allSessions() }
+            .filter(\.isRunning)
+    }
+
+    /// Takes a running shell out of its pane and puts it in the dock, so it
+    /// stays visible while the tab above it gets used for something else.
+    ///
+    /// The session moves rather than being mirrored: its terminal is a live
+    /// AppKit view and cannot be in two places at once. Nothing is terminated
+    /// — that is the entire point — so this deliberately does not go through
+    /// `closeTab`, which would kill the shell and file it under recents.
+    func moveSessionToDock(_ sessionID: UUID) {
+        guard !isDockSession(sessionID), composerSession?.id != sessionID else { return }
+        guard let location = paneLocation(ofSessionID: sessionID),
+              case .terminal(let session) = location.leaf.content else { return }
+        let workspace = location.workspace
+        let tab = location.tab
+        let leaf = location.leaf
+
+        if leaf === tab.root {
+            // The shell was the whole tab, so the tab goes with it. Same
+            // outcome as closing that pane, except the shell lives on.
+            workspace.tabs.removeAll { $0 === tab }
+            EventBus.shared.publish(APIEvent("tab.closed", ["tab": tab.id.uuidString]))
+            if selectedTabID == tab.id {
+                selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
+            }
+        } else if let parent = tab.root.parent(of: leaf),
+                  case .split(let direction, var children) = parent.content {
+            children.removeAll { $0 === leaf }
+            if children.count == 1 {
+                parent.content = children[0].content
+            } else {
+                parent.content = .split(direction, children)
+            }
+        } else {
+            // A leaf that is neither the root nor a child of a split is not a
+            // shape the tree can produce; bailing out beats detaching a
+            // session with nowhere to put it back.
+            return
+        }
+
+        dockSessions.append(session)
+        selectedDockSessionID = session.id
+        // Set directly rather than through toggleBottomDock(), which opens an
+        // empty dock by making a new shell — there is already one here.
+        if !bottomDockOpen {
+            withAnimation(Motion.panel) { bottomDockOpen = true }
+        }
+        EventBus.shared.publish(APIEvent("dock.session.moved", ["session": session.id.uuidString]))
+        scheduleSave()
+    }
+
+    /// Which workspace, tab and leaf hold a session, if a tab pane does.
+    private func paneLocation(
+        ofSessionID id: UUID
+    ) -> (workspace: Workspace, tab: WorkspaceTab, leaf: PaneNode)? {
+        for workspace in workspaces {
+            for tab in workspace.tabs {
+                if let leaf = tab.root.leaf(containingSessionID: id) {
+                    return (workspace, tab, leaf)
+                }
+            }
+        }
+        return nil
     }
 
     func closeDockSession(_ id: UUID) {
@@ -820,6 +926,12 @@ final class WorkspaceStore: ObservableObject {
             rightRegionOpen: rightRegionOpen,
             bottomDockOpen: bottomDockOpen,
             dockDirectories: dockSessions.map(\.currentDirectory),
+            dockTabs: dockSessions.map {
+                DockTabSnapshot(
+                    directory: $0.currentDirectory,
+                    connectionID: $0.kind.connectionID
+                )
+            },
             rightPanelWidth: settings.rightPanelWidth,
             bottomDockHeight: settings.bottomDockHeight
         )
@@ -849,83 +961,40 @@ final class WorkspaceStore: ObservableObject {
         dockSessions.removeAll()
         selectedDockSessionID = nil
 
-        for directory in snapshot.dockDirectories {
-            _ = newDockSession(directory: directory)
+        // `dockTabs` carries the connection each tab reopens; `dockDirectories`
+        // is the older shape and is all a state file written before dock tabs
+        // could be remote has.
+        if let tabs = snapshot.dockTabs {
+            let known = Set(AppSettings.shared.sshConnections.map(\.id))
+            for tab in tabs {
+                // A connection deleted since the snapshot cannot be reopened.
+                // Falling back to a local shell beats a tab whose only
+                // behaviour is to fail to start.
+                let kind: SessionKind
+                if let connectionID = tab.connectionID, known.contains(connectionID) {
+                    kind = .remote(connectionID)
+                } else {
+                    kind = .localShell
+                }
+                _ = newDockSession(kind: kind, directory: tab.directory)
+            }
+        } else {
+            for directory in snapshot.dockDirectories {
+                _ = newDockSession(directory: directory)
+            }
         }
         bottomDockOpen = snapshot.bottomDockOpen && !dockSessions.isEmpty
         selectedDockSessionID = dockSessions.first?.id
     }
 
-    /// What `applyRemoteSnapshot` was able to do.
-    enum RemoteApplyOutcome {
-        /// The layout was adopted.
-        case applied
-        /// Live shells are running, so the layout was left alone. Preferences
-        /// and recents still merged — neither can destroy anything.
-        case deferredLiveSessions(count: Int)
-    }
-
-    /// Applies a snapshot that arrived from another Mac.
-    ///
-    /// Deliberately NOT `applySnapshot`. That one backs Import, where wiping
-    /// the current layout is exactly what the user asked for by clicking the
-    /// button. A sync runs on its own schedule with nobody watching, so the
-    /// same two steps become a background process destroying work: killing
-    /// every live shell mid-build, and — because the outgoing `recentSessions`
-    /// takes the remote's list with it — pruning away transcripts that are
-    /// deliberately never uploaded and so can never come back.
-    ///
-    /// So this one destroys nothing. Recents merge rather than replace, and a
-    /// layout change waits while anything is still running; the caller
-    /// surfaces that so the user can apply it when they are ready.
-    func applyRemoteSnapshot(_ snapshot: AppStateSnapshot) -> RemoteApplyOutcome {
-        // Union, never replace. Pruning against a merged list can only drop
-        // transcripts whose sessions neither Mac still lists.
-        mergeRecents(snapshot.recents ?? [])
-
-        let live = liveSessionCount()
-        guard live == 0 else {
-            saveNow()
-            return .deferredLiveSessions(count: live)
-        }
-
-        applySnapshot(snapshot)
-        return .applied
-    }
-
-    /// Sessions with a process still attached. Adopting a remote layout drops
-    /// the current one, which would orphan these.
-    private func liveSessionCount() -> Int {
-        var count = workspaces
-            .flatMap(\.tabs)
-            .flatMap { $0.root.allSessions() }
-            .filter(\.isRunning)
-            .count
-        count += dockSessions.filter(\.isRunning).count
-        if composerSession?.isRunning == true { count += 1 }
-        return count
-    }
-
-    /// Adds recents this Mac has not seen, newest first, without dropping any
-    /// of its own. Same cap the local list uses.
-    private func mergeRecents(_ incoming: [RecentSession]) {
-        guard !incoming.isEmpty else { return }
-        let known = Set(recentSessions.map(\.id))
-        let additions = incoming.filter { !known.contains($0.id) }
-        guard !additions.isEmpty else { return }
-        recentSessions = (recentSessions + additions)
-            .sorted { $0.closedAt > $1.closedAt }
-        if recentSessions.count > Self.maxRecentSessions {
-            recentSessions.removeLast(recentSessions.count - Self.maxRecentSessions)
-        }
-        pruneOrphanedTranscripts()
-    }
-
     /// Replaces every workspace with the contents of a snapshot, shutting down
     /// the processes that belonged to the outgoing layout.
     ///
-    /// This is the Import path and it is destructive by design — see
-    /// `applyRemoteSnapshot` for the one that a sync is allowed to use.
+    /// This is the Import path and it is destructive by design — the user
+    /// clicked a button and the sheet says so. Nothing else in the app calls
+    /// it, and nothing should: the sibling that existed for a background sync
+    /// to apply a remote layout went away with CloudKit, along with the
+    /// live-session guard it needed to avoid killing shells mid-build.
     func applySnapshot(_ snapshot: AppStateSnapshot) {
         terminateAllSessions()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
@@ -946,12 +1015,10 @@ final class WorkspaceStore: ObservableObject {
 
     func saveNow() {
         // A queued debounced save is redundant once we save here, and letting
-        // it fire later is actively harmful during a remote apply: adopting a
+        // it fire later is worse than redundant during an import: adopting a
         // snapshot rebuilds the dock, each dock session calls scheduleSave,
-        // and that work item lands a second later — after sync has stopped
-        // treating saves as its own. It then reads as a user edit, stamps this
-        // Mac newer than the remote it just adopted, and uploads it straight
-        // back.
+        // and that work item lands a second later on top of what was just
+        // written.
         pendingSave?.cancel()
         pendingSave = nil
         let snapshot = currentSnapshot()
@@ -963,12 +1030,6 @@ final class WorkspaceStore: ObservableObject {
         } catch {
             NSLog("Failed to save workspace state: \(error.localizedDescription)")
         }
-        // The layout just changed on disk, which is precisely the signal sync
-        // needs. Saying so here replaced a 2s timer that stat()ed this same
-        // file to infer it — along with the seen-mtime tracking and
-        // suppression counter that inference required. The provider ignores
-        // this while it is the one doing the writing.
-        SyncEngineProvider.schedulePushAfterLocalSave()
     }
 
     private func restore() -> Bool {

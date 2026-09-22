@@ -80,7 +80,7 @@ targets:
         # otherwise an untagged build would claim to be a release it is not.
         # Left at 0.3.0 it claimed to be two major versions behind: Build 116
         # reported 0.3.0 while the newest release was v3.9.5.
-        MARKETING_VERSION: 3.9.6
+        MARKETING_VERSION: 4.0.0
         CURRENT_PROJECT_VERSION: 3
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
@@ -94,9 +94,12 @@ targets:
         # restrict spawned processes.
         ENABLE_APP_SANDBOX: "NO"
         ENABLE_HARDENED_RUNTIME: "YES"
-        # CloudKit container entitlement. Unsigned CI builds still sign with
-        # "-" and report iCloud unavailable; a Developer-signed build lights it up.
-        CODE_SIGN_ENTITLEMENTS: Resources/iTERMiNAL.entitlements
+        # No entitlements file. The only one this project ever had existed for
+        # a CloudKit container, which needed an Apple Developer account to
+        # bind — so the feature behind it was dead in every build anyone could
+        # actually make. Backups are snapshot files now and need no
+        # entitlement. Hardened Runtime is what notarization requires and is
+        # set above; it needs no entitlements of its own.
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
     scheme:

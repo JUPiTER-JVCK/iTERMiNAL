@@ -115,6 +115,8 @@ struct SidebarView: View {
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
                 .fixedSize()
+                // Lets the drag area behind it take the click — see below.
+                .allowsHitTesting(false)
 
             Spacer()
 
@@ -141,8 +143,14 @@ struct SidebarView: View {
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 14)
-        .padding(.top, 10)
+        // The window is frameless, so this row is the first thing below the
+        // top edge and the traffic lights float over the band above it. Clear
+        // that band rather than drawing the app name underneath three buttons.
+        .padding(.top, WindowChrome.titleBarHeight + 8)
         .padding(.bottom, 10)
+        // Covers the cleared band as well as the row, so the strip the traffic
+        // lights float in drags the window like a title bar would.
+        .background(WindowDragArea())
     }
 
     private func searchField(theme: Theme) -> some View {

@@ -47,7 +47,7 @@ struct PreferencesArchive: Codable {
     /// composer fields above — older archives predate them.
     ///
     /// The API key is deliberately absent: it lives in the keychain under
-    /// `assistant.apiKey` and never enters an export, which is what the Sync
+    /// `assistant.apiKey` and never enters an export, which is what the Backup
     /// pane's "no secrets" promise rests on. The context switches travel so a
     /// second Mac does not silently start sending more than the first did.
     var assistantBaseURL: String?
@@ -180,10 +180,7 @@ enum WorkspaceArchiveIO {
         )
 
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(archive).write(to: url, options: .atomic)
+            try ArchiveCodec.encode(archive).write(to: url, options: .atomic)
         } catch {
             presentError(error)
         }
@@ -199,12 +196,7 @@ enum WorkspaceArchiveIO {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let archive = try decoder.decode(WorkspaceArchive.self, from: Data(contentsOf: url))
-            guard archive.version <= WorkspaceArchive.currentVersion else {
-                throw ArchiveError.unsupportedVersion(archive.version)
-            }
+            let archive = try ArchiveCodec.decode(Data(contentsOf: url))
             archive.preferences.apply(to: settings)
             store.applySnapshot(archive.state)
         } catch {

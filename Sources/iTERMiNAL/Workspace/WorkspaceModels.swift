@@ -151,17 +151,32 @@ struct AppStateSnapshot: Codable {
 
 /// The surrounding layout — which panels were up and what the dock held.
 ///
-/// Dock terminals are recorded by working directory rather than by process:
-/// a shell cannot outlive a quit, so restoring means starting fresh ones
-/// where the old ones were.
+/// Dock terminals are recorded by where they pointed rather than by process:
+/// a shell cannot outlive a quit, so restoring means starting fresh ones in
+/// the same places.
 struct PanelStateSnapshot: Codable {
     var openPanels: [String]
     var frontPanel: String?
     var rightRegionOpen: Bool
     var bottomDockOpen: Bool
+    /// Directories only, which is all a dock tab could be before it could be
+    /// remote. Still written so a state file from this build restores in an
+    /// older one, and still read when `dockTabs` is absent.
     var dockDirectories: [String]
+    /// The authoritative dock list. Optional because state files written
+    /// before dock tabs could be remote do not have it.
+    var dockTabs: [DockTabSnapshot]?
     var rightPanelWidth: Double?
     var bottomDockHeight: Double?
+}
+
+/// One dock tab, and what it reconnects to.
+struct DockTabSnapshot: Codable {
+    var directory: String
+    /// The saved connection a remote dock tab reopens; nil for a local shell.
+    /// A connection deleted in the meantime falls back to a local shell rather
+    /// than leaving a tab that can never start.
+    var connectionID: UUID?
 }
 
 /// A session the user closed, kept so it can be reopened from the sidebar.

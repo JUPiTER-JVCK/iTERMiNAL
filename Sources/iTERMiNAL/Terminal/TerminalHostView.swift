@@ -69,6 +69,13 @@ final class TerminalContainerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    /// The frameless window is movable by its background, which would otherwise
+    /// make a drag across the terminal move the window instead of selecting
+    /// text. SwiftTerm's view consumes its own mouse events, but the inset this
+    /// container draws around it does not — so the answer has to come from
+    /// here, covering both.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func layout() {
         super.layout()
         let inset = Self.inset
