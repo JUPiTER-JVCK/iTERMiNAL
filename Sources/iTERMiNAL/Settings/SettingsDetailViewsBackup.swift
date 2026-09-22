@@ -88,6 +88,7 @@ struct ShortcutsSettingsView: View {
         ("Toggle terminal dock", "⌘J"),
         ("Toggle browser panel", "⌥⌘B"),
         ("Toggle files panel", "⌥⌘F"),
+        ("Toggle notes panel", "⌥⌘N"),
         ("Settings", "⌘,"),
     ]
 

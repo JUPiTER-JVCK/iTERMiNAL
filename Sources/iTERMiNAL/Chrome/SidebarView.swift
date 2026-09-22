@@ -508,10 +508,13 @@ struct SidebarActionRow: View {
     }
 }
 
-/// "Connect" row: opens a saved SSH/mosh host in a new tab.
+/// "Connect" row: a saved SSH/mosh host in a new tab, a saved screen-sharing
+/// endpoint through the system's client, or anything the network is currently
+/// advertising.
 struct SidebarConnectionRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var discovery = ServiceDiscovery.shared
     @State private var hovering = false
 
     var body: some View {
@@ -525,6 +528,37 @@ struct SidebarConnectionRow: View {
                     }
                 }
             }
+
+            if !settings.remoteServices.isEmpty {
+                Section("Screen sharing") {
+                    ForEach(settings.remoteServices) { service in
+                        Button("\(service.name) — \(service.subtitle)") {
+                            RemoteServiceLauncher.open(
+                                service,
+                                store: store,
+                                settings: settings
+                            )
+                        }
+                    }
+                }
+            }
+
+            if !discovery.services.isEmpty {
+                Section("On this network") {
+                    ForEach(discovery.services) { service in
+                        Button("\(service.name) — \(service.kind.shortLabel)") {
+                            connect(service)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            // Discovery is started here rather than at launch, so a user who
+            // never opens this menu is never asked for local network access.
+            Button(discovery.isBrowsing ? "Refresh Network Scan" : "Look for Machines on This Network") {
+                discovery.restart()
+            }
         } label: {
             SidebarRowContent(icon: "network", title: "Connect", isHovering: hovering)
         }
@@ -532,6 +566,25 @@ struct SidebarConnectionRow: View {
         .menuIndicator(.hidden)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
+    }
+
+    /// Resolves the advertised service to an address, then opens it. The
+    /// lookup is why this is not a one-liner: Bonjour hands out a service
+    /// name, and nothing knows the host behind it until something asks.
+    private func connect(_ service: DiscoveredService) {
+        discovery.resolve(service) { result in
+            guard case .success(let resolved) = result else { return }
+            RemoteServiceLauncher.open(
+                RemoteService(
+                    name: service.name,
+                    kind: service.kind,
+                    host: resolved.host,
+                    port: resolved.port
+                ),
+                store: store,
+                settings: settings
+            )
+        }
     }
 }
 

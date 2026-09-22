@@ -146,6 +146,13 @@ final class AppSettings: ObservableObject {
         didSet { persistProxmoxHosts() }
     }
 
+    /// Saved screen-sharing and remote-desktop endpoints. No secret either:
+    /// the client the system opens is what authenticates, and this app never
+    /// sees the password.
+    @Published var remoteServices: [RemoteService] {
+        didSet { persistRemoteServices() }
+    }
+
     private init() {
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         restoreSession = defaults.object(forKey: "restoreSession") as? Bool ?? true
@@ -211,6 +218,13 @@ final class AppSettings: ObservableObject {
             proxmoxHosts = []
         }
 
+        if let data = defaults.data(forKey: "remoteServices"),
+           let decoded = try? JSONDecoder().decode([RemoteService].self, from: data) {
+            remoteServices = decoded
+        } else {
+            remoteServices = []
+        }
+
         // `didSet` doesn't fire during init, so reconcile the login item with
         // the stored preference on every launch.
         applyLaunchAtLogin()
@@ -237,6 +251,12 @@ final class AppSettings: ObservableObject {
     private func persistProxmoxHosts() {
         if let data = try? JSONEncoder().encode(proxmoxHosts) {
             defaults.set(data, forKey: "proxmoxHosts")
+        }
+    }
+
+    private func persistRemoteServices() {
+        if let data = try? JSONEncoder().encode(remoteServices) {
+            defaults.set(data, forKey: "remoteServices")
         }
     }
 

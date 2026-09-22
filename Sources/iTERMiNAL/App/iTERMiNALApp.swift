@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         LocalAPIServer.shared.stop()
+        // Notes save on a debounce, so the last thing typed is exactly what a
+        // quit would otherwise drop.
+        WorkspaceStore.shared.flushNotes()
         WorkspaceStore.shared.saveNow()
         WorkspaceStore.shared.terminateAllSessions()
     }
@@ -164,6 +167,11 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.togglePanel(.files)
             }
             .keyboardShortcut("f", modifiers: [.command, .option])
+
+            Button("Toggle Notes Panel") {
+                WorkspaceStore.shared.togglePanel(.notes)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
 
             Divider()
 

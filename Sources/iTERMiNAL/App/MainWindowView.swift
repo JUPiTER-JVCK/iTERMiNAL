@@ -988,6 +988,8 @@ struct RightPanelView: View {
             BrowserPanelView(model: store.panelBrowserTabs)
         case .files:
             FilePaneView(model: store.panelFiles)
+        case .notes:
+            NotesPaneView(model: store.panelNotes)
         case nil:
             PanelPicker()
         }
@@ -1092,7 +1094,7 @@ private struct PanelPicker: View {
                 PickerRow(
                     icon: panel.icon,
                     title: panel.title,
-                    shortcut: panel == .browser ? "⌥⌘B" : "⌥⌘F",
+                    shortcut: panel.shortcutHint,
                     theme: theme
                 ) {
                     store.openPanel(panel)
