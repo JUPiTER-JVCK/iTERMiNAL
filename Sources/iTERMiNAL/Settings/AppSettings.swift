@@ -139,6 +139,13 @@ final class AppSettings: ObservableObject {
         didSet { persistConnections() }
     }
 
+    /// Saved Proxmox VE endpoints. Like `sshConnections` these carry no
+    /// secret — the API token's secret half lives in the Keychain, keyed by
+    /// each host's `keychainAccount`.
+    @Published var proxmoxHosts: [ProxmoxHost] {
+        didSet { persistProxmoxHosts() }
+    }
+
     private init() {
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         restoreSession = defaults.object(forKey: "restoreSession") as? Bool ?? true
@@ -197,6 +204,13 @@ final class AppSettings: ObservableObject {
             sshConnections = []
         }
 
+        if let data = defaults.data(forKey: "proxmoxHosts"),
+           let decoded = try? JSONDecoder().decode([ProxmoxHost].self, from: data) {
+            proxmoxHosts = decoded
+        } else {
+            proxmoxHosts = []
+        }
+
         // `didSet` doesn't fire during init, so reconcile the login item with
         // the stored preference on every launch.
         applyLaunchAtLogin()
@@ -205,6 +219,24 @@ final class AppSettings: ObservableObject {
     private func persistConnections() {
         if let data = try? JSONEncoder().encode(sshConnections) {
             defaults.set(data, forKey: "sshConnections")
+        }
+    }
+
+    /// The certificate the user pinned for a saved Proxmox host, if any.
+    ///
+    /// Matched on host and port together, so pinning `pve.lan:8006` says
+    /// nothing about anything else running on that machine.
+    func pinnedFingerprint(forHost host: String, port: Int) -> String? {
+        proxmoxHosts.first {
+            $0.host.caseInsensitiveCompare(host) == .orderedSame
+                && $0.port == port
+                && $0.isPinned
+        }?.pinnedFingerprint
+    }
+
+    private func persistProxmoxHosts() {
+        if let data = try? JSONEncoder().encode(proxmoxHosts) {
+            defaults.set(data, forKey: "proxmoxHosts")
         }
     }
 

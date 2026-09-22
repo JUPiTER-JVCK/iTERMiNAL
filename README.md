@@ -50,6 +50,10 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop.
+- **Proxmox VE** — list the VMs and containers on a cluster over its API, open
+  a guest's console in the browser panel, and save a guest as an SSH host. The
+  API token's secret half stays in the keychain; a self-signed certificate is
+  handled by pinning one you confirm, never by relaxing trust.
 - **Local scripting API + CLI** — a Unix-socket JSON API and the `iterminalctl`
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
@@ -280,6 +284,35 @@ transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
 you for a password or 2FA code itself; the file browser runs `sftp`
 non-interactively and therefore **requires key-based authentication**.
 
+### Proxmox VE
+
+**Settings → Connections → Proxmox** takes an endpoint and an API token id
+(`user@realm!tokenid`); the token's secret half goes to the keychain, and the
+host record itself carries no secret — the same rule saved SSH hosts follow.
+
+Discovery is API-driven, not a port scan. Proxmox does not leave a VNC port
+listening per VM — a console is created on demand by `vncproxy` behind a
+one-time ticket — and it never exposes a guest's RDP at all, since that is a
+service inside the guest on the guest's own address. A scan would find almost
+nothing and miss every VM worth listing, so the app reads `/nodes`, then the
+`qemu` and `lxc` guests per node, and asks the guest agent for addresses. No
+agent means no address, not a failed refresh.
+
+From the list, a guest's console opens in the app's browser panel (Proxmox
+already serves noVNC over its own web UI, so there is no VNC client involved),
+and a guest with a reported address can be saved as an SSH host in one click.
+
+**Certificates.** A default Proxmox install serves a self-signed certificate,
+and this app's ATS exemption covers web content only — which relaxes transport
+*policy*, not certificate *trust* — so neither the API calls nor the console
+page would load. Rather than disabling validation or widening the exemption,
+which would weaken every connection the app makes, the system's verdict is
+tried first and you confirm a SHA-256 fingerprint once; exactly that
+certificate is then accepted, for that host and port alone. A host with a real
+certificate needs no pin. The pin is honoured by both the API client and the
+browser panel, because WKWebView runs its own trust evaluation and never
+consults URLSession's delegate.
+
 ## Security model
 
 - **The scripting API is opt-in.** It ships disabled, with separate toggles for
@@ -297,6 +330,10 @@ non-interactively and therefore **requires key-based authentication**.
   content, so the browser pane can preview a plain-http dev server, and local
   networking, so the assistant can reach a model server on loopback. Anything
   routable still has to be HTTPS.
+- **Certificate validation is never disabled.** A self-signed Proxmox host is
+  reached by pinning the one certificate you confirmed by fingerprint, for that
+  host and port alone — the system's own verdict is tried first, so pinning can
+  only ever *add* an accepted certificate, never subtract a check.
 - **No sandbox, but Hardened Runtime is on.** A terminal exists to launch your
   programs, and sandboxed children inherit the sandbox — a sandboxed build
   could not read `~/.ssh`, Homebrew tools, or repos outside its container. No
@@ -332,6 +369,7 @@ Sources/
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
 │   ├── Panels/      scriptable browser pane, file pane
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
+│   ├── Remote/      Proxmox VE client, host records, pinned trust
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
 │   ├── Backup/      workspace snapshot archive, export/import
