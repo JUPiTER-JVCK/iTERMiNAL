@@ -51,6 +51,17 @@ struct DetailView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Sizes while a seam is being dragged, kept here rather than written
+    /// straight to `AppSettings`. Settings is observed by half the app, so
+    /// publishing every frame repainted all of it; this keeps the drag local
+    /// to the column it resizes. Nil means "not dragging — use the stored
+    /// value".
+    @State private var liveRightPanelWidth: Double?
+    @State private var liveDockHeight: Double?
+
+    private var rightPanelWidth: Double { liveRightPanelWidth ?? settings.rightPanelWidth }
+    private var dockHeight: Double { liveDockHeight ?? settings.bottomDockHeight }
+
     var body: some View {
         // One reader over the whole column: the trailing handle needs the
         // width and the dock handle needs the height. A second reader nested
@@ -66,8 +77,10 @@ struct DetailView: View {
             // The strip spans the whole detail column rather than living
             // inside the content VStack: nested there, it narrowed whenever a
             // panel opened and the right-aligned toggles slid with it.
+            // No divider under the strip: it is the window's top bar now, not
+            // a toolbar sitting on top of the content, and a rule across the
+            // whole width is the one line a borderless design cannot have.
             DetailTopStrip(leadingInset: trafficLightInset)
-            FadedDivider()
 
             // The trailing panel can never take so much width that the
             // terminal is squeezed to a sliver — clamped against what is
@@ -82,11 +95,16 @@ struct DetailView: View {
                     if !store.rightPanelExpanded {
                         PanelResizeHandle(
                             axis: .horizontal,
-                            size: $settings.rightPanelWidth,
+                            value: rightPanelWidth,
                             range: 280...1200,
                             inverted: true,
                             resetTo: 420,
-                            available: size.width
+                            available: size.width,
+                            onChange: { liveRightPanelWidth = $0 },
+                            onCommit: {
+                                liveRightPanelWidth = nil
+                                settings.rightPanelWidth = $0
+                            }
                         )
                     }
                     RightPanelView()
@@ -100,14 +118,19 @@ struct DetailView: View {
             if store.bottomDockOpen {
                 PanelResizeHandle(
                     axis: .vertical,
-                    size: $settings.bottomDockHeight,
+                    value: dockHeight,
                     range: 120...620,
                     inverted: true,
                     resetTo: 260,
-                    available: size.height
+                    available: size.height,
+                    onChange: { liveDockHeight = $0 },
+                    onCommit: {
+                        liveDockHeight = nil
+                        settings.bottomDockHeight = $0
+                    }
                 )
                 TerminalDockView()
-                    .frame(height: settings.bottomDockHeight)
+                    .frame(height: dockHeight)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -128,9 +151,10 @@ struct DetailView: View {
         let minMain: Double = 360
         let minPanel: Double = 280
         if available >= minMain + minPanel {
-            // Room for both: honour the stored width, capped so the main
-            // surface keeps its minimum.
-            return min(settings.rightPanelWidth, available - minMain)
+            // Room for both: honour the requested width, capped so the main
+            // surface keeps its minimum. The live value while dragging, the
+            // stored one otherwise.
+            return min(rightPanelWidth, available - minMain)
         }
         // Too narrow for both minimums, so neither gets one. Split what
         // there is and leave the larger share to the main surface — it
@@ -248,9 +272,11 @@ private struct DetailTopStrip: View {
             .buttonStyle(.plain)
             .help("Settings")
         }
-        .padding(.horizontal, 14)
-        .padding(.leading, leadingInset)
-        .frame(height: 40)
+        .padding(.leading, 14 + leadingInset)
+        // Small enough that the last icon sits in the window's actual corner,
+        // which is the whole point of moving them up here.
+        .padding(.trailing, 6)
+        .frame(height: WindowChrome.topBarHeight)
         // This strip sits at the very top of a frameless window, so it is the
         // window's title bar in every sense but the system's.
         .background(WindowDragArea())
@@ -341,30 +367,55 @@ private struct DetailBottomStrip: View {
 /// at drag start rather than accumulated. `inverted` is for panels that grow
 /// as the handle moves toward the window's origin — the trailing panel and
 /// the bottom dock both do.
+/// The draggable seam between two regions.
+///
+/// Reports the live size through `onChange` and the settled one through
+/// `onCommit`, rather than writing a binding straight into `AppSettings`.
+/// It used to do the latter, and the cost was not obvious: `rightPanelWidth`
+/// is `@Published` on the app-wide settings singleton, so every frame of a
+/// drag invalidated every view observing it — the sidebar, the composer, the
+/// dock, the settings window — and wrote UserDefaults besides. The caller now
+/// keeps the in-flight value in its own state and only stores the result, so a
+/// drag repaints the column being resized and nothing else.
 private struct PanelResizeHandle: View {
     enum Axis { case horizontal, vertical }
 
     let axis: Axis
-    @Binding var size: Double
+    /// Current size, live while a drag is in flight.
+    let value: Double
     let range: ClosedRange<Double>
     var inverted = false
     /// Default the handle returns to on a double-click.
     var resetTo: Double
     /// Total extent of the container, used to work out the snap points.
     var available: Double = 0
+    /// Every frame of the drag.
+    let onChange: (Double) -> Void
+    /// Once, when the drag settles — or on a double-click reset.
+    let onCommit: (Double) -> Void
 
     @State private var hovering = false
     @State private var baseline: Double?
 
     /// A third, half and two thirds of the container — the proportions worth
     /// landing on exactly. Within 12pt the drag settles onto one.
-    private func snapped(_ value: Double) -> Double {
-        guard available > 0 else { return value }
+    private func snapped(_ candidate: Double) -> Double {
+        guard available > 0 else { return candidate }
         let targets = [available / 3, available / 2, available * 2 / 3]
-        for target in targets where abs(value - target) < 12 {
+        for target in targets where abs(candidate - target) < 12 {
             return target
         }
-        return value
+        return candidate
+    }
+
+    /// Where the seam lands for a drag that started at `start`. Shared by
+    /// `onChanged` and `onEnded` so the committed value is the one last drawn,
+    /// rather than a second calculation that could round differently.
+    private func resolved(from start: Double, drag: DragGesture.Value) -> Double {
+        let moved = Double(
+            axis == .horizontal ? drag.translation.width : drag.translation.height
+        )
+        return snapped(start + (inverted ? -moved : moved)).clamped(to: range)
     }
 
     var body: some View {
@@ -401,21 +452,19 @@ private struct PanelResizeHandle: View {
                     }
                     .gesture(
                         DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                let start = baseline ?? size
+                            .onChanged { drag in
+                                let start = baseline ?? value
                                 if baseline == nil { baseline = start }
-                                let moved = Double(
-                                    axis == .horizontal
-                                        ? value.translation.width
-                                        : value.translation.height
-                                )
-                                let raw = start + (inverted ? -moved : moved)
-                                size = snapped(raw).clamped(to: range)
+                                onChange(resolved(from: start, drag: drag))
                             }
-                            .onEnded { _ in baseline = nil }
+                            .onEnded { drag in
+                                let start = baseline ?? value
+                                baseline = nil
+                                onCommit(resolved(from: start, drag: drag))
+                            }
                     )
                     .onTapGesture(count: 2) {
-                        withAnimation(Motion.panel) { size = resetTo }
+                        withAnimation(Motion.panel) { onCommit(resetTo) }
                     }
             }
     }

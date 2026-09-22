@@ -111,8 +111,12 @@ struct SidebarView: View {
             // Just the name. The menu that used to hang off this offered New
             // Workspace, New Terminal and Settings — all three of which are
             // already their own rows in this same sidebar.
+            // 15pt rather than 19: the row is now 40pt tall and starts 78pt in
+            // to clear the traffic lights, which at the sidebar's 240pt
+            // minimum leaves the title and its two buttons about 150pt to
+            // share. The old size fit only at wider settings.
             Text("iTERMiNAL")
-                .font(.system(size: 19, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
                 .fixedSize()
                 // Lets the drag area behind it take the click — see below.
@@ -142,14 +146,15 @@ struct SidebarView: View {
             .help("New terminal")
         }
         .foregroundStyle(theme.textSecondary)
-        .padding(.horizontal, 14)
-        // The window is frameless, so this row is the first thing below the
-        // top edge and the traffic lights float over the band above it. Clear
-        // that band rather than drawing the app name underneath three buttons.
-        .padding(.top, WindowChrome.titleBarHeight + 8)
-        .padding(.bottom, 10)
-        // Covers the cleared band as well as the row, so the strip the traffic
-        // lights float in drags the window like a title bar would.
+        // Clear the traffic lights sideways, not downwards. Padding down past
+        // them left an empty band above the title and sat this row lower than
+        // the detail column's strip — the gap. Sharing one height with that
+        // strip puts the whole top of the window on a single line.
+        .padding(.leading, WindowChrome.trafficLightWidth)
+        .padding(.trailing, 10)
+        .frame(height: WindowChrome.topBarHeight)
+        // With no title bar, this row is what the user grabs to move the
+        // window.
         .background(WindowDragArea())
     }
 
