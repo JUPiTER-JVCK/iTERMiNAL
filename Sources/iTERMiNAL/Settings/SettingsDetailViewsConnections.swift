@@ -61,6 +61,8 @@ struct ConnectionsSettingsView: View {
                 }
             }
 
+            RemoteServicesSettingsSection()
+
             ProxmoxSettingsSection()
 
             Section("Authentication") {

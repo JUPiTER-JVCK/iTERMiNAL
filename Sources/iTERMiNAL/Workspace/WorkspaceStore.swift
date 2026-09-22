@@ -2,18 +2,31 @@ import SwiftUI
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files
+    case browser, files, notes
     var id: String { rawValue }
     var title: String {
         switch self {
         case .browser: return "Browser"
         case .files: return "Files"
+        case .notes: return "Notes"
         }
     }
     var icon: String {
         switch self {
         case .browser: return "globe"
         case .files: return "folder"
+        case .notes: return "note.text"
+        }
+    }
+
+    /// Kept beside the case rather than worked out at the call site. The panel
+    /// picker used a two-way ternary, which silently labelled any third panel
+    /// with the Files shortcut.
+    var shortcutHint: String {
+        switch self {
+        case .browser: return "⌥⌘B"
+        case .files: return "⌥⌘F"
+        case .notes: return "⌥⌘N"
         }
     }
 }
@@ -125,6 +138,24 @@ final class WorkspaceStore: ObservableObject {
     /// inside a tab's split layout).
     lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
+
+    /// Built on first use like the panels above, but through an explicit
+    /// backing store rather than `lazy` so quitting can flush a pending write
+    /// without *creating* the model — reading a `lazy var` to ask whether it
+    /// exists is what would create it.
+    private var notesModel: NotesModel?
+    var panelNotes: NotesModel {
+        if let notesModel { return notesModel }
+        let model = NotesModel()
+        notesModel = model
+        return model
+    }
+
+    /// Writes any note still inside its debounce window. No-op when the panel
+    /// was never opened.
+    func flushNotes() {
+        notesModel?.saveNow()
+    }
 
     var selectedDockSession: TerminalSession? {
         guard let selectedDockSessionID else { return dockSessions.first }

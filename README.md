@@ -50,6 +50,12 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop.
+- **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
+  screen-sharing endpoints, and whatever the local network is advertising right
+  now. VNC and RDP open through the system's own client; SSH, SFTP and web open
+  in the app.
+- **Notes panel** — a scratchpad beside the terminal (⌥⌘N), saved as you type
+  and kept out of exported snapshots.
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
   a guest's console in the browser panel, and save a guest as an SSH host. The
   API token's secret half stays in the keychain; a self-signed certificate is
@@ -284,6 +290,30 @@ transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
 you for a password or 2FA code itself; the file browser runs `sftp`
 non-interactively and therefore **requires key-based authentication**.
 
+### Screen sharing, and what the network is advertising
+
+**Settings → Connections** has two sections beyond saved SSH hosts.
+
+**On this network** browses Bonjour for `_rfb._tcp` (VNC / Apple Screen
+Sharing), `_ssh._tcp`, `_sftp-ssh._tcp` and `_http._tcp`, so a machine already
+advertising itself can be reached without typing an address. It browses only:
+nothing about this Mac is advertised, and no connection is opened until you
+pick a result. A Bonjour listing names a *service*, not a host, so the address
+behind it is looked up at the moment you connect rather than while listening.
+macOS asks for local network access the first time; declining leaves the list
+empty and changes nothing else. Discovery starts when you open that section or
+the sidebar's **Connect** menu, so a user who never does is never asked.
+
+**Screen sharing and remote desktop** holds endpoints saved by hand. iTERMiNAL
+implements neither VNC nor RDP — it hands the address to whichever app has
+registered the scheme (Screen Sharing for `vnc://`, Microsoft Remote Desktop or
+similar for `rdp://`), so that client is what authenticates and no password is
+stored here. If nothing has registered the scheme, you are told, rather than
+the button appearing to do nothing.
+
+SSH, SFTP and web entries open inside the app instead — a terminal tab, the
+Files panel, and the browser panel.
+
 ### Proxmox VE
 
 **Settings → Connections → Proxmox** takes an endpoint and an API token id
@@ -369,7 +399,7 @@ Sources/
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
 │   ├── Panels/      scriptable browser pane, file pane
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
-│   ├── Remote/      Proxmox VE client, host records, pinned trust
+│   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
 │   ├── Backup/      workspace snapshot archive, export/import

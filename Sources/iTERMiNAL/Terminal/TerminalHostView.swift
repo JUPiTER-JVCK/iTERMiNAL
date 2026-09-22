@@ -28,6 +28,14 @@ struct TerminalHostView: NSViewRepresentable {
         nsView.syncBackground()
         let terminal = nsView.terminal
         let sessionID = session.id
+        // Cheap synchronous filter before the hop. This method runs on every
+        // layout pass, so during a resize it was queuing a block per frame per
+        // terminal just to discover there was nothing to do. The hop still
+        // happens in the case it exists for — the view not being in a window
+        // yet — because that is exactly when `window` is nil and neither test
+        // below short-circuits.
+        if WorkspaceStore.shared.focusedSessionID != sessionID { return }
+        if let window = terminal.window, window.firstResponder === terminal { return }
         DispatchQueue.main.async {
             guard WorkspaceStore.shared.focusedSessionID == sessionID,
                   let window = terminal.window,

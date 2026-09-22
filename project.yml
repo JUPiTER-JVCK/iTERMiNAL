@@ -48,6 +48,15 @@ targets:
         # AppIcon set alone leaves the Dock showing the generic placeholder.
         CFBundleIconName: AppIcon
         NSPrincipalClass: NSApplication
+        # Shown when macOS asks whether this app may browse the local network.
+        # It is asked for Bonjour discovery in Settings → Connections, which
+        # only ever browses: nothing about this Mac is advertised, and no
+        # connection is opened until the user picks a result. Declining leaves
+        # that list empty and changes nothing else.
+        NSLocalNetworkUsageDescription: >-
+          iTERMiNAL looks for machines on your network advertising screen
+          sharing, SSH or file sharing, so you can connect without typing an
+          address. It advertises nothing about this Mac.
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         # Scope the ATS exception to web-view content only, so the browser

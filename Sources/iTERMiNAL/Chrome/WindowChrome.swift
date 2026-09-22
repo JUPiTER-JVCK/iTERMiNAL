@@ -21,6 +21,16 @@ enum WindowChrome {
     /// breathing room after the last one.
     static let trafficLightWidth: CGFloat = 78
 
+    /// Height of the app's own top bar, shared by the sidebar header and the
+    /// detail strip so the two columns read as one band rather than two rows
+    /// that happen to be adjacent.
+    ///
+    /// The sidebar used to clear the traffic lights by padding *down* past
+    /// them, which left an empty strip above its title and put the two columns
+    /// at different heights — the gap. Clearing them sideways instead puts
+    /// everything on one row, which is what the borderless look needs.
+    static let topBarHeight: CGFloat = 40
+
     /// Applies the frameless configuration to a window.
     ///
     /// Safe to call repeatedly: every step is idempotent, which matters because

@@ -399,6 +399,40 @@ private struct WebViewRepresentable: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
+/// The panel's web view and its empty state.
+///
+/// Exists to observe the *tab's* model rather than the tab list. The panel
+/// view around it holds a `BrowserTabsModel`, and `hasNavigated` is published
+/// by `BrowserModel` — a different object. Reading it from there compiled and
+/// looked right, but nothing invalidated the panel when a page finished
+/// loading: the web view stayed at `opacity(0)` underneath the empty state
+/// until some unrelated change — expanding the panel, resizing the window —
+/// happened to re-evaluate the body and pick up the new value. That is why the
+/// browser appeared to work only once the panel was expanded, and why the
+/// address bar (which does observe the tab) updated while the page did not.
+///
+/// `BrowserPaneView` never had the bug because it takes the `BrowserModel`
+/// directly, which is what this now does too.
+private struct BrowserPanelContent: View {
+    @ObservedObject var browser: BrowserModel
+    let theme: Theme
+
+    var body: some View {
+        ZStack {
+            // Identity follows the tab. Without it SwiftUI sees the same view
+            // in the same slot when you switch tabs, calls updateNSView, and
+            // the container keeps hosting the previous tab's web view — the
+            // same trap the terminal dock hit with its sessions.
+            WebViewRepresentable(webView: browser.webView)
+                .id(browser.id)
+                .opacity(browser.hasNavigated ? 1 : 0)
+            if !browser.hasNavigated {
+                BrowserEmptyState(theme: theme)
+            }
+        }
+    }
+}
+
 struct BrowserPaneView: View {
     @ObservedObject var model: BrowserModel
     @Environment(\.colorScheme) private var colorScheme
@@ -506,13 +540,7 @@ struct BrowserPanelView: View {
             if let active = model.active {
                 BrowserNavigationRow(model: active)
                 FadedDivider()
-                ZStack {
-                    WebViewRepresentable(webView: active.webView)
-                        .opacity(active.hasNavigated ? 1 : 0)
-                    if !active.hasNavigated {
-                        BrowserEmptyState(theme: theme)
-                    }
-                }
+                BrowserPanelContent(browser: active, theme: theme)
             } else {
                 BrowserEmptyState(theme: theme)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

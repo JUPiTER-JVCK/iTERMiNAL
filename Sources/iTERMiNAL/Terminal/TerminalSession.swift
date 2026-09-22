@@ -43,6 +43,18 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var lastAttentionFingerprint: String?
     private var hasStarted = false
 
+    /// Everything `applyStyling` reads. Held so the work can be skipped when
+    /// none of it has changed — see the guard there for why that matters.
+    private struct StylingInputs: Equatable {
+        var themeID: String
+        var darkMode: Bool
+        var fontName: String
+        var fontSize: Double
+        var backgroundOpacity: Double
+        var gpuRequested: Bool
+    }
+    private var appliedStyling: StylingInputs?
+
     /// A shell for this session alone, overriding the global setting. The
     /// composer uses it so switching to bash there leaves every other terminal
     /// on whatever the user configured.
@@ -222,7 +234,27 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Pushes font, colors, ANSI palette, and the GPU renderer preference
     /// into the engine. Safe to call on every SwiftUI update — the engine
     /// ignores values that haven't changed.
+    /// Pushes theme, font and rendering settings into the engine.
+    ///
+    /// Called from `TerminalHostView.updateNSView`, which SwiftUI runs on
+    /// every layout pass — so this runs on every frame of a window resize, a
+    /// panel drag, or a split seam being moved, once per visible terminal.
+    /// Unguarded it did real work each time: constructing an `NSFont`,
+    /// rebuilding the full colour palette, and re-asking SwiftTerm about Metal.
+    /// That is what made resizing feel heavy. The inputs are cheap to compare,
+    /// so compare them and do nothing when a redraw is just a redraw.
     func applyStyling(settings: AppSettings, darkMode: Bool) {
+        let inputs = StylingInputs(
+            themeID: settings.terminalThemeID,
+            darkMode: darkMode,
+            fontName: settings.terminalFontName,
+            fontSize: settings.terminalFontSize,
+            backgroundOpacity: settings.backgroundOpacity,
+            gpuRequested: settings.useGPURendering
+        )
+        guard inputs != appliedStyling else { return }
+        appliedStyling = inputs
+
         let theme = settings.resolvedTerminalTheme(darkMode: darkMode)
         engine.applyPalette(theme.palette)
         engine.apply(TerminalAppearance(
