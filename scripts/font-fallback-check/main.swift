@@ -67,15 +67,18 @@ for base in bases {
     // (see NSFont.standaloneEquivalent). Say what happened, so a failure
     // below comes with the reason.
     if base.fontName.hasPrefix(".") {
-        let url = CTFontCopyAttribute(base as CTFont, kCTFontURLAttribute) as? URL
-        let faces = url.flatMap { CTFontManagerCreateFontDescriptorsFromURL($0 as CFURL) as? [CTFontDescriptor] } ?? []
-        let names = faces.compactMap { CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String }
-        print("info  \(base.fontName) is a UI font: file \(url?.path ?? "none"), faces \(names)")
-        print("info  variation \(String(describing: CTFontCopyVariation(base as CTFont)))")
-        if let standalone = base.standaloneEquivalent {
-            print("info  reopened as \(standalone.fontName) with identical cell metrics")
+        let manager = NSFontManager.shared
+        print("info  \(base.fontName) is a UI font; variation \(String(describing: CTFontCopyVariation(base as CTFont)))")
+        print("info  SF Mono file: \(NSFont.monospacedSystemFontFile?.path ?? "not found")")
+        if let candidate = base.standaloneCandidate {
+            let bold = manager.convert(candidate, toHaveTrait: .boldFontMask)
+            let italic = manager.convert(candidate, toHaveTrait: .italicFontMask)
+            print("info  reopened as \(candidate.fontName): same cell metrics \(candidate.hasSameCellMetrics(as: base)), bold \(bold.fontName) weight \(manager.weight(of: bold)), italic \(italic.fontName) \(manager.traits(of: italic).contains(.italicFontMask))")
         } else {
-            print("FAIL  \(base.fontName): could not be reopened as an ordinary font")
+            print("info  could not be reopened from a file")
+        }
+        if base.standaloneEquivalent == nil {
+            print("FAIL  \(base.fontName): no standalone equivalent passed the metrics and style checks")
             failed = true
         }
     }

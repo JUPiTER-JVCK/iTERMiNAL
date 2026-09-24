@@ -109,7 +109,7 @@ extension NSFont {
 
     /// The same face as this system UI font, opened from its file as an
     /// ordinary font — or nil if this is not a UI font, or the reopened one
-    /// would not draw identically.
+    /// would not draw exactly as this one does.
     ///
     /// `monospacedSystemFont` — SF Mono, the terminal's default — returns a
     /// UI font, and CoreText resolves a UI font's missing characters through
@@ -122,13 +122,31 @@ extension NSFont {
     /// before the system's, which is what makes Menlo, JetBrains Mono and the
     /// rest work.
     ///
-    /// Only returned when its cell metrics match this font's exactly, so the
-    /// terminal grid cannot change under anyone.
+    /// Only returned when it draws the same cells and derives the same bold
+    /// and italic, so reopening can never cost the terminal its grid or its
+    /// bold text in exchange for icons. When it cannot, the font stays as it
+    /// was.
     var standaloneEquivalent: NSFont? {
+        guard let candidate = standaloneCandidate,
+              candidate.hasSameCellMetrics(as: self),
+              candidate.derivesStylesLike(self) else { return nil }
+        return candidate
+    }
+
+    /// This UI font's face opened from its file, unchecked.
+    ///
+    /// A UI font does not say where its file is — CI found its URL attribute
+    /// empty — so the monospaced system face is opened from where macOS keeps
+    /// it. The UI font's axis values are carried over: SF Mono is a variable
+    /// font, and without them a Regular request could come back as some
+    /// other instance.
+    var standaloneCandidate: NSFont? {
         // UI fonts are the dot-named ones: .AppleSystemUIFontMonospaced-…
         guard fontName.hasPrefix(".") else { return nil }
         let font = self as CTFont
-        guard let url = CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL,
+        let url = (CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
+            ?? (fontName.contains("Monospaced") ? Self.monospacedSystemFontFile : nil)
+        guard let url,
               let faces = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
               let first = faces.first else { return nil }
         // A file can hold several faces; take the one with this style.
@@ -136,16 +154,32 @@ extension NSFont {
         var face = faces.first {
             (CTFontDescriptorCopyAttribute($0, kCTFontStyleNameAttribute) as? String) == style
         } ?? first
-        // SF Mono is a variable font. Carry the axis values over, or a
-        // Regular request could come back as the file's default instance.
         if let variation = CTFontCopyVariation(font) {
             face = CTFontDescriptorCreateCopyWithAttributes(
                 face, [kCTFontVariationAttribute: variation] as CFDictionary
             )
         }
-        let standalone = CTFontCreateWithFontDescriptor(face, pointSize, nil) as NSFont
-        guard standalone.hasSameCellMetrics(as: self) else { return nil }
-        return standalone
+        return CTFontCreateWithFontDescriptor(face, pointSize, nil) as NSFont
+    }
+
+    /// SF Mono's file, where macOS has kept it since 10.15.
+    static let monospacedSystemFontFile: URL? = {
+        let url = URL(fileURLWithPath: "/System/Library/Fonts/SFNSMono.ttf")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }()
+
+    /// Bold and italic, derived the way SwiftTerm derives them — through
+    /// NSFontManager — come out as heavy, and as slanted, as they do from
+    /// `other`.
+    func derivesStylesLike(_ other: NSFont) -> Bool {
+        let manager = NSFontManager.shared
+        let bold = manager.convert(self, toHaveTrait: .boldFontMask)
+        let otherBold = manager.convert(other, toHaveTrait: .boldFontMask)
+        let italic = manager.convert(self, toHaveTrait: .italicFontMask)
+        let otherItalic = manager.convert(other, toHaveTrait: .italicFontMask)
+        return manager.weight(of: bold) == manager.weight(of: otherBold)
+            && manager.traits(of: italic).contains(.italicFontMask)
+                == manager.traits(of: otherItalic).contains(.italicFontMask)
     }
 
     /// Same advance for "W" and same line height: what SwiftTerm sizes a
