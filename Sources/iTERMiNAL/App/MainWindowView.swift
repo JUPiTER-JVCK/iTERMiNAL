@@ -490,18 +490,33 @@ private struct PanelResizeHandle: View {
                         DragGesture(minimumDistance: 1)
                             .onChanged { drag in
                                 let start = baseline ?? value
-                                if baseline == nil { baseline = start }
+                                if baseline == nil {
+                                    baseline = start
+                                    // Terminals hold their size until the
+                                    // drag ends — see SeamDrag.
+                                    SeamDrag.begin()
+                                }
                                 onChange(resolved(from: start, drag: drag))
                             }
                             .onEnded { drag in
                                 let start = baseline ?? value
                                 baseline = nil
                                 onCommit(resolved(from: start, drag: drag))
+                                SeamDrag.end()
                             }
                     )
                     .onTapGesture(count: 2) {
                         withAnimation(Motion.panel) { onCommit(resetTo) }
                     }
+            }
+            // A seam can vanish mid-drag — its panel closed by a shortcut —
+            // and then onEnded never comes. Left set, every terminal would
+            // wait out the catch-up delay on each resize from then on.
+            .onDisappear {
+                if baseline != nil {
+                    baseline = nil
+                    SeamDrag.end()
+                }
             }
     }
 }
