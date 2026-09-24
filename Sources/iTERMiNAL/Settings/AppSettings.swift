@@ -295,12 +295,24 @@ final class AppSettings: ObservableObject {
 
     var accentColor: Color { Accents.color(for: accentID) }
 
+    /// Whether the app is showing its dark appearance right now — the colour
+    /// scheme SwiftUI hands its views, readable where there is no view.
+    /// `applyAppearance` sets the app's appearance from `theme`, so this
+    /// follows the setting and, on System, the Mac.
+    var isDarkAppearance: Bool {
+        let appearance = NSApp?.effectiveAppearance ?? NSAppearance.currentDrawing()
+        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    /// The font every terminal draws with, backed by the bundled Nerd Font
+    /// symbols for the icons it has no glyphs for — see `SymbolsFont`.
     func resolvedTerminalFont() -> NSFont {
         let size = CGFloat(terminalFontSize)
-        if !terminalFontName.isEmpty, let font = NSFont(name: terminalFontName, size: size) {
-            return font
+        var font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        if !terminalFontName.isEmpty, let chosen = NSFont(name: terminalFontName, size: size) {
+            font = chosen
         }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        return SymbolsFont.withFallback(font)
     }
 
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {

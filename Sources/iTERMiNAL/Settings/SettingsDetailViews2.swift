@@ -29,7 +29,8 @@ struct AdvancedSettingsView: View {
                 ForEach(TerminalTool.allCases) { tool in
                     BundledToolRow(tool: tool)
                 }
-                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile is upstream's release binary, checked against its published hash; btop publishes no macOS build, so it is compiled from pinned source. Neither runs with elevated privileges.")
+                BundledFontRow()
+                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile is upstream's release binary, checked against its published hash; btop publishes no macOS build, so it is compiled from pinned source. Neither runs with elevated privileges. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -73,6 +74,42 @@ private struct BundledToolRow: View {
         }
         let version = tool.bundledVersion.map { "v\($0)" } ?? "version unknown"
         return "\(tool.summary) · \(version) · \(tool.licenseName)"
+    }
+}
+
+/// The Nerd Font symbols face: what it is for, the version that shipped, and
+/// its licence. Laid out like `BundledToolRow` so the list reads as one.
+private struct BundledFontRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "textformat")
+                .frame(width: 18)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Nerd Font symbols")
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let licenseURL = SymbolsFont.licenseURL {
+                Button("Licence") {
+                    NSWorkspace.shared.open(licenseURL)
+                }
+            }
+            Button("Project") {
+                NSWorkspace.shared.open(SymbolsFont.homepage)
+            }
+        }
+    }
+
+    private var detail: String {
+        let summary = "Icons in terminal text"
+        guard SymbolsFont.isAvailable else {
+            return "\(summary) · not included in this build"
+        }
+        let version = SymbolsFont.bundledVersion.map { "v\($0)" } ?? "version unknown"
+        return "\(summary) · \(version) · MIT"
     }
 }
 

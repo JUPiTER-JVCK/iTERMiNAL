@@ -59,8 +59,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
-  (a resource monitor, ⌥⌘P) in the side panel. Both ship inside the app; nothing
-  to install. See [Bundled tools](#bundled-tools).
+  (a resource monitor, ⌥⌘P) in the side panel. Both ship inside the app,
+  nothing to install, and both wear the terminal's colours — light, dark, and
+  every change between. See [Bundled tools](#bundled-tools).
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
   a guest's console in the browser panel, and save a guest as an SSH host. The
   API token's secret half stays in the keychain; a self-signed certificate is
@@ -484,10 +485,50 @@ panel widens to at least 640pt while one is in front — capped so your terminal
 keeps its minimum — and returns to your usual width when you switch back to
 Browser, Files or Notes.
 
-**What makes bundling safe.** btop is linked with `STATIC=true`, which on
-macOS statically links GCC's runtime, and CI refuses any build that links a
-library outside `/usr/lib` and `/System/Library` — a binary that loads
-Homebrew's `libstdc++` would run in CI and on no one else's Mac. CI then checks
+**They wear the terminal's colours**, and change with it — a new theme in
+Settings, or the Mac switching between light and dark:
+
+- superfile is given a theme written in the terminal's ANSI palette, with its
+  background and body text left to the terminal, so what it draws *is* the
+  terminal's palette and restyles the moment that changes. Code previews are
+  the exception: the highlighter needs literal colours, so the preview style
+  (matched to the terminal theme by name where one exists) updates the next
+  time superfile starts.
+- btop only accepts literal colours, so it gets a theme generated from the
+  palette — background left to the terminal — and is sent `SIGUSR2`, btop's
+  own reload signal, whenever the palette changes.
+
+Their settings live in `~/Library/Application Support/iTERMiNAL/Tools` and are
+passed on the command line, so a copy of either tool you installed yourself
+keeps its own configuration. The one file written elsewhere is superfile's
+`iterminal.toml`, in superfile's theme folder, since that is the only place it
+reads themes from. The bundled superfile also doesn't check GitHub for updates:
+its version moves with this repository.
+
+**Icons render with any font.** superfile draws file and folder icons from
+[Nerd Font](https://www.nerdfonts.com) code points, which no macOS font has, so
+they showed as boxes. The app bundles *Symbols Nerd Font Mono* (MIT; the icon
+sets' own credits ship beside it) and puts it behind the terminal font as a
+fallback, the way Ghostty and WezTerm do. It is used only for characters your
+font has no glyph for, in every terminal — prompts like Starship benefit too —
+and is registered for this app alone: nothing is installed on your Mac. CI
+checks, on a real Mac, that the icons resolve to it, bold included.
+
+The default font needed one more step. macOS hands the system SF Mono out as a
+UI font, and a UI font's fallback always ends in a box-drawing font before any
+fallback the app adds. So by default the terminal draws with SF Mono from the
+complete family macOS ships inside Terminal.app, read in place — the same
+typeface, as Terminal.app draws it. Measured in CI at 13 pt: identical width,
+lines 0.2 pt taller (both round to the same row), and bold is SF Mono Bold
+rather than Semibold. If that family is ever missing, or would not keep a real
+bold and italic, the system font is used as before. Any other font you pick is
+used as is.
+
+**What makes bundling safe.** btop links GCC's runtime statically —
+`STATIC=true`, plus `CXX_IS_CLANG=false` to get past a bug in btop's Makefile
+that otherwise makes that setting a no-op on macOS — and CI refuses any build
+that links a library outside `/usr/lib` and `/System/Library`: a binary that
+loads Homebrew's `libstdc++` would run in CI and on no one else's Mac. CI then checks
 both tools *in the finished bundle*: present, executable, both architectures,
 system-only linkage, and that they actually run.
 
@@ -495,19 +536,20 @@ system-only linkage, and that they actually run.
 nothing updates itself or is downloaded at runtime. Settings → Advanced lists
 the bundled versions and opens each licence. The tools take the download from
 about 5 MB to about 35 MB; btop accounts for about 3 MB of that, superfile the
-rest.
+rest. The symbols font adds about 1.7 MB more.
 
 **Deliberately not done:** btop's README recommends setting it suid-root so it
 can show every user's processes. It does not run that way here — a suid-root
 binary inside an app bundle is a privilege-escalation risk — so btop shows
 full detail for your own processes and less for others'.
 
-A local Xcode build works without the tools and says so in their panels. To
-include them, on a Mac:
+A local Xcode build works without the tools and the font, and says so in their
+panels and in Settings. To include them, on a Mac:
 
 ```sh
 scripts/fetch-superfile.sh                 # needs curl, lipo, codesign
 brew install gcc@15 make && scripts/build-btop.sh Vendor/Tools   # this Mac's arch only
+scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 ```
 
 ## Roadmap

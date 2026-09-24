@@ -7,7 +7,11 @@ struct TerminalSettingsView: View {
 
     private static let monospacedFamilies: [String] = {
         NSFontManager.shared.availableFontFamilies.filter { family in
-            NSFont(name: family, size: 12)?.isFixedPitch == true
+            // The bundled symbols face is fixed-pitch too, but it has no
+            // letters: picked as the terminal font, every line would draw as
+            // boxes. It is the fallback behind the chosen font, not a choice.
+            family != SymbolsFont.familyName
+                && NSFont(name: family, size: 12)?.isFixedPitch == true
         }
         .sorted()
     }()
