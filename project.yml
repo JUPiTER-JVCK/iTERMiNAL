@@ -111,6 +111,29 @@ targets:
         # set above; it needs no entitlements of its own.
         CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: "YES"
+        # Stated rather than inherited: the copy phase below reads Vendor/,
+        # outside anything Xcode would grant a sandboxed script, and a
+        # sandboxed phase fails in a way that is easy to misread as "the
+        # tools were not fetched".
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    # superfile and btop, built or fetched by scripts/ at the versions pinned
+    # in scripts/tools.env. A post-build phase rather than a resource entry so
+    # a local build without Vendor/Tools still builds — it just ships without
+    # them, and the panels say so. ditto keeps the executable bit, which CI
+    # then checks in the finished bundle.
+    postBuildScripts:
+      - name: Copy bundled tools
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          src="$SRCROOT/Vendor/Tools"
+          dst="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Tools"
+          if [ ! -d "$src" ]; then
+            echo "note: $src not found; building without superfile and btop (see scripts/tools.env)"
+            exit 0
+          fi
+          rm -rf "$dst"
+          ditto "$src" "$dst"
     scheme:
       testTargets: []
 

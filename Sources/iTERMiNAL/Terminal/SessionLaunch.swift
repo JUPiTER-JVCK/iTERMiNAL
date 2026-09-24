@@ -1,10 +1,12 @@
 import Foundation
 
-/// What a terminal session is: this Mac's shell, or a remote host reached
-/// through one of the saved connections.
+/// What a terminal session is: this Mac's shell, a remote host reached
+/// through one of the saved connections, or one of the bundled full-screen
+/// tools running in a side panel.
 enum SessionKind: Equatable {
     case localShell
     case remote(UUID)
+    case tool(TerminalTool)
 
     var connectionID: UUID? {
         if case .remote(let id) = self { return id }
@@ -12,12 +14,22 @@ enum SessionKind: Equatable {
     }
 
     var isRemote: Bool { connectionID != nil }
+
+    var tool: TerminalTool? {
+        if case .tool(let tool) = self { return tool }
+        return nil
+    }
+
+    /// A program that owns the whole screen, not a shell. Nothing that types
+    /// commands — the composer — should ever send them here.
+    var isTool: Bool { tool != nil }
 }
 
 enum SessionLaunchError: LocalizedError {
     case unknownConnection
     case missingExecutable(String)
     case emptyCustomCommand
+    case toolUnavailable(TerminalTool)
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +39,10 @@ enum SessionLaunchError: LocalizedError {
             return "Couldn't find \(name) on this Mac. Install it, or point the connection at a custom command."
         case .emptyCustomCommand:
             return "This connection uses a custom command, but none is set."
+        case .toolUnavailable(let tool):
+            // Release builds always carry both tools — CI refuses to publish
+            // one that does not — so this is a local build made without them.
+            return "This build of iTERMiNAL was made without \(tool.title), and it isn't installed on this Mac either. Release builds include it; for a local build, run scripts/fetch-superfile.sh or scripts/build-btop.sh."
         }
     }
 }
@@ -60,6 +76,22 @@ enum SessionLaunch {
                 return .failure(.unknownConnection)
             }
             return remoteConfiguration(connection)
+
+        case .tool(let tool):
+            guard let executable = tool.resolvedExecutable else {
+                return .failure(.toolUnavailable(tool))
+            }
+            // Run directly, not through a shell: there is nothing to expand,
+            // and a shell in between would outlive the tool as a prompt the
+            // user never asked for once they quit it.
+            let cwd = directory ?? settings.resolvedInitialDirectory
+            return .success(TerminalLaunchConfiguration(
+                executable: executable,
+                args: tool.arguments(directory: cwd),
+                execName: nil,
+                environment: environment(),
+                initialDirectory: cwd
+            ))
         }
     }
 

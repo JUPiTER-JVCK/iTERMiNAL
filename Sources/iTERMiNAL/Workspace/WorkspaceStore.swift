@@ -2,13 +2,30 @@ import SwiftUI
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files, notes
+    case browser, files, notes, superfile, btop
     var id: String { rawValue }
+
+    /// The bundled program this panel runs, for the two that are one.
+    /// Persisted by raw value like the others, so a layout saved with btop
+    /// open restores with it — and an older build, which has no such case,
+    /// simply drops it.
+    var tool: TerminalTool? {
+        switch self {
+        case .superfile: return .superfile
+        case .btop: return .btop
+        case .browser, .files, .notes: return nil
+        }
+    }
+
+    var isTool: Bool { tool != nil }
+
     var title: String {
         switch self {
         case .browser: return "Browser"
         case .files: return "Files"
         case .notes: return "Notes"
+        case .superfile: return TerminalTool.superfile.title
+        case .btop: return TerminalTool.btop.title
         }
     }
     var icon: String {
@@ -16,6 +33,8 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .browser: return "globe"
         case .files: return "folder"
         case .notes: return "note.text"
+        case .superfile: return TerminalTool.superfile.icon
+        case .btop: return TerminalTool.btop.icon
         }
     }
 
@@ -27,7 +46,21 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .browser: return "⌥⌘B"
         case .files: return "⌥⌘F"
         case .notes: return "⌥⌘N"
+        case .superfile: return "⌥⌘S"
+        case .btop: return "⌥⌘P"
         }
+    }
+
+    /// Width the panel is given at least while it is in front.
+    ///
+    /// btop and superfile draw a full-screen interface and fall back to a
+    /// "too small" message rather than a cramped one — and neither project
+    /// publishes the size it needs, so this is a floor chosen to give them
+    /// room at the default font, not a column count. The stored panel width is
+    /// left alone: bring Notes back to the front and it returns to whatever
+    /// the user dragged it to.
+    var minimumWidth: Double? {
+        isTool ? 640 : nil
     }
 }
 
@@ -43,12 +76,15 @@ struct RunningTask: Identifiable {
         case tab(WorkspaceTab, Workspace)
         case dock
         case composer
+        /// A bundled tool running in its side panel.
+        case panel(SidePanel)
 
         var label: String {
             switch self {
             case .tab(_, let workspace): return workspace.name
             case .dock: return "Terminal dock"
             case .composer: return "Composer"
+            case .panel(let panel): return "\(panel.title) panel"
             }
         }
     }
@@ -94,7 +130,20 @@ final class WorkspaceStore: ObservableObject {
     /// Panels currently in the trailing region. A set rather than one
     /// optional, so opening Files no longer evicts the browser — every panel
     /// keeps its place until you close it yourself.
-    @Published private(set) var openPanels: Set<SidePanel> = []
+    ///
+    /// A bundled tool whose panel leaves this set is stopped here, and only
+    /// here. `togglePanel`, `closePanel` and a snapshot import each take panels
+    /// out their own way; putting the stop in the didSet means none of them
+    /// can forget to, and a btop nobody can see is never left polling the
+    /// machine. Hiding the whole region does not touch this set, so tools keep
+    /// running while it is merely put away.
+    @Published private(set) var openPanels: Set<SidePanel> = [] {
+        didSet {
+            for panel in oldValue.subtracting(openPanels) {
+                if let tool = panel.tool { stopToolSession(tool) }
+            }
+        }
+    }
     /// Whether the trailing region is showing, tracked separately from what
     /// is in it: the region can be open and empty (offering the picker), and
     /// hiding it keeps its panels so reopening restores them where they were.
@@ -155,6 +204,51 @@ final class WorkspaceStore: ObservableObject {
     /// was never opened.
     func flushNotes() {
         notesModel?.saveNow()
+    }
+
+    // MARK: Bundled tools
+
+    /// The running copy of each bundled tool, one per panel.
+    @Published private(set) var toolSessions: [TerminalTool: TerminalSession] = [:]
+
+    /// Starts `tool` if it is not already running, and returns its session.
+    ///
+    /// Idempotent, and called from two places on purpose: `openPanel`, for the
+    /// click, and the panel's own `.onAppear`, for a panel restored at launch.
+    /// Starting restored tools there rather than during restore is what keeps
+    /// a btop from launching behind a region the user left hidden.
+    ///
+    /// A session that has exited is returned as is, not replaced: the panel
+    /// shows why it stopped and offers Restart, which is more useful than a
+    /// fresh copy appearing as though nothing happened.
+    @discardableResult
+    func ensureToolSession(_ tool: TerminalTool) -> TerminalSession {
+        if let existing = toolSessions[tool] { return existing }
+        // superfile opens where the user is working — but only a local
+        // directory means anything to it, not a remote session's path.
+        let directory: String?
+        if tool == .superfile, let focused = focusedSession, !focused.isRemote, !focused.kind.isTool {
+            directory = focused.currentDirectory
+        } else {
+            directory = nil
+        }
+        let session = TerminalSession(kind: .tool(tool), initialDirectory: directory)
+        session.startIfNeeded()
+        toolSessions[tool] = session
+        EventBus.shared.publish(APIEvent("tool.started", [
+            "tool": tool.rawValue,
+            "session": session.id.uuidString,
+        ]))
+        return session
+    }
+
+    private func stopToolSession(_ tool: TerminalTool) {
+        guard let session = toolSessions.removeValue(forKey: tool) else { return }
+        session.terminate()
+        if focusedSessionID == session.id {
+            focusedSessionID = selectedTab?.root.firstTerminal()?.id
+        }
+        EventBus.shared.publish(APIEvent("tool.stopped", ["tool": tool.rawValue]))
     }
 
     var selectedDockSession: TerminalSession? {
@@ -224,6 +318,10 @@ final class WorkspaceStore: ObservableObject {
         // The dock's terminals take focus like any other, so they have to be
         // findable here or the composer would type into the wrong shell.
         if let session = dockSessions.first(where: { $0.id == id }) { return session }
+        // Findable so focus and attention work in a tool's panel like
+        // anywhere else. What must not follow focus there is the composer —
+        // see `composerDestination`.
+        if let session = toolSessions.values.first(where: { $0.id == id }) { return session }
         return composerSession?.id == id ? composerSession : nil
     }
 
@@ -495,6 +593,16 @@ final class WorkspaceStore: ObservableObject {
             closeDockSession(focusedSessionID)
             return
         }
+        // The same trap for a bundled tool: its session lives in a side panel,
+        // not the tab, so the fallback below would read "focus is nowhere in
+        // this tab" and close the whole tab — ⇧⌘W in btop killing the shell
+        // beside it. Close the thing that has focus instead.
+        if let focusedSessionID,
+           let tool = toolSessions.first(where: { $0.value.id == focusedSessionID })?.key,
+           let panel = SidePanel.allCases.first(where: { $0.tool == tool }) {
+            closePanel(panel)
+            return
+        }
         guard let tab = selectedTab else { return }
         guard let focusedSessionID,
               let leaf = tab.root.leaf(containingSessionID: focusedSessionID) else {
@@ -535,6 +643,13 @@ final class WorkspaceStore: ObservableObject {
             }
         }
         tasks.append(contentsOf: dockSessions.map { RunningTask(session: $0, origin: .dock) })
+        // In SidePanel order, so the list does not reshuffle between reads of
+        // a dictionary.
+        for panel in SidePanel.allCases {
+            if let tool = panel.tool, let session = toolSessions[tool] {
+                tasks.append(RunningTask(session: session, origin: .panel(panel)))
+            }
+        }
         if let composerSession {
             tasks.append(RunningTask(session: composerSession, origin: .composer))
         }
@@ -558,6 +673,10 @@ final class WorkspaceStore: ObservableObject {
             selectedDockSessionID = task.session.id
         case .composer:
             focusComposer()
+        case .panel(let panel):
+            detailMode = .terminal
+            openPanel(panel)
+            focusedSessionID = task.session.id
         }
     }
 
@@ -580,6 +699,11 @@ final class WorkspaceStore: ObservableObject {
         case .composer:
             rememberClosed(session, title: session.displayTitle)
             resetComposerSession()
+        case .panel(let panel):
+            // Stopping means what closing means here too: the panel goes, and
+            // openPanels' didSet ends the process. Not filed under Recents —
+            // that list is shells to reopen, and a tool reopens from its icon.
+            closePanel(panel)
         }
         scheduleSave()
     }
@@ -652,6 +776,15 @@ final class WorkspaceStore: ObservableObject {
         // visible terminal is the one the user means. It also resolves dock
         // tabs, which take focus like any other terminal.
         guard let session = focusedSession else { return .ownShell }
+        // Never into btop or superfile. They are findable for focus, but a
+        // command typed into the composer is meant for a shell: sent to a
+        // full-screen tool it becomes keystrokes — `ls⏎` selects and opens
+        // things. With one of them focused, the composer types into the tab
+        // behind it instead, and its chip says so.
+        if session.kind.isTool {
+            if let pane = selectedTab?.root.firstTerminal() { return .terminal(pane) }
+            return .ownShell
+        }
         return .terminal(session)
     }
 
@@ -760,6 +893,10 @@ final class WorkspaceStore: ObservableObject {
         }
         if panel == .browser, panelBrowserTabs.tabs.isEmpty {
             panelBrowserTabs.newTab()
+        }
+        // Selecting a tool's panel is what starts it.
+        if let tool = panel.tool {
+            ensureToolSession(tool)
         }
         if panel == .files,
            AppSettings.shared.followTerminalDirectory,
@@ -1091,6 +1228,11 @@ final class WorkspaceStore: ObservableObject {
         }
         dockSessions.forEach { $0.terminate() }
         composerSession?.terminate()
+        // Cleared as well as stopped: this also runs before an import, and a
+        // tool panel that survives the import should start a fresh copy when
+        // it next appears, not show the one the import just killed.
+        toolSessions.values.forEach { $0.terminate() }
+        toolSessions.removeAll()
     }
 
     var stateFileURL: URL { stateURL }

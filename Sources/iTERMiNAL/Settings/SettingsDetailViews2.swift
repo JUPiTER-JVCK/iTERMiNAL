@@ -22,8 +22,57 @@ struct AdvancedSettingsView: View {
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
             }
+            // MIT and Apache-2.0 both require the notice to travel with the
+            // binary. It does — in the bundle — and this is where a user can
+            // actually find it.
+            Section("Bundled tools") {
+                ForEach(TerminalTool.allCases) { tool in
+                    BundledToolRow(tool: tool)
+                }
+                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile is upstream's release binary, checked against its published hash; btop publishes no macOS build, so it is compiled from pinned source. Neither runs with elevated privileges.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// One bundled tool: what it is, the version that shipped, and its licence.
+private struct BundledToolRow: View {
+    let tool: TerminalTool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: tool.icon)
+                .frame(width: 18)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(tool.title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let licenseURL = tool.licenseURL {
+                Button("Licence") {
+                    NSWorkspace.shared.open(licenseURL)
+                }
+            }
+            Button("Project") {
+                NSWorkspace.shared.open(tool.homepage)
+            }
+        }
+    }
+
+    /// Says plainly when a build has no copy — a local build made without
+    /// fetching the tools — rather than printing a version that isn't there.
+    private var detail: String {
+        guard tool.isBundled else {
+            return "\(tool.summary) · not included in this build"
+        }
+        let version = tool.bundledVersion.map { "v\($0)" } ?? "version unknown"
+        return "\(tool.summary) · \(version) · \(tool.licenseName)"
     }
 }
 

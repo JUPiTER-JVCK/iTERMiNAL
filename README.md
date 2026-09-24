@@ -56,6 +56,11 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   in the app.
 - **Notes panel** — a scratchpad beside the terminal (⌥⌘N), saved as you type
   and kept out of exported snapshots.
+- **superfile and btop, built in** — two icons at the top right, left of the
+  panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
+  terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
+  (a resource monitor, ⌥⌘P) in the side panel. Both ship inside the app; nothing
+  to install. See [Bundled tools](#bundled-tools).
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
   a guest's console in the browser panel, and save a guest as an SSH host. The
   API token's secret half stays in the keychain; a self-signed certificate is
@@ -381,7 +386,8 @@ consults URLSession's delegate.
 | Split with browser | ⇧⌘B |
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
-| Browser / Files panel | ⌥⌘B / ⌥⌘F |
+| Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
+| superfile / btop | ⌥⌘S / ⌥⌘P |
 | Focus composer | ⇧⌘R |
 | Minimise / expand composer | ⇧⌘M |
 | Task manager | ⌥⌘T |
@@ -456,6 +462,53 @@ it. An earlier version offered iCloud through CloudKit; it needed an Apple
 Developer iCloud container to bind, so it was visible in every build and usable
 only in a signed one, and it has been removed along with the app's entitlements
 file. App Sandbox stays off; Hardened Runtime stays on.
+
+## Bundled tools
+
+Two third-party programs ship inside `iTERMiNAL.app`, in
+`Contents/Resources/Tools`, and open from the icons at the top right:
+
+| Tool | What it is | Licence | How it gets into the app |
+| --- | --- | --- | --- |
+| [superfile](https://github.com/yorukot/superfile) (`spf`) | Terminal file manager | MIT | Upstream's macOS release binaries for both chips, checked against pinned SHA-256 hashes that were matched to upstream's own checksums file, merged into one universal binary |
+| [btop](https://github.com/aristocratos/btop) | Resource monitor | Apache-2.0 | Built by CI from a pinned commit — upstream publishes no macOS binaries — with Homebrew's GCC 15, once per chip on a native runner |
+
+Selecting an icon starts the tool in the side panel; turning it off, or
+closing its panel, ends the process. Putting the whole panel region away
+leaves it running. superfile opens in the directory of the terminal you were
+using. The composer never types into either of them: with one focused, it
+sends commands to the tab behind it instead.
+
+Both need room, and fall back to a "too small" message when squeezed, so the
+panel widens to at least 640pt while one is in front — capped so your terminal
+keeps its minimum — and returns to your usual width when you switch back to
+Browser, Files or Notes.
+
+**What makes bundling safe.** btop is linked with `STATIC=true`, which on
+macOS statically links GCC's runtime, and CI refuses any build that links a
+library outside `/usr/lib` and `/System/Library` — a binary that loads
+Homebrew's `libstdc++` would run in CI and on no one else's Mac. CI then checks
+both tools *in the finished bundle*: present, executable, both architectures,
+system-only linkage, and that they actually run.
+
+**Versions** live in `scripts/tools.env` and move only by a PR that edits it;
+nothing updates itself or is downloaded at runtime. Settings → Advanced lists
+the bundled versions and opens each licence. The tools take the download from
+about 5 MB to about 35 MB; btop accounts for about 3 MB of that, superfile the
+rest.
+
+**Deliberately not done:** btop's README recommends setting it suid-root so it
+can show every user's processes. It does not run that way here — a suid-root
+binary inside an app bundle is a privilege-escalation risk — so btop shows
+full detail for your own processes and less for others'.
+
+A local Xcode build works without the tools and says so in their panels. To
+include them, on a Mac:
+
+```sh
+scripts/fetch-superfile.sh                 # needs curl, lipo, codesign
+brew install gcc@15 make && scripts/build-btop.sh Vendor/Tools   # this Mac's arch only
+```
 
 ## Roadmap
 

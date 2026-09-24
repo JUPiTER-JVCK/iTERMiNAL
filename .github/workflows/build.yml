@@ -36,8 +36,68 @@ env:
   CONFIGURATION: Release
 
 jobs:
+  # btop ships inside the app, and upstream publishes no macOS binaries ("No
+  # MacOs or BSD binaries provided"). It needs GCC 14+ or Clang 19+ and does
+  # not support Xcode's clang, so it is compiled here with Homebrew's gcc@15 —
+  # once per architecture on a native runner, because GCC cannot
+  # cross-compile between them. The build job merges the two slices.
+  #
+  # Cached on the pin and on the build script itself, so the compile happens
+  # when either changes and every other run restores it in seconds.
+  btop:
+    name: Build btop (${{ matrix.arch }})
+    strategy:
+      # Each architecture's result is worth having on its own. With the
+      # default fail-fast, an arm64 failure cancelled the Intel leg, leaving
+      # no way to tell whether x86_64 built without spending another run.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Derive cache key
+        id: pins
+        run: |
+          set -euo pipefail
+          . scripts/tools.env
+          script_hash=$(shasum -a 256 scripts/build-btop.sh | cut -c1-12)
+          echo "key=btop-${BTOP_VERSION}-${BTOP_COMMIT}-${{ matrix.arch }}-gcc15-${script_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore built btop
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: btop-out
+          key: ${{ steps.pins.outputs.key }}
+
+      # build-btop.sh refuses any result that links a library outside
+      # /usr/lib and /System/Library, and runs it before handing it back.
+      - name: Build btop
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          brew install gcc@15 make
+          scripts/build-btop.sh btop-out
+
+      - name: Upload slice
+        uses: actions/upload-artifact@v6
+        with:
+          name: btop-${{ matrix.arch }}
+          path: btop-out/
+          if-no-files-found: error
+
   build:
     name: Build (macOS)
+    needs: btop
     runs-on: macos-15
     steps:
       # fetch-depth: 0 because CFBundleVersion below is the commit count, and
@@ -102,6 +162,37 @@ jobs:
           echo "$(dirname "$binary")" >> "$GITHUB_PATH"
           # Fail here, with a clear reason, rather than at project generation.
           "$binary" --version
+
+      # Each slice lands in its own btop-slices/btop-<arch>/ directory.
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: btop-*
+          path: btop-slices
+
+      # Vendor/Tools is what project.yml's copy phase puts into
+      # Contents/Resources/Tools. Artifacts do not keep the executable bit,
+      # hence the chmod; lipo reads the file either way.
+      - name: Assemble bundled tools
+        run: |
+          set -euo pipefail
+          . scripts/tools.env
+          tools=Vendor/Tools
+          mkdir -p "$tools/licenses"
+
+          lipo -create -output "$tools/btop" \
+            btop-slices/btop-arm64/btop \
+            btop-slices/btop-x86_64/btop
+          codesign --force --sign - "$tools/btop"
+          chmod 755 "$tools/btop"
+          cp btop-slices/btop-arm64/licenses/btop-LICENSE.txt "$tools/licenses/btop-LICENSE.txt"
+
+          scripts/fetch-superfile.sh "$tools"
+
+          # Read by the About box, so it reports what was actually bundled
+          # rather than a second copy of the pins that could drift.
+          printf '{"btop":"%s","superfile":"%s"}\n' \
+            "$BTOP_VERSION" "$SUPERFILE_VERSION" > "$tools/manifest.json"
+          ls -la "$tools" "$tools/licenses"
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -205,6 +296,47 @@ jobs:
             fail=1
           fi
           echo "version: $got_short (build $got_bundle)"
+
+          # The bundled tools, checked in the bundle rather than in Vendor/:
+          # a copy phase that silently skipped, or dropped the executable bit,
+          # would pass every check made on the inputs. Each must be present,
+          # executable, universal, link only what a stock Mac has, and run.
+          tools="$APP/Contents/Resources/Tools"
+          for tool in spf btop; do
+            bin="$tools/$tool"
+            if [ ! -x "$bin" ]; then
+              echo "::error::bundled $tool is missing or not executable: $bin"
+              fail=1
+              continue
+            fi
+            for arch in x86_64 arm64; do
+              if ! lipo -archs "$bin" | grep -qw "$arch"; then
+                echo "::error::bundled $tool is missing the $arch slice"
+                fail=1
+              fi
+            done
+            foreign=$(otool -L "$bin" | awk '/^\t/ { print $1 }' \
+              | awk '!/^\/usr\/lib\// && !/^\/System\/Library\//')
+            if [ -n "$foreign" ]; then
+              echo "::error::bundled $tool links libraries a stock Mac does not have: $foreign"
+              fail=1
+            fi
+            # This runner is arm64, so only the arm64 slice runs here. btop's
+            # x86_64 slice already ran on the Intel runner that built it;
+            # superfile's is upstream's release binary, checked by hash but
+            # never executed by this workflow.
+            if ! "$bin" --version; then
+              echo "::error::bundled $tool does not run"
+              fail=1
+            fi
+          done
+          # MIT and Apache-2.0 both require the notice to ship with the binary.
+          for file in licenses/superfile-LICENSE.txt licenses/btop-LICENSE.txt manifest.json; do
+            if [ ! -s "$tools/$file" ]; then
+              echo "::error::missing from bundled tools: $file"
+              fail=1
+            fi
+          done
 
           exit $fail
 

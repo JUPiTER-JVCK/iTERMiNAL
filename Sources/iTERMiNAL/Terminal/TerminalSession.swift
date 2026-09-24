@@ -134,6 +134,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// with paths and flags is far wider than a sidebar row, and the head of
     /// it is what distinguishes one tab from another.
     private func noteCommand(_ command: String) {
+        // The line buffer behind this assumes a shell prompt. Inside btop or
+        // superfile, Enter confirms a selection, and what was "typed" before
+        // it is navigation keys — recorded, it would retitle the panel "jjk".
+        guard !kind.isTool else { return }
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let words = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
@@ -145,6 +149,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         // A title the shell set itself wins: it is the most deliberate signal
         // available, and a program that sets one is saying what it is.
         if !title.isEmpty { return title }
+        if let tool = kind.tool { return tool.title }
         if let lastCommand { return lastCommand }
         if let connection { return connection.name.isEmpty ? connection.destination : connection.name }
         let component = (currentDirectory as NSString).lastPathComponent
