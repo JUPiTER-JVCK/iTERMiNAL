@@ -11,3 +11,9 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Bundled third-party tools (superfile, btop). Fetched and built by
+# scripts/fetch-superfile.sh and scripts/build-btop.sh at the versions pinned
+# in scripts/tools.env — never committed: ~55 MB of binaries in history,
+# forever, for something CI reproduces from a pin.
+Vendor/
