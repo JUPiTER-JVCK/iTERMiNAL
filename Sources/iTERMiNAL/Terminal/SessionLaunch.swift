@@ -85,9 +85,15 @@ enum SessionLaunch {
             // and a shell in between would outlive the tool as a prompt the
             // user never asked for once they quit it.
             let cwd = directory ?? settings.resolvedInitialDirectory
+            // Dressed in the terminal's colours from the first frame. There
+            // may be no view yet to ask for its colour scheme — the store
+            // starts a tool before its panel is drawn — so the appearance
+            // comes from the app, which is what that scheme follows anyway.
+            let theme = settings.resolvedTerminalTheme(darkMode: settings.isDarkAppearance)
             return .success(TerminalLaunchConfiguration(
                 executable: executable,
-                args: tool.arguments(directory: cwd),
+                args: ToolTheming.launchArguments(for: tool, theme: theme)
+                    + tool.arguments(directory: cwd),
                 execName: nil,
                 environment: environment(),
                 initialDirectory: cwd

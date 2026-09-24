@@ -55,6 +55,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
     private var appliedStyling: StylingInputs?
 
+    /// When the running process was launched. `startedAt` is the first
+    /// launch only; Restart launches again.
+    private var launchedAt: Date?
+
     /// A shell for this session alone, overriding the global setting. The
     /// composer uses it so switching to bash there leaves every other terminal
     /// on whatever the user configured.
@@ -198,6 +202,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         case .success(let configuration):
             launchError = nil
             engine.start(configuration)
+            launchedAt = Date()
             isRunning = true
             lastExitCode = nil
             lastActivityAt = Date()
@@ -271,6 +276,32 @@ final class TerminalSession: ObservableObject, Identifiable {
         let active = engine.setGPUAcceleration(settings.useGPURendering)
         if isGPUAccelerated != active {
             isGPUAccelerated = active
+        }
+        // A bundled tool follows the palette the terminal just took on —
+        // a theme picked in Settings, or the switch to or from dark mode.
+        if let tool = kind.tool, ToolTheming.follow(theme, tool: tool) {
+            reloadToolTheme()
+        }
+    }
+
+    /// Tells a running btop to reread the theme `ToolTheming` just rewrote.
+    /// superfile draws in the terminal's palette, so it has already changed
+    /// and needs nothing.
+    ///
+    /// SIGUSR2's default action is to terminate, and btop installs its
+    /// handler a moment after it starts. A theme change inside that moment —
+    /// dark mode switching as the panel opens — would kill btop instead of
+    /// restyling it, so the signal waits until btop has run for two seconds.
+    private func reloadToolTheme() {
+        guard kind.tool == .btop, isRunning else { return }
+        let pid = engine.shellPID
+        guard pid > 0 else { return }
+        let settle: TimeInterval = 2
+        let running = launchedAt.map { Date().timeIntervalSince($0) } ?? settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, settle - running)) { [weak self] in
+            // Still the same btop: not quit, and not restarted since.
+            guard let self, self.isRunning, self.engine.shellPID == pid else { return }
+            kill(pid, SIGUSR2)
         }
     }
 
