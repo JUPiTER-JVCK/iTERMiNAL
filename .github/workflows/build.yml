@@ -169,10 +169,10 @@ jobs:
           pattern: btop-*
           path: btop-slices
 
-      # Vendor/Tools is what project.yml's copy phase puts into
-      # Contents/Resources/Tools. Artifacts do not keep the executable bit,
-      # hence the chmod; lipo reads the file either way.
-      - name: Assemble bundled tools
+      # Vendor/Tools and Vendor/Fonts are what project.yml's copy phase puts
+      # into Contents/Resources/Tools and /Fonts. Artifacts do not keep the
+      # executable bit, hence the chmod; lipo reads the file either way.
+      - name: Assemble bundled tools and fonts
         run: |
           set -euo pipefail
           . scripts/tools.env
@@ -193,6 +193,10 @@ jobs:
           printf '{"btop":"%s","superfile":"%s"}\n' \
             "$BTOP_VERSION" "$SUPERFILE_VERSION" > "$tools/manifest.json"
           ls -la "$tools" "$tools/licenses"
+
+          # The terminal's fallback for the icons superfile draws.
+          scripts/fetch-symbols-font.sh Vendor/Fonts
+          ls -la Vendor/Fonts Vendor/Fonts/licenses
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -337,6 +341,33 @@ jobs:
               fail=1
             fi
           done
+
+          # The symbols font, with its notice and the icon sets' credits.
+          fonts="$APP/Contents/Resources/Fonts"
+          for file in SymbolsNerdFontMono-Regular.ttf manifest.json \
+            licenses/nerd-fonts-symbols-LICENSE.txt licenses/nerd-fonts-symbols-README.md
+          do
+            if [ ! -s "$fonts/$file" ]; then
+              echo "::error::missing from bundled fonts: $file"
+              fail=1
+            fi
+          done
+          # Present is not the same as working. This compiles the app's own
+          # SymbolsFont.swift beside a small check and lays out icons the way
+          # SwiftTerm does, so it fails if CoreText would draw them with
+          # anything but the bundled face.
+          if [ -s "$fonts/SymbolsNerdFontMono-Regular.ttf" ]; then
+            check="$RUNNER_TEMP/font-check"
+            if ! swiftc -o "$check" \
+                Sources/iTERMiNAL/Terminal/SymbolsFont.swift \
+                scripts/font-fallback-check/main.swift; then
+              echo "::error::the font fallback check did not compile"
+              fail=1
+            elif ! "$check" "$fonts/SymbolsNerdFontMono-Regular.ttf"; then
+              echo "::error::terminal icons do not resolve to the bundled symbols font"
+              fail=1
+            fi
+          fi
 
           exit $fail
 

@@ -295,12 +295,15 @@ final class AppSettings: ObservableObject {
 
     var accentColor: Color { Accents.color(for: accentID) }
 
+    /// The font every terminal draws with, backed by the bundled Nerd Font
+    /// symbols for the icons it has no glyphs for — see `SymbolsFont`.
     func resolvedTerminalFont() -> NSFont {
         let size = CGFloat(terminalFontSize)
-        if !terminalFontName.isEmpty, let font = NSFont(name: terminalFontName, size: size) {
-            return font
+        var font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        if !terminalFontName.isEmpty, let chosen = NSFont(name: terminalFontName, size: size) {
+            font = chosen
         }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        return SymbolsFont.withFallback(font)
     }
 
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
