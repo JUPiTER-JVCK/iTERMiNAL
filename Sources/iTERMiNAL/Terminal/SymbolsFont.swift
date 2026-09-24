@@ -122,62 +122,45 @@ extension NSFont {
     /// before the system's, which is what makes Menlo, JetBrains Mono and the
     /// rest work.
     ///
-    /// Only returned when it draws the same cells and derives the same bold
-    /// and italic, so reopening can never cost the terminal its grid or its
-    /// bold text in exchange for icons. When it cannot, the font stays as it
-    /// was.
+    /// Only returned when it draws the same cells and still has a real bold
+    /// and italic, so this can never cost the terminal its grid or its bold
+    /// text in exchange for icons. When it cannot, the font stays as it was.
     var standaloneEquivalent: NSFont? {
         guard let candidate = standaloneCandidate,
               candidate.hasSameCellMetrics(as: self),
-              candidate.derivesStylesLike(self) else { return nil }
+              candidate.derivesStyles(like: self) else { return nil }
         return candidate
     }
 
-    /// This UI font's face opened from its file, unchecked.
+    /// SF Mono as an ordinary font, unchecked: the same face from the family
+    /// macOS ships inside Terminal.app, registered for this process.
     ///
-    /// A UI font does not say where its file is — CI found its URL attribute
-    /// empty — so the monospaced system face is opened from where macOS keeps
-    /// it. The UI font's axis values are carried over: SF Mono is a variable
-    /// font, and without them a Regular request could come back as some
-    /// other instance.
+    /// Two simpler routes failed, and CI's font check showed why. A UI font
+    /// does not report its file — its URL attribute is empty. And the system
+    /// copy, /System/Library/Fonts/SFNSMono.ttf, opens as a hidden family in
+    /// which NSFontManager finds no bold or italic, so SwiftTerm — which
+    /// derives both through NSFontManager — would have drawn bold text in
+    /// regular weight. Terminal.app's copy is the complete family under
+    /// public names: what anyone who "installs SF Mono" copies out of it.
     var standaloneCandidate: NSFont? {
-        // UI fonts are the dot-named ones: .AppleSystemUIFontMonospaced-…
-        guard fontName.hasPrefix(".") else { return nil }
-        let font = self as CTFont
-        let url = (CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
-            ?? (fontName.contains("Monospaced") ? Self.monospacedSystemFontFile : nil)
-        guard let url,
-              let faces = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
-              let first = faces.first else { return nil }
-        // A file can hold several faces; take the one with this style.
-        let style = CTFontCopyName(font, kCTFontStyleNameKey) as String?
-        var face = faces.first {
-            (CTFontDescriptorCopyAttribute($0, kCTFontStyleNameAttribute) as? String) == style
-        } ?? first
-        if let variation = CTFontCopyVariation(font) {
-            face = CTFontDescriptorCreateCopyWithAttributes(
-                face, [kCTFontVariationAttribute: variation] as CFDictionary
-            )
-        }
-        return CTFontCreateWithFontDescriptor(face, pointSize, nil) as NSFont
+        guard fontName.hasPrefix(".AppleSystemUIFontMonospaced"),
+              SystemMono.isRegistered else { return nil }
+        // .AppleSystemUIFontMonospaced-Regular → SFMono-Regular
+        let style = fontName.split(separator: "-").last.map(String.init) ?? "Regular"
+        return NSFont(name: "SFMono-\(style)", size: pointSize)
     }
 
-    /// SF Mono's file, where macOS has kept it since 10.15.
-    static let monospacedSystemFontFile: URL? = {
-        let url = URL(fileURLWithPath: "/System/Library/Fonts/SFNSMono.ttf")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }()
-
     /// Bold and italic, derived the way SwiftTerm derives them — through
-    /// NSFontManager — come out as heavy, and as slanted, as they do from
-    /// `other`.
-    func derivesStylesLike(_ other: NSFont) -> Bool {
+    /// NSFontManager — are still bold and italic: bold at least as heavy as
+    /// `other`'s, italic exactly when `other`'s is.
+    func derivesStyles(like other: NSFont) -> Bool {
         let manager = NSFontManager.shared
         let bold = manager.convert(self, toHaveTrait: .boldFontMask)
         let otherBold = manager.convert(other, toHaveTrait: .boldFontMask)
         let italic = manager.convert(self, toHaveTrait: .italicFontMask)
         let otherItalic = manager.convert(other, toHaveTrait: .italicFontMask)
-        return manager.weight(of: bold) == manager.weight(of: otherBold)
+        return manager.weight(of: bold) > manager.weight(of: self)
+            && manager.weight(of: bold) >= manager.weight(of: otherBold)
             && manager.traits(of: italic).contains(.italicFontMask)
                 == manager.traits(of: otherItalic).contains(.italicFontMask)
     }
@@ -193,4 +176,32 @@ extension NSFont {
             && abs(descender - other.descender) < 0.001
             && abs(leading - other.leading) < 0.001
     }
+}
+
+/// SF Mono's complete family as macOS ships it inside Terminal.app, registered
+/// for this process on first use. Read in place: nothing is copied, installed
+/// or visible to other apps.
+enum SystemMono {
+    static let directory = URL(
+        fileURLWithPath: "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts",
+        isDirectory: true
+    )
+
+    /// The faces found there, for the CI check to report.
+    static var faces: [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter {
+            $0.lastPathComponent.hasPrefix("SF-Mono") && ["otf", "ttf"].contains($0.pathExtension.lowercased())
+        }
+    }
+
+    /// Whether SF Mono now resolves by name. Already-registered faces — SF
+    /// Mono the user installed — report an error on registration, which is
+    /// fine: the lookup is the test.
+    static let isRegistered: Bool = {
+        for face in faces {
+            _ = CTFontManagerRegisterFontsForURL(face as CFURL, .process, nil)
+        }
+        return NSFont(name: "SFMono-Regular", size: 12) != nil
+    }()
 }

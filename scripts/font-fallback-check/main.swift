@@ -63,19 +63,19 @@ let bases: [NSFont] = [
 ]
 for base in bases {
     let font = base.cascading(to: symbols)
-    // SF Mono arrives as a UI font, which the app reopens from its file
-    // (see NSFont.standaloneEquivalent). Say what happened, so a failure
-    // below comes with the reason.
+    // SF Mono arrives as a UI font, which the app swaps for the same face
+    // from Terminal.app's SF Mono family (see NSFont.standaloneEquivalent).
+    // Say what happened, so a failure below comes with the reason.
     if base.fontName.hasPrefix(".") {
         let manager = NSFontManager.shared
         print("info  \(base.fontName) is a UI font; variation \(String(describing: CTFontCopyVariation(base as CTFont)))")
-        print("info  SF Mono file: \(NSFont.monospacedSystemFontFile?.path ?? "not found")")
+        print("info  Terminal.app SF Mono faces: \(SystemMono.faces.map(\.lastPathComponent).sorted()); registered \(SystemMono.isRegistered)")
         if let candidate = base.standaloneCandidate {
             let bold = manager.convert(candidate, toHaveTrait: .boldFontMask)
             let italic = manager.convert(candidate, toHaveTrait: .italicFontMask)
-            print("info  reopened as \(candidate.fontName): same cell metrics \(candidate.hasSameCellMetrics(as: base)), bold \(bold.fontName) weight \(manager.weight(of: bold)), italic \(italic.fontName) \(manager.traits(of: italic).contains(.italicFontMask))")
+            print("info  candidate \(candidate.fontName): same cell metrics \(candidate.hasSameCellMetrics(as: base)), bold \(bold.fontName) weight \(manager.weight(of: bold)), italic \(italic.fontName) \(manager.traits(of: italic).contains(.italicFontMask))")
         } else {
-            print("info  could not be reopened from a file")
+            print("info  no SF Mono candidate")
         }
         if base.standaloneEquivalent == nil {
             print("FAIL  \(base.fontName): no standalone equivalent passed the metrics and style checks")
@@ -109,15 +109,16 @@ for base in bases {
     }
 
     // SwiftTerm derives bold itself, through NSFontManager, from the font it
-    // is given. Bold text has to stay as heavy as it was before the app
-    // touched the font — reopening SF Mono from its file must not cost it
-    // its bold. Whether bold *icons* keep the fallback is AppKit's business,
-    // so that is reported rather than enforced.
+    // is given. Bold text has to stay bold — at least as heavy as before the
+    // app touched the font — or icons would have been bought with it.
+    // Whether bold *icons* keep the fallback is AppKit's business, so that
+    // is reported rather than enforced.
     let manager = NSFontManager.shared
     let bold = manager.convert(font, toHaveTrait: .boldFontMask)
     let boldBefore = manager.convert(base, toHaveTrait: .boldFontMask)
-    if manager.weight(of: bold) == manager.weight(of: boldBefore) {
-        print("ok    \(base.fontName): bold is \(bold.fontName), weight \(manager.weight(of: bold)) as before")
+    if manager.weight(of: bold) > manager.weight(of: font),
+       manager.weight(of: bold) >= manager.weight(of: boldBefore) {
+        print("ok    \(base.fontName): bold is \(bold.fontName), weight \(manager.weight(of: bold)) (was \(manager.weight(of: boldBefore)))")
     } else {
         print("FAIL  \(base.fontName): bold is \(bold.fontName), weight \(manager.weight(of: bold)); was \(boldBefore.fontName), weight \(manager.weight(of: boldBefore))")
         failed = true
