@@ -493,8 +493,9 @@ system-only linkage, and that they actually run.
 
 **Versions** live in `scripts/tools.env` and move only by a PR that edits it;
 nothing updates itself or is downloaded at runtime. Settings → Advanced lists
-the bundled versions and opens each licence. The tools add roughly 25 MB to
-the download, almost all of it superfile.
+the bundled versions and opens each licence. The tools take the download from
+about 5 MB to about 35 MB; btop accounts for about 3 MB of that, superfile the
+rest.
 
 **Deliberately not done:** btop's README recommends setting it suid-root so it
 can show every user's processes. It does not run that way here — a suid-root
