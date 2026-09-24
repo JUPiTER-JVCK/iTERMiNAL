@@ -93,10 +93,13 @@ struct DetailView: View {
 
                 if store.rightRegionOpen {
                     if !store.rightPanelExpanded {
+                        // The range follows the floor, so dragging a tool's
+                        // panel stops visibly at its minimum instead of the
+                        // seam moving while the panel does not.
                         PanelResizeHandle(
                             axis: .horizontal,
-                            value: rightPanelWidth,
-                            range: 280...1200,
+                            value: effectivePanelWidth,
+                            range: panelWidthFloor...1200,
                             inverted: true,
                             resetTo: 420,
                             available: size.width,
@@ -147,14 +150,29 @@ struct DetailView: View {
     }
 
     /// Width for the trailing panel against the space actually available.
+    /// The narrowest the front panel may be. A bundled tool raises it: btop
+    /// and superfile show a "too small" message instead of their interface
+    /// when squeezed, and 280pt squeezes them.
+    private var panelWidthFloor: Double {
+        store.visiblePanel?.minimumWidth ?? 280
+    }
+
+    /// The requested width, raised to the front panel's floor. The stored
+    /// width is never rewritten to meet the floor, so bringing Notes back to
+    /// the front returns it to whatever the user last dragged it to.
+    private var effectivePanelWidth: Double {
+        max(rightPanelWidth, panelWidthFloor)
+    }
+
     private func panelWidth(in available: Double) -> Double {
         let minMain: Double = 360
         let minPanel: Double = 280
         if available >= minMain + minPanel {
             // Room for both: honour the requested width, capped so the main
             // surface keeps its minimum. The live value while dragging, the
-            // stored one otherwise.
-            return min(rightPanelWidth, available - minMain)
+            // stored one otherwise — raised to a tool's floor while one is in
+            // front, and still capped, so a small window keeps its terminal.
+            return min(effectivePanelWidth, available - minMain)
         }
         // Too narrow for both minimums, so neither gets one. Split what
         // there is and leave the larger share to the main surface — it
@@ -244,6 +262,24 @@ private struct DetailTopStrip: View {
 
             Spacer(minLength: 12)
 
+            // The bundled tools sit left of the layout toggles, and apart from
+            // them: these start a program, the rest arrange the window.
+            ForEach(SidePanel.allCases.filter(\.isTool)) { panel in
+                let isOpen = store.rightRegionOpen && store.openPanels.contains(panel)
+                StripToggle(
+                    icon: panel.icon,
+                    help: "\(isOpen ? "Close" : "Open") \(panel.title) — \(panel.tool?.summary ?? "")",
+                    isActive: isOpen
+                ) {
+                    store.togglePanel(panel)
+                }
+            }
+
+            Rectangle()
+                .fill(theme.surfaceBorder)
+                .frame(width: 1, height: 16)
+                .padding(.horizontal, 3)
+
             StripToggle(
                 icon: "rectangle.bottomthird.inset.filled",
                 help: "Toggle terminal dock",
@@ -252,7 +288,7 @@ private struct DetailTopStrip: View {
                 store.toggleBottomDock()
             }
 
-            ForEach(SidePanel.allCases) { panel in
+            ForEach(SidePanel.allCases.filter { !$0.isTool }) { panel in
                 StripToggle(
                     icon: panel.icon,
                     help: "Toggle \(panel.title) panel",
@@ -990,6 +1026,10 @@ struct RightPanelView: View {
             FilePaneView(model: store.panelFiles)
         case .notes:
             NotesPaneView(model: store.panelNotes)
+        case .superfile:
+            ToolPanelView(tool: .superfile)
+        case .btop:
+            ToolPanelView(tool: .btop)
         case nil:
             PanelPicker()
         }
@@ -1082,6 +1122,35 @@ private struct PanelTabChip: View {
 
 /// Shown when the trailing region is open but empty — the reference app
 /// offers the same choice rather than a blank panel.
+/// A bundled tool — superfile or btop — running in its side panel.
+///
+/// Hosts the same `TerminalPaneView` a tab pane uses, so a tool that exits or
+/// fails to launch gets the same banner and Restart button a shell does,
+/// rather than a second implementation of both.
+private struct ToolPanelView: View {
+    let tool: TerminalTool
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        Group {
+            if let session = store.toolSessions[tool] {
+                // Identity follows the session. Restart relaunches inside the
+                // same one, but closing and reopening the panel, or an import,
+                // replaces it — and without this the container would keep
+                // hosting the old, dead terminal.
+                TerminalPaneView(session: session, isSolo: true)
+                    .id(session.id)
+            } else {
+                // Only for the instant before onAppear starts it.
+                Color.clear
+            }
+        }
+        // A panel restored at launch was never clicked, so nothing has
+        // started its tool yet; this does, and only once it is on screen.
+        .onAppear { store.ensureToolSession(tool) }
+    }
+}
+
 private struct PanelPicker: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme

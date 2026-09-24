@@ -5,7 +5,7 @@
 #   scripts/build-btop.sh OUTPUT_DIR
 #
 # Writes OUTPUT_DIR/btop (thin, for the host architecture) and
-# OUTPUT_DIR/btop-LICENSE.txt. CI runs it once on an Apple Silicon runner and
+# OUTPUT_DIR/licenses/btop-LICENSE.txt. CI runs it once on an Apple Silicon runner and
 # once on an Intel one, then lipo merges the two: GCC, unlike clang, cannot
 # cross-compile between them.
 #
@@ -83,5 +83,8 @@ fi
 
 cp "$binary" "$out/btop"
 chmod 755 "$out/btop"
-cp "$work/btop/LICENSE" "$out/btop-LICENSE.txt"
+# Same layout as the bundle, so a local `build-btop.sh Vendor/Tools` puts the
+# notice where Settings → Advanced looks for it.
+mkdir -p "$out/licenses"
+cp "$work/btop/LICENSE" "$out/licenses/btop-LICENSE.txt"
 echo "btop $BTOP_VERSION ($(uname -m)) -> $out/btop"

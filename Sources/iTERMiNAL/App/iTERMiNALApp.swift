@@ -175,6 +175,19 @@ struct AppCommands: Commands {
 
             Divider()
 
+            // Opening either starts it; closing it ends the process.
+            Button("Toggle superfile") {
+                WorkspaceStore.shared.togglePanel(.superfile)
+            }
+            .keyboardShortcut("s", modifiers: [.command, .option])
+
+            Button("Toggle btop") {
+                WorkspaceStore.shared.togglePanel(.btop)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+
+            Divider()
+
             Button("Focus Composer") {
                 WorkspaceStore.shared.focusComposer()
             }

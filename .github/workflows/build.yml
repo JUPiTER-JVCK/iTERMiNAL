@@ -180,7 +180,7 @@ jobs:
             btop-slices/btop-x86_64/btop
           codesign --force --sign - "$tools/btop"
           chmod 755 "$tools/btop"
-          cp btop-slices/btop-arm64/btop-LICENSE.txt "$tools/licenses/btop-LICENSE.txt"
+          cp btop-slices/btop-arm64/licenses/btop-LICENSE.txt "$tools/licenses/btop-LICENSE.txt"
 
           scripts/fetch-superfile.sh "$tools"
 
