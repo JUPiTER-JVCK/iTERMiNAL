@@ -101,8 +101,62 @@ extension NSFont {
     /// This font with `fallback` consulted first for characters it lacks,
     /// ahead of any cascade list it already had.
     func cascading(to fallback: NSFontDescriptor) -> NSFont {
-        let existing = fontDescriptor.object(forKey: .cascadeList) as? [NSFontDescriptor] ?? []
-        let descriptor = fontDescriptor.addingAttributes([.cascadeList: [fallback] + existing])
-        return NSFont(descriptor: descriptor, size: pointSize) ?? self
+        let base = standaloneEquivalent ?? self
+        let existing = base.fontDescriptor.object(forKey: .cascadeList) as? [NSFontDescriptor] ?? []
+        let descriptor = base.fontDescriptor.addingAttributes([.cascadeList: [fallback] + existing])
+        return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
+    }
+
+    /// The same face as this system UI font, opened from its file as an
+    /// ordinary font — or nil if this is not a UI font, or the reopened one
+    /// would not draw identically.
+    ///
+    /// `monospacedSystemFont` — SF Mono, the terminal's default — returns a
+    /// UI font, and CoreText resolves a UI font's missing characters through
+    /// the system's own fallback first, which ends in LastResort: a font that
+    /// claims the whole Basic Multilingual Plane and draws a box for each
+    /// code point. A cascade list only gets the characters LastResort leaves,
+    /// so under SF Mono every icon from U+E000–U+F8FF still drew as a box
+    /// while supplementary-plane icons reached the symbols face. CI's font
+    /// check caught exactly that. An ordinary font consults its cascade list
+    /// before the system's, which is what makes Menlo, JetBrains Mono and the
+    /// rest work.
+    ///
+    /// Only returned when its cell metrics match this font's exactly, so the
+    /// terminal grid cannot change under anyone.
+    var standaloneEquivalent: NSFont? {
+        // UI fonts are the dot-named ones: .AppleSystemUIFontMonospaced-…
+        guard fontName.hasPrefix(".") else { return nil }
+        let font = self as CTFont
+        guard let url = CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL,
+              let faces = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+              let first = faces.first else { return nil }
+        // A file can hold several faces; take the one with this style.
+        let style = CTFontCopyName(font, kCTFontStyleNameKey) as String?
+        var face = faces.first {
+            (CTFontDescriptorCopyAttribute($0, kCTFontStyleNameAttribute) as? String) == style
+        } ?? first
+        // SF Mono is a variable font. Carry the axis values over, or a
+        // Regular request could come back as the file's default instance.
+        if let variation = CTFontCopyVariation(font) {
+            face = CTFontDescriptorCreateCopyWithAttributes(
+                face, [kCTFontVariationAttribute: variation] as CFDictionary
+            )
+        }
+        let standalone = CTFontCreateWithFontDescriptor(face, pointSize, nil) as NSFont
+        guard standalone.hasSameCellMetrics(as: self) else { return nil }
+        return standalone
+    }
+
+    /// Same advance for "W" and same line height: what SwiftTerm sizes a
+    /// terminal cell from.
+    func hasSameCellMetrics(as other: NSFont) -> Bool {
+        func advance(_ font: NSFont) -> CGFloat {
+            font.advancement(forGlyph: font.glyph(withName: "W")).width
+        }
+        return abs(advance(self) - advance(other)) < 0.001
+            && abs(ascender - other.ascender) < 0.001
+            && abs(descender - other.descender) < 0.001
+            && abs(leading - other.leading) < 0.001
     }
 }

@@ -10,8 +10,9 @@
 // Each sample is laid out the way SwiftTerm draws a row — a CTLine over an
 // attributed string — so the font CoreText picks for the icon's run is the
 // font the terminal will draw it with. Exits non-zero if any icon falls
-// through to another font, or if the fallback takes over a character the
-// terminal font already has.
+// through to another font, if the fallback takes over a character the
+// terminal font already has, or if the font the app hands SwiftTerm has
+// different cell metrics or a lighter bold than the one it started from.
 import AppKit
 import CoreText
 
@@ -62,6 +63,29 @@ let bases: [NSFont] = [
 ]
 for base in bases {
     let font = base.cascading(to: symbols)
+    // SF Mono arrives as a UI font, which the app reopens from its file
+    // (see NSFont.standaloneEquivalent). Say what happened, so a failure
+    // below comes with the reason.
+    if base.fontName.hasPrefix(".") {
+        let url = CTFontCopyAttribute(base as CTFont, kCTFontURLAttribute) as? URL
+        let faces = url.flatMap { CTFontManagerCreateFontDescriptorsFromURL($0 as CFURL) as? [CTFontDescriptor] } ?? []
+        let names = faces.compactMap { CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String }
+        print("info  \(base.fontName) is a UI font: file \(url?.path ?? "none"), faces \(names)")
+        print("info  variation \(String(describing: CTFontCopyVariation(base as CTFont)))")
+        if let standalone = base.standaloneEquivalent {
+            print("info  reopened as \(standalone.fontName) with identical cell metrics")
+        } else {
+            print("FAIL  \(base.fontName): could not be reopened as an ordinary font")
+            failed = true
+        }
+    }
+    // Whatever the app did to the font, the grid must not move.
+    if font.hasSameCellMetrics(as: base) {
+        print("ok    \(base.fontName): cell metrics unchanged")
+    } else {
+        print("FAIL  \(base.fontName): cell metrics changed")
+        failed = true
+    }
     for icon in icons {
         let got = drawingFont(for: icon.scalar, in: font) ?? "nothing"
         if got == symbolsName {
@@ -81,14 +105,22 @@ for base in bases {
         failed = true
     }
 
-    // SwiftTerm derives bold, italic and bold-italic itself, through
-    // NSFontManager, from the font it is given. Whether those keep the cascade
-    // is up to AppKit, not this app, so it is reported rather than enforced:
-    // superfile draws its icons in regular weight, but a prompt that bolds an
-    // icon depends on this.
-    let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    // SwiftTerm derives bold itself, through NSFontManager, from the font it
+    // is given. Bold text has to stay as heavy as it was before the app
+    // touched the font — reopening SF Mono from its file must not cost it
+    // its bold. Whether bold *icons* keep the fallback is AppKit's business,
+    // so that is reported rather than enforced.
+    let manager = NSFontManager.shared
+    let bold = manager.convert(font, toHaveTrait: .boldFontMask)
+    let boldBefore = manager.convert(base, toHaveTrait: .boldFontMask)
+    if manager.weight(of: bold) == manager.weight(of: boldBefore) {
+        print("ok    \(base.fontName): bold is \(bold.fontName), weight \(manager.weight(of: bold)) as before")
+    } else {
+        print("FAIL  \(base.fontName): bold is \(bold.fontName), weight \(manager.weight(of: bold)); was \(boldBefore.fontName), weight \(manager.weight(of: boldBefore))")
+        failed = true
+    }
     let boldGot = drawingFont(for: icons[0].scalar, in: bold) ?? "nothing"
-    print("info  \(bold.fontName) (bold, derived as SwiftTerm does): \(icons[0].label) -> \(boldGot)")
+    print("info  \(bold.fontName) (bold): \(icons[0].label) -> \(boldGot)")
 }
 
 exit(failed ? 1 : 0)
