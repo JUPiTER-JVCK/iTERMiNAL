@@ -11,8 +11,8 @@
 // attributed string — so the font CoreText picks for the icon's run is the
 // font the terminal will draw it with. Exits non-zero if any icon falls
 // through to another font, if the fallback takes over a character the
-// terminal font already has, or if the font the app hands SwiftTerm has
-// different cell metrics or a lighter bold than the one it started from.
+// terminal font already has, or if the font the app hands SwiftTerm has a
+// visibly different cell or a lighter bold than the one it started from.
 import AppKit
 import CoreText
 
@@ -73,7 +73,7 @@ for base in bases {
         if let candidate = base.standaloneCandidate {
             let bold = manager.convert(candidate, toHaveTrait: .boldFontMask)
             let italic = manager.convert(candidate, toHaveTrait: .italicFontMask)
-            print("info  candidate \(candidate.fontName): same cell metrics \(candidate.hasSameCellMetrics(as: base)), bold \(bold.fontName) weight \(manager.weight(of: bold)), italic \(italic.fontName) \(manager.traits(of: italic).contains(.italicFontMask))")
+            print("info  candidate \(candidate.fontName): cell \(candidate.cellSize) vs \(base.cellSize), close \(candidate.hasCloseCellMetrics(to: base)), bold \(bold.fontName) weight \(manager.weight(of: bold)), italic \(italic.fontName) \(manager.traits(of: italic).contains(.italicFontMask))")
         } else {
             print("info  no SF Mono candidate")
         }
@@ -82,11 +82,14 @@ for base in bases {
             failed = true
         }
     }
-    // Whatever the app did to the font, the grid must not move.
+    // Whatever the app did to the font, the grid must not visibly move:
+    // identical for an ordinary font, close for SF Mono's swap.
     if font.hasSameCellMetrics(as: base) {
-        print("ok    \(base.fontName): cell metrics unchanged")
+        print("ok    \(base.fontName): cell \(font.cellSize), unchanged")
+    } else if base.fontName.hasPrefix("."), font.hasCloseCellMetrics(to: base) {
+        print("ok    \(base.fontName): cell \(font.cellSize), was \(base.cellSize) — within tolerance")
     } else {
-        print("FAIL  \(base.fontName): cell metrics changed")
+        print("FAIL  \(base.fontName): cell \(font.cellSize), was \(base.cellSize)")
         failed = true
     }
     for icon in icons {

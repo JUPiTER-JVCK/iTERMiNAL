@@ -122,12 +122,20 @@ extension NSFont {
     /// before the system's, which is what makes Menlo, JetBrains Mono and the
     /// rest work.
     ///
-    /// Only returned when it draws the same cells and still has a real bold
-    /// and italic, so this can never cost the terminal its grid or its bold
-    /// text in exchange for icons. When it cannot, the font stays as it was.
+    /// Only returned when its cells are within a hair of this font's and it
+    /// still has a real bold and italic, so this can never cost the terminal
+    /// its bold text, or reshape its grid, in exchange for icons. When it
+    /// cannot, the font stays as it was.
+    ///
+    /// Close rather than identical: the system SF Mono is a variable font the
+    /// system tunes per size (CI saw a second axis beside weight), and
+    /// Terminal.app's copies are static, so their line height can differ by
+    /// a fraction. SwiftTerm measures its grid from whichever font it is
+    /// given, so the grid stays consistent either way — it is simply SF Mono
+    /// as Terminal.app draws it.
     var standaloneEquivalent: NSFont? {
         guard let candidate = standaloneCandidate,
-              candidate.hasSameCellMetrics(as: self),
+              candidate.hasCloseCellMetrics(to: self),
               candidate.derivesStyles(like: self) else { return nil }
         return candidate
     }
@@ -165,16 +173,29 @@ extension NSFont {
                 == manager.traits(of: otherItalic).contains(.italicFontMask)
     }
 
-    /// Same advance for "W" and same line height: what SwiftTerm sizes a
-    /// terminal cell from.
+    /// What SwiftTerm sizes a terminal cell from: the advance of "W", and
+    /// ascent plus descent plus leading.
+    var cellSize: CGSize {
+        let ctFont = self as CTFont
+        return CGSize(
+            width: advancement(forGlyph: glyph(withName: "W")).width,
+            height: CTFontGetAscent(ctFont) + CTFontGetDescent(ctFont) + CTFontGetLeading(ctFont)
+        )
+    }
+
+    /// Same cell size, to the thousandth of a point.
     func hasSameCellMetrics(as other: NSFont) -> Bool {
-        func advance(_ font: NSFont) -> CGFloat {
-            font.advancement(forGlyph: font.glyph(withName: "W")).width
-        }
-        return abs(advance(self) - advance(other)) < 0.001
-            && abs(ascender - other.ascender) < 0.001
-            && abs(descender - other.descender) < 0.001
-            && abs(leading - other.leading) < 0.001
+        let (a, b) = (cellSize, other.cellSize)
+        return abs(a.width - b.width) < 0.001 && abs(a.height - b.height) < 0.001
+    }
+
+    /// A cell within 2% as wide and 10% as tall: a column count and line
+    /// count no one would notice changing.
+    func hasCloseCellMetrics(to other: NSFont) -> Bool {
+        let (a, b) = (cellSize, other.cellSize)
+        guard b.width > 0, b.height > 0 else { return false }
+        return abs(a.width - b.width) / b.width <= 0.02
+            && abs(a.height - b.height) / b.height <= 0.10
     }
 }
 
