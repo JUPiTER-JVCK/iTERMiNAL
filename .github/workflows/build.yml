@@ -47,6 +47,10 @@ jobs:
   btop:
     name: Build btop (${{ matrix.arch }})
     strategy:
+      # Each architecture's result is worth having on its own. With the
+      # default fail-fast, an arm64 failure cancelled the Intel leg, leaving
+      # no way to tell whether x86_64 built without spending another run.
+      fail-fast: false
       matrix:
         include:
           - runner: macos-15

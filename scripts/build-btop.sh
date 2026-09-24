@@ -52,8 +52,18 @@ fi
 # GPU_SUPPORT is Linux-only upstream; stated so the build cannot drift.
 # No lowdown is installed, so the man page is skipped, which is fine: nothing
 # in the app bundle would ever read it.
+#
+# CXX_IS_CLANG=false works around an upstream Makefile bug: it sets that
+# variable to `true` for clang and never to `false`, so with GCC it is empty
+# and the `ifeq ($(CXX_IS_CLANG),false)` guarding -static-libgcc and
+# -static-libstdc++ on macOS can never fire. STATIC=true alone is a silent
+# no-op here — the first CI run built a binary linking Homebrew's libstdc++
+# and libgcc_s, which the otool check below refused. The Makefile's only
+# assignment is an override that fires for clang, so this cannot mislabel
+# a clang build.
 "$MAKE_BIN" -C "$work/btop" \
   CXX="$CXX" \
+  CXX_IS_CLANG=false \
   STATIC=true \
   GPU_SUPPORT=false \
   QUIET=true \
