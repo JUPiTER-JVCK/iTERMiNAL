@@ -77,14 +77,21 @@ struct Theme {
         scheme == .dark ? .dark : .light
     }
 
-    /// The floating surface as hex, for code that needs its luminance — a
-    /// `Color` will not give it up. Named once so the colour and anything
-    /// measured against it cannot drift apart.
     static let darkFloatingSurfaceHex: UInt32 = 0x25252B
     static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
 
-    static func floatingSurfaceHex(for scheme: ColorScheme) -> UInt32 {
-        scheme == .dark ? darkFloatingSurfaceHex : lightFloatingSurfaceHex
+    /// The composer's input field, as an opaque colour.
+    ///
+    /// Opaque on purpose, and in hex: the command colours are chosen for
+    /// contrast against exactly this value, which only holds if nothing shows
+    /// through it — the card around it can be translucent over arbitrary
+    /// terminal content. Named once so the colour and what is measured against
+    /// it cannot drift apart.
+    static let darkInputFieldHex: UInt32 = 0x1D1D21
+    static let lightInputFieldHex: UInt32 = 0xF1F1F3
+
+    static func inputFieldHex(for scheme: ColorScheme) -> UInt32 {
+        scheme == .dark ? darkInputFieldHex : lightInputFieldHex
     }
 
     static let dark = Theme(

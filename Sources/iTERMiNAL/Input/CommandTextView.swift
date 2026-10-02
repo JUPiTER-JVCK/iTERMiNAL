@@ -138,6 +138,10 @@ struct CommandInputView: NSViewRepresentable {
         var parent: CommandInputView
         weak var textView: CommandTextView?
         private var appliedStyle: CommandInputStyle?
+        /// Whether `./script` is coloured depends on where the command will
+        /// run, so the painted state is a function of this as well as the
+        /// style: switching destination must repaint even if nothing else did.
+        private var appliedDirectory: String?
 
         init(_ parent: CommandInputView) {
             self.parent = parent
@@ -168,7 +172,7 @@ struct CommandInputView: NSViewRepresentable {
                 textView.needsDisplay = true
             }
 
-            apply(view.style, to: textView)
+            apply(view.style, directory: view.workingDirectory, to: textView)
 
             if view.focusPending {
                 DispatchQueue.main.async { [weak self] in self?.takeFocusIfRequested() }
@@ -187,9 +191,10 @@ struct CommandInputView: NSViewRepresentable {
 
         // MARK: Colour
 
-        private func apply(_ style: CommandInputStyle, to textView: CommandTextView) {
-            guard style != appliedStyle else { return }
+        private func apply(_ style: CommandInputStyle, directory: String?, to textView: CommandTextView) {
+            guard style != appliedStyle || directory != appliedDirectory else { return }
             appliedStyle = style
+            appliedDirectory = directory
             textView.font = CommandInputView.font
             textView.textColor = style.body
             textView.insertionPointColor = style.accent
@@ -240,7 +245,7 @@ struct CommandInputView: NSViewRepresentable {
                     // Only a command that exists gets the colour: aliases and
                     // functions are invisible from here, so unknown stays plain.
                     let word = string.substring(with: range)
-                    guard CommandResolver.shared.isKnown(word, workingDirectory: parent.workingDirectory) else { continue }
+                    guard CommandResolver.shared.isKnown(word, workingDirectory: appliedDirectory) else { continue }
                     color = style.colors.command
                 case .flag: color = style.colors.flag
                 case .string: color = style.colors.string

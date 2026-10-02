@@ -28,10 +28,13 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   into whichever terminal has focus — drag it anywhere, minimise it to a pill,
   and recall earlier commands with the arrow keys. It colours what you type —
   commands, flags, strings, variables, pipes — in your terminal theme's colours,
-  switching to a palette tuned for the card wherever a theme's own colours would
-  not read on it. A command word is coloured only if it is found on this app's
-  `PATH`; one it can't find (an alias, say) is left plain, never marked wrong.
-  The chip above the input
+  switching to a palette tuned for the input wherever a theme's own colours
+  would not read on it (4.5:1 contrast, checked in CI). A command word is
+  coloured if it is a shell builtin, an executable on this app's `PATH` or in
+  `~/.local/bin`, `~/.cargo/bin`, `~/bin` or `~/go/bin`, or a path such as
+  `./script` that points at an executable file (checked against the terminal's
+  directory, for local terminals only). Anything else — an alias or a shell
+  function, say — is left plain, never marked wrong. The chip above the input
   names the terminal it will run in, and switches it to a private shell of its
   own if you want one.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file

@@ -399,7 +399,9 @@ struct ComposerBar: View {
             onRecallEarlier: recallEarlier,
             onRecallLater: recallLater
         )
-        .background(shape.fill(theme.surface.opacity(inputFocused ? 0.7 : 0.5)))
+        // Opaque and sRGB, so the colours chosen for it are checked against
+        // exactly what is drawn. The focus change is the accent hairline.
+        .background(shape.fill(Color(hex: Theme.inputFieldHex(for: colorScheme))))
         .overlay(
             shape.strokeBorder(
                 inputFocused ? settings.accentColor.opacity(0.55) : theme.surfaceBorder,
@@ -410,8 +412,8 @@ struct ComposerBar: View {
         .animation(reduceMotion ? nil : Motion.field, value: inputFocused)
     }
 
-    /// The command colours for the card this is typed on, from the terminal
-    /// theme where it reads and from a palette tuned for the card where it
+    /// The command colours for the field this is typed in, from the terminal
+    /// theme where it reads and from a palette tuned for the field where it
     /// would not.
     private func inputStyle(_ theme: Theme) -> CommandInputStyle {
         let dark = colorScheme == .dark
@@ -419,8 +421,8 @@ struct ComposerBar: View {
         let colors = SyntaxPalette.colors(
             ansi: terminal.ansi,
             foreground: terminal.foreground,
-            card: Theme.floatingSurfaceHex(for: colorScheme),
-            darkCard: dark
+            background: Theme.inputFieldHex(for: colorScheme),
+            darkBackground: dark
         )
         return CommandInputStyle(
             colors: colors,

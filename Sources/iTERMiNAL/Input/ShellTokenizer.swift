@@ -207,6 +207,8 @@ enum ShellTokenizer {
                     if peek() == Ch.lt || peek() == Ch.minus { i += 1 }   // <<< and <<-
                 } else if peek() == Ch.gt {
                     i += 1                                                // <>
+                } else if peek() == Ch.amp {
+                    i += 1                                                // <& duplicates an input descriptor
                 }
             } else {
                 if peek() == Ch.gt {

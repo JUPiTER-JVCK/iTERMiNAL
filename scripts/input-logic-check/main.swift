@@ -69,6 +69,10 @@ expect("ls ~/Library", ["command ls"])
 expect("echo hi >out", ["command echo", "op >"])
 expect("echo hi > out && ls", ["command echo", "op >", "op &&", "command ls"])
 expect("cat <<EOF", ["command cat", "op <<"])
+expect("cat <&3", ["command cat", "op <&"])
+expect("cat <&3 && ls", ["command cat", "op <&", "op &&", "command ls"])
+expect("exec 3<&0", ["command exec", "op 3<&"])
+expect("cat <&- | wc", ["command cat", "op <&", "op |", "command wc"])
 expect("diff <(ls a) <(ls b)",
        ["command diff", "op <(", "command ls", "op )", "op <(", "command ls", "op )"])
 expect("echo ${HOME:-x}", ["command echo", "variable ${HOME:-x}"])
@@ -110,13 +114,13 @@ do {
 
 // MARK: Palette
 
-let darkCard: UInt32 = 0x25252B     // Theme.darkFloatingSurfaceHex
-let lightCard: UInt32 = 0xFDFDFE    // Theme.lightFloatingSurfaceHex
+// The opaque field the command is typed in: Theme.darkInputFieldHex and
+// Theme.lightInputFieldHex. This file cannot import Theme, so it repeats them.
+// Read them from the source and compare, so a change to the field cannot
+// silently leave the tuning behind. Run from the repository root, as CI does.
+let darkField: UInt32 = 0x1D1D21
+let lightField: UInt32 = 0xF1F1F3
 
-// This file cannot import Theme, so it repeats the two card colours the
-// fallbacks are tuned against. Read them from the source and compare, so a
-// change to the card cannot silently leave the tuning behind. Run from the
-// repository root, as CI does.
 do {
     let path = "Sources/iTERMiNAL/Chrome/Theme.swift"
     if let source = try? String(contentsOfFile: path, encoding: .utf8) {
@@ -125,10 +129,10 @@ do {
             let digits = source[range.upperBound...].prefix { $0.isHexDigit }
             return UInt32(digits, radix: 16)
         }
-        check(declared("darkFloatingSurfaceHex") == darkCard,
-              "Theme.darkFloatingSurfaceHex is \(String(describing: declared("darkFloatingSurfaceHex"))); the fallbacks were tuned for \(ColorMath.hex(darkCard))")
-        check(declared("lightFloatingSurfaceHex") == lightCard,
-              "Theme.lightFloatingSurfaceHex is \(String(describing: declared("lightFloatingSurfaceHex"))); the fallbacks were tuned for \(ColorMath.hex(lightCard))")
+        check(declared("darkInputFieldHex") == darkField,
+              "Theme.darkInputFieldHex is \(String(describing: declared("darkInputFieldHex"))); the fallbacks were tuned for \(ColorMath.hex(darkField))")
+        check(declared("lightInputFieldHex") == lightField,
+              "Theme.lightInputFieldHex is \(String(describing: declared("lightInputFieldHex"))); the fallbacks were tuned for \(ColorMath.hex(lightField))")
     } else {
         check(false, "could not read \(path): run this from the repository root")
     }
@@ -141,17 +145,20 @@ func all(_ c: SyntaxColors) -> [(String, UInt32)] {
 
 // The fallbacks are what a user sees whenever their terminal theme would not
 // read, so they have to read well, not just barely.
-for (name, colors, card) in [("dark", SyntaxPalette.darkFallback, darkCard),
-                             ("light", SyntaxPalette.lightFallback, lightCard)] {
+for (name, colors, field) in [("dark", SyntaxPalette.darkFallback, darkField),
+                              ("light", SyntaxPalette.lightFallback, lightField)] {
     for (kind, color) in all(colors) {
-        let ratio = ColorMath.contrast(color, card)
-        check(ratio >= (kind == "comment" ? 3.0 : 4.5),
-              "\(name) fallback \(kind) \(ColorMath.hex(color)) is \(String(format: "%.2f", ratio)):1 on its card")
+        let ratio = ColorMath.contrast(color, field)
+        check(ratio >= 4.5,
+              "\(name) fallback \(kind) \(ColorMath.hex(color)) is \(String(format: "%.2f", ratio)):1 on its field")
     }
 }
 
+// The floor is WCAG AA for normal text, because the input is 13 pt regular.
+check(SyntaxPalette.minimumContrast == 4.5, "minimumContrast is \(SyntaxPalette.minimumContrast), not 4.5")
+
 // A cross-section of the shipped terminal themes (ANSI slots 0–7 are enough:
-// the palette reads 2–6), on both cards.
+// the palette reads 2–6), on both fields.
 let themes: [(String, [UInt32], UInt32)] = [
     ("codex-dark",
      [0x2B2B2B, 0xE05561, 0x8CC265, 0xD18F52, 0x4AA5F0, 0xC162DE, 0x42B3C2, 0xD7D7D7], 0xECECEC),
@@ -171,12 +178,12 @@ let themes: [(String, [UInt32], UInt32)] = [
      [0x3B4252, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x88C0D0, 0xE5E9F0], 0xD8DEE9),
 ]
 for (name, ansi, foreground) in themes {
-    for (cardName, card, dark) in [("dark card", darkCard, true), ("light card", lightCard, false)] {
-        let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, card: card, darkCard: dark)
+    for (fieldName, field, dark) in [("dark field", darkField, true), ("light field", lightField, false)] {
+        let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, background: field, darkBackground: dark)
         for (kind, color) in all(colors) {
-            let ratio = ColorMath.contrast(color, card)
-            check(ratio >= SyntaxPalette.minimumContrast,
-                  "\(name) on the \(cardName): \(kind) \(ColorMath.hex(color)) is \(String(format: "%.2f", ratio)):1")
+            let ratio = ColorMath.contrast(color, field)
+            check(ratio >= 4.5,
+                  "\(name) on the \(fieldName): \(kind) \(ColorMath.hex(color)) is \(String(format: "%.2f", ratio)):1")
         }
     }
 }
@@ -184,23 +191,23 @@ for (name, ansi, foreground) in themes {
 // When the theme's own colours read, they are used as they are.
 do {
     let (_, ansi, foreground) = themes[0]
-    let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, card: darkCard, darkCard: true)
+    let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, background: darkField, darkBackground: true)
     check(colors.command == ansi[2] && colors.flag == ansi[6] && colors.string == ansi[3]
           && colors.variable == ansi[5] && colors.op == ansi[4],
-          "codex-dark on the dark card should keep its own colours, got \(all(colors).map { ColorMath.hex($0.1) })")
+          "codex-dark on the dark field should keep its own colours, got \(all(colors).map { ColorMath.hex($0.1) })")
 }
 
-// A theme that would vanish on the card is replaced, not trusted.
+// A theme that would vanish on the field is replaced, not trusted.
 do {
     let (_, ansi, foreground) = themes[4]   // Dracula's pastels
-    let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, card: lightCard, darkCard: false)
+    let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, background: lightField, darkBackground: false)
     check(colors.command == SyntaxPalette.lightFallback.command,
-          "dracula green on the light card should fall back, got \(ColorMath.hex(colors.command))")
+          "dracula green on the light field should fall back, got \(ColorMath.hex(colors.command))")
 }
 
 // A palette with too few slots falls back rather than crashing.
 do {
-    let colors = SyntaxPalette.colors(ansi: [], foreground: 0xFFFFFF, card: darkCard, darkCard: true)
+    let colors = SyntaxPalette.colors(ansi: [], foreground: 0xFFFFFF, background: darkField, darkBackground: true)
     check(colors.command == SyntaxPalette.darkFallback.command, "empty palette should fall back")
 }
 
