@@ -77,6 +77,16 @@ struct Theme {
         scheme == .dark ? .dark : .light
     }
 
+    /// The floating surface as hex, for code that needs its luminance — a
+    /// `Color` will not give it up. Named once so the colour and anything
+    /// measured against it cannot drift apart.
+    static let darkFloatingSurfaceHex: UInt32 = 0x25252B
+    static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
+
+    static func floatingSurfaceHex(for scheme: ColorScheme) -> UInt32 {
+        scheme == .dark ? darkFloatingSurfaceHex : lightFloatingSurfaceHex
+    }
+
     static let dark = Theme(
         background: Color(p3: 0x131316),
         sidebar: Color(p3: 0x0C0C0E),
@@ -90,7 +100,7 @@ struct Theme {
         elevatedShadow: Color.black.opacity(0.55),
         elevatedHighlight: Color.white.opacity(0.06),
         divider: Color.white.opacity(0.09),
-        floatingSurface: Color(p3: 0x25252B)
+        floatingSurface: Color(p3: Theme.darkFloatingSurfaceHex)
     )
 
     static let light = Theme(
@@ -106,7 +116,7 @@ struct Theme {
         elevatedShadow: Color.black.opacity(0.13),
         elevatedHighlight: Color.white.opacity(0.9),
         divider: Color.black.opacity(0.08),
-        floatingSurface: Color(p3: 0xFDFDFE)
+        floatingSurface: Color(p3: Theme.lightFloatingSurfaceHex)
     )
 }
 
