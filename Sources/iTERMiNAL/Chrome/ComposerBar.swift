@@ -20,6 +20,7 @@ struct ComposerBar: View {
 
     @State private var text = ""
     @StateObject private var ai = ComposerAIController()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
     @State private var dragDelta: CGSize = .zero
@@ -33,7 +34,8 @@ struct ComposerBar: View {
     /// Darkens the grip while a drag is in flight, so it is obvious the card
     /// has been picked up.
     @State private var dragging = false
-    @FocusState private var inputFocused: Bool
+    /// Whether the input has keyboard focus, reported by the editor.
+    @State private var inputFocused = false
 
     var body: some View {
         Group {
@@ -59,7 +61,6 @@ struct ComposerBar: View {
         )
         .animation(Motion.panel, value: settings.composerCollapsed)
         .onChange(of: bounds) { _, _ in clampToBounds() }
-        .onChange(of: store.composerFocusRequest) { _, _ in inputFocused = true }
         // Hiding the composer mid-request used to leave the call running with
         // nothing left to show its answer.
         .onDisappear { ai.cancel() }
@@ -200,14 +201,7 @@ struct ComposerBar: View {
                     )
                 }
 
-                TextField("Run anything", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .lineLimit(1...6)
-                    .focused($inputFocused)
-                    .onSubmit(send)
-                    .onKeyPress(.upArrow) { recallEarlier() }
-                    .onKeyPress(.downArrow) { recallLater() }
+                inputField(theme: theme)
 
                 HStack(spacing: 8) {
                     // A popover rather than a Menu: the reference app groups
@@ -247,7 +241,7 @@ struct ComposerBar: View {
                                 )
                             )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressScaleButtonStyle())
                     .disabled(trimmedText.isEmpty)
                 }
             }
@@ -385,16 +379,81 @@ struct ComposerBar: View {
         draft = ""
     }
 
+    // MARK: Input
+
+    /// The command line, in a soft field that warms to the accent on focus.
+    ///
+    /// The field's whole area is the editor — its padding is the text view's own
+    /// inset — so a click anywhere in it lands the caret.
+    private func inputField(theme: Theme) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return CommandInputView(
+            text: $text,
+            placeholder: "Run anything",
+            style: inputStyle(theme),
+            workingDirectory: destinationDirectory,
+            focusPending: store.composerFocusPending,
+            isFocused: $inputFocused,
+            onFocusTaken: { store.composerFocusHandled = store.composerFocusRequest },
+            onSubmit: send,
+            onRecallEarlier: recallEarlier,
+            onRecallLater: recallLater
+        )
+        .background(shape.fill(theme.surface.opacity(inputFocused ? 0.7 : 0.5)))
+        .overlay(
+            shape.strokeBorder(
+                inputFocused ? settings.accentColor.opacity(0.55) : theme.surfaceBorder,
+                lineWidth: 1
+            )
+        )
+        // With Reduce Motion on, the focus change is instant rather than eased.
+        .animation(reduceMotion ? nil : Motion.field, value: inputFocused)
+    }
+
+    /// The command colours for the card this is typed on, from the terminal
+    /// theme where it reads and from a palette tuned for the card where it
+    /// would not.
+    private func inputStyle(_ theme: Theme) -> CommandInputStyle {
+        let dark = colorScheme == .dark
+        let terminal = settings.resolvedTerminalTheme(darkMode: dark)
+        let colors = SyntaxPalette.colors(
+            ansi: terminal.ansi,
+            foreground: terminal.foreground,
+            card: Theme.floatingSurfaceHex(for: colorScheme),
+            darkCard: dark
+        )
+        return CommandInputStyle(
+            colors: colors,
+            body: NSColor(theme.textPrimary),
+            accent: NSColor(settings.accentColor),
+            placeholder: NSColor(theme.textSecondary)
+        )
+    }
+
+    /// Where the command will run, for checking `./script` against. Nil for a
+    /// remote session, whose files this Mac cannot see.
+    private var destinationDirectory: String? {
+        switch store.composerDestination {
+        case .terminal(let session):
+            return session.isRemote ? nil : session.currentDirectory
+        case .ownShell:
+            return store.composerSession?.currentDirectory
+        }
+    }
+
     // MARK: Arrow-key recall
 
     /// Walks back through commands this composer has run, the way a shell
     /// does. Multi-line input is left alone: there the arrows have to move
     /// the caret, and stealing them would make the field unusable.
-    private func recallEarlier() -> KeyPress.Result {
+    ///
+    /// Both return whether they used the key; false hands it back to the text
+    /// view, which moves the caret.
+    private func recallEarlier() -> Bool {
         let history = store.composerHistory
-        guard !text.contains("\n"), !history.isEmpty else { return .ignored }
+        guard !text.contains("\n"), !history.isEmpty else { return false }
         if let historyIndex {
-            guard historyIndex > 0 else { return .handled }
+            guard historyIndex > 0 else { return true }
             self.historyIndex = historyIndex - 1
             text = history[historyIndex - 1]
         } else {
@@ -403,12 +462,12 @@ struct ComposerBar: View {
             historyIndex = history.count - 1
             text = history[history.count - 1]
         }
-        return .handled
+        return true
     }
 
-    private func recallLater() -> KeyPress.Result {
+    private func recallLater() -> Bool {
         let history = store.composerHistory
-        guard !text.contains("\n"), let historyIndex else { return .ignored }
+        guard !text.contains("\n"), let historyIndex else { return false }
         if historyIndex + 1 < history.count {
             self.historyIndex = historyIndex + 1
             text = history[historyIndex + 1]
@@ -416,6 +475,26 @@ struct ComposerBar: View {
             self.historyIndex = nil
             text = draft
         }
-        return .handled
+        return true
+    }
+}
+
+/// Gives a little under the pointer, so a button feels pressed rather than
+/// merely clicked. Reduce Motion drops the movement.
+private struct PressScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PressScaleLabel(configuration: configuration)
+    }
+
+    /// A View, because only a View can read the environment.
+    private struct PressScaleLabel: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
+                .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
+        }
     }
 }

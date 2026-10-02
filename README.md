@@ -26,7 +26,12 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   live background sessions); a landing screen with quick-start cards and
   recent commands from your shell history; and a floating composer that types
   into whichever terminal has focus — drag it anywhere, minimise it to a pill,
-  and recall earlier commands with the arrow keys. The chip above the input
+  and recall earlier commands with the arrow keys. It colours what you type —
+  commands, flags, strings, variables, pipes — in your terminal theme's colours,
+  switching to a palette tuned for the card wherever a theme's own colours would
+  not read on it. A command word is coloured only if it is found on this app's
+  `PATH`; one it can't find (an alias, say) is left plain, never marked wrong.
+  The chip above the input
   names the terminal it will run in, and switches it to a private shell of its
   own if you want one.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file
