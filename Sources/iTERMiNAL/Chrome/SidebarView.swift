@@ -173,7 +173,7 @@ struct SidebarView: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
         .padding(.horizontal, 10)
         .padding(.bottom, 4)
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .transition(Motion.bannerTransition)
     }
 
     // MARK: Sections
@@ -414,8 +414,10 @@ private struct SidebarSectionHeader<Accessory: View>: View {
 
             if hovering {
                 accessory
+                    .transition(.opacity)
             }
         }
+        .animation(Motion.hover, value: hovering)
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 14)
         .padding(.top, 18)
@@ -474,9 +476,14 @@ struct SidebarRowContent: View {
         // sits on a 34pt rhythm and text metrics vary by label.
         .frame(height: 34)
         .background(
+            // The resting fill is the same colour at no opacity rather than
+            // `Color.clear`: fading from transparent black can pass through a
+            // grey on the way to a light tint.
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isActive ? theme.surface : (isHovering ? theme.surface.opacity(0.6) : Color.clear))
+                .fill(isActive ? theme.surface : theme.surface.opacity(isHovering ? 0.6 : 0))
         )
+        .animation(Motion.hover, value: isHovering)
+        .animation(Motion.hover, value: isActive)
         .contentShape(Rectangle())
     }
 }
@@ -630,8 +637,10 @@ private struct WorkspaceFolderRow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .transition(.opacity)
             }
         }
+        .animation(Motion.hover, value: hovering)
         .foregroundStyle(theme.textPrimary)
         .padding(.horizontal, 17)
         .frame(height: 30)
@@ -678,7 +687,7 @@ private struct SidebarTabRow: View {
                 .frame(height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? theme.surfaceHover : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+                        .fill(isSelected ? theme.surfaceHover : theme.surface.opacity(hovering ? 0.5 : 0))
                 )
                 .contentShape(Rectangle())
             }
@@ -698,8 +707,11 @@ private struct SidebarTabRow: View {
                     }
                 }
                 .padding(.trailing, 7)
+                .transition(.opacity)
             }
         }
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isSelected)
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
@@ -807,11 +819,12 @@ private struct RowIconButton: View {
                 .frame(width: 18, height: 18)
                 .background(
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(hovering ? theme.surfaceHover : Color.clear)
+                        .fill(theme.surfaceHover.opacity(hovering ? 1 : 0))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
         .onHover { hovering = $0 }
         .help(help)
     }
@@ -847,11 +860,12 @@ private struct SidebarRecentRow: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovering ? theme.surface.opacity(0.5) : Color.clear)
+                    .fill(theme.surface.opacity(hovering ? 0.5 : 0))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)

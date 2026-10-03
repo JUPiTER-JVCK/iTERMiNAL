@@ -56,9 +56,16 @@ struct TerminalPaneView: View {
         let host = TerminalHostView(session: session)
             .id(session.id)
             .overlay(alignment: .top) {
-                if let note = session.statusNote {
-                    SessionStatusBanner(session: session, note: note, theme: theme)
+                // The container carries the animation, so the banner's removal
+                // is animated too: a modifier on the banner itself is gone by
+                // the time it would run.
+                VStack(spacing: 0) {
+                    if let note = session.statusNote {
+                        SessionStatusBanner(session: session, note: note, theme: theme)
+                            .transition(Motion.bannerTransition)
+                    }
                 }
+                .animation(Motion.banner, value: session.statusNote)
             }
 
         if isSolo {
