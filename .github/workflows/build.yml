@@ -150,6 +150,13 @@ jobs:
             Sources/iTERMiNAL/Input/PathCompleter.swift \
             Sources/iTERMiNAL/Input/SuggestionState.swift \
             Sources/iTERMiNAL/Chrome/ShellHistory.swift \
+            Sources/iTERMiNAL/AI/SecretRedactor.swift \
+            Sources/iTERMiNAL/AI/ContextSanitizer.swift \
+            Sources/iTERMiNAL/AI/FailureSignature.swift \
+            Sources/iTERMiNAL/AI/AssistReply.swift \
+            Sources/iTERMiNAL/AI/CommandRisk.swift \
+            Sources/iTERMiNAL/AI/AssistantDestination.swift \
+            Sources/iTERMiNAL/AI/ErrorHelp.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

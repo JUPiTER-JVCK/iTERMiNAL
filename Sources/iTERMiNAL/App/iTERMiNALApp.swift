@@ -202,6 +202,20 @@ struct AppCommands: Commands {
 
             Divider()
 
+            // About what the composer's terminal last printed. Both ask first
+            // when output sharing is off, and neither runs anything.
+            Button("Explain Last Output") {
+                WorkspaceStore.shared.requestComposerHelp(.explain)
+            }
+            .keyboardShortcut("e", modifiers: [.command, .option])
+
+            Button("Suggest a Fix") {
+                WorkspaceStore.shared.requestComposerHelp(.fix)
+            }
+            .keyboardShortcut("x", modifiers: [.command, .option])
+
+            Divider()
+
             Button("Task Manager") {
                 WorkspaceStore.shared.detailMode = .tasks
             }

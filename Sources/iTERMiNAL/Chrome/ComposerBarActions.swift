@@ -24,6 +24,26 @@ struct ComposerActionsPopover: View {
 
             ComposerShellPicker(theme: theme)
 
+            sectionHeader("Assistant", theme: theme)
+
+            ComposerActionRow(
+                icon: "questionmark.bubble",
+                title: "Explain last output",
+                detail: "Ask what this terminal printed",
+                shortcut: "⌥⌘E"
+            ) {
+                store.requestComposerHelp(.explain)
+            }
+
+            ComposerActionRow(
+                icon: "wrench.and.screwdriver",
+                title: "Suggest a fix",
+                detail: "A command to review — it won't run itself",
+                shortcut: "⌥⌘X"
+            ) {
+                store.requestComposerHelp(.fix)
+            }
+
             sectionHeader("Terminal", theme: theme)
 
             ComposerActionRow(

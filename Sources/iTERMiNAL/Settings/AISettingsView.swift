@@ -97,19 +97,26 @@ struct AISettingsView: View {
                 Toggle("Include git branch", isOn: $settings.assistantIncludeGitBranch)
                 Toggle("Include workspace name", isOn: $settings.assistantIncludeWorkspace)
                 Toggle("Include recent terminal output", isOn: $settings.assistantIncludeRecentOutput)
-                Text("Only the fields switched on above are sent with a prompt, and full scrollback never is — only what is on screen, trimmed to the last 6,000 characters.")
+                Text("Only the fields switched on above are sent with a prompt, and full scrollback never is — only what is on screen, trimmed to the last 6,000 characters. Explain and Fix it ask first when this is off.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if settings.assistantIncludeRecentOutput {
-                    Text("Recent output is sent as-is. Control sequences are stripped, but nothing redacts secrets — if the screen is showing a key, an env dump or a token, that goes too.")
+                    Text("Control sequences are stripped and values that look like API keys, tokens, passwords, private keys and URL credentials are masked before output is sent. That is best effort: a secret in a form it doesn't recognise — an env dump with an unusual name, say — still goes.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
 
+            Section("Error help") {
+                Toggle("Offer Explain / Fix it after a command prints an error", isOn: $settings.assistantOfferErrorHelp)
+                Text("When a command you run from the composer prints something that reads like an error, a row offers Explain and Fix it. Spotting it happens on this Mac, from the terminal's text; nothing is sent until you press one. From the offer, the command and only the new text that appeared after it are sent; from the Terminal menu, the command the terminal last ran and what is on screen. If \"Include recent terminal output\" is off, you're asked each time and shown what would go. A suggested command is only ever put in the input for you to review.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Privacy") {
                 Text("""
-                Prompts and the context toggles above go to the configured endpoint when you submit `@ai …` in the composer. Nothing is sent until an API key is saved (or the base URL is a localhost OpenAI-compatible server). Suggested commands are shown only — they are never auto-executed.
+                Prompts and the context toggles above go to the configured endpoint when you submit `@ai …` in the composer, and the command and output Explain / Fix it show go when you send them. Nothing is sent until an API key is saved (or the base URL is a localhost OpenAI-compatible server). Suggested commands are shown only — they can be put in the input to review and are never auto-executed.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)

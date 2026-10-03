@@ -22,6 +22,9 @@ struct ComposerBar: View {
     @StateObject private var ai = ComposerAIController()
     /// Ghost text, history search and file completion for the input.
     @StateObject private var suggestions = ComposerSuggestions()
+    /// Notices when a command run from here prints something that reads like
+    /// an error, so Explain / Fix it can be offered.
+    @StateObject private var outcome = CommandOutcomeWatcher()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
@@ -71,8 +74,10 @@ struct ComposerBar: View {
                 composerHistory: store.composerHistory,
                 readsShellHistory: settings.composerSuggestFromShellHistory
             )
+            handlePendingHelp()
         }
         .onChange(of: store.composerHistory) { _, history in suggestions.setComposerHistory(history) }
+        .onChange(of: store.composerHelpRequest) { _, _ in handlePendingHelp() }
         .onChange(of: settings.composerSuggestFromShellHistory) { _, reads in suggestions.setReadsShellHistory(reads) }
         // A list that is open follows the text, including changes the editor
         // is not told about, such as the field being cleared on send.
@@ -81,6 +86,7 @@ struct ComposerBar: View {
         // nothing left to show its answer.
         .onDisappear {
             ai.cancel()
+            outcome.stop()
             suggestions.close()
         }
     }
@@ -178,7 +184,7 @@ struct ComposerBar: View {
                 // happened to run a non-`@ai` command, and a hung endpoint
                 // left a spinner with nothing to cancel it.
                 HStack(alignment: .top, spacing: 6) {
-                    ComposerAIBannerView(banner: banner, theme: theme)
+                    ComposerAIBannerView(banner: banner, theme: theme, actions: bannerActions)
                     Spacer(minLength: 0)
                     Button {
                         withAnimation(Motion.banner) {
@@ -378,6 +384,7 @@ struct ComposerBar: View {
             // call on whatever the model made of the context alone.
             let prompt = ComposerAIController.stripAIPrefix(command)
             guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            outcome.stop()
             store.recordComposerCommand(command)
             text = ""
             historyIndex = nil
@@ -389,6 +396,13 @@ struct ComposerBar: View {
         }
         ai.cancel()
         ai.clearBanner()
+        outcome.stop()
+        // What the terminal shows before the command, so an error already on
+        // screen is not taken for this command's. Only if an offer could be
+        // made at all.
+        let watching = settings.assistantOfferErrorHelp && ai.assistantIsConfigured()
+        let target = store.composerDestinationSession
+        let baseline = watching ? (target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? "") : ""
         // Wherever the chip above the input says: the focused terminal by
         // default, the composer's own shell if the user asked for that.
         withAnimation(Motion.panel) {
@@ -397,6 +411,59 @@ struct ComposerBar: View {
         text = ""
         historyIndex = nil
         draft = ""
+        if watching, let session = target ?? store.composerSession {
+            outcome.start(session: session, command: command, baseline: baseline) { found in
+                withAnimation(Motion.banner) { ai.offer(found) }
+            }
+        }
+    }
+
+    // MARK: Assistant
+
+    /// What the banner's buttons do.
+    private var bannerActions: ComposerAIBannerActions {
+        ComposerAIBannerActions(
+            insert: { insertSuggestion($0) },
+            help: { kind, offer in
+                withAnimation(Motion.banner) {
+                    ai.requestHelp(kind, offer: offer, store: store, settings: settings)
+                }
+            },
+            confirm: { request in
+                withAnimation(Motion.banner) {
+                    ai.confirm(request, store: store, settings: settings)
+                }
+            },
+            decline: {
+                withAnimation(Motion.banner) {
+                    ai.cancel()
+                    ai.clearBanner()
+                }
+            }
+        )
+    }
+
+    /// Puts a suggested command in the input, for review. Through the editor,
+    /// so it is one undo step and the caret lands in it. This is as far as a
+    /// suggestion goes: only Return sends anything.
+    private func insertSuggestion(_ command: String) {
+        historyIndex = nil
+        draft = ""
+        if let apply = suggestions.apply {
+            apply(ComposerSuggestions.Replacement(range: nil, text: command))
+        } else {
+            text = command
+        }
+    }
+
+    /// A request from the menu or the "+" menu to explain or fix what the
+    /// composer's terminal last printed.
+    private func handlePendingHelp() {
+        guard let request = store.composerHelpPending else { return }
+        store.composerHelpHandled = request.id
+        withAnimation(Motion.banner) {
+            ai.requestHelp(request.kind, offer: nil, store: store, settings: settings)
+        }
     }
 
     // MARK: Input

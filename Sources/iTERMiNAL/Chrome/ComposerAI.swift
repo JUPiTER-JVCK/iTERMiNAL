@@ -1,7 +1,12 @@
 import SwiftUI
 
-/// Handles `@ai …` submission from the composer: configuration checks,
-/// context building, cancelable completion, and banner state.
+/// Handles `@ai …` submission from the composer, and Explain / Fix it for what
+/// a terminal printed: configuration checks, context building, consent,
+/// cancelable completion, and banner state.
+///
+/// Nothing here runs anything. A reply is text; the most this does with a
+/// suggested command is hand it to the composer's input, where only a person
+/// pressing Return sends it.
 @MainActor
 final class ComposerAIController: ObservableObject {
     enum Banner: Equatable {
@@ -9,10 +14,25 @@ final class ComposerAIController: ObservableObject {
         case thinking
         case reply(String)
         case failure(String)
+        /// A command printed something that reads like an error, and Explain /
+        /// Fix it are on offer. Nothing has been sent.
+        case offer(ErrorOffer)
+        /// About to send output to the assistant, and waiting to be told to.
+        case consent(ErrorHelpRequest)
     }
 
     @Published var banner: Banner?
     private var task: Task<Void, Never>?
+    /// Whether an assistant is set up, remembered briefly. Asking reads the
+    /// keychain, and the composer asks on every command it sends.
+    private var configuredCheck: (value: Bool, at: Date)?
+
+    func assistantIsConfigured() -> Bool {
+        if let check = configuredCheck, Date().timeIntervalSince(check.at) < 30 { return check.value }
+        let value = AssistantServiceProvider.current.isConfigured
+        configuredCheck = (value, Date())
+        return value
+    }
 
     func cancel() {
         task?.cancel()
@@ -48,7 +68,86 @@ final class ComposerAIController: ObservableObject {
 
         let context = Self.buildContext(store: store, settings: settings)
         banner = .thinking
+        run(prompt: prompt, context: context, service: service)
+    }
 
+    // MARK: Error help
+
+    /// An offer from the failure watcher. It never replaces something the
+    /// person is waiting on or reading.
+    func offer(_ offer: ErrorOffer) {
+        switch banner {
+        case nil, .offer?:
+            banner = .offer(offer)
+        default:
+            break
+        }
+    }
+
+    /// Explain or Fix it. With an `offer` it is about that command and what it
+    /// printed; without one it is about what the composer's terminal shows now.
+    ///
+    /// When "Include recent terminal output" is off this asks first, naming
+    /// where the text would go. It does not turn the setting on.
+    func requestHelp(_ kind: ErrorHelpKind, offer: ErrorOffer?, store: WorkspaceStore, settings: AppSettings) {
+        task?.cancel()
+
+        guard AssistantServiceProvider.current.isConfigured else {
+            banner = .notConfigured
+            return
+        }
+
+        let command: String?
+        let output: String
+        if let offer {
+            command = offer.command
+            output = offer.output
+        } else {
+            guard let session = store.composerDestinationSession else {
+                banner = .failure("There's nothing to look at yet — run something first.")
+                return
+            }
+            output = session.captureVisibleText()
+            command = session.lastCommand
+        }
+        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            banner = .failure("There's no output to look at yet.")
+            return
+        }
+
+        let request = ErrorHelpRequest.make(
+            kind: kind,
+            command: command,
+            rawOutput: output,
+            baseURL: settings.assistantBaseURL
+        )
+        if settings.assistantIncludeRecentOutput {
+            send(request, store: store, settings: settings)
+        } else {
+            banner = .consent(request)
+        }
+    }
+
+    /// The person agreed to what the consent banner showed.
+    func confirm(_ request: ErrorHelpRequest, store: WorkspaceStore, settings: AppSettings) {
+        send(request, store: store, settings: settings)
+    }
+
+    private func send(_ request: ErrorHelpRequest, store: WorkspaceStore, settings: AppSettings) {
+        task?.cancel()
+        let service = AssistantServiceProvider.current
+        guard service.isConfigured else {
+            banner = .notConfigured
+            return
+        }
+        var context = Self.buildContext(store: store, settings: settings, includeOutput: false)
+        context.recentOutput = request.output
+        context.lastCommand = request.command
+        banner = .thinking
+        run(prompt: request.prompt, context: context, service: service)
+    }
+
+    private func run(prompt: String, context: AssistantContext, service: AssistantService) {
         task = Task { [weak self] in
             do {
                 let reply = try await service.complete(prompt: prompt, context: context)
@@ -63,7 +162,11 @@ final class ComposerAIController: ObservableObject {
         }
     }
 
-    private static func buildContext(store: WorkspaceStore, settings: AppSettings) -> AssistantContext {
+    private static func buildContext(
+        store: WorkspaceStore,
+        settings: AppSettings,
+        includeOutput: Bool = true
+    ) -> AssistantContext {
         let session = store.focusedSession ?? store.composerSession
         var context = AssistantContext()
         if settings.assistantIncludeCwd {
@@ -75,46 +178,11 @@ final class ComposerAIController: ObservableObject {
         if settings.assistantIncludeWorkspace {
             context.workspaceName = store.currentWorkspace?.name
         }
-        if settings.assistantIncludeRecentOutput, let session {
+        if includeOutput, settings.assistantIncludeRecentOutput, let session {
             context.recentOutput = ContextSanitizer.sanitizeRecentOutput(
                 session.captureVisibleText()
             )
         }
         return context
-    }
-}
-
-struct ComposerAIBannerView: View {
-    let banner: ComposerAIController.Banner
-    let theme: Theme
-
-    var body: some View {
-        switch banner {
-        case .notConfigured:
-            Text("The AI assistant isn't configured yet — add a provider in Settings → AI.")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.textSecondary)
-        case .thinking:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Thinking…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary)
-            }
-        case .reply(let text):
-            ScrollView {
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(maxHeight: 180)
-        case .failure(let message):
-            Text(message)
-                .font(.system(size: 11))
-                .foregroundStyle(.red.opacity(0.85))
-        }
     }
 }

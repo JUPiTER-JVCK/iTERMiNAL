@@ -1,6 +1,7 @@
 // Checks the composer's pure logic — the command-line tokenizer, the syntax
 // palette, fuzzy matching, the history index and shell-history parsing, and path
-// completion and the suggestion state machine — on their own, so a mistake in any fails in seconds rather than
+// completion, the suggestion state machine, and the assistant helpers (secret
+// masking, failure signatures, reply parsing, command warnings) — on their own, so a mistake in any fails in seconds rather than
 // after the app build, and so they can be proven off a Mac:
 //
 //   swiftc -o input-logic-check \
@@ -12,6 +13,13 @@
 //     Sources/iTERMiNAL/Input/PathCompleter.swift \
 //     Sources/iTERMiNAL/Input/SuggestionState.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
+//     Sources/iTERMiNAL/AI/SecretRedactor.swift \
+//     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
+//     Sources/iTERMiNAL/AI/FailureSignature.swift \
+//     Sources/iTERMiNAL/AI/AssistReply.swift \
+//     Sources/iTERMiNAL/AI/CommandRisk.swift \
+//     Sources/iTERMiNAL/AI/AssistantDestination.swift \
+//     Sources/iTERMiNAL/AI/ErrorHelp.swift \
 //     scripts/input-logic-check/main.swift
 //   ./input-logic-check
 //
@@ -812,6 +820,358 @@ do {
         check(replacement == .init(range: nil, text: "make test") && s.mode == nil, "clicking a row chooses it: \(String(describing: replacement))")
         check(s.choose(nil) == nil, "choosing nothing is nothing")
     }
+}
+
+// MARK: Secret masking
+
+do {
+    check(SecretRedactor.isOperational, "every redaction pattern compiled")
+    func masked(_ text: String) -> String { SecretRedactor.redact(text) }
+    func same(_ text: String, _ why: String) {
+        check(masked(text) == text, "\(why): \(text.debugDescription) became \(masked(text).debugDescription)")
+    }
+    func gone(_ text: String, secret: String, _ why: String) {
+        let result = masked(text)
+        check(!result.contains(secret) && result.contains("[redacted"), "\(why): \(text.debugDescription) became \(result.debugDescription)")
+    }
+
+    // Tokens with a shape of their own.
+    gone("key AKIAIOSFODNN7EXAMPLE here", secret: "AKIAIOSFODNN7EXAMPLE", "AWS access key id")
+    same("AKIA1234 is too short to be a key", "a short AKIA string")
+    gone("token ghp_" + String(repeating: "a1B2", count: 9), secret: "ghp_a1B2", "GitHub token")
+    same("ghp_abc is not a token", "a short ghp_ string")
+    gone("github_pat_11AAAAAAA0123456789_abcdefghijklmnopqrstuvwxyz", secret: "github_pat_11", "fine-grained GitHub token")
+    gone("SLACK=xoxb-1234567890-abcdefghijkl", secret: "xoxb-1234567890", "Slack token")
+    gone("OPENAI_KEY sk-abcdefghijklmnopqrstuvwx", secret: "sk-abcdefghijklmnopqrstuvwx", "sk- key")
+    gone("sk-ant-api03-abcdefghijklmnopqrstuvwxyz", secret: "sk-ant-api03", "Anthropic-style key")
+    same("scikit: sk-learn is a package", "a short sk- string")
+    same("ask-me-anything-about-this-topic-today", "sk- inside a word")
+    same("task-force-reduction-plan-for-2024", "sk- inside another word")
+    gone("AIzaSyA-1234567890abcdefghijklmnopqrstu", secret: "AIzaSyA-1234567890", "Google API key")
+    same("AIzaSyA-1234567890abcdefghijklmnopqrstuvwxyz", "a Google-key lookalike that is too long")
+    gone("sk_live_abcdefghijklmnop1234", secret: "sk_live_abcdefghijklmnop1234", "Stripe key")
+    gone("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk end", secret: "eyJhbGciOiJIUzI1NiJ9", "JWT")
+
+    // Private keys, whole and cut off.
+    let pem = "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\nabc\n-----END RSA PRIVATE KEY-----\nafter"
+    check(masked(pem) == "before\n[redacted private key]\nafter", "a whole private key goes, its surroundings stay: \(masked(pem).debugDescription)")
+    let cut = "ok\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+    check(masked(cut) == "ok\n[redacted private key]", "a key cut off mid-way goes to the end: \(masked(cut).debugDescription)")
+    same("-----BEGIN PUBLIC KEY-----\nMIIBIjANBg\n-----END PUBLIC KEY-----", "a public key")
+
+    // URLs, headers, flags and assignments.
+    check(masked("git clone https://user:hunter2@example.com/repo.git") == "git clone https://user:[redacted]@example.com/repo.git",
+          "a password in a URL: \(masked("git clone https://user:hunter2@example.com/repo.git"))")
+    same("ssh://git@github.com:22/repo", "a URL with a user and no password")
+    same("http://localhost:8080/path@x", "a port is not a password")
+    check(masked("Authorization: Bearer abc.def.ghi") == "Authorization: [redacted]", "an Authorization header: \(masked("Authorization: Bearer abc.def.ghi"))")
+    check(masked("curl -H \"Authorization: token ghp_x\" url") == "curl -H \"Authorization: [redacted]\" url", "a header in quotes: \(masked("curl -H \"Authorization: token ghp_x\" url"))")
+    check(masked("sent Bearer abcdefghij123 ok") == "sent Bearer [redacted] ok", "a bare bearer token")
+    same("a bearer of bad news", "the word bearer")
+    check(masked("run --password hunter2 now") == "run --password [redacted] now", "a password flag")
+    check(masked("run --token=abc123 now") == "run --token=[redacted] now", "a token flag with =")
+    same("run --token --verbose", "a token flag followed by a flag")
+    same("run --passthrough value", "a flag that merely starts like one")
+    check(masked("PASSWORD=hunter2 ./run") == "PASSWORD=[redacted] ./run", "a password assignment")
+    check(masked("export API_KEY=\"abc def\"") == "export API_KEY=[redacted]", "a quoted value: \(masked("export API_KEY=\"abc def\""))")
+    check(masked("{\"password\": \"hunter2\", \"user\": \"me\"}") == "{\"password\": [redacted], \"user\": \"me\"}",
+          "a JSON password: \(masked("{\"password\": \"hunter2\", \"user\": \"me\"}"))")
+    check(masked("db_password: s3cret") == "db_password: [redacted]", "a YAML-style secret")
+    check(masked("aws_secret_access_key = abcd1234") == "aws_secret_access_key = [redacted]", "a spaced assignment")
+    // Near misses: prose, prompts, and unrelated words.
+    same("Enter your password to continue", "the word password in prose")
+    same("Password:", "a bare password prompt")
+    same("Password:\nthe next line stays", "a prompt does not take the next line")
+    same("the author = John", "author is not auth")
+    same("3 tokens remaining", "tokens in prose")
+    same("npm run test -- --watch", "an ordinary command")
+    same("drwxr-xr-x  5 me  staff  160 Oct  3 12:00 src\n-rw-r--r--  1 me  staff  1.2K README.md", "a directory listing")
+    same("error: cannot find module './config' in /Users/me/app", "an ordinary error")
+    // Several at once, and idempotence.
+    let mixed = "TOKEN=abc https://u:p@h/x Authorization: Bearer zzz AKIAIOSFODNN7EXAMPLE --password hunter2"
+    let once = masked(mixed)
+    check(!once.contains("abc") && !once.contains(":p@") && !once.contains("zzz") && !once.contains("AKIAIOSFODNN7EXAMPLE") && !once.contains("hunter2"),
+          "several secrets in one line all go: \(once)")
+    check(masked(once) == once, "masking twice changes nothing more: \(masked(once)) vs \(once)")
+}
+
+// MARK: Sanitising output
+
+do {
+    check(ContextSanitizer.stripANSI("\u{1B}[31mred\u{1B}[0m plain") == "red plain", "colour codes are stripped: \(ContextSanitizer.stripANSI("\u{1B}[31mred\u{1B}[0m plain").debugDescription)")
+    check(ContextSanitizer.stripANSI("\u{1B}]0;a title\u{07}text") == "text", "an OSC title is stripped")
+    check(ContextSanitizer.stripANSI("\u{1B}[2K\u{1B}[1Gprompt") == "prompt", "cursor movement is stripped")
+    check(ContextSanitizer.sanitizeRecentOutput("short\nthing") == "short\nthing", "short output is untouched")
+    check(ContextSanitizer.sanitizeRecentOutput("a\r\nb\rc") == "a\nb\nc", "line endings are normalised")
+    check(ContextSanitizer.sanitizeRecentOutput("\u{1B}[31mkey=abcd1234efgh\u{1B}[0m") == "key=abcd1234efgh" || !ContextSanitizer.sanitizeRecentOutput("secret=\u{1B}[1mhunter2\u{1B}[0m").contains("hunter2"),
+          "a secret split by colour codes is still masked")
+
+    let plain = "aaaa\nbbbb\ncccc\ndddd"
+    check(ContextSanitizer.sanitizeRecentOutput(plain, limit: 12) == "\u{2026}\ncccc\ndddd", "a cut inside a line drops the fragment: \(ContextSanitizer.sanitizeRecentOutput(plain, limit: 12).debugDescription)")
+    check(ContextSanitizer.sanitizeRecentOutput(plain, limit: 9) == "\u{2026}\ncccc\ndddd", "a cut on a line start keeps the line: \(ContextSanitizer.sanitizeRecentOutput(plain, limit: 9).debugDescription)")
+    check(ContextSanitizer.sanitizeRecentOutput(plain, limit: 10) == "\u{2026}\ncccc\ndddd", "a cut on the newline itself: \(ContextSanitizer.sanitizeRecentOutput(plain, limit: 10).debugDescription)")
+    check(ContextSanitizer.sanitizeRecentOutput(String(repeating: "x", count: 50), limit: 20) == "\u{2026}\n" + String(repeating: "x", count: 20),
+          "one long line keeps its tail rather than nothing")
+    // On one long line nothing is dropped as a fragment, so the order of masking
+    // and cutting is what keeps a half token out.
+    let oneLine = "prefix TOKEN=abcd1234efgh5678 suffix text"
+    for limit in 8...(oneLine.count - 1) {
+        let result = ContextSanitizer.sanitizeRecentOutput(oneLine, limit: limit)
+        check(!result.contains("abcd") && !result.contains("efgh") && !result.contains("5678") && !result.contains("1234"),
+              "a secret cut by the limit \(limit) on a single line leaves no fragment: \(result.debugDescription)")
+    }
+    // Masked before it is cut: a token straddling the cut cannot survive as a fragment.
+    let straddle = "line one\nTOKEN=abcd1234efgh5678 and more text here\nlast line"
+    for limit in 20...48 {
+        let result = ContextSanitizer.sanitizeRecentOutput(straddle, limit: limit)
+        check(!result.contains("abcd") && !result.contains("efgh") && !result.contains("5678"),
+              "a secret cut by the limit \(limit) leaves no fragment: \(result.debugDescription)")
+    }
+}
+
+// MARK: Failure signatures
+
+do {
+    func reason(_ line: String, command: String? = nil) -> String? {
+        FailureSignature.firstMatch(in: [line], excludingCommand: command)?.reason
+    }
+    let positives: [(String, String)] = [
+        ("zsh: command not found: foo", "command not found"),
+        ("bash: foo: command not found", "command not found"),
+        ("ls: /nope: No such file or directory", "no such file or directory"),
+        ("zsh: no such file or directory: ./x", "no such file or directory"),
+        ("cat: secret.txt: Permission denied", "permission denied"),
+        ("zsh: permission denied: ./run.sh", "permission denied"),
+        ("me@host: Permission denied (publickey).", "permission denied"),
+        ("fatal: not a git repository (or any of the parent directories): .git", "a fatal error"),
+        ("fatal error: 'foo.h' file not found", "a fatal error"),
+        ("Traceback (most recent call last):", "a Python traceback"),
+        ("npm ERR! code ENOENT", "an npm error"),
+        ("panic: runtime error: index out of range", "a panic"),
+        ("thread 'main' panicked at src/main.rs:2:5:", "a panic"),
+        ("zsh: segmentation fault  ./a.out", "a crash"),
+        ("Segmentation fault: 11", "a crash"),
+        ("make: *** [all] Error 1", "a failed make"),
+        ("make[2]: *** [build/x.o] Error 1", "a failed make"),
+        ("** BUILD FAILED **", "a failed build"),
+        ("   zsh: command not found: indented", "command not found"),
+    ]
+    for (line, expected) in positives {
+        check(reason(line) == expected, "\(line.debugDescription) should read as \(expected), got \(String(describing: reason(line)))")
+    }
+    let negatives = [
+        "Permission denied is what the docs call this",
+        "src/a.c:10: // No such file or directory handling",
+        "grep: hello world",
+        "make: Nothing to be done for 'all'.",
+        "make[x]: *** not a make error",
+        "makefile is fine",
+        "everything is fine, no panic: here",
+        "see the Traceback (most recent call last) section of the docs",
+        "the fatal: word in the middle of a line",
+        "Compiling 14 files... done",
+        "total 8",
+        "",
+        "   ",
+    ]
+    for line in negatives {
+        check(reason(line) == nil, "\(line.debugDescription) is not an error, got \(String(describing: reason(line)))")
+    }
+    // The typed command is not output.
+    check(reason("% echo zsh: command not found: x", command: "echo zsh: command not found: x") == nil, "the echo of a command that mentions an error is not one")
+    check(reason("zsh: command not found: nosuch", command: "nosuch") == nil, "a line containing the command text is its echo")
+    check(FailureSignature.firstMatch(in: ["fine", "bash: x: command not found", "fatal: later"], excludingCommand: nil)?.line == "bash: x: command not found",
+          "the first matching line wins")
+    check(FailureSignature.firstMatch(in: [], excludingCommand: nil) == nil, "no lines, no match")
+
+    // What is new since the command was sent.
+    let before = "$ ls\nfile.txt\nzsh: command not found: old\n$ "
+    check(OutputDiff.newLines(baseline: before, current: before).isEmpty, "nothing new when nothing changed")
+    check(OutputDiff.newLines(baseline: before, current: before + "\n$ make\nmake: *** [all] Error 1\n$ ") == ["$ make", "make: *** [all] Error 1", "$"],
+          "only what was added: \(OutputDiff.newLines(baseline: before, current: before + "\n$ make\nmake: *** [all] Error 1\n$ "))")
+    check(FailureSignature.firstMatch(in: OutputDiff.newLines(baseline: before, current: before), excludingCommand: nil) == nil,
+          "an error already on screen before the command is not the command's")
+    check(OutputDiff.newLines(baseline: before, current: before + "\nzsh: command not found: old") == ["zsh: command not found: old"],
+          "the same error printed again is new")
+    check(OutputDiff.newLines(baseline: "a\nb\n", current: "a\r\nb  \r\nc\r\n") == ["c"], "line endings and trailing blanks do not make lines new")
+    check(OutputDiff.newLines(baseline: "", current: "x\n\n\ny\n") == ["x", "y"], "blank lines are left out")
+    // Output scrolling the old lines away is still only the new lines.
+    check(OutputDiff.newLines(baseline: "one\ntwo\nthree\n", current: "three\nfour\nfive\n") == ["four", "five"], "scrolled-away lines do not matter")
+    check(OutputDiff.newLines(baseline: "x\nx\n", current: "x\nx\nx\n") == ["x"], "a line seen twice before and three times now is new once")
+}
+
+// MARK: Replies
+
+do {
+    let reply = "The file is missing.\n\n```bash\nls -la src\n```\n\nThen:\n\n```python\nprint('hi')\n```\nDone."
+    check(AssistReply.segments(of: reply) == [
+        .prose("The file is missing."),
+        .code(language: "bash", text: "ls -la src"),
+        .prose("Then:"),
+        .code(language: "python", text: "print('hi')"),
+        .prose("Done."),
+    ], "prose and code blocks separate: \(AssistReply.segments(of: reply))")
+    check(AssistReply.segments(of: "Try:\n```\nbrew install jq\n```") == [.prose("Try:"), .code(language: nil, text: "brew install jq")], "an untagged block")
+    check(AssistReply.segments(of: "```SH\necho hi\n```") == [.code(language: "sh", text: "echo hi")], "the tag is lower-cased")
+    check(AssistReply.segments(of: "run ```ls```") == [.prose("run ```ls```")] || AssistReply.segments(of: "```ls```") == [.code(language: nil, text: "ls")],
+          "a block opened and closed on one line")
+    check(AssistReply.segments(of: "Try:\n```sh\nnpm install\nnpm test") == [.prose("Try:"), .code(language: "sh", text: "npm install\nnpm test")], "a block cut off at the end runs to the end")
+    check(AssistReply.segments(of: "just words\nmore words") == [.prose("just words\nmore words")], "no code, one prose segment")
+    check(AssistReply.segments(of: "").isEmpty, "an empty reply has no segments")
+    check(AssistReply.segments(of: "```\n```").isEmpty, "an empty block is nothing")
+    check(AssistReply.segments(of: "a\r\n```sh\r\nls\r\n```\r\n") == [.prose("a"), .code(language: "sh", text: "ls")], "CRLF replies")
+    check(AssistReply.segments(of: "  ```sh\n  ls\n  ```") == [.code(language: "sh", text: "ls")], "an indented fence")
+    check(AssistReply.segments(of: "```sh\nls\n```\n```sh\npwd\n```").count == 2, "two blocks in a row")
+    check(AssistReply.segments(of: "```sh\n$ ls -la\ntotal 0\n$ pwd\n/tmp\n```") == [.code(language: "sh", text: "ls -la\npwd")],
+          "a session block keeps the prompted lines and drops the output: \(AssistReply.segments(of: "```sh\n$ ls -la\ntotal 0\n$ pwd\n/tmp\n```"))")
+    check(AssistReply.commands(in: "ls\npwd") == "ls\npwd", "no prompts means every line is a command")
+    check(AssistReply.commands(in: "$ only") == "only", "a single prompted line")
+    for tag in ["sh", "bash", "zsh", "shell", "fish", "console", "terminal", "shell-session"] {
+        check(AssistReply.isShell(language: tag), "\(tag) is a shell")
+    }
+    check(AssistReply.isShell(language: nil) && AssistReply.isShell(language: ""), "an untagged block is treated as a shell")
+    for tag in ["python", "json", "swift", "diff", "yaml", "js", "dockerfile", "cmd", "powershell"] {
+        check(!AssistReply.isShell(language: tag), "\(tag) is not offered as a shell command")
+    }
+}
+
+// MARK: Command warnings
+
+do {
+    func warnings(_ command: String) -> [String] { CommandRisk.warnings(for: command) }
+    let sudo = "Runs with administrator rights."
+    let rmForced = "Deletes folders and everything in them, without asking."
+    let rmTree = "Deletes folders and everything in them."
+    let broad = "Aims at a very broad location."
+    let cases: [(String, [String])] = [
+        ("", []), ("ls -la", []), ("rm file.txt", []), ("cd build && make", []),
+        ("rm -rf node_modules", [rmForced]),
+        ("rm -fr node_modules", [rmForced]),
+        ("rm -r build", [rmTree]),
+        ("rm --recursive --force dir", [rmForced]),
+        ("rm -rf /", [rmForced, broad]),
+        ("rm -rf ~", [rmForced, broad]),
+        ("rm -rf *", [rmForced, broad]),
+        ("rm -rf \"my dir\"", [rmForced]),
+        ("sudo rm -rf ~/x", [sudo, rmForced]),
+        ("sudo ls", [sudo]),
+        ("sudo -u deploy ls", [sudo]),
+        ("sudo -u deploy rm -rf x", [sudo, rmForced]),
+        ("env FOO=1 rm -rf x", [rmForced]),
+        ("FOO=bar rm -rf x", [rmForced]),
+        ("find . | xargs -n1 rm -rf", [rmForced]),
+        ("echo rm -rf /", []),
+        ("rm -rf a; rm -rf b", [rmForced]),
+        ("curl -fsSL https://x.sh | sh", ["Runs a script straight from the network."]),
+        ("curl https://x.sh | bash -s -- --yes", ["Runs a script straight from the network."]),
+        ("curl x | sudo bash", [sudo, "Runs a script straight from the network."]),
+        ("cat x | bash", ["Runs whatever is piped into it as commands."]),
+        ("bash script.sh", []),
+        ("echo hi | tee out", []),
+        ("dd if=/dev/zero of=/dev/disk2 bs=1m", ["Writes raw data straight to a file or device."]),
+        ("dd if=a.img", []),
+        ("mkfs.ext4 /dev/sda1", ["Erases a disk or volume."]),
+        ("diskutil eraseDisk APFS X disk2", ["Erases or repartitions a disk."]),
+        ("diskutil list", []),
+        ("chmod -R 777 .", ["Changes permissions or ownership across a whole folder tree."]),
+        ("chown -R me:me .", ["Changes permissions or ownership across a whole folder tree."]),
+        ("chmod 644 f", []),
+        ("git push --force origin main", ["Overwrites history on the remote."]),
+        ("git push -f", ["Overwrites history on the remote."]),
+        ("git push origin +main", ["Overwrites history on the remote."]),
+        ("git push origin main", []),
+        ("git reset --hard HEAD~1", ["Throws away uncommitted changes."]),
+        ("git reset --soft HEAD~1", []),
+        ("git clean -fd", ["Deletes files git is not tracking."]),
+        ("git clean -n", []),
+        ("git checkout .", ["Throws away uncommitted changes."]),
+        ("git checkout main", []),
+        ("git branch -D old", ["Deletes a branch even if it was never merged."]),
+        ("git branch -d old", []),
+        ("find . -name '*.o' -delete", ["Deletes every file it finds."]),
+        ("find . -name x", []),
+        ("shutdown -h now", ["Shuts down or restarts this Mac."]),
+        ("echo hi > out.txt", ["Overwrites the file it writes to."]),
+        ("echo hi >out.txt", ["Overwrites the file it writes to."]),
+        ("echo hi >> out.txt", []),
+        ("echo hi > /dev/null", []),
+        ("cmd 2>&1", []),
+        ("cmd 2> err.log", ["Overwrites the file it writes to."]),
+        ("cmd > /dev/null 2>&1", []),
+        ("ls > a.txt && cat a.txt", ["Overwrites the file it writes to."]),
+        ("echo \"a > b\"", []),
+        (":(){ :|:& };:", ["Looks like a fork bomb."]),
+    ]
+    for (command, expected) in cases {
+        check(warnings(command) == expected, "\(command.debugDescription): expected \(expected), got \(warnings(command))")
+    }
+}
+
+// MARK: Where a request goes, and what asking says
+
+do {
+    check(AssistantDestination.describe(baseURL: "https://api.openai.com/v1") == .init(name: "api.openai.com", staysOnThisMac: false), "a hosted endpoint is named")
+    check(AssistantDestination.describe(baseURL: "http://127.0.0.1:11434/v1") == .init(name: "the assistant on this Mac", staysOnThisMac: true), "a loopback address stays on this Mac")
+    check(AssistantDestination.describe(baseURL: "http://localhost:11434/v1").staysOnThisMac, "localhost stays on this Mac")
+    check(AssistantDestination.describe(baseURL: "http://[::1]:8080/v1").staysOnThisMac, "::1 stays on this Mac: \(AssistantDestination.describe(baseURL: "http://[::1]:8080/v1"))")
+    check(!AssistantDestination.describe(baseURL: "http://192.168.1.20:11434/v1").staysOnThisMac, "a LAN address does not")
+    check(!AssistantDestination.describe(baseURL: "https://localhost.evil.example/v1").staysOnThisMac, "a name that merely starts with localhost does not")
+    check(!AssistantDestination.describe(baseURL: "http://127.0.0.1.evil.example/v1").staysOnThisMac, "nor one that starts with a loopback address")
+    check(AssistantDestination.describe(baseURL: "not a url") == .init(name: "the configured assistant endpoint", staysOnThisMac: false), "an unreadable URL is not trusted")
+    check(AssistantDestination.describe(baseURL: "").staysOnThisMac == false, "an empty URL is not trusted")
+    check(AssistantDestination.describe(baseURL: "  https://api.groq.com/openai/v1 \n").name == "api.groq.com", "whitespace is ignored")
+
+    let key = "AKIAIOSFODNN7EXAMPLE"
+    let request = ErrorHelpRequest.make(
+        kind: .explain,
+        command: "  aws s3 ls --password hunter2  ",
+        rawOutput: "\u{1B}[31mAn error occurred\u{1B}[0m\nkey \(key)\nsecond line\n",
+        baseURL: "https://api.openai.com/v1"
+    )
+    check(request.command == "aws s3 ls --password [redacted]", "the command is trimmed and masked: \(String(describing: request.command))")
+    check(!request.output.contains(key) && !request.output.contains("\u{1B}") && request.output.contains("An error occurred"), "the output is stripped and masked: \(request.output.debugDescription)")
+    check(request.lineCount == 3, "lines are counted after cleaning: \(request.lineCount)")
+    check(request.consentMessage == "Send the command and 3 lines of output to api.openai.com? Values that look like keys or passwords are masked first.",
+          "the consent question names the host: \(request.consentMessage)")
+    let local = ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "one line", baseURL: "http://127.0.0.1:11434/v1")
+    check(local.command == nil && local.lineCount == 1, "no command, one line")
+    check(local.consentMessage == "Send 1 line of output to the assistant on this Mac? It stays on this Mac.", "a local assistant says so: \(local.consentMessage)")
+    check(!request.consentMessage.contains("stays on this Mac"), "a hosted one never claims it")
+    check(ErrorHelpRequest.make(kind: .explain, command: "   ", rawOutput: "x", baseURL: "https://a.b").command == nil, "a blank command is no command")
+    check((ErrorHelpRequest.make(kind: .explain, command: String(repeating: "a", count: 5_000), rawOutput: "x", baseURL: "https://a.b").command?.count ?? 0) <= ErrorHelpRequest.commandLimit,
+          "a very long command is cut")
+    check(ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt != ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt,
+          "explain and fix ask different things")
+    check(ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt.contains("fenced code block"), "fix asks for a fenced command")
+}
+
+// MARK: Assistant output is never run
+
+// The assistant's words reach the terminal only by a person pressing Return in
+// the composer, after they were put in the input for review. Nothing in the AI
+// code, the composer's AI views, or the failure watcher may send text to a
+// terminal itself. Comments are skipped, so a comment may say so.
+do {
+    let fm = FileManager.default
+    var files: [String] = []
+    if let aiFiles = try? fm.contentsOfDirectory(atPath: "Sources/iTERMiNAL/AI") {
+        files += aiFiles.filter { $0.hasSuffix(".swift") }.map { "Sources/iTERMiNAL/AI/" + $0 }
+    }
+    files += ["Sources/iTERMiNAL/Chrome/ComposerAI.swift", "Sources/iTERMiNAL/Chrome/ErrorAssistViews.swift"]
+    check(files.count >= 10, "found the AI sources to check (\(files.count)); run from the repository root")
+    let forbidden = ["sendFromComposer", ".send(text:", "session.send(", "engine.send("]
+    var offenders: [String] = []
+    for path in files {
+        guard let source = try? String(contentsOfFile: path, encoding: .utf8) else {
+            if !path.hasSuffix("ErrorAssistViews.swift") { offenders.append("\(path): unreadable") }
+            continue
+        }
+        let code = source.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        for word in forbidden where code.contains(word) { offenders.append("\(path) uses \(word)") }
+    }
+    check(offenders.isEmpty, "the AI path must not send to a terminal: \(offenders)")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

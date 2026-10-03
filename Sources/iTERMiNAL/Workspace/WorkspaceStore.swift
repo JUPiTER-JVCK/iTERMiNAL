@@ -187,6 +187,22 @@ final class WorkspaceStore: ObservableObject {
     var composerFocusHandled = 0
     var composerFocusPending: Bool { composerFocusRequest != composerFocusHandled }
 
+    /// A request, from a menu or the composer's "+" menu, for the assistant to
+    /// look at what the composer's terminal last printed. Handled the way focus
+    /// is: the composer may not exist yet when it is made, so it is kept until
+    /// the view acknowledges it.
+    struct ComposerHelpRequest: Equatable {
+        let id: Int
+        let kind: ErrorHelpKind
+    }
+    @Published private(set) var composerHelpRequest: ComposerHelpRequest?
+    var composerHelpHandled = 0
+    private var composerHelpCounter = 0
+    var composerHelpPending: ComposerHelpRequest? {
+        guard let request = composerHelpRequest, request.id != composerHelpHandled else { return nil }
+        return request
+    }
+
     /// Terminals living in the bottom dock. Separate from tab panes — the
     /// dock is a scratch surface that survives switching tabs.
     @Published private(set) var dockSessions: [TerminalSession] = []
@@ -764,6 +780,17 @@ final class WorkspaceStore: ObservableObject {
         composerFocusRequest += 1
     }
 
+    /// Asks the composer's assistant to explain, or suggest a fix for, what the
+    /// composer's terminal last printed — un-hiding the composer first, since
+    /// the answer appears there.
+    func requestComposerHelp(_ kind: ErrorHelpKind) {
+        detailMode = .terminal
+        AppSettings.shared.composerEnabled = true
+        AppSettings.shared.composerCollapsed = false
+        composerHelpCounter += 1
+        composerHelpRequest = ComposerHelpRequest(id: composerHelpCounter, kind: kind)
+    }
+
     // MARK: Composer routing
 
     /// Where a composer command will run right now.
@@ -795,6 +822,15 @@ final class WorkspaceStore: ObservableObject {
             return .ownShell
         }
         return .terminal(session)
+    }
+
+    /// The terminal a composer command would run in, if there is one yet: the
+    /// focused terminal, or the composer's own shell once it has started.
+    var composerDestinationSession: TerminalSession? {
+        switch composerDestination {
+        case .terminal(let session): return session
+        case .ownShell: return composerSession
+        }
     }
 
     /// Runs a command typed in the composer, in whatever it is pointed at.
