@@ -134,6 +134,20 @@ jobs:
           fi
           echo "$tag is free."
 
+      # The composer's pure logic — the command-line tokenizer and the colour
+      # palette — compiled and run on its own. It takes seconds, so a mistake
+      # in either fails here rather than after the app build, and the files it
+      # compiles import nothing but Foundation, which is what keeps that true.
+      - name: Check input logic
+        run: |
+          set -euo pipefail
+          swiftc -o "$RUNNER_TEMP/input-logic-check" \
+            Sources/iTERMiNAL/Input/ColorMath.swift \
+            Sources/iTERMiNAL/Input/ShellTokenizer.swift \
+            Sources/iTERMiNAL/Input/SyntaxPalette.swift \
+            scripts/input-logic-check/main.swift
+          "$RUNNER_TEMP/input-logic-check"
+
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
       # had nothing to do with this project. Taking the tool straight from its

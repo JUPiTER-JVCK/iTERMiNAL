@@ -12,6 +12,11 @@ enum Motion {
     /// Status and notice banners.
     static let banner = Animation.spring(response: 0.28, dampingFraction: 0.88)
 
+    /// The composer's input field warming on focus.
+    static let field = Animation.easeOut(duration: 0.18)
+    /// A control giving under the pointer: quick, with a little give.
+    static let press = Animation.spring(response: 0.22, dampingFraction: 0.68)
+
     static let panelTransition = AnyTransition.move(edge: .trailing)
         .combined(with: .opacity)
 

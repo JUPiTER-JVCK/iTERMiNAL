@@ -177,6 +177,15 @@ final class WorkspaceStore: ObservableObject {
     /// composer to take keyboard focus. The view watches the number rather
     /// than a Bool, so two requests in a row both land.
     @Published private(set) var composerFocusRequest = 0
+    /// The last focus request the composer's editor acted on.
+    ///
+    /// Kept here, not in the editor, because `focusComposer()` un-hides and
+    /// un-collapses the composer before it asks for focus, so the editor is
+    /// built *after* the request: one that only compared against the value it
+    /// was created with would treat the request as already handled. Plain, not
+    /// published — acknowledging a request must not redraw anything.
+    var composerFocusHandled = 0
+    var composerFocusPending: Bool { composerFocusRequest != composerFocusHandled }
 
     /// Terminals living in the bottom dock. Separate from tab panes — the
     /// dock is a scratch surface that survives switching tabs.

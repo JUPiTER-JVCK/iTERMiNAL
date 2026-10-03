@@ -77,6 +77,23 @@ struct Theme {
         scheme == .dark ? .dark : .light
     }
 
+    static let darkFloatingSurfaceHex: UInt32 = 0x25252B
+    static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
+
+    /// The composer's input field, as an opaque colour.
+    ///
+    /// Opaque on purpose, and in hex: the command colours are chosen for
+    /// contrast against exactly this value, which only holds if nothing shows
+    /// through it — the card around it can be translucent over arbitrary
+    /// terminal content. Named once so the colour and what is measured against
+    /// it cannot drift apart.
+    static let darkInputFieldHex: UInt32 = 0x1D1D21
+    static let lightInputFieldHex: UInt32 = 0xF1F1F3
+
+    static func inputFieldHex(for scheme: ColorScheme) -> UInt32 {
+        scheme == .dark ? darkInputFieldHex : lightInputFieldHex
+    }
+
     static let dark = Theme(
         background: Color(p3: 0x131316),
         sidebar: Color(p3: 0x0C0C0E),
@@ -90,7 +107,7 @@ struct Theme {
         elevatedShadow: Color.black.opacity(0.55),
         elevatedHighlight: Color.white.opacity(0.06),
         divider: Color.white.opacity(0.09),
-        floatingSurface: Color(p3: 0x25252B)
+        floatingSurface: Color(p3: Theme.darkFloatingSurfaceHex)
     )
 
     static let light = Theme(
@@ -106,7 +123,7 @@ struct Theme {
         elevatedShadow: Color.black.opacity(0.13),
         elevatedHighlight: Color.white.opacity(0.9),
         divider: Color.black.opacity(0.08),
-        floatingSurface: Color(p3: 0xFDFDFE)
+        floatingSurface: Color(p3: Theme.lightFloatingSurfaceHex)
     )
 }
 
