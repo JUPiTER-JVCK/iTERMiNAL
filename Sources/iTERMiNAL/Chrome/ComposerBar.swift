@@ -20,6 +20,8 @@ struct ComposerBar: View {
 
     @State private var text = ""
     @StateObject private var ai = ComposerAIController()
+    /// Ghost text, history search and file completion for the input.
+    @StateObject private var suggestions = ComposerSuggestions()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showActions = false
     /// Live drag delta, folded into the persisted offset when the drag ends.
@@ -61,9 +63,26 @@ struct ComposerBar: View {
         )
         .animation(Motion.panel, value: settings.composerCollapsed)
         .onChange(of: bounds) { _, _ in clampToBounds() }
+        .onAppear {
+            // Asked when it is needed rather than kept: a session's directory
+            // changes under a card that is not being redrawn.
+            suggestions.directory = { destinationDirectory }
+            suggestions.start(
+                composerHistory: store.composerHistory,
+                readsShellHistory: settings.composerSuggestFromShellHistory
+            )
+        }
+        .onChange(of: store.composerHistory) { _, history in suggestions.setComposerHistory(history) }
+        .onChange(of: settings.composerSuggestFromShellHistory) { _, reads in suggestions.setReadsShellHistory(reads) }
+        // A list that is open follows the text, including changes the editor
+        // is not told about, such as the field being cleared on send.
+        .onChange(of: text) { _, newText in suggestions.refresh(text: newText, caret: suggestions.caret) }
         // Hiding the composer mid-request used to leave the call running with
         // nothing left to show its answer.
-        .onDisappear { ai.cancel() }
+        .onDisappear {
+            ai.cancel()
+            suggestions.close()
+        }
     }
 
     /// How far the card may travel from home while staying fully on the
@@ -352,6 +371,7 @@ struct ComposerBar: View {
     private func send() {
         let command = trimmedText
         guard !command.isEmpty else { return }
+        suggestions.close()
         if command.lowercased().hasPrefix("@ai") {
             // A bare `@ai` is a typo, not a prompt. Without this it reached
             // submit with an empty string and spent a real chat-completions
@@ -392,6 +412,9 @@ struct ComposerBar: View {
             placeholder: "Run anything",
             style: inputStyle(theme),
             workingDirectory: destinationDirectory,
+            ghost: suggestions.ghost(for: text),
+            ghostBase: text,
+            suggestions: suggestions,
             focusPending: store.composerFocusPending,
             isFocused: $inputFocused,
             onFocusTaken: { store.composerFocusHandled = store.composerFocusRequest },
@@ -410,6 +433,15 @@ struct ComposerBar: View {
         )
         // With Reduce Motion on, the focus change is instant rather than eased.
         .animation(reduceMotion ? nil : Motion.field, value: inputFocused)
+        // Above the field rather than in the card's layout, so opening it does
+        // not move anything. Its bottom edge sits just over the field's top.
+        .overlay(alignment: .topLeading) {
+            SuggestionList(suggestions: suggestions, theme: theme, accent: settings.accentColor)
+                .alignmentGuide(.top) { $0[.bottom] + 8 }
+        }
+        // Above what follows it in the card, or the row of controls below
+        // would draw over the list's shadow.
+        .zIndex(1)
     }
 
     /// The command colours for the field this is typed in, from the terminal
@@ -432,14 +464,20 @@ struct ComposerBar: View {
         )
     }
 
-    /// Where the command will run, for checking `./script` against. Nil for a
-    /// remote session, whose files this Mac cannot see.
+    /// Where the command will run, for checking `./script` against and for
+    /// completing file names in. Nil for a remote session, whose files this Mac
+    /// cannot see.
+    ///
+    /// The composer's own shell, before it has started, begins where the
+    /// focused terminal is — what `ensureComposerSession` does.
     private var destinationDirectory: String? {
         switch store.composerDestination {
         case .terminal(let session):
             return session.isRemote ? nil : session.currentDirectory
         case .ownShell:
             return store.composerSession?.currentDirectory
+                ?? store.focusedSession.flatMap { $0.isRemote ? nil : $0.currentDirectory }
+                ?? NSHomeDirectory()
         }
     }
 

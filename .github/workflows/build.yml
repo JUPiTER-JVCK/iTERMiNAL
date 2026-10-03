@@ -145,6 +145,11 @@ jobs:
             Sources/iTERMiNAL/Input/ColorMath.swift \
             Sources/iTERMiNAL/Input/ShellTokenizer.swift \
             Sources/iTERMiNAL/Input/SyntaxPalette.swift \
+            Sources/iTERMiNAL/Input/FuzzyMatcher.swift \
+            Sources/iTERMiNAL/Input/CommandHistoryIndex.swift \
+            Sources/iTERMiNAL/Input/PathCompleter.swift \
+            Sources/iTERMiNAL/Input/SuggestionState.swift \
+            Sources/iTERMiNAL/Chrome/ShellHistory.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

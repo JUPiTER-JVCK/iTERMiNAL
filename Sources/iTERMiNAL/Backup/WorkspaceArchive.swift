@@ -43,6 +43,10 @@ struct PreferencesArchive: Codable {
     var composerOpacity: Double?
     var composerVibrancy: Bool?
     var composerTranscriptHeight: Double?
+    /// Travels for the same reason the assistant's context switches do: a
+    /// second Mac should not start reading shell history that the first was
+    /// told not to.
+    var composerSuggestFromShellHistory: Bool?
     /// Assistant provider configuration. Optional for the same reason as the
     /// composer fields above — older archives predate them.
     ///
@@ -79,6 +83,7 @@ struct PreferencesArchive: Codable {
         composerOpacity = settings.composerOpacity
         composerVibrancy = settings.composerVibrancy
         composerTranscriptHeight = settings.composerTranscriptHeight
+        composerSuggestFromShellHistory = settings.composerSuggestFromShellHistory
         assistantBaseURL = settings.assistantBaseURL
         assistantModel = settings.assistantModel
         assistantIncludeCwd = settings.assistantIncludeCwd
@@ -131,6 +136,9 @@ struct PreferencesArchive: Codable {
         if let composerWidth { settings.composerWidth = composerWidth }
         if let composerOpacity { settings.composerOpacity = composerOpacity }
         if let composerVibrancy { settings.composerVibrancy = composerVibrancy }
+        if let composerSuggestFromShellHistory {
+            settings.composerSuggestFromShellHistory = composerSuggestFromShellHistory
+        }
         if let composerTranscriptHeight {
             settings.composerTranscriptHeight = composerTranscriptHeight
         }
