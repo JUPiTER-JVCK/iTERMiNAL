@@ -26,6 +26,13 @@ struct ErrorHelpRequest: Equatable {
     var output: String
     var lineCount: Int
     var destination: AssistantDestination.Description
+    /// Where the command ran, the git branch and the workspace's name — only
+    /// the ones whose switches in Settings → AI are on. They travel with the
+    /// request, so what is shown for consent is the payload itself: the
+    /// request is the single source for what is sent.
+    var workingDirectory: String?
+    var gitBranch: String?
+    var workspaceName: String?
 
     /// - Parameters:
     ///   - rawOutput: Straight from the terminal. Only the tail is kept.
@@ -34,7 +41,10 @@ struct ErrorHelpRequest: Equatable {
         kind: ErrorHelpKind,
         command: String?,
         rawOutput: String,
-        baseURL: String
+        baseURL: String,
+        workingDirectory: String? = nil,
+        gitBranch: String? = nil,
+        workspaceName: String? = nil
     ) -> ErrorHelpRequest {
         let output = ContextSanitizer.sanitizeRecentOutput(rawOutput)
         let typed = command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -44,8 +54,16 @@ struct ErrorHelpRequest: Equatable {
             command: cleanedCommand,
             output: output,
             lineCount: output.split(separator: "\n", omittingEmptySubsequences: true).count,
-            destination: AssistantDestination.describe(baseURL: baseURL)
+            destination: AssistantDestination.describe(baseURL: baseURL),
+            workingDirectory: clean(workingDirectory),
+            gitBranch: clean(gitBranch),
+            workspaceName: clean(workspaceName)
         )
+    }
+
+    private static func clean(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : SecretRedactor.redact(trimmed)
     }
 
     static let commandLimit = 1_000
@@ -65,14 +83,41 @@ struct ErrorHelpRequest: Equatable {
         }
     }
 
-    /// The question put to the person before anything is sent. Names the
-    /// destination, and says "stays on this Mac" only for a loopback one.
+    /// Everything that would be sent, in words, in the order it is shown.
+    var contents: [String] {
+        var items: [String] = []
+        if command != nil { items.append("the command") }
+        items.append(lineCount == 1 ? "1 line of output" : "\(lineCount) lines of output")
+        if workingDirectory != nil { items.append("the working directory") }
+        if gitBranch != nil { items.append("the git branch") }
+        if workspaceName != nil { items.append("the workspace name") }
+        return items
+    }
+
+    /// The question put to the person before anything is sent. Lists every kind
+    /// of thing in the request, names the destination, and says "stays on this
+    /// Mac" only for a loopback one.
     var consentMessage: String {
-        let lines = lineCount == 1 ? "1 line of output" : "\(lineCount) lines of output"
-        let what = command == nil ? lines : "the command and \(lines)"
+        let items = contents
+        let what = items.count > 1
+            ? items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
+            : items.joined()
         if destination.staysOnThisMac {
             return "Send \(what) to \(destination.name)? It stays on this Mac."
         }
         return "Send \(what) to \(destination.name)? Values that look like keys or passwords are masked first."
+    }
+
+    /// Exactly what would be sent, as text: the same fields, the same values.
+    var preview: String {
+        var sections: [String] = []
+        if let workingDirectory { sections.append("Working directory:\n\(workingDirectory)") }
+        if let gitBranch { sections.append("Git branch:\n\(gitBranch)") }
+        if let workspaceName { sections.append("Workspace:\n\(workspaceName)") }
+        if let command { sections.append("Command:\n\(command)") }
+        sections.append("Output:\n\(output)")
+        // The question asked of the assistant, which goes with it.
+        sections.append("Request:\n\(prompt)")
+        return sections.joined(separator: "\n\n")
     }
 }

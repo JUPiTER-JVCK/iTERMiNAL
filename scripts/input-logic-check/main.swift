@@ -1137,6 +1137,36 @@ do {
     check(local.command == nil && local.lineCount == 1, "no command, one line")
     check(local.consentMessage == "Send 1 line of output to the assistant on this Mac? It stays on this Mac.", "a local assistant says so: \(local.consentMessage)")
     check(!request.consentMessage.contains("stays on this Mac"), "a hosted one never claims it")
+
+    // The request is what is sent: everything in it is listed in the question and
+    // shown in the preview, and nothing is left out of either.
+    let withContext = ErrorHelpRequest.make(
+        kind: .explain,
+        command: "ls",
+        rawOutput: "a\nb",
+        baseURL: "https://api.openai.com/v1",
+        workingDirectory: "/Users/me/clients/acme",
+        gitBranch: "feature/x",
+        workspaceName: "Acme redesign"
+    )
+    check(withContext.consentMessage == "Send the command, 2 lines of output, the working directory, the git branch and the workspace name to api.openai.com? Values that look like keys or passwords are masked first.",
+          "the question lists every kind of thing sent: \(withContext.consentMessage)")
+    check(withContext.preview == "Working directory:\n/Users/me/clients/acme\n\nGit branch:\nfeature/x\n\nWorkspace:\nAcme redesign\n\nCommand:\nls\n\nOutput:\na\nb\n\nRequest:\n" + withContext.prompt,
+          "the preview shows every field: \(withContext.preview.debugDescription)")
+    let someContext = ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "http://localhost:11434/v1", workingDirectory: "/tmp", gitBranch: "  ", workspaceName: nil)
+    check(someContext.consentMessage == "Send 1 line of output and the working directory to the assistant on this Mac? It stays on this Mac.",
+          "only what is present is listed: \(someContext.consentMessage)")
+    check(someContext.gitBranch == nil, "a blank field is no field")
+    check(someContext.preview == "Working directory:\n/tmp\n\nOutput:\nx\n\nRequest:\n" + someContext.prompt, "and only what is present is shown: \(someContext.preview.debugDescription)")
+    check(ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "x", baseURL: "https://a.b", workingDirectory: "/Users/me/AKIAIOSFODNN7EXAMPLE").workingDirectory == "/Users/me/[redacted]",
+          "context fields are masked like everything else")
+    // Every field is in the contents list exactly when it is in the preview.
+    for request in [request, local, withContext, someContext] {
+        check(request.contents.contains("the command") == request.preview.contains("Command:"), "command listed iff shown")
+        check(request.contents.contains("the working directory") == request.preview.contains("Working directory:"), "directory listed iff shown")
+        check(request.contents.contains("the git branch") == request.preview.contains("Git branch:"), "branch listed iff shown")
+        check(request.contents.contains("the workspace name") == request.preview.contains("Workspace:"), "workspace listed iff shown")
+    }
     check(ErrorHelpRequest.make(kind: .explain, command: "   ", rawOutput: "x", baseURL: "https://a.b").command == nil, "a blank command is no command")
     check((ErrorHelpRequest.make(kind: .explain, command: String(repeating: "a", count: 5_000), rawOutput: "x", baseURL: "https://a.b").command?.count ?? 0) <= ErrorHelpRequest.commandLimit,
           "a very long command is cut")

@@ -131,7 +131,7 @@ struct ConsentPrompt: View {
 
             if showing {
                 ScrollView {
-                    Text(preview)
+                    Text(request.preview)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,13 +142,6 @@ struct ConsentPrompt: View {
         }
     }
 
-    /// Exactly the cleaned text the request holds, which is what is sent.
-    private var preview: String {
-        var text = ""
-        if let command = request.command { text += "Command:\n\(command)\n\n" }
-        text += "Output:\n\(request.output)"
-        return text
-    }
 }
 
 // MARK: - The answer

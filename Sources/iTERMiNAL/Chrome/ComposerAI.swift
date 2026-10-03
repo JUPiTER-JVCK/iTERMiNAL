@@ -115,11 +115,17 @@ final class ComposerAIController: ObservableObject {
             return
         }
 
+        // The context switches are applied here, once, and the result travels
+        // inside the request: what the consent prompt shows is what is sent.
+        let session = store.composerDestinationSession ?? store.focusedSession ?? store.composerSession
         let request = ErrorHelpRequest.make(
             kind: kind,
             command: command,
             rawOutput: output,
-            baseURL: settings.assistantBaseURL
+            baseURL: settings.assistantBaseURL,
+            workingDirectory: settings.assistantIncludeCwd ? session?.currentDirectory : nil,
+            gitBranch: settings.assistantIncludeGitBranch ? session?.gitBranch : nil,
+            workspaceName: settings.assistantIncludeWorkspace ? store.currentWorkspace?.name : nil
         )
         if settings.assistantIncludeRecentOutput {
             send(request, store: store, settings: settings)
@@ -140,7 +146,12 @@ final class ComposerAIController: ObservableObject {
             banner = .notConfigured
             return
         }
-        var context = Self.buildContext(store: store, settings: settings, includeOutput: false)
+        // From the request alone: nothing is gathered again here, so nothing
+        // goes that the person was not shown.
+        var context = AssistantContext()
+        context.workingDirectory = request.workingDirectory
+        context.gitBranch = request.gitBranch
+        context.workspaceName = request.workspaceName
         context.recentOutput = request.output
         context.lastCommand = request.command
         banner = .thinking
@@ -162,11 +173,7 @@ final class ComposerAIController: ObservableObject {
         }
     }
 
-    private static func buildContext(
-        store: WorkspaceStore,
-        settings: AppSettings,
-        includeOutput: Bool = true
-    ) -> AssistantContext {
+    private static func buildContext(store: WorkspaceStore, settings: AppSettings) -> AssistantContext {
         let session = store.focusedSession ?? store.composerSession
         var context = AssistantContext()
         if settings.assistantIncludeCwd {
@@ -178,7 +185,7 @@ final class ComposerAIController: ObservableObject {
         if settings.assistantIncludeWorkspace {
             context.workspaceName = store.currentWorkspace?.name
         }
-        if includeOutput, settings.assistantIncludeRecentOutput, let session {
+        if settings.assistantIncludeRecentOutput, let session {
             context.recentOutput = ContextSanitizer.sanitizeRecentOutput(
                 session.captureVisibleText()
             )
