@@ -87,6 +87,13 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K, fuzzy search over every action.
+- **Gentle motion** — panels, the dock, banners and the sidebar's sections
+  move on springs, and hover and selection in the sidebar, toolbar and dock
+  fade instead of flashing. With Reduce Motion on (System Settings →
+  Accessibility → Display) the sliding panels, dock and banners fade in place
+  and the springs behind them become a short ease. The app follows the setting
+  live, so changing it applies without a relaunch. Splitting or closing a pane
+  is not animated.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
   cursor, scrollback, GPU), Panels, Connections, Security, AI, Backup,
   Shortcuts, and Advanced, all applying live.

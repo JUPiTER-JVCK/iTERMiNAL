@@ -50,6 +50,7 @@ struct DetailView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Sizes while a seam is being dragged, kept here rather than written
     /// straight to `AppSettings`. Settings is observed by half the app, so
@@ -113,7 +114,7 @@ struct DetailView: View {
                     RightPanelView()
                         .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: size.width))
                         .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(Motion.panelTransition(reduceMotion: reduceMotion))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -134,7 +135,7 @@ struct DetailView: View {
                 )
                 TerminalDockView()
                     .frame(height: dockHeight)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(Motion.dockTransition(reduceMotion: reduceMotion))
             }
 
             // Last in the column, so it lands in the window's bottom-right
@@ -337,11 +338,13 @@ private struct StripToggle: View {
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isActive ? theme.surface : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+                        .fill(isActive ? theme.surface : theme.surface.opacity(hovering ? 0.5 : 0))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isActive)
         .onHover { hovering = $0 }
         .help(help)
     }
@@ -679,6 +682,7 @@ private struct RecentCommandRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
         .onHover { hovering = $0 }
         .help("Run in a new terminal")
     }
@@ -936,8 +940,9 @@ private struct TaskRow: View {
         .frame(height: 46)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovering ? theme.surface : Color.clear)
+                .fill(theme.surface.opacity(hovering ? 1 : 0))
         )
+        .animation(Motion.hover, value: hovering)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(count: 2) { store.reveal(task) }
@@ -1127,8 +1132,10 @@ private struct PanelTabChip: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? theme.surface : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+                .fill(isSelected ? theme.surface : theme.surface.opacity(hovering ? 0.5 : 0))
         )
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isSelected)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
@@ -1222,11 +1229,12 @@ private struct PickerRow: View {
             .frame(height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(hovering ? theme.surface : Color.clear)
+                    .fill(theme.surface.opacity(hovering ? 1 : 0))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
         .onHover { hovering = $0 }
     }
 }
@@ -1362,8 +1370,10 @@ private struct DockTabChip: View {
         .frame(maxWidth: 190)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? theme.surface : (hovering ? theme.surface.opacity(0.5) : Color.clear))
+                .fill(isSelected ? theme.surface : theme.surface.opacity(hovering ? 0.5 : 0))
         )
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isSelected)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
