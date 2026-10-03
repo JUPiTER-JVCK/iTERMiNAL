@@ -468,16 +468,15 @@ struct ComposerBar: View {
     /// completing file names in. Nil for a remote session, whose files this Mac
     /// cannot see.
     ///
-    /// The composer's own shell, before it has started, begins where the
-    /// focused terminal is — what `ensureComposerSession` does.
+    /// The composer's own shell, before it has started, begins where
+    /// `composerShellDirectory` says — the same answer `ensureComposerSession`
+    /// starts it with.
     private var destinationDirectory: String? {
         switch store.composerDestination {
         case .terminal(let session):
             return session.isRemote ? nil : session.currentDirectory
         case .ownShell:
-            return store.composerSession?.currentDirectory
-                ?? store.focusedSession.flatMap { $0.isRemote ? nil : $0.currentDirectory }
-                ?? NSHomeDirectory()
+            return store.composerSession?.currentDirectory ?? store.composerShellDirectory
         }
     }
 

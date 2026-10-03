@@ -827,13 +827,25 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// Where the composer's own shell begins, and so where its commands and file
+    /// completions are read from before it has started: the focused terminal's
+    /// directory when that is a place on this Mac, otherwise the configured
+    /// default, as for any new local terminal. A remote session's directory is
+    /// a path on another machine, and means nothing here.
+    ///
+    /// One answer for both, so what Tab completes is what the shell will see.
+    var composerShellDirectory: String {
+        if let session = focusedSession, !session.isRemote { return session.currentDirectory }
+        return AppSettings.shared.resolvedInitialDirectory
+    }
+
     @discardableResult
     func ensureComposerSession() -> TerminalSession {
         if let composerSession { return composerSession }
         let shell = AppSettings.shared.composerShell
         let session = TerminalSession(
             kind: .localShell,
-            initialDirectory: focusedSession?.currentDirectory,
+            initialDirectory: composerShellDirectory,
             shellOverride: shell.isEmpty ? nil : shell
         )
         session.startIfNeeded()

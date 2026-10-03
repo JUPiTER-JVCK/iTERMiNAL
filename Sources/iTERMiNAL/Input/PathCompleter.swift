@@ -14,10 +14,15 @@ struct PathCompletion: Equatable {
 
     /// UTF-16 range of the word being completed, the unit `NSRange` uses.
     var range: Range<Int>
+    /// The first `PathCompleter.maxCandidates` matches, in order.
     var candidates: [Candidate]
-    /// What the word becomes when every candidate shares more than has been
-    /// typed — the part a shell fills in before it lists anything. Nil when
-    /// they share nothing further, and always nil for a single candidate.
+    /// How many things match in all, which is more than `candidates` holds when
+    /// a directory has more matches than are worth listing.
+    var matchCount: Int
+    /// What the word becomes when every match shares more than has been typed —
+    /// the part a shell fills in before it lists anything. Worked out from all
+    /// the matches, not just the ones kept. Nil when they share nothing further,
+    /// and always nil for a single match.
     var sharedInsertion: String?
 }
 
@@ -86,7 +91,7 @@ enum PathCompleter {
         if quote == nil {
             if content == "~" {
                 let tilde = PathCompletion.Candidate(name: "~", isDirectory: true, insertion: "~/")
-                return PathCompletion(range: start..<caret, candidates: [tilde], sharedInsertion: nil)
+                return PathCompletion(range: start..<caret, candidates: [tilde], matchCount: 1, sharedInsertion: nil)
             }
             // `~user` would need the account database.
             if content.hasPrefix("~"), !content.hasPrefix("~/") { return nil }
@@ -116,14 +121,13 @@ enum PathCompleter {
             let (a, b) = (lhs.lowercased(), rhs.lowercased())
             return a != b ? a < b : lhs < rhs
         }
-        matches = Array(matches.prefix(maxCandidates))
 
         let render = Renderer(quote: quote, directoryPart: directoryPart)
-        let candidates = matches.map { name -> PathCompletion.Candidate in
-            let isDir = isDirectory(directory, name)
-            return PathCompletion.Candidate(name: name, isDirectory: isDir, insertion: render.insertion(name, isDirectory: isDir))
-        }
 
+        // What they share comes from every match: a name past the cut that
+        // diverges earlier would otherwise be left out of it, and Tab would
+        // fill in a prefix that excludes real files. Only what is kept for
+        // listing is cut, and only those need asking the file system about.
         var shared: String?
         if matches.count > 1 {
             let common = commonPrefix(of: matches)
@@ -131,7 +135,11 @@ enum PathCompleter {
                 shared = render.partial(common)
             }
         }
-        return PathCompletion(range: start..<caret, candidates: candidates, sharedInsertion: shared)
+        let candidates = matches.prefix(maxCandidates).map { name -> PathCompletion.Candidate in
+            let isDir = isDirectory(directory, name)
+            return PathCompletion.Candidate(name: name, isDirectory: isDir, insertion: render.insertion(name, isDirectory: isDir))
+        }
+        return PathCompletion(range: start..<caret, candidates: candidates, matchCount: matches.count, sharedInsertion: shared)
     }
 
     // MARK: The word at the caret

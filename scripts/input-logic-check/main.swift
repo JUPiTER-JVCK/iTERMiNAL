@@ -244,6 +244,72 @@ check(score("gs", "git status") > score("gs", "go to far away sleep"), "a closer
 check(score("dep", "dependabot") > score("dep", "npm run deploy"),
       "the start of the command outranks the start of a later word")
 
+// The match must be the best there is. Check it against every way of placing the
+// query in the candidate, over many small random cases — not just the cases a
+// person thought to write down, which a first-fit search can pass.
+do {
+    func bestPossible(_ query: String, _ candidate: String) -> Int? {
+        let original = Array(candidate)
+        let folded = FuzzyMatcher.folded(candidate)
+        let needle = FuzzyMatcher.needle(query)
+        if needle.isEmpty { return 0 }
+        var best: Int?
+        func place(_ slot: Int, from start: Int, chosen: [Int]) {
+            if slot == needle.count {
+                let value = FuzzyMatcher.score(of: chosen, candidateLength: original.count, original: original)
+                if best == nil || value > best! { best = value }
+                return
+            }
+            var j = start
+            while j < folded.count {
+                if folded[j] == needle[slot] { place(slot + 1, from: j + 1, chosen: chosen + [j]) }
+                j += 1
+            }
+        }
+        place(0, from: 0, chosen: [])
+        return best
+    }
+
+    // The cases that a leftmost-end-then-tighten search gets wrong: an early
+    // loose match that is not the best one.
+    for (query, candidate) in [("ab", "a ----- b ab"), ("bc", "xb ----- c bc"), ("ab", "ab ab"), ("st", "git status status")] {
+        let match = fuzzy(query, candidate)
+        check(match?.score == bestPossible(query, candidate),
+              "\(query) in \(candidate.debugDescription) should score the best possible \(String(describing: bestPossible(query, candidate))), got \(String(describing: match))")
+    }
+    check(fuzzy("bc", "xb ----- c bc")?.indices == [11, 12], "a tight later match beats a loose earlier one: \(String(describing: fuzzy("bc", "xb ----- c bc")))")
+
+    var seed: UInt64 = 0xFEEDFACE
+    func next() -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int(truncatingIfNeeded: seed >> 33)
+    }
+    let letters = ["a", "b", "A", "B", " ", "-", "/", "é"]
+    var wrong: String?
+    for _ in 0..<4_000 {
+        let candidate = (0..<(next() % 13)).map { _ in letters[next() % letters.count] }.joined()
+        let query = (0..<(1 + next() % 4)).map { _ in ["a", "b", " ", "é"][next() % 4] }.joined()
+        let match = fuzzy(query, candidate)
+        let best = bestPossible(query, candidate)
+        let original = Array(candidate)
+        let needle = FuzzyMatcher.needle(query)
+        var problem: String?
+        if match?.score != best {
+            problem = "score \(String(describing: match?.score)), best possible \(String(describing: best))"
+        } else if let match {
+            if match.indices.count != needle.count || zip(match.indices, match.indices.dropFirst()).contains(where: { $0 >= $1 })
+                || match.indices.contains(where: { $0 < 0 || $0 >= original.count })
+                || zip(match.indices, needle).contains(where: { FuzzyMatcher.fold(original[$0]) != $1 }) {
+                problem = "malformed indices \(match.indices)"
+            } else if FuzzyMatcher.score(of: match.indices, candidateLength: original.count, original: original) != match.score {
+                problem = "indices \(match.indices) are not worth the score \(match.score)"
+            }
+        }
+        if let problem { wrong = "query \(query.debugDescription) in \(candidate.debugDescription): \(problem)"; break }
+    }
+    check(wrong == nil, "fuzzy match is not optimal or well-formed: \(wrong ?? "")")
+}
+
 // MARK: History index
 
 do {
@@ -332,6 +398,29 @@ do {
     check(ShellHistory.search(in: [file], tailByteCount: 14, limit: 10) == ["charlie", "bravo"],
           "a tail that reaches back to a line start keeps it: \(ShellHistory.search(in: [file], tailByteCount: 14, limit: 10))")
     check(ShellHistory.search(in: [file], tailByteCount: 3, limit: 10).isEmpty, "a tail inside one line is no commands")
+    // A cut can land inside a command that spans lines. What is left of it is
+    // not a command, whichever of its lines the cut starts on.
+    func tail(_ content: String, _ bytes: Int, name: String) -> [String] {
+        let url = URL(fileURLWithPath: directory + "/" + name)
+        try? content.write(to: url, atomically: true, encoding: .utf8)
+        return ShellHistory.search(in: [url], tailByteCount: bytes, limit: 10)
+    }
+    // ": 1:0;echo first\" newline "continued" newline "ls" newline — 31 bytes.
+    let spanning2 = ": 1:0;echo first\\\ncontinued\nls\n"
+    check(tail(spanning2, 13, name: "span-a") == ["ls"],
+          "a tail that starts on the last line of a multi-line command skips it: \(tail(spanning2, 13, name: "span-a"))")
+    check(tail(spanning2, 31, name: "span-b") == ["ls"], "and the whole file reads the same way: \(tail(spanning2, 31, name: "span-b"))")
+    check(tail(spanning2, 12, name: "span-c") == ["ls"], "a tail starting inside that line gives the same: \(tail(spanning2, 12, name: "span-c"))")
+    // Three lines: ": 1:0;echo a\" / "b\" / "c" / "ls" — 22 bytes. Cut on each.
+    let spanning3 = ": 1:0;echo a\\\nb\\\nc\nls\n"
+    for bytes in [3, 4, 5, 6, 7, 8, 9, 10, 22] {
+        let result = tail(spanning3, bytes, name: "span-3-\(bytes)")
+        check(result == ["ls"], "a cut \(bytes) bytes from the end of a three-line command leaves only ls: \(result)")
+    }
+    // A command right before the multi-line one is still found when the cut is clean.
+    let before = "pwd\n" + spanning2
+    check(tail(before, before.utf8.count, name: "span-d") == ["ls", "pwd"], "commands either side of a multi-line one are kept")
+    check(tail(before, 31, name: "span-e") == ["ls"], "cutting exactly at the multi-line command: \(tail(before, 31, name: "span-e"))")
     check(ShellHistory.search(in: [URL(fileURLWithPath: directory + "/missing")], tailByteCount: 100, limit: 10).isEmpty,
           "a missing file yields nothing")
     let second = URL(fileURLWithPath: directory + "/second")
@@ -368,6 +457,9 @@ do {
     }
     try? fm.createSymbolicLink(atPath: root + "/link-to-docs", withDestinationPath: root + "/Documents")
 
+    for number in 1...100 { make("big/fooa" + String(format: "%03d", number)) }
+    make("big/foob001")
+    for number in 1...101 { make("many/longprefix-" + String(format: "%03d", number)) }
     func complete(_ text: String, caret: Int? = nil, wd: String? = root, home: String = root + "/home/user") -> PathCompletion? {
         PathCompleter.complete(text: text, caret: caret ?? text.utf16.count, workingDirectory: wd, home: home)
     }
@@ -382,6 +474,18 @@ do {
     check(complete("ls Documents/n")?.candidates.first?.insertion == "Documents/notes.txt", "completes inside a directory")
     check(complete("ls Documents/n")?.range == 3..<14, "range covers the directory part too")
     check(complete("ls readme")?.candidates.first?.isDirectory == false, "a file is not a directory")
+
+    // More matches than are kept: what they share comes from all of them.
+    let big = complete("ls big/foo")
+    check(big?.matchCount == 101 && big?.candidates.count == PathCompleter.maxCandidates,
+          "101 matches keep \(PathCompleter.maxCandidates) and say how many there were: \(String(describing: big?.matchCount)), \(String(describing: big?.candidates.count))")
+    check(big?.sharedInsertion == nil,
+          "a name past the cut that diverges keeps the shared prefix from reaching 'fooa': \(String(describing: big?.sharedInsertion))")
+    check(complete("ls big/fooa")?.sharedInsertion == nil, "the hundred that agree on 'fooa' have nothing more in common: \(String(describing: complete("ls big/fooa")?.sharedInsertion))")
+    let many = complete("ls many/lo")
+    check(many?.matchCount == 101 && many?.sharedInsertion == "many/longprefix-",
+          "what all 101 share is filled in: \(String(describing: many?.sharedInsertion)), \(String(describing: many?.matchCount))")
+    check(complete("ls Do")?.matchCount == 2 && complete("ls Doc")?.matchCount == 1, "match counts for small directories")
 
     // The empty word lists the directory, without dot files.
     let all = names(complete("ls "))
@@ -510,6 +614,9 @@ do {
     touch("solo-file.txt")
     touch("pair-a.txt")
     touch("pair-b.txt")
+    try? fm.createDirectory(atPath: root + "/big", withIntermediateDirectories: true)
+    for number in 1...100 { _ = fm.createFile(atPath: root + "/big/fooa" + String(format: "%03d", number), contents: Data()) }
+    _ = fm.createFile(atPath: root + "/big/foob001", contents: Data())
 
     func state(composer: [String] = ["git status", "git stash", "ls -la", "make test", "npm run build", "echo hi"],
                shell: [String] = []) -> SuggestionState {
@@ -661,6 +768,12 @@ do {
         _ = press(&s, .tab, text: "ls f")
         check(s.mode == .path && s.rows.count == SuggestionState.maxRows && s.hiddenCount == 4,
               "twelve files show eight and say there are four more: \(s.rows.count) shown, \(s.hiddenCount) hidden")
+
+        s = state()
+        o = press(&s, .tab, text: "ls big/foo")
+        check(s.mode == .path && s.rows.count == SuggestionState.maxRows && s.hiddenCount == 101 - SuggestionState.maxRows,
+              "the count of what is not shown is of all the matches, not of the ones kept: \(s.hiddenCount)")
+        check(o.replacement == nil, "and nothing is filled in when the matches past the cap diverge")
 
         // The list follows the word.
         s = state()

@@ -208,7 +208,7 @@ struct SuggestionState {
             return nil
         }
         let range = NSRange(location: completion.range.lowerBound, length: completion.range.count)
-        if completion.candidates.count == 1 {
+        if completion.matchCount == 1 {
             return Replacement(range: range, text: completion.candidates[0].insertion)
         }
         if let shared = completion.sharedInsertion {
@@ -230,6 +230,6 @@ struct SuggestionState {
                 replacement: Replacement(range: range, text: candidate.insertion)
             )
         }
-        return (shown, max(0, completion.candidates.count - Self.maxRows))
+        return (shown, max(0, completion.matchCount - shown.count))
     }
 }

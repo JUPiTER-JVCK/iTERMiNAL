@@ -62,43 +62,77 @@ enum ShellHistory {
         return files
     }
 
-    /// The last `byteCount` bytes as text. When that cuts into the file, the
-    /// line it cuts into is dropped: a fragment of a command is not one.
-    private static func readTail(of url: URL, byteCount: Int) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+    /// The last `byteCount` bytes as text, and what the cut did to its start.
+    private struct Tail {
+        var text: String
+        /// The text begins part-way through a line, so that first line is a
+        /// fragment of a command, not one.
+        var startsMidLine = false
+        /// The line before the text ended in a backslash, so the first line
+        /// is the rest of a command that began earlier.
+        var continuesFromPrevious = false
+    }
+
+    private static func readTail(of url: URL, byteCount: Int) -> Tail {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return Tail(text: "") }
         defer { try? handle.close() }
 
         let size = (try? handle.seekToEnd()) ?? 0
         let truncated = size > UInt64(byteCount)
-        // One byte more than asked for when cutting: the byte before the tail
-        // is a newline exactly when the tail starts on a line, and dropping
-        // through the first newline then costs nothing.
-        let offset = truncated ? size - UInt64(byteCount) - 1 : 0
+        // Two bytes more than asked for when cutting. The one just before the
+        // tail is a newline exactly when the tail starts on a line; the one
+        // before that, if it is a backslash, says that line carries on from
+        // the one before it. Neither is part of the text.
+        let lead = truncated ? Int(min(UInt64(2), size - UInt64(byteCount))) : 0
+        let offset = truncated ? size - UInt64(byteCount) - UInt64(lead) : 0
         try? handle.seek(toOffset: offset)
-        guard let data = try? handle.readToEnd(), !data.isEmpty else { return "" }
+        guard let data = try? handle.readToEnd(), data.count > lead else { return Tail(text: "") }
 
         // History files can hold non-UTF8 bytes (zsh metafies them); decoding
         // leniently keeps the readable entries instead of dropping the file.
-        var text = String(decoding: data, as: UTF8.self)
-        if truncated {
-            guard let newline = text.firstIndex(of: "\n") else { return "" }
-            text = String(text[text.index(after: newline)...])
+        let text = String(decoding: data.dropFirst(lead), as: UTF8.self)
+        guard truncated else { return Tail(text: text) }
+        let before = Array(data.prefix(lead))
+        let newline = UInt8(ascii: "\n")
+        let backslash = UInt8(ascii: "\\")
+        if before.last == newline {
+            // The tail starts on a line. That line carries on from the one
+            // before it if that one ended in a backslash.
+            return Tail(text: text, startsMidLine: false, continuesFromPrevious: before.count == 2 && before[0] == backslash)
         }
-        return text
+        if data[lead] == newline {
+            // The cut fell exactly on a line's newline: what is cut off of it
+            // is nothing, and the line after starts clean. The line that just
+            // ended is the byte before.
+            return Tail(text: text, startsMidLine: false, continuesFromPrevious: before.last == backslash)
+        }
+        return Tail(text: text, startsMidLine: true, continuesFromPrevious: false)
     }
 
     /// Every command in the text, oldest first.
-    static func entries(in text: String, maxLength: Int) -> [String] {
+    ///
+    /// `startsMidLine` and `continuesFromPrevious` describe a text that was cut
+    /// out of the middle of a file (see `Tail`): the first line is then not a
+    /// command to offer, though it still says whether the line after it is a
+    /// continuation, because only its start was cut, not its end.
+    static func entries(
+        in text: String,
+        maxLength: Int,
+        startsMidLine: Bool = false,
+        continuesFromPrevious: Bool = false
+    ) -> [String] {
         var commands: [String] = []
-        var continuing = false
+        var continuing = continuesFromPrevious
+        var first = true
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(raw)
             // zsh stores a command that spans lines as its lines joined by a
             // backslash-newline. The first line ends in the backslash, and the
             // lines after it are not commands of their own.
-            let wasContinuing = continuing
+            let skip = continuing || (first && startsMidLine)
             continuing = line.trimmingCharacters(in: .whitespaces).hasSuffix("\\")
-            if wasContinuing { continue }
+            first = false
+            if skip { continue }
             if let command = normalize(line, maxLength: maxLength) {
                 commands.append(command)
             }
@@ -106,10 +140,23 @@ enum ShellHistory {
         return commands
     }
 
+    private static func newestFirst(in tail: Tail, maxLength: Int, limit: Int) -> [String] {
+        newestFirst(
+            entries(in: tail.text, maxLength: maxLength, startsMidLine: tail.startsMidLine,
+                    continuesFromPrevious: tail.continuesFromPrevious),
+            limit: limit
+        )
+    }
+
     static func newestFirst(in text: String, maxLength: Int, limit: Int) -> [String] {
+        newestFirst(entries(in: text, maxLength: maxLength), limit: limit)
+    }
+
+    /// Newest first, each command once, at its newest position.
+    private static func newestFirst(_ oldestFirst: [String], limit: Int) -> [String] {
         var seen = Set<String>()
         var commands: [String] = []
-        for command in entries(in: text, maxLength: maxLength).reversed() {
+        for command in oldestFirst.reversed() {
             guard seen.insert(command).inserted else { continue }
             commands.append(command)
             if commands.count >= limit { break }
