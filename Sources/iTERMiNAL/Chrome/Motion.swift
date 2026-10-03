@@ -6,10 +6,15 @@ import AppKit
 ///
 /// Reduce Motion is honoured here, once, rather than in every view: with the
 /// system setting on, a curve that moves things becomes a short fade and a
-/// transition that slides becomes a fade. The setting is read each time a curve
-/// is asked for, so changing it in System Settings applies to the next
-/// animation without a relaunch. Views that already check the environment
-/// themselves (the composer) keep doing so; this does not replace that.
+/// transition that slides becomes a fade.
+///
+/// The two are read differently, on purpose. A curve is read when it is asked
+/// for, which is when an animation starts, so it is always current. A
+/// transition is different: a view leaves with the transition it last rendered
+/// with, and SwiftUI cannot see this file read the system setting, so nothing
+/// would re-render a panel that is already open when the setting changes. Its
+/// transitions therefore take the value from the view's own
+/// `accessibilityReduceMotion` environment, which SwiftUI does refresh.
 enum Motion {
     /// Whether the person asked the system to cut down on movement.
     static var reduceMotion: Bool {
@@ -50,16 +55,18 @@ enum Motion {
     /// rows. A little give, but settled quickly: it is in the way of typing.
     static let suggestion = Animation.spring(response: 0.24, dampingFraction: 0.86)
 
-    static var panelTransition: AnyTransition {
+    /// Pass the view's `@Environment(\.accessibilityReduceMotion)`, not
+    /// `Motion.reduceMotion`; see the note above.
+    static func panelTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity)
     }
 
     /// The terminal dock rising from the bottom edge.
-    static var dockTransition: AnyTransition {
+    static func dockTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
     }
 
-    static var bannerTransition: AnyTransition {
+    static func bannerTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
     }
 }

@@ -7,6 +7,7 @@ struct SidebarView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var query = ""
     @State private var searchVisible = false
@@ -173,7 +174,7 @@ struct SidebarView: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
         .padding(.horizontal, 10)
         .padding(.bottom, 4)
-        .transition(Motion.bannerTransition)
+        .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
     }
 
     // MARK: Sections

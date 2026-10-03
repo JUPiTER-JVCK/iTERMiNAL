@@ -91,9 +91,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   move on springs, and hover and selection in the sidebar, toolbar and dock
   fade instead of flashing. With Reduce Motion on (System Settings →
   Accessibility → Display) the sliding panels, dock and banners fade in place
-  and the springs behind them become a short ease. The setting is read each
-  time something animates, so changing it applies without a relaunch.
-  Splitting or closing a pane is not animated.
+  and the springs behind them become a short ease. The app follows the setting
+  live, so changing it applies without a relaunch. Splitting or closing a pane
+  is not animated.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
   cursor, scrollback, GPU), Panels, Connections, Security, AI, Backup,
   Shortcuts, and Advanced, all applying live.

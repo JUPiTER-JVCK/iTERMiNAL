@@ -199,7 +199,7 @@ struct ComposerBar: View {
                     .buttonStyle(.plain)
                     .help(banner == .thinking ? "Stop the request" : "Dismiss")
                 }
-                .transition(Motion.bannerTransition)
+                .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
             }
 
             VStack(alignment: .leading, spacing: 10) {

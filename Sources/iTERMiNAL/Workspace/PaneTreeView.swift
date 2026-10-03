@@ -47,6 +47,7 @@ struct TerminalPaneView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -62,7 +63,7 @@ struct TerminalPaneView: View {
                 VStack(spacing: 0) {
                     if let note = session.statusNote {
                         SessionStatusBanner(session: session, note: note, theme: theme)
-                            .transition(Motion.bannerTransition)
+                            .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
                     }
                 }
                 .animation(Motion.banner, value: session.statusNote)

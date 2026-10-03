@@ -50,6 +50,7 @@ struct DetailView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Sizes while a seam is being dragged, kept here rather than written
     /// straight to `AppSettings`. Settings is observed by half the app, so
@@ -113,7 +114,7 @@ struct DetailView: View {
                     RightPanelView()
                         .frame(width: store.rightPanelExpanded ? nil : panelWidth(in: size.width))
                         .frame(maxWidth: store.rightPanelExpanded ? .infinity : nil)
-                        .transition(Motion.panelTransition)
+                        .transition(Motion.panelTransition(reduceMotion: reduceMotion))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -134,7 +135,7 @@ struct DetailView: View {
                 )
                 TerminalDockView()
                     .frame(height: dockHeight)
-                    .transition(Motion.dockTransition)
+                    .transition(Motion.dockTransition(reduceMotion: reduceMotion))
             }
 
             // Last in the column, so it lands in the window's bottom-right
