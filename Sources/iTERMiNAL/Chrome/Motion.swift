@@ -4,9 +4,11 @@ import AppKit
 /// Every animation curve in one place, so the feel can be retuned against
 /// reference video without hunting through views.
 ///
-/// Reduce Motion is honoured here, once, rather than in every view: with the
-/// system setting on, a curve that moves things becomes a short fade and a
-/// transition that slides becomes a fade.
+/// Reduce Motion is honoured here, once, rather than in every view. With the
+/// system setting on, two things change, and they are different mechanisms: a
+/// spring becomes a short ease, so nothing overshoots or bounces, and a
+/// transition that slides becomes a plain fade. A timing curve cannot take the
+/// movement out by itself; the transitions are what do that.
 ///
 /// The two are read differently, on purpose. A curve is read when it is asked
 /// for, which is when an animation starts, so it is always current. A
@@ -21,23 +23,24 @@ enum Motion {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
-    /// What every moving curve becomes under Reduce Motion: no travel, just a
-    /// quick change of opacity.
-    private static let fade = Animation.easeOut(duration: 0.12)
+    /// What each spring below becomes under Reduce Motion: a quick, settled
+    /// ease with no overshoot. Whether anything still travels is decided by the
+    /// transitions further down, not by this curve.
+    private static let shortEase = Animation.easeOut(duration: 0.12)
 
     /// Side panels sliding in from the trailing edge.
     static var panel: Animation {
-        reduceMotion ? fade : .spring(response: 0.32, dampingFraction: 0.86)
+        reduceMotion ? shortEase : .spring(response: 0.32, dampingFraction: 0.86)
     }
     /// Sidebar section disclosure.
     static var disclosure: Animation {
-        reduceMotion ? fade : .spring(response: 0.22, dampingFraction: 0.9)
+        reduceMotion ? shortEase : .spring(response: 0.22, dampingFraction: 0.9)
     }
     /// Command palette appear/dismiss.
     static let palette = Animation.easeOut(duration: 0.16)
     /// Status and notice banners.
     static var banner: Animation {
-        reduceMotion ? fade : .spring(response: 0.28, dampingFraction: 0.88)
+        reduceMotion ? shortEase : .spring(response: 0.28, dampingFraction: 0.88)
     }
 
     /// The composer's input field warming on focus.
