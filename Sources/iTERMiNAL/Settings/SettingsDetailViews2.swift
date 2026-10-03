@@ -165,6 +165,13 @@ struct ComposerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Suggestions") {
+                Toggle("Suggest from shell history", isOn: $settings.composerSuggestFromShellHistory)
+                Text("As you type, the rest of a command you have run before appears in grey after the caret — → or ⇥ takes it, esc waves it away. ⌃R searches your history, and ⇥ completes file names for terminals on this Mac. What the composer has run in this session is always used. With this on, the tail of your shell's history file (~/.zsh_history or ~/.bash_history) is read too. It is kept in memory only: never saved, exported, or sent anywhere.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Where commands run") {
                 Picker("Run commands in", selection: $settings.composerTarget) {
                     ForEach(ComposerTarget.allCases) { target in

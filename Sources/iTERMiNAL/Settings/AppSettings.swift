@@ -97,6 +97,14 @@ final class AppSettings: ObservableObject {
     /// Off by default: the card is meant to read as sitting above the
     /// terminal, and vibrancy pulls the desktop through it instead.
     @Published var composerVibrancy: Bool { didSet { defaults.set(composerVibrancy, forKey: "composerVibrancy") } }
+    /// Whether the composer reads the shell's own history file (`~/.zsh_history`
+    /// or `~/.bash_history`) to suggest and search commands. What the composer
+    /// itself has run is always used. On by default, as the landing screen
+    /// already reads the same file; it is read here, held in memory, and never
+    /// saved, exported or sent anywhere.
+    @Published var composerSuggestFromShellHistory: Bool {
+        didSet { defaults.set(composerSuggestFromShellHistory, forKey: "composerSuggestFromShellHistory") }
+    }
 
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
@@ -188,6 +196,7 @@ final class AppSettings: ObservableObject {
         composerWidth = defaults.object(forKey: "composerWidth") as? Double ?? 820
         composerOpacity = defaults.object(forKey: "composerOpacity") as? Double ?? 1.0
         composerVibrancy = defaults.bool(forKey: "composerVibrancy")
+        composerSuggestFromShellHistory = defaults.object(forKey: "composerSuggestFromShellHistory") as? Bool ?? true
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -400,6 +409,7 @@ final class AppSettings: ObservableObject {
         composerWidth = 820
         composerOpacity = 1.0
         composerVibrancy = false
+        composerSuggestFromShellHistory = true
 
         assistantBaseURL = "https://api.openai.com/v1"
         assistantModel = "gpt-4o-mini"

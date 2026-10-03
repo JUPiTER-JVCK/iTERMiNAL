@@ -34,9 +34,18 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   `~/.local/bin`, `~/.cargo/bin`, `~/bin` or `~/go/bin`, or a path such as
   `./script` that points at an executable file (checked against the terminal's
   directory, for local terminals only). Anything else — an alias or a shell
-  function, say — is left plain, never marked wrong. The chip above the input
-  names the terminal it will run in, and switches it to a private shell of its
-  own if you want one.
+  function, say — is left plain, never marked wrong. As you type, the rest of
+  a command you have run before shows in grey after the caret (→ or ⇥ takes it,
+  esc waves it away); ⌃R searches your history, ↑↓ choose and ↩ puts the choice
+  in the input without running it; and ⇥ completes file names — filling in what
+  the candidates share first, then listing the rest — for terminals on this
+  Mac, never for a remote session. Suggestions come from what the composer has
+  run and from the tail of your shell's history file (`~/.zsh_history` or
+  `~/.bash_history`, up to 512 KB, read locally); they are held in memory, never
+  saved, exported or sent anywhere, and a setting turns the file off. Only
+  single-line commands are suggested. The chip above the input names the
+  terminal it will run in, and switches it to a private shell of its own if you
+  want one.
 - **Dockable panels** — a terminal dock along the bottom and a browser or file
   panel down the right, opened independently from the toggles at the top right
   of the content area, with draggable dividers whose sizes persist. A dock tab

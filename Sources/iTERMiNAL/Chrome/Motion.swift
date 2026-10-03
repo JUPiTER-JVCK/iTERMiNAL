@@ -17,6 +17,10 @@ enum Motion {
     /// A control giving under the pointer: quick, with a little give.
     static let press = Animation.spring(response: 0.22, dampingFraction: 0.68)
 
+    /// The composer's suggestion list opening, and its highlight moving between
+    /// rows. A little give, but settled quickly: it is in the way of typing.
+    static let suggestion = Animation.spring(response: 0.24, dampingFraction: 0.86)
+
     static let panelTransition = AnyTransition.move(edge: .trailing)
         .combined(with: .opacity)
 

@@ -80,6 +80,10 @@ struct Theme {
     static let darkFloatingSurfaceHex: UInt32 = 0x25252B
     static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
 
+    static func floatingSurfaceHex(for scheme: ColorScheme) -> UInt32 {
+        scheme == .dark ? darkFloatingSurfaceHex : lightFloatingSurfaceHex
+    }
+
     /// The composer's input field, as an opaque colour.
     ///
     /// Opaque on purpose, and in hex: the command colours are chosen for
