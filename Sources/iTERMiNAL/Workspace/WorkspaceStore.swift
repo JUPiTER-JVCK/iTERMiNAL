@@ -835,17 +835,28 @@ final class WorkspaceStore: ObservableObject {
 
     /// Runs a command typed in the composer, in whatever it is pointed at.
     func sendFromComposer(_ text: String) {
+        let session: TerminalSession
         switch composerDestination {
-        case .terminal(let session):
-            session.send(text: text)
+        case .terminal(let target):
+            target.send(text: text)
+            session = target
         case .ownShell:
-            ensureComposerSession().send(text: text)
+            session = ensureComposerSession()
+            session.send(text: text)
             // Gates the inline transcript, so it only appears when there is a
             // composer shell whose output has nowhere else to go.
             if !composerHasRun { composerHasRun = true }
         }
+        lastComposerSend = (session.id, text.trimmingCharacters(in: .whitespacesAndNewlines))
         recordComposerCommand(text)
     }
+
+    /// The last command sent from the composer, and the terminal it went to.
+    /// What Explain and Fix it can say about "the command" without guessing: the
+    /// terminal's own record of its last command is a two-word label for the
+    /// sidebar, and its line buffer can hold anything typed at a prompt — a
+    /// password included. Plain, not published: nothing draws from it.
+    private(set) var lastComposerSend: (sessionID: UUID, command: String)?
 
     /// Keeps the recall list free of adjacent duplicates and bounded, so a
     /// command run in a loop doesn't crowd out everything before it.

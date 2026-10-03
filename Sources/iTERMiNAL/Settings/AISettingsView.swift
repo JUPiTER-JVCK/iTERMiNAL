@@ -109,7 +109,7 @@ struct AISettingsView: View {
 
             Section("Error help") {
                 Toggle("Offer Explain / Fix it after a command prints an error", isOn: $settings.assistantOfferErrorHelp)
-                Text("When a command you run from the composer prints something that reads like an error, a row offers Explain and Fix it. Spotting it happens on this Mac, from the terminal's text; nothing is sent until you press one. From the offer, the command and only the new text that appeared after it are sent; from the Terminal menu, the command the terminal last ran and what is on screen. If \"Include recent terminal output\" is off, you're asked each time and shown what would go. A suggested command is only ever put in the input for you to review.")
+                Text("When a command you run from the composer prints something that reads like an error, a row offers Explain and Fix it. Spotting it happens on this Mac, from the terminal's text; nothing is sent until you press one. From the offer, the command and only the new text that appeared after it are sent; from the Terminal menu, what is on screen and the command last sent from the composer if it is still there. If \"Include recent terminal output\" is off, you're asked each time and shown what would go. A suggested command is only ever put in the input for you to review.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

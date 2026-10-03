@@ -48,7 +48,9 @@ struct ErrorHelpRequest: Equatable {
     ) -> ErrorHelpRequest {
         let output = ContextSanitizer.sanitizeRecentOutput(rawOutput)
         let typed = command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let cleanedCommand = typed.isEmpty ? nil : SecretRedactor.redact(String(typed.prefix(commandLimit)))
+        // Masked whole, then cut: a token that straddles the limit would otherwise
+        // be left as a fragment too short to be recognised as one.
+        let cleanedCommand = typed.isEmpty ? nil : String(SecretRedactor.redact(typed).prefix(commandLimit))
         return ErrorHelpRequest(
             kind: kind,
             command: cleanedCommand,

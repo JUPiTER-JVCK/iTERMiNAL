@@ -977,9 +977,20 @@ do {
     for line in negatives {
         check(reason(line) == nil, "\(line.debugDescription) is not an error, got \(String(describing: reason(line)))")
     }
-    // The typed command is not output.
-    check(reason("% echo zsh: command not found: x", command: "echo zsh: command not found: x") == nil, "the echo of a command that mentions an error is not one")
-    check(reason("zsh: command not found: nosuch", command: "nosuch") == nil, "a line containing the command text is its echo")
+    // The shell's echo of the typed command is not output; what it says about it is.
+    func lines(_ text: String, command: String) -> FailureSignature.Match? {
+        FailureSignature.firstMatch(in: text.components(separatedBy: "\n"), excludingCommand: command)
+    }
+    check(lines("% echo zsh: command not found: x", command: "echo zsh: command not found: x") == nil, "the echo of a command that mentions an error is not one")
+    check(lines("me@host ~ % nosuch\nzsh: command not found: nosuch\nme@host ~ %", command: "nosuch")?.reason == "command not found",
+          "the shell's complaint about a command is found even though it contains the command: \(String(describing: lines("me@host ~ % nosuch\nzsh: command not found: nosuch\nme@host ~ %", command: "nosuch")))")
+    check(lines("% ./run.sh\nzsh: permission denied: ./run.sh", command: "./run.sh")?.reason == "permission denied", "a refusal that names the script")
+    check(lines("% cat missing.txt\ncat: missing.txt: No such file or directory", command: "cat missing.txt")?.reason == "no such file or directory", "a missing file that names the file")
+    check(lines("% echo permission denied: x\nfine", command: "echo permission denied: x") == nil, "only the echo is set aside, and nothing else matched")
+    check(lines("% git checkout -- nope\nerror: pathspec 'nope' did not match any file(s)\nfatal: not a repo", command: "git checkout -- nope")?.reason == "a fatal error", "later lines are still read")
+    check(lines("zsh: command not found: nosuch", command: "nosuch") == nil, "with no echo captured, the first line mentioning the command is taken for it")
+    check(lines("nothing here", command: "nosuch") == nil && lines("bash: x: command not found", command: "ls")?.reason == "command not found",
+          "a command that never appears sets nothing aside")
     check(FailureSignature.firstMatch(in: ["fine", "bash: x: command not found", "fatal: later"], excludingCommand: nil)?.line == "bash: x: command not found",
           "the first matching line wins")
     check(FailureSignature.firstMatch(in: [], excludingCommand: nil) == nil, "no lines, no match")
@@ -1170,6 +1181,11 @@ do {
     check(ErrorHelpRequest.make(kind: .explain, command: "   ", rawOutput: "x", baseURL: "https://a.b").command == nil, "a blank command is no command")
     check((ErrorHelpRequest.make(kind: .explain, command: String(repeating: "a", count: 5_000), rawOutput: "x", baseURL: "https://a.b").command?.count ?? 0) <= ErrorHelpRequest.commandLimit,
           "a very long command is cut")
+    // A token straddling the command limit is masked whole before the cut.
+    let straddling = String(repeating: "a ", count: 495) + "ghp_" + String(repeating: "A1b2", count: 9) + " tail"
+    let cutCommand = ErrorHelpRequest.make(kind: .explain, command: straddling, rawOutput: "x", baseURL: "https://a.b").command ?? ""
+    check(!cutCommand.contains("ghp_") && !cutCommand.contains("A1b2") && cutCommand.count <= ErrorHelpRequest.commandLimit,
+          "a token across the command limit leaves no fragment: \(cutCommand.suffix(30).debugDescription)")
     check(ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt != ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt,
           "explain and fix ask different things")
     check(ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt.contains("fenced code block"), "fix asks for a fenced command")

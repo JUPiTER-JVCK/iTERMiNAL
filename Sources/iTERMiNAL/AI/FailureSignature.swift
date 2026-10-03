@@ -15,14 +15,21 @@ enum FailureSignature {
     }
 
     /// The first line that carries a marker. `command` is the text that was
-    /// typed: the shell's echo of it is not output, and a command that merely
-    /// mentions "permission denied" has not hit it.
+    /// typed: the shell echoes it before anything it prints, so the first line
+    /// that contains it is that echo — not output, and a command that merely
+    /// mentions "permission denied" has not hit it. Only that one line is set
+    /// aside. Later lines that contain the command are the shell talking about
+    /// it, and `zsh: command not found: nosuch` is exactly that.
     static func firstMatch(in lines: [String], excludingCommand command: String? = nil) -> Match? {
         let typed = command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var echoSkipped = typed.isEmpty
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
-            if !typed.isEmpty, line.contains(typed) { continue }
+            if !echoSkipped, line.contains(typed) {
+                echoSkipped = true
+                continue
+            }
             if let reason = reason(for: line) { return Match(reason: reason, line: line) }
         }
         return nil

@@ -108,7 +108,18 @@ final class ComposerAIController: ObservableObject {
                 return
             }
             output = session.captureVisibleText()
-            command = session.lastCommand
+            // The exact command sent from the composer to this terminal — and
+            // only while it is still on screen, so it cannot be a command whose
+            // output has long scrolled away. Not the terminal's own `lastCommand`:
+            // that is a two-word label for the sidebar, with the arguments gone.
+            // A command typed straight into the terminal is already on screen,
+            // prompt line and all, so the output carries it.
+            if let sent = store.lastComposerSend, sent.sessionID == session.id,
+               !sent.command.isEmpty, output.contains(sent.command) {
+                command = sent.command
+            } else {
+                command = nil
+            }
         }
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             banner = .failure("There's no output to look at yet.")

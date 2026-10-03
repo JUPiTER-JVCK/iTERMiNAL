@@ -468,8 +468,8 @@ The same two actions work any time, for any terminal, without any detection:
 and the composer's **+** menu.
 
 - **What is sent.** From the offer: the command and only the new text that
-  appeared after it was sent. From the menu: the command the terminal last ran,
-  if it knows it, and what is on screen. Either way, control sequences are stripped, values that look like
+  appeared after it was sent. From the menu: what is on screen, and the command
+  last sent to that terminal from the composer if it is still there. Either way, control sequences are stripped, values that look like
   secrets are masked, and it is cut to the last 6,000 characters starting on a
   whole line.
 - **Asking first.** If "Include recent terminal output" is off, you are asked
