@@ -77,10 +77,10 @@ final class OpenAICompatibleAssistant: AssistantService {
 
     /// True when the base URL points at a loopback host (no API key required).
     static func isLocalHost(_ baseURL: String) -> Bool {
-        guard let url = URL(string: baseURL), let host = url.host?.lowercased() else {
+        guard let url = URL(string: baseURL), let host = url.host else {
             return false
         }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+        return AssistantDestination.isLoopback(host: host)
     }
 
     /// Accepts either `…/v1` or a full `…/v1/chat/completions` base.
@@ -117,6 +117,9 @@ final class OpenAICompatibleAssistant: AssistantService {
         }
         if let workspace = context.workspaceName, !workspace.isEmpty {
             parts.append("Workspace: \(workspace)")
+        }
+        if let command = context.lastCommand, !command.isEmpty {
+            parts.append("Command that was run:\n```\n\(command)\n```")
         }
         if let output = context.recentOutput, !output.isEmpty {
             parts.append("Recent terminal output:\n```\n\(output)\n```")

@@ -29,13 +29,29 @@ enum ContextSanitizer {
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 
-    /// Strip ANSI, then keep the trailing `limit` characters (recent output).
+    /// Strip control sequences, mask what looks like a secret, then keep the
+    /// trailing `limit` characters.
+    ///
+    /// In that order. Masking after the cut could leave half a token at the
+    /// start of what is kept, too short to be recognised as one; masking
+    /// first sees every token whole. And what is kept begins on a line of its
+    /// own, not part-way through one.
     static func sanitizeRecentOutput(_ text: String, limit: Int = recentOutputLimit) -> String {
-        let plain = stripANSI(text)
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+        let plain = SecretRedactor.redact(
+            stripANSI(text)
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        )
         guard plain.count > limit else { return plain }
         let start = plain.index(plain.endIndex, offsetBy: -limit)
-        return "\u{2026}" + String(plain[start...])
+        var kept = String(plain[start...])
+        // If the cut fell inside a line, drop what is left of it — unless it is
+        // all there is, in which case a fragment beats nothing.
+        let cutOnLineStart = plain[plain.index(before: start)] == "\n"
+        if !cutOnLineStart, let newline = kept.firstIndex(of: "\n") {
+            let rest = kept[kept.index(after: newline)...]
+            if !rest.isEmpty { kept = String(rest) }
+        }
+        return "\u{2026}\n" + kept
     }
 }

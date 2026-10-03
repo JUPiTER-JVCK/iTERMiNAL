@@ -92,7 +92,11 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
-  replies appear above the input and are never auto-run in a PTY.
+  replies appear above the input and are never auto-run in a PTY. When a
+  command you ran from the composer prints something that reads like an error,
+  an **Explain / Fix it** offer appears; a suggested command goes into the
+  input for you to review, with a note if it is the kind that is easy to
+  regret.
 
 ## Requirements
 
@@ -377,8 +381,12 @@ consults URLSession's delegate.
   layout, or exported snapshots.
 - **The assistant sends only what you switch on.** Working directory, git
   branch and workspace name travel by default; the visible terminal screen
-  does not, and has to be turned on in Settings → AI. Nothing redacts secrets
-  from that screen, so it is off until you say otherwise.
+  does not, and has to be turned on in Settings → AI — except that Explain /
+  Fix it, which you ask for each time, ask first when it is off. Terminal text
+  is sent with control sequences stripped and values that look like API keys,
+  tokens, passwords, private keys and URL credentials masked. That is best
+  effort, not a promise: a secret in a form it does not recognise still goes,
+  which is why sending the screen stays off until you say otherwise.
 - **App Transport Security stays on**, with two narrow exemptions: web-view
   content, so the browser pane can preview a plain-http dev server, and local
   networking, so the assistant can reach a model server on loopback. Anything
@@ -443,6 +451,37 @@ the UI.
 Configure a provider in **Settings → AI**, then type `@ai …` in the composer.
 Replies appear in a banner above the input — suggested commands are never
 executed automatically.
+
+### Explain and Fix it
+
+After a command you ran **from the composer** prints something that reads like
+an error — "command not found", "permission denied", "no such file or
+directory", a Python traceback, `fatal:`, `npm ERR!`, a failed `make` or build —
+a slim row appears: **That looked like an error · Explain · Fix it**. It is a
+guess from the words on screen, made on this Mac, and says only that it
+*looked* like one: real exit codes would need the shell's help, and a command
+that merely printed "permission denied" while searching has not failed.
+Turn the offers off in Settings → AI.
+
+The same two actions work any time, for any terminal, without any detection:
+**Explain last output** (⌥⌘E) and **Suggest a fix** (⌥⌘X) in the Terminal menu
+and the composer's **+** menu.
+
+- **What is sent.** From the offer: the command and only the new text that
+  appeared after it was sent. From the menu: what is on screen, and the command
+  last sent to that terminal from the composer if it is still there. Either way, control sequences are stripped, values that look like
+  secrets are masked, and it is cut to the last 6,000 characters starting on a
+  whole line.
+- **Asking first.** If "Include recent terminal output" is off, you are asked
+  each time, told where it would go (the host's name, or "stays on this Mac"
+  for a loopback model), and can read exactly what would be sent. Pressing
+  Send does not turn the setting on.
+- **Nothing runs.** A fenced command in a reply gets **Insert**, which puts it
+  in the input to review — one undo step, nothing sent until you press Return —
+  and **Copy**. Code in other languages gets Copy only. A command that deletes
+  recursively, uses `sudo`, pipes a download into a shell, overwrites a file,
+  force-pushes, or similar carries a short plain warning. No warning does not
+  mean safe; it only reads for a few well-known dangers.
 
 ### OpenAI
 

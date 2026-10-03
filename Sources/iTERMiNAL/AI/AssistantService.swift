@@ -5,6 +5,9 @@ struct AssistantContext {
     var recentOutput: String?
     var gitBranch: String?
     var workspaceName: String?
+    /// The command the output belongs to, when the request is about one.
+    /// Already masked by the caller.
+    var lastCommand: String?
     /// Optional selection; left nil in v1 unless a selection API exists.
     var selection: String?
 }

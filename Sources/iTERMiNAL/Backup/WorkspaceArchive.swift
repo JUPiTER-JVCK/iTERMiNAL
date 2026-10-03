@@ -60,6 +60,7 @@ struct PreferencesArchive: Codable {
     var assistantIncludeRecentOutput: Bool?
     var assistantIncludeGitBranch: Bool?
     var assistantIncludeWorkspace: Bool?
+    var assistantOfferErrorHelp: Bool?
     var connections: [SSHConnection]
 
     init(settings: AppSettings) {
@@ -90,6 +91,7 @@ struct PreferencesArchive: Codable {
         assistantIncludeRecentOutput = settings.assistantIncludeRecentOutput
         assistantIncludeGitBranch = settings.assistantIncludeGitBranch
         assistantIncludeWorkspace = settings.assistantIncludeWorkspace
+        assistantOfferErrorHelp = settings.assistantOfferErrorHelp
         connections = settings.sshConnections
     }
 
@@ -151,6 +153,7 @@ struct PreferencesArchive: Codable {
         if let assistantIncludeGitBranch {
             settings.assistantIncludeGitBranch = assistantIncludeGitBranch
         }
+        if let assistantOfferErrorHelp { settings.assistantOfferErrorHelp = assistantOfferErrorHelp }
         if let assistantIncludeWorkspace {
             settings.assistantIncludeWorkspace = assistantIncludeWorkspace
         }

@@ -187,6 +187,22 @@ final class WorkspaceStore: ObservableObject {
     var composerFocusHandled = 0
     var composerFocusPending: Bool { composerFocusRequest != composerFocusHandled }
 
+    /// A request, from a menu or the composer's "+" menu, for the assistant to
+    /// look at what the composer's terminal last printed. Handled the way focus
+    /// is: the composer may not exist yet when it is made, so it is kept until
+    /// the view acknowledges it.
+    struct ComposerHelpRequest: Equatable {
+        let id: Int
+        let kind: ErrorHelpKind
+    }
+    @Published private(set) var composerHelpRequest: ComposerHelpRequest?
+    var composerHelpHandled = 0
+    private var composerHelpCounter = 0
+    var composerHelpPending: ComposerHelpRequest? {
+        guard let request = composerHelpRequest, request.id != composerHelpHandled else { return nil }
+        return request
+    }
+
     /// Terminals living in the bottom dock. Separate from tab panes — the
     /// dock is a scratch surface that survives switching tabs.
     @Published private(set) var dockSessions: [TerminalSession] = []
@@ -764,6 +780,17 @@ final class WorkspaceStore: ObservableObject {
         composerFocusRequest += 1
     }
 
+    /// Asks the composer's assistant to explain, or suggest a fix for, what the
+    /// composer's terminal last printed — un-hiding the composer first, since
+    /// the answer appears there.
+    func requestComposerHelp(_ kind: ErrorHelpKind) {
+        detailMode = .terminal
+        AppSettings.shared.composerEnabled = true
+        AppSettings.shared.composerCollapsed = false
+        composerHelpCounter += 1
+        composerHelpRequest = ComposerHelpRequest(id: composerHelpCounter, kind: kind)
+    }
+
     // MARK: Composer routing
 
     /// Where a composer command will run right now.
@@ -797,19 +824,39 @@ final class WorkspaceStore: ObservableObject {
         return .terminal(session)
     }
 
+    /// The terminal a composer command would run in, if there is one yet: the
+    /// focused terminal, or the composer's own shell once it has started.
+    var composerDestinationSession: TerminalSession? {
+        switch composerDestination {
+        case .terminal(let session): return session
+        case .ownShell: return composerSession
+        }
+    }
+
     /// Runs a command typed in the composer, in whatever it is pointed at.
     func sendFromComposer(_ text: String) {
+        let session: TerminalSession
         switch composerDestination {
-        case .terminal(let session):
-            session.send(text: text)
+        case .terminal(let target):
+            target.send(text: text)
+            session = target
         case .ownShell:
-            ensureComposerSession().send(text: text)
+            session = ensureComposerSession()
+            session.send(text: text)
             // Gates the inline transcript, so it only appears when there is a
             // composer shell whose output has nowhere else to go.
             if !composerHasRun { composerHasRun = true }
         }
+        lastComposerSend = (session.id, text.trimmingCharacters(in: .whitespacesAndNewlines))
         recordComposerCommand(text)
     }
+
+    /// The last command sent from the composer, and the terminal it went to.
+    /// What Explain and Fix it can say about "the command" without guessing: the
+    /// terminal's own record of its last command is a two-word label for the
+    /// sidebar, and its line buffer can hold anything typed at a prompt — a
+    /// password included. Plain, not published: nothing draws from it.
+    private(set) var lastComposerSend: (sessionID: UUID, command: String)?
 
     /// Keeps the recall list free of adjacent duplicates and bounded, so a
     /// command run in a loop doesn't crowd out everything before it.

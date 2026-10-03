@@ -131,16 +131,22 @@ final class AppSettings: ObservableObject {
     @Published var assistantIncludeCwd: Bool { didSet { defaults.set(assistantIncludeCwd, forKey: "assistantIncludeCwd") } }
     /// Off by default, unlike the other context switches. This one uploads the
     /// visible screen to a third party, and the screen may be showing the
-    /// output of `cat .env` or `aws configure list`. Nothing downstream
-    /// redacts secrets — the sanitiser strips escape sequences and truncates,
-    /// nothing more — so sending it is the user's call to make, not a default
-    /// they discover afterwards.
+    /// output of `cat .env` or `aws configure list`. The sanitiser strips
+    /// escape sequences and masks values that look like keys, tokens and
+    /// passwords — best effort, it cannot know every secret — so sending it is
+    /// the user's call to make, not a default they discover afterwards.
+    /// Explain and Fix it ask before sending when this is off.
     @Published var assistantIncludeRecentOutput: Bool { didSet { defaults.set(assistantIncludeRecentOutput, forKey: "assistantIncludeRecentOutput") } }
     @Published var assistantIncludeGitBranch: Bool { didSet { defaults.set(assistantIncludeGitBranch, forKey: "assistantIncludeGitBranch") } }
     /// Workspace names routinely name a client or an internal project, so this
     /// gets a switch like everything else that leaves the machine rather than
     /// riding along unconditionally.
     @Published var assistantIncludeWorkspace: Bool { didSet { defaults.set(assistantIncludeWorkspace, forKey: "assistantIncludeWorkspace") } }
+    /// Whether a command run from the composer that prints something that reads
+    /// like an error gets an "Explain / Fix it" offer. Reading the screen to
+    /// decide happens on this Mac; nothing is sent until one of the buttons is
+    /// pressed. On by default, and only ever shown when an assistant is set up.
+    @Published var assistantOfferErrorHelp: Bool { didSet { defaults.set(assistantOfferErrorHelp, forKey: "assistantOfferErrorHelp") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -212,6 +218,7 @@ final class AppSettings: ObservableObject {
         assistantIncludeRecentOutput = defaults.object(forKey: "assistantIncludeRecentOutput") as? Bool ?? false
         assistantIncludeGitBranch = defaults.object(forKey: "assistantIncludeGitBranch") as? Bool ?? true
         assistantIncludeWorkspace = defaults.object(forKey: "assistantIncludeWorkspace") as? Bool ?? true
+        assistantOfferErrorHelp = defaults.object(forKey: "assistantOfferErrorHelp") as? Bool ?? true
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -417,6 +424,7 @@ final class AppSettings: ObservableObject {
         assistantIncludeRecentOutput = false
         assistantIncludeGitBranch = true
         assistantIncludeWorkspace = true
+        assistantOfferErrorHelp = true
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true
