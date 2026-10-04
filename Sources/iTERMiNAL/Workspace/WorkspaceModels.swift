@@ -221,8 +221,11 @@ indirect enum PaneSnapshot: Codable {
     case browser(url: String?)
     case files(path: String?, connection: String?)
     /// The builder's URL field, the same as `browser`'s — not an explored
-    /// host (there is no site-explorer state yet to persist).
-    case http(url: String?)
+    /// host (there is no site-explorer state yet to persist). `historyID`
+    /// is `HTTPHistoryStore`'s scope key for this pane; carrying the same
+    /// one forward on restore is what lets the pane's history survive a
+    /// relaunch instead of starting over under a freshly generated ID.
+    case http(url: String?, historyID: UUID)
     case split(direction: SplitDirection, children: [PaneSnapshot])
 }
 
@@ -239,7 +242,7 @@ extension PaneNode {
         case .files(let files):
             return .files(path: files.directory, connection: files.connectionID)
         case .http(let client):
-            return .http(url: client.urlText.isEmpty ? nil : client.urlText)
+            return .http(url: client.urlText.isEmpty ? nil : client.urlText, historyID: client.id)
         case .split(let direction, let children):
             return .split(direction: direction, children: children.map { $0.snapshot() })
         }
@@ -259,8 +262,8 @@ extension PaneNode {
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))
         case .files(let path, let connection):
             return PaneNode(content: .files(FileBrowserModel(path: path, connectionID: connection)))
-        case .http(let url):
-            let client = HTTPClientModel()
+        case .http(let url, let historyID):
+            let client = HTTPClientModel(id: historyID)
             if let url { client.urlText = url }
             return PaneNode(content: .http(client))
         case .split(let direction, let children):

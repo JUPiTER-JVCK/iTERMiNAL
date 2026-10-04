@@ -77,13 +77,23 @@ enum HTTPMessage {
     /// is safe to paste even when a header or the body itself contains a
     /// quote, a space, or a `$`.
     static func curlCommand(for spec: HTTPRequestSpec) -> String {
-        var parts = ["curl", "-X", shellQuote(spec.method.rawValue), shellQuote(spec.url)]
+        // `normalizedURL` is the same resolution `execute` sends to the
+        // network — without it, a bare `example.com` (no scheme typed)
+        // copies as a curl command that defaults to plain HTTP, downgrading
+        // a request this app actually sent over HTTPS.
+        let url = normalizedURL(from: spec.url)?.absoluteString ?? spec.url
+        var parts = ["curl", "-X", shellQuote(spec.method.rawValue), shellQuote(url)]
         for header in spec.headers where !header.name.isEmpty {
             parts.append("-H")
             parts.append(shellQuote("\(header.name): \(header.value)"))
         }
         if let body = spec.body, !body.isEmpty {
-            parts.append("--data")
+            // `--data-raw`, not `--data`: curl treats a `--data` value that
+            // starts with `@` as a filename to read instead of literal text,
+            // even single-quoted — a body that happens to start with `@`
+            // would otherwise exfiltrate a local file instead of
+            // reproducing the request.
+            parts.append("--data-raw")
             parts.append(shellQuote(body))
         }
         return parts.joined(separator: " ")

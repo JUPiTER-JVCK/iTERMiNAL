@@ -7,6 +7,7 @@ import Foundation
 /// coming back at all.
 enum HTTPClientError: LocalizedError {
     case invalidURL(String)
+    case unsupportedScheme(String)
     case plainHTTPBlocked(host: String)
     case transport(String)
     case responseTooLarge(Int)
@@ -16,6 +17,8 @@ enum HTTPClientError: LocalizedError {
         switch self {
         case .invalidURL(let value):
             return "That doesn't look like a URL: \(value)"
+        case .unsupportedScheme(let scheme):
+            return "This app's HTTP client only sends http or https requests, not \(scheme)."
         case .plainHTTPBlocked(let host):
             return "This app's network policy only allows plain HTTP to this Mac itself. "
                 + "\(host) would need https, or it may not support that."
@@ -45,14 +48,23 @@ final class HTTPRequestExecutor {
         guard let url = HTTPMessage.normalizedURL(from: spec.url), let host = url.host, !host.isEmpty else {
             throw HTTPClientError.invalidURL(spec.url)
         }
-        if url.scheme?.lowercased() == "http", !AssistantDestination.isLoopback(host: host) {
+        // Only http/https are ever sent — anything else (ftp, file, ws, a
+        // custom scheme) falls through the policy check below unnoticed
+        // otherwise, since that check only special-cases "http".
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw HTTPClientError.unsupportedScheme(url.scheme ?? spec.url)
+        }
+        if scheme == "http", !AssistantDestination.isLoopback(host: host) {
             throw HTTPClientError.plainHTTPBlocked(host: host)
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = spec.method.rawValue
+        // `addValue`, not `setValue`: the builder allows more than one row
+        // with the same header name, and `setValue` would silently drop
+        // every row but the last instead of sending them all.
         for header in spec.headers where !header.name.isEmpty {
-            request.setValue(header.value, forHTTPHeaderField: header.name)
+            request.addValue(header.value, forHTTPHeaderField: header.name)
         }
         if let body = spec.body, !body.isEmpty, !HTTPMethod.bodylessByConvention.contains(spec.method) {
             request.httpBody = body.data(using: .utf8)
@@ -110,11 +122,29 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
 
     func run(_ request: URLRequest, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
         let configuration = URLSessionConfiguration.ephemeral
+        // `timeoutIntervalForRequest` alone is an *inactivity* timeout — a
+        // server that keeps trickling a byte every few seconds would never
+        // trip it. Settings presents this one number as how long a request
+        // is given before giving up, so it needs to cap the whole transfer
+        // too, not just a gap in it.
         configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            session.dataTask(with: request).resume()
+        let task = session.dataTask(with: request)
+        // A `CheckedContinuation` has no idea the wrapping Swift `Task` was
+        // cancelled — cancelling `sendTask` in `HTTPClientModel` would
+        // otherwise only stop the UI from waiting, while the real transfer
+        // (and any redirects it's still following) kept running to
+        // completion in the background. `withTaskCancellationHandler` wires
+        // real cancellation through to the data task that is actually doing
+        // the work.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                task.resume()
+            }
+        } onCancel: {
+            task.cancel()
         }
     }
 
@@ -167,7 +197,8 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
     /// to the policy the first request's URL was checked against.
     private func isRedirectAllowed(_ request: URLRequest) -> Bool {
         guard let url = request.url, let host = url.host, !host.isEmpty else { return false }
-        if url.scheme?.lowercased() == "http" {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return false }
+        if scheme == "http" {
             return AssistantDestination.isLoopback(host: host)
         }
         return true

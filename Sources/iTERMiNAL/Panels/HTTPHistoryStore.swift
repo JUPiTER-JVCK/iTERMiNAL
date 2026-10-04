@@ -36,37 +36,63 @@ enum HTTPHistoryStore {
     /// Plenty for a useful history list without growing without bound.
     static let maxEntries = 200
 
-    private static let directory: URL = {
+    /// One subdirectory per pane, named by that pane's stable history ID —
+    /// without this, every `HTTPClientModel` read and wrote the same flat
+    /// directory, so opening a second pane showed the first one's requests,
+    /// and clearing history in either one cleared both.
+    private static let rootDirectory: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let directory = base
+        return base
             .appendingPathComponent("iTERMiNAL", isDirectory: true)
             .appendingPathComponent("HTTPHistory", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
     }()
 
-    private static func url(for id: UUID) -> URL {
-        directory.appendingPathComponent("\(id.uuidString).json")
+    private static func directory(for scope: UUID) -> URL {
+        let directory = rootDirectory.appendingPathComponent(scope.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
-    /// Redacts the request's own headers and body, then writes one new
-    /// file, then prunes down to `maxEntries` — oldest first, by
-    /// modification date, not by trying to parse every file's own
-    /// timestamp.
-    static func append(_ entry: HTTPHistoryEntry) {
+    /// Redacts the request's own URL, headers, and body, then writes one
+    /// new file into `scope`'s own directory, then prunes that directory
+    /// down to `maxEntries` — oldest first, by modification date, not by
+    /// trying to parse every file's own timestamp.
+    static func append(_ entry: HTTPHistoryEntry, scope: UUID) {
         var redacted = entry
-        redacted.headers = entry.headers.map { HTTPHeaderField(id: $0.id, name: $0.name, value: SecretRedactor.redact($0.value)) }
+        redacted.url = SecretRedactor.redact(entry.url)
+        redacted.headers = entry.headers.map { HTTPHeaderField(id: $0.id, name: $0.name, value: redactedHeaderValue(name: $0.name, value: $0.value)) }
         redacted.body = entry.body.map(SecretRedactor.redact)
 
+        let directory = directory(for: scope)
         guard let data = try? JSONEncoder.httpHistory.encode(redacted) else { return }
-        let fileURL = url(for: redacted.id)
+        let fileURL = directory.appendingPathComponent("\(redacted.id.uuidString).json")
         try? data.write(to: fileURL, options: [.atomic])
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
-        prune()
+        prune(in: directory)
     }
 
-    /// Every saved entry, newest first.
-    static func loadAll() -> [HTTPHistoryEntry] {
+    /// `SecretRedactor`'s own patterns are context-dependent — they key off
+    /// a header *name* next to its value, such as `Authorization: …` or
+    /// `api_key=…` — so redacting a bare value alone, with no name beside
+    /// it, never gives them anything to match. Redacting `"name: value"`
+    /// together and then stripping the name back off recovers the redacted
+    /// value with that context intact; if the known "name: " prefix somehow
+    /// didn't survive (nothing in `SecretRedactor`'s patterns today would
+    /// touch it, but this is cheap insurance against a future one that
+    /// might), redacting the bare value is still strictly safer than
+    /// skipping redaction outright.
+    private static func redactedHeaderValue(name: String, value: String) -> String {
+        let prefix = "\(name): "
+        let redacted = SecretRedactor.redact(prefix + value)
+        if redacted.hasPrefix(prefix) {
+            return String(redacted.dropFirst(prefix.count))
+        }
+        return SecretRedactor.redact(value)
+    }
+
+    /// Every entry saved for `scope`, newest first.
+    static func loadAll(scope: UUID) -> [HTTPHistoryEntry] {
+        let directory = directory(for: scope)
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]
@@ -78,7 +104,8 @@ enum HTTPHistoryStore {
         return entries.sorted { $0.sentAt > $1.sentAt }
     }
 
-    static func clear() {
+    static func clear(scope: UUID) {
+        let directory = directory(for: scope)
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for file in files { try? FileManager.default.removeItem(at: file) }
     }
@@ -87,7 +114,7 @@ enum HTTPHistoryStore {
     /// each file's own modification date — cheaper than decoding every file
     /// just to read its `sentAt`, and just as correct, since `append`
     /// writes a fresh file for every new entry.
-    private static func prune() {
+    private static func prune(in directory: URL) {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]

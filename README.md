@@ -77,8 +77,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   a right-hand panel (⌥⌘R): method, URL, headers, body; pretty-printed JSON;
   ⌘Return sends from anywhere in the pane; "Copy as cURL"; per-pane history.
   Requests only ever go out over HTTPS, or plain HTTP to this Mac itself —
-  never a relaxed ATS exception for an arbitrary host. History is redacted
-  the same way terminal output is before it touches disk, and stays out of
+  never a relaxed ATS exception for an arbitrary host. History is run
+  through this app's best-effort secret masking (values that look like
+  credentials, not a guarantee) before it touches disk, and stays out of
   exported snapshots.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a

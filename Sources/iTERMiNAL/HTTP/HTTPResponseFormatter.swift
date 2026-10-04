@@ -45,6 +45,22 @@ enum HTTPResponseFormatter {
                 if mediaType.contains("html") { return .html }
                 if mediaType.contains("xml") { return .xml }
                 if mediaType.hasPrefix("text/") { return .plainText }
+                // A declared binary type otherwise fell through to `.other`,
+                // which `format` decodes as text — not a crash, since a
+                // lossy decode always produces *some* string, but a long,
+                // garbled one for what is almost always a short, useless
+                // render of an image or a font. Known families only: this
+                // is a recognised-binary list, not an attempt to name every
+                // binary type that exists.
+                let binaryPrefixes = ["image/", "video/", "audio/", "font/"]
+                let binaryExactTypes: Set<String> = [
+                    "application/octet-stream", "application/pdf", "application/zip",
+                    "application/gzip", "application/x-gzip", "application/x-tar",
+                    "application/wasm", "application/x-protobuf",
+                ]
+                if binaryPrefixes.contains(where: mediaType.hasPrefix) || binaryExactTypes.contains(mediaType) {
+                    return .binary
+                }
                 return .other(mediaType)
             }
             // An empty Content-Type is as good as no header — fall through.
@@ -164,7 +180,8 @@ enum HTTPResponseFormatter {
         case .json:
             rawText = prettyPrintJSON(data) ?? decodedText(data, contentType: contentType)
         case .binary:
-            rawText = "[binary data, \(data.count) bytes]"
+            let label = contentType.map { ": \($0)" } ?? ""
+            rawText = "[binary data\(label), \(data.count) bytes]"
         case .html, .xml, .plainText, .other:
             rawText = decodedText(data, contentType: contentType)
         }

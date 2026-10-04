@@ -1248,8 +1248,25 @@ do {
 
     let withBody = HTTPRequestSpec(method: .post, url: "https://example.com/a", headers: [], body: "{\"x\":1}")
     check(
-        HTTPMessage.curlCommand(for: withBody) == "curl -X 'POST' 'https://example.com/a' --data '{\"x\":1}'",
+        HTTPMessage.curlCommand(for: withBody) == "curl -X 'POST' 'https://example.com/a' --data-raw '{\"x\":1}'",
         "a POST with a body: \(HTTPMessage.curlCommand(for: withBody))"
+    )
+
+    // --data-raw, not --data: curl treats a --data value starting with "@"
+    // as a filename to read, even single-quoted, so a literal body in that
+    // shape must never be sent that way.
+    let atBody = HTTPRequestSpec(method: .post, url: "https://example.com/a", headers: [], body: "@/etc/passwd")
+    let atBodyCommand = HTTPMessage.curlCommand(for: atBody)
+    check(atBodyCommand.contains("--data-raw"), "a body starting with @ still uses --data-raw: \(atBodyCommand)")
+    check(!atBodyCommand.contains("--data '"), "never the plain --data flag for any body: \(atBodyCommand)")
+
+    // Copy as cURL normalizes a bare host the same way a real send does —
+    // otherwise curl defaults to http:// for a URL this app actually sent
+    // over https://.
+    let bareHost = HTTPRequestSpec(method: .get, url: "example.com/a", headers: [], body: nil)
+    check(
+        HTTPMessage.curlCommand(for: bareHost) == "curl -X 'GET' 'https://example.com/a'",
+        "a bare host copies as https, not curl's default http: \(HTTPMessage.curlCommand(for: bareHost))"
     )
 
     let emptyExtras = HTTPRequestSpec(
@@ -1301,8 +1318,18 @@ do {
           "application/xml classifies as xml")
     check(HTTPResponseFormatter.classify(contentTypeHeader: "text/plain", sampleBytes: Data()) == .plainText,
           "text/plain classifies as plain text")
-    check(HTTPResponseFormatter.classify(contentTypeHeader: "image/png", sampleBytes: Data()) == .other("image/png"),
-          "an unrecognised media type is carried through, not discarded")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/vnd.custom-widget", sampleBytes: Data()) == .other("application/vnd.custom-widget"),
+          "an unrecognised, non-binary media type is carried through, not discarded")
+
+    // A declared binary type classifies as binary outright, rather than
+    // falling into `.other` and then being decoded as garbled lossy text.
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "image/png", sampleBytes: Data()) == .binary,
+          "a declared image type classifies as binary, not .other")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/pdf", sampleBytes: Data()) == .binary,
+          "a declared PDF type classifies as binary")
+    let pngFormatted = HTTPResponseFormatter.format(Data([0x89, 0x50, 0x4E, 0x47]), contentType: "image/png", maxCharacters: 1000)
+    check(pngFormatted.kind == .binary, "a PNG body formats as binary rather than lossily-decoded text")
+    check(pngFormatted.text.contains("image/png"), "the binary placeholder names the declared media type: \(pngFormatted.text)")
 
     // No header: sniff the bytes.
     check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: "  {\"a\":1}".data(using: .utf8)!) == .json,

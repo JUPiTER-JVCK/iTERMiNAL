@@ -18,7 +18,14 @@ import AppKit
 /// pins its own continuation to the main actor instead, so the `@Published`
 /// mutations that follow the network await still land on the main thread.
 final class HTTPClientModel: ObservableObject, Identifiable {
-    let id = UUID()
+    /// Also this pane's history scope — `HTTPHistoryStore` keys its on-disk
+    /// directory by this value, so two panes never show or clear each
+    /// other's requests. For a split-pane leaf this is persisted in
+    /// `PaneSnapshot.http` and passed back into `init(id:)` on restore, so
+    /// the pane's history survives a relaunch under the same scope; the
+    /// side panel's single instance gets a fresh one every launch, the same
+    /// as the fields in its builder do.
+    let id: UUID
 
     @Published var method: HTTPMethod = .get
     @Published var urlText: String = ""
@@ -33,8 +40,9 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     private let executor = HTTPRequestExecutor()
     private var sendTask: Task<Void, Never>?
 
-    init() {
-        history = HTTPHistoryStore.loadAll()
+    init(id: UUID = UUID()) {
+        self.id = id
+        history = HTTPHistoryStore.loadAll(scope: id)
     }
 
     /// Builds a request from the current fields and sends it, replacing any
@@ -88,7 +96,7 @@ final class HTTPClientModel: ObservableObject, Identifiable {
 
     func clearHistory() {
         history = []
-        HTTPHistoryStore.clear()
+        HTTPHistoryStore.clear(scope: id)
     }
 
     private func recordHistory(spec: HTTPRequestSpec, statusCode: Int?, errorDescription: String?) {
@@ -103,7 +111,13 @@ final class HTTPClientModel: ObservableObject, Identifiable {
             errorDescription: errorDescription
         )
         history.insert(entry, at: 0)
-        HTTPHistoryStore.append(entry)
+        // The store prunes its own on-disk copy to this same limit — this
+        // keeps the in-memory list, which `append` never trims, from
+        // growing without bound for as long as the pane stays open.
+        if history.count > HTTPHistoryStore.maxEntries {
+            history.removeLast(history.count - HTTPHistoryStore.maxEntries)
+        }
+        HTTPHistoryStore.append(entry, scope: id)
 
         // Built as two separately-optional keys, not one boxed as `Any` —
         // a present-but-nil value isn't how this app's other API events

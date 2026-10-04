@@ -36,6 +36,17 @@ struct HTTPHistoryListView: View {
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
+                // Arrow keys already move `selection` for free via the
+                // List's own selection binding; Return still did nothing
+                // with it until this — only a double-click or the context
+                // menu could load a row.
+                .onKeyPress(.return) {
+                    guard let selection, let entry = model.history.first(where: { $0.id == selection }) else {
+                        return .ignored
+                    }
+                    model.loadFromHistory(entry)
+                    return .handled
+                }
 
                 FadedDivider()
                 HStack {

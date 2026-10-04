@@ -31,7 +31,7 @@ struct HTTPClientSettingsView: View {
             }
 
             Section("Privacy") {
-                Text("Requests are sent only when you press Send or ⌘Return — never as you type a URL. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, redacted the same way terminal output is before being written to disk, and are left out of exported snapshots.")
+                Text("Requests are sent only when you press Send or ⌘Return — never as you type a URL. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, with values that look like credentials masked (best effort, not a guarantee) before being written to disk, and are left out of exported snapshots.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
