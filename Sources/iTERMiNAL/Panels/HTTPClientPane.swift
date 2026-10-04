@@ -11,7 +11,12 @@ import AppKit
 /// `send(settings:)`, and that is only ever called in response to a
 /// person's own action — pressing Return, ⌘Return, or choosing a history
 /// row loads it into the fields but still waits for one of those.
-@MainActor
+/// Not `@MainActor`: like `BrowserModel`/`FileBrowserModel`, this is stored
+/// in `PaneContent` and read synchronously from nonisolated code elsewhere
+/// (`PaneNode.snapshot()`/`.restore()`, `APIRouter.describePanes`) — the
+/// same reason neither of those two carries the annotation either. `send()`
+/// pins its own continuation to the main actor instead, so the `@Published`
+/// mutations that follow the network await still land on the main thread.
 final class HTTPClientModel: ObservableObject, Identifiable {
     let id = UUID()
 
@@ -46,7 +51,7 @@ final class HTTPClientModel: ObservableObject, Identifiable {
         )
         isSending = true
         lastError = nil
-        sendTask = Task { [weak self] in
+        sendTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let response = try await self.executor.execute(spec, settings: settings)

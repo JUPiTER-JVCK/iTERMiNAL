@@ -157,6 +157,19 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        completionHandler(followRedirects ? request : nil)
+        completionHandler(followRedirects && isRedirectAllowed(request) ? request : nil)
+    }
+
+    /// The same plain-HTTP policy `execute` checks on the request it builds,
+    /// re-applied to where a redirect actually points — a server redirecting
+    /// an `https://` request to `http://some-other-host` would otherwise
+    /// resend it, headers and all, in cleartext to a host that never agreed
+    /// to the policy the first request's URL was checked against.
+    private func isRedirectAllowed(_ request: URLRequest) -> Bool {
+        guard let url = request.url, let host = url.host, !host.isEmpty else { return false }
+        if url.scheme?.lowercased() == "http" {
+            return AssistantDestination.isLoopback(host: host)
+        }
+        return true
     }
 }
