@@ -1220,5 +1220,207 @@ do {
     check(offenders.isEmpty, "the AI path must not send to a terminal: \(offenders)")
 }
 
+// MARK: HTTP methods and cURL
+
+do {
+    check(HTTPMethod(rawValue: "get").rawValue == "GET", "a method is uppercased on the way in")
+    check(HTTPMethod("propfind").rawValue == "PROPFIND", "an unlisted method is not forced into a default case")
+    check(HTTPMethod.get == HTTPMethod("get"), "a static constant equals the same method built from text")
+
+    for method in [HTTPMethod.get, .post, .put, .patch, .delete, .head, .options] {
+        check(HTTPMethod.common.contains(method), "\(method.rawValue) is offered in the common list")
+    }
+    check(HTTPMethod.common.count == 7, "the common list has exactly the seven listed methods")
+    check(HTTPMethod.bodylessByConvention.contains(.get), "GET is bodyless by convention")
+    check(HTTPMethod.bodylessByConvention.contains(.head), "HEAD is bodyless by convention")
+    check(!HTTPMethod.bodylessByConvention.contains(.post), "POST is not bodyless by convention")
+
+    let plain = HTTPRequestSpec(
+        method: .get,
+        url: "https://example.com/a",
+        headers: [HTTPHeaderField(name: "Accept", value: "application/json")],
+        body: nil
+    )
+    check(
+        HTTPMessage.curlCommand(for: plain) == "curl -X 'GET' 'https://example.com/a' -H 'Accept: application/json'",
+        "a plain GET with one header: \(HTTPMessage.curlCommand(for: plain))"
+    )
+
+    let withBody = HTTPRequestSpec(method: .post, url: "https://example.com/a", headers: [], body: "{\"x\":1}")
+    check(
+        HTTPMessage.curlCommand(for: withBody) == "curl -X 'POST' 'https://example.com/a' --data-raw '{\"x\":1}'",
+        "a POST with a body: \(HTTPMessage.curlCommand(for: withBody))"
+    )
+
+    // --data-raw, not --data: curl treats a --data value starting with "@"
+    // as a filename to read, even single-quoted, so a literal body in that
+    // shape must never be sent that way.
+    let atBody = HTTPRequestSpec(method: .post, url: "https://example.com/a", headers: [], body: "@/etc/passwd")
+    let atBodyCommand = HTTPMessage.curlCommand(for: atBody)
+    check(atBodyCommand.contains("--data-raw"), "a body starting with @ still uses --data-raw: \(atBodyCommand)")
+    check(!atBodyCommand.contains("--data '"), "never the plain --data flag for any body: \(atBodyCommand)")
+
+    // Copy as cURL normalizes a bare host the same way a real send does —
+    // otherwise curl defaults to http:// for a URL this app actually sent
+    // over https://.
+    let bareHost = HTTPRequestSpec(method: .get, url: "example.com/a", headers: [], body: nil)
+    check(
+        HTTPMessage.curlCommand(for: bareHost) == "curl -X 'GET' 'https://example.com/a'",
+        "a bare host copies as https, not curl's default http: \(HTTPMessage.curlCommand(for: bareHost))"
+    )
+
+    let emptyExtras = HTTPRequestSpec(
+        method: .get,
+        url: "https://example.com/a",
+        headers: [HTTPHeaderField(name: "", value: "ignored"), HTTPHeaderField(name: "Accept", value: "*/*")],
+        body: ""
+    )
+    let emptyExtrasCommand = HTTPMessage.curlCommand(for: emptyExtras)
+    check(!emptyExtrasCommand.contains("--data"), "an empty body is not sent as --data: \(emptyExtrasCommand)")
+    check(!emptyExtrasCommand.contains("ignored"), "a header with no name is skipped: \(emptyExtrasCommand)")
+
+    let quoted = HTTPRequestSpec(method: .get, url: "https://example.com/a's", headers: [], body: nil)
+    check(
+        HTTPMessage.curlCommand(for: quoted) == "curl -X 'GET' 'https://example.com/a'\"'\"'s'",
+        "a single quote in the URL is escaped for a POSIX shell: \(HTTPMessage.curlCommand(for: quoted))"
+    )
+
+    // normalizedURL: a bare host gets https:// the way an address bar would;
+    // an explicit scheme is trusted as-is; "host:port" is not misread as a
+    // scheme, which is the one case that actually broke while writing this.
+    func normalized(_ input: String) -> URL? { HTTPMessage.normalizedURL(from: input) }
+    check(normalized("google.com")?.absoluteString == "https://google.com", "a bare host gets https://")
+    check(normalized("https://google.com")?.absoluteString == "https://google.com", "an explicit https URL is unchanged")
+    check(normalized("http://localhost:8080")?.absoluteString == "http://localhost:8080",
+          "an explicit http URL to loopback is not upgraded to https")
+    check(normalized("localhost:8080")?.host == "localhost" && normalized("localhost:8080")?.port == 8080,
+          "host:port with no scheme is read as a host and a port, not a scheme named \"localhost\"")
+    check(normalized("example.com:3000")?.host == "example.com" && normalized("example.com:3000")?.port == 3000,
+          "the same holds for a non-local host:port")
+    check(normalized("example.com/path")?.absoluteString == "https://example.com/path", "a bare host with a path gets https://")
+    check(normalized("  example.com  ")?.absoluteString == "https://example.com", "surrounding whitespace is trimmed first")
+    check(normalized("") == nil, "an empty string is not a URL")
+    check(normalized("   ") == nil, "whitespace alone is not a URL")
+    check(normalized("not a url with spaces") == nil, "text with raw spaces is rejected, not mangled into something that parses")
+}
+
+// MARK: HTTP response formatting
+
+do {
+    // Classification: the header wins when there is one.
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/json; charset=utf-8", sampleBytes: Data()) == .json,
+          "application/json classifies as json")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/ld+json", sampleBytes: Data()) == .json,
+          "a json subtype classifies as json")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "text/html; charset=utf-8", sampleBytes: Data()) == .html,
+          "text/html classifies as html")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/xml", sampleBytes: Data()) == .xml,
+          "application/xml classifies as xml")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "text/plain", sampleBytes: Data()) == .plainText,
+          "text/plain classifies as plain text")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/vnd.custom-widget", sampleBytes: Data()) == .other("application/vnd.custom-widget"),
+          "an unrecognised, non-binary media type is carried through, not discarded")
+
+    // A declared binary type classifies as binary outright, rather than
+    // falling into `.other` and then being decoded as garbled lossy text.
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "image/png", sampleBytes: Data()) == .binary,
+          "a declared image type classifies as binary, not .other")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "application/pdf", sampleBytes: Data()) == .binary,
+          "a declared PDF type classifies as binary")
+    let pngFormatted = HTTPResponseFormatter.format(Data([0x89, 0x50, 0x4E, 0x47]), contentType: "image/png", maxCharacters: 1000)
+    check(pngFormatted.kind == .binary, "a PNG body formats as binary rather than lossily-decoded text")
+    check(pngFormatted.text.contains("image/png"), "the binary placeholder names the declared media type: \(pngFormatted.text)")
+
+    // No header: sniff the bytes.
+    check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: "  {\"a\":1}".data(using: .utf8)!) == .json,
+          "sniffing skips leading whitespace before a {")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: "[1,2,3]".data(using: .utf8)!) == .json,
+          "a leading [ sniffs as json")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: "hello world".data(using: .utf8)!) == .plainText,
+          "plain prose sniffs as plain text")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: Data([0xFF, 0xFE, 0x00, 0xDE])) == .binary,
+          "bytes that are not valid UTF-8 sniff as binary")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: nil, sampleBytes: Data()) == .plainText,
+          "no bytes at all is treated as plain text, not binary")
+    check(HTTPResponseFormatter.classify(contentTypeHeader: "", sampleBytes: "{}".data(using: .utf8)!) == .json,
+          "an empty Content-Type falls through to sniffing")
+
+    // JSON pretty-printing: sorted, deterministic key order; fragments and
+    // garbage handled. (Not "preserves the server's order" — a Dictionary
+    // round trip cannot do that at all; see prettyPrintJSON's own comment.
+    // Checked here directly while writing it: the same binary on the same
+    // input gave a different, unsorted order on repeated runs before
+    // `.sortedKeys` was added — which is also why this check uses five keys,
+    // not two. Two keys land in sorted order by pure chance half the time
+    // even with the bug present, so a two-key version of this check would
+    // only catch a regression on a coin flip. Five distinct single-letter
+    // keys land in fully-sorted order by chance only 1 run in 120 (5!), so a
+    // real regression here reliably fails the check instead of sometimes
+    // slipping through.
+    let reordered = "{\"e\":5,\"c\":3,\"a\":1,\"d\":4,\"b\":2}".data(using: .utf8)!
+    if let pretty = HTTPResponseFormatter.prettyPrintJSON(reordered) {
+        check(pretty.contains("\n"), "pretty-printed JSON has line breaks: \(pretty.debugDescription)")
+        let positions = ["\"a\"", "\"b\"", "\"c\"", "\"d\"", "\"e\""].map { pretty.range(of: $0)?.lowerBound }
+        let isSortedAscending = zip(positions, positions.dropFirst()).allSatisfy { a, b in
+            guard let a, let b else { return false }
+            return a < b
+        }
+        check(positions.allSatisfy { $0 != nil } && isSortedAscending,
+              "pretty-printing sorts keys so the order is stable across runs, not left to hash order: \(pretty)")
+        let reparsed = try? JSONSerialization.jsonObject(with: pretty.data(using: .utf8)!) as? [String: Int]
+        check(reparsed == ["a": 1, "b": 2, "c": 3, "d": 4, "e": 5], "pretty-printed JSON round-trips to the same values")
+    } else {
+        check(false, "valid JSON should pretty-print")
+    }
+    check(HTTPResponseFormatter.prettyPrintJSON("42".data(using: .utf8)!) == "42",
+          "a bare JSON fragment pretty-prints to itself")
+    check(HTTPResponseFormatter.prettyPrintJSON("not json".data(using: .utf8)!) == nil,
+          "text that is not JSON at all returns nil, not a guess")
+
+    // Text decoding: declared charset, quoted charset, unknown charset, and
+    // bytes that are not valid text at all.
+    check(HTTPResponseFormatter.decodedText("hello".data(using: .utf8)!, contentType: nil) == "hello",
+          "plain UTF-8 with no header decodes as itself")
+    check(HTTPResponseFormatter.decodedText("hello".data(using: .utf8)!, contentType: "text/plain; charset=utf-8") == "hello",
+          "a declared utf-8 charset decodes correctly")
+    check(HTTPResponseFormatter.decodedText("hello".data(using: .utf8)!, contentType: "text/plain; charset=\"utf-8\"") == "hello",
+          "a quoted charset value is unquoted before use")
+    check(HTTPResponseFormatter.decodedText("hi".data(using: .utf8)!, contentType: "text/plain; charset=unknown-xyz") == "hi",
+          "an unrecognised charset name falls back to UTF-8 rather than failing")
+    check(HTTPResponseFormatter.decodedText(Data([0xFF, 0xFE]), contentType: nil).contains("\u{FFFD}"),
+          "bytes that are not valid UTF-8 still decode, lossily, rather than throwing")
+
+    // Truncation: untouched below the limit, exactly at the limit, and over
+    // it — the boundary is where an off-by-one would hide.
+    let short = HTTPResponseFormatter.truncated("hello", maxCharacters: 10)
+    check(short == (text: "hello", wasTruncated: false), "text under the limit is returned unchanged")
+    let exact = HTTPResponseFormatter.truncated("hello", maxCharacters: 5)
+    check(exact == (text: "hello", wasTruncated: false), "text exactly at the limit is not truncated")
+    let over = HTTPResponseFormatter.truncated("hello world", maxCharacters: 5)
+    check(over.text.hasPrefix("hello") && over.wasTruncated, "text over the limit is cut with a marker: \(over.text)")
+    let zero = HTTPResponseFormatter.truncated("hello", maxCharacters: 0)
+    check(zero.wasTruncated && !zero.text.hasPrefix("hello"), "a zero-character limit cuts everything")
+
+    // The one entry point, end to end.
+    let jsonBody = "{\"ok\":true}".data(using: .utf8)!
+    let formatted = HTTPResponseFormatter.format(jsonBody, contentType: "application/json", maxCharacters: 1000)
+    check(formatted.kind == .json, "format classifies by the declared content type")
+    check(formatted.text.contains("\n"), "format pretty-prints a JSON body: \(formatted.text)")
+    check(!formatted.wasTruncated, "a short body is not truncated")
+    check(formatted.originalByteCount == jsonBody.count, "format reports the original byte count, not the rendered length")
+
+    let binaryBody = Data([0xFF, 0xFE, 0x00, 0xDE, 0x01])
+    let formattedBinary = HTTPResponseFormatter.format(binaryBody, contentType: nil, maxCharacters: 1000)
+    check(formattedBinary.kind == .binary, "format sniffs binary when there is no header")
+    check(formattedBinary.text == "[binary data, 5 bytes]", "a binary body renders as a plain description, not a garbled string: \(formattedBinary.text)")
+
+    let mislabeledJSON = HTTPResponseFormatter.format("not actually json".data(using: .utf8)!, contentType: "application/json", maxCharacters: 1000)
+    check(mislabeledJSON.kind == .json, "format still classifies by the header even when the body does not parse")
+    check(mislabeledJSON.text == "not actually json", "a body that fails to pretty-print falls back to plain decoding rather than crashing")
+
+    let longPlain = HTTPResponseFormatter.format(String(repeating: "x", count: 50).data(using: .utf8)!, contentType: "text/plain", maxCharacters: 10)
+    check(longPlain.wasTruncated, "format applies the rendering limit, independent of any upstream byte cap")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

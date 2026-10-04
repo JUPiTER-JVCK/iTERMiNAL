@@ -8,7 +8,7 @@ enum SplitDirection: String, Codable {
 }
 
 enum PaneKind {
-    case terminal, browser, files
+    case terminal, browser, files, http
 }
 
 /// The content of one node in a tab's layout tree: either a leaf pane or a
@@ -17,6 +17,7 @@ enum PaneContent {
     case terminal(TerminalSession)
     case browser(BrowserModel)
     case files(FileBrowserModel)
+    case http(HTTPClientModel)
     case split(SplitDirection, [PaneNode])
 }
 
@@ -78,7 +79,7 @@ extension PaneNode {
                 if let session = child.firstTerminal() { return session }
             }
             return nil
-        case .browser, .files:
+        case .browser, .files, .http:
             return nil
         }
     }
@@ -89,7 +90,7 @@ extension PaneNode {
             return [session]
         case .split(_, let children):
             return children.flatMap { $0.allSessions() }
-        case .browser, .files:
+        case .browser, .files, .http:
             return []
         }
     }
@@ -100,7 +101,18 @@ extension PaneNode {
             return [browser]
         case .split(_, let children):
             return children.flatMap { $0.allBrowsers() }
-        case .terminal, .files:
+        case .terminal, .files, .http:
+            return []
+        }
+    }
+
+    func allHTTPClients() -> [HTTPClientModel] {
+        switch content {
+        case .http(let client):
+            return [client]
+        case .split(_, let children):
+            return children.flatMap { $0.allHTTPClients() }
+        case .terminal, .browser, .files:
             return []
         }
     }
@@ -122,7 +134,7 @@ extension PaneNode {
                 if let node = child.leaf(containingSessionID: sessionID) { return node }
             }
             return nil
-        case .browser, .files:
+        case .browser, .files, .http:
             return nil
         }
     }
@@ -208,6 +220,12 @@ indirect enum PaneSnapshot: Codable {
     case terminal(directory: String?, connection: String?)
     case browser(url: String?)
     case files(path: String?, connection: String?)
+    /// The builder's URL field, the same as `browser`'s — not an explored
+    /// host (there is no site-explorer state yet to persist). `historyID`
+    /// is `HTTPHistoryStore`'s scope key for this pane; carrying the same
+    /// one forward on restore is what lets the pane's history survive a
+    /// relaunch instead of starting over under a freshly generated ID.
+    case http(url: String?, historyID: UUID)
     case split(direction: SplitDirection, children: [PaneSnapshot])
 }
 
@@ -223,6 +241,8 @@ extension PaneNode {
             return .browser(url: browser.urlText)
         case .files(let files):
             return .files(path: files.directory, connection: files.connectionID)
+        case .http(let client):
+            return .http(url: client.urlText.isEmpty ? nil : client.urlText, historyID: client.id)
         case .split(let direction, let children):
             return .split(direction: direction, children: children.map { $0.snapshot() })
         }
@@ -242,6 +262,10 @@ extension PaneNode {
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))
         case .files(let path, let connection):
             return PaneNode(content: .files(FileBrowserModel(path: path, connectionID: connection)))
+        case .http(let url, let historyID):
+            let client = HTTPClientModel(id: historyID)
+            if let url { client.urlText = url }
+            return PaneNode(content: .http(client))
         case .split(let direction, let children):
             return PaneNode(content: .split(direction, children.map { PaneNode.restore($0) }))
         }

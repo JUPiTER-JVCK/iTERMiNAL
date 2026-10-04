@@ -141,6 +141,9 @@ struct CommandPaletteView: View {
             PaletteAction(id: "split.files", title: "Split with Files", subtitle: "Browse alongside", systemImage: "folder") {
                 store.splitFocusedPane(.horizontal, kind: .files)
             },
+            PaletteAction(id: "split.http", title: "Split with HTTP Client", subtitle: "Send requests alongside", systemImage: "arrow.up.arrow.down") {
+                store.splitFocusedPane(.horizontal, kind: .http)
+            },
             PaletteAction(id: "pane.close", title: "Close Pane", systemImage: "xmark.square", shortcut: "⇧⌘W") {
                 store.closeFocusedPane()
             },
@@ -149,6 +152,9 @@ struct CommandPaletteView: View {
             },
             PaletteAction(id: "panel.files", title: "Toggle Files Panel", systemImage: "sidebar.right", shortcut: "⌥⌘F") {
                 store.togglePanel(.files)
+            },
+            PaletteAction(id: "panel.http", title: "Toggle HTTP Client Panel", systemImage: "sidebar.right", shortcut: "⌥⌘R") {
+                store.togglePanel(.http)
             },
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()

@@ -2,7 +2,7 @@ import SwiftUI
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files, notes, superfile, btop
+    case browser, files, notes, superfile, btop, http
     var id: String { rawValue }
 
     /// The bundled program this panel runs, for the two that are one.
@@ -13,7 +13,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         switch self {
         case .superfile: return .superfile
         case .btop: return .btop
-        case .browser, .files, .notes: return nil
+        case .browser, .files, .notes, .http: return nil
         }
     }
 
@@ -26,6 +26,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return "Notes"
         case .superfile: return TerminalTool.superfile.title
         case .btop: return TerminalTool.btop.title
+        case .http: return "HTTP Client"
         }
     }
     var icon: String {
@@ -35,6 +36,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return "note.text"
         case .superfile: return TerminalTool.superfile.icon
         case .btop: return TerminalTool.btop.icon
+        case .http: return "arrow.up.arrow.down"
         }
     }
 
@@ -48,6 +50,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return "⌥⌘N"
         case .superfile: return "⌥⌘S"
         case .btop: return "⌥⌘P"
+        case .http: return "⌥⌘R"
         }
     }
 
@@ -212,6 +215,7 @@ final class WorkspaceStore: ObservableObject {
     /// inside a tab's split layout).
     lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
+    lazy var panelHTTPClient = HTTPClientModel()
 
     /// Built on first use like the panels above, but through an explicit
     /// backing store rather than `lazy` so quitting can flush a pending write
@@ -380,6 +384,16 @@ final class WorkspaceStore: ObservableObject {
 
     func browser(withIdentifier identifier: String) -> BrowserModel? {
         allBrowsers().first { $0.id.uuidString == identifier }
+    }
+
+    /// Every HTTP client the API can address: panes inside tabs, plus the
+    /// right panel's one instance.
+    func allHTTPClients() -> [HTTPClientModel] {
+        workspaces.flatMap { $0.tabs.flatMap { $0.root.allHTTPClients() } } + [panelHTTPClient]
+    }
+
+    func httpClient(withIdentifier identifier: String) -> HTTPClientModel? {
+        allHTTPClients().first { $0.id.uuidString == identifier }
     }
 
     func noteFocused(session: TerminalSession) {
@@ -598,6 +612,8 @@ final class WorkspaceStore: ObservableObject {
             newContent = .browser(BrowserModel())
         case .files:
             newContent = .files(FileBrowserModel(path: focusedSession?.currentDirectory))
+        case .http:
+            newContent = .http(HTTPClientModel())
         }
 
         let existing = PaneNode(content: target.content)
@@ -972,6 +988,10 @@ final class WorkspaceStore: ObservableObject {
            let directory = focusedSession?.currentDirectory {
             panelFiles.navigate(to: directory)
         }
+        // No bootstrap for .http: unlike Files following the focused
+        // terminal's directory, there is no "current thing" to seed a
+        // request from, and seeding anything would mean firing a network
+        // request the instant the panel opens.
         scheduleSave()
     }
 

@@ -137,6 +137,10 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.splitFocusedPane(.horizontal, kind: .files)
             }
 
+            Button("Split with HTTP Client") {
+                WorkspaceStore.shared.splitFocusedPane(.horizontal, kind: .http)
+            }
+
             Divider()
 
             Button("Close Pane") {
@@ -172,6 +176,11 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.togglePanel(.notes)
             }
             .keyboardShortcut("n", modifiers: [.command, .option])
+
+            Button("Toggle HTTP Client Panel") {
+                WorkspaceStore.shared.togglePanel(.http)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
 
             Divider()
 

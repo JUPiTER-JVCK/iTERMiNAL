@@ -157,6 +157,8 @@ jobs:
             Sources/iTERMiNAL/AI/CommandRisk.swift \
             Sources/iTERMiNAL/AI/AssistantDestination.swift \
             Sources/iTERMiNAL/AI/ErrorHelp.swift \
+            Sources/iTERMiNAL/HTTP/HTTPMessage.swift \
+            Sources/iTERMiNAL/HTTP/HTTPResponseFormatter.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

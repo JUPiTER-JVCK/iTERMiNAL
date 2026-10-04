@@ -116,6 +116,7 @@ struct SettingsRootView: View {
                 case .connections: ConnectionsSettingsView()
                 case .security: SecuritySettingsView()
                 case .ai: AISettingsView()
+                case .http: HTTPClientSettingsView()
                 case .backup: BackupSettingsView()
                 case .shortcuts: ShortcutsSettingsView()
                 case .advanced: AdvancedSettingsView()

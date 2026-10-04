@@ -61,6 +61,11 @@ struct PreferencesArchive: Codable {
     var assistantIncludeGitBranch: Bool?
     var assistantIncludeWorkspace: Bool?
     var assistantOfferErrorHelp: Bool?
+    /// HTTP client request behavior. Optional for the same reason as the
+    /// composer/assistant fields above — older archives predate them.
+    var httpRequestTimeout: Double?
+    var httpFollowRedirects: Bool?
+    var httpMaxResponseBytes: Int?
     var connections: [SSHConnection]
 
     init(settings: AppSettings) {
@@ -92,6 +97,9 @@ struct PreferencesArchive: Codable {
         assistantIncludeGitBranch = settings.assistantIncludeGitBranch
         assistantIncludeWorkspace = settings.assistantIncludeWorkspace
         assistantOfferErrorHelp = settings.assistantOfferErrorHelp
+        httpRequestTimeout = settings.httpRequestTimeout
+        httpFollowRedirects = settings.httpFollowRedirects
+        httpMaxResponseBytes = settings.httpMaxResponseBytes
         connections = settings.sshConnections
     }
 
@@ -157,6 +165,9 @@ struct PreferencesArchive: Codable {
         if let assistantIncludeWorkspace {
             settings.assistantIncludeWorkspace = assistantIncludeWorkspace
         }
+        if let httpRequestTimeout { settings.httpRequestTimeout = httpRequestTimeout }
+        if let httpFollowRedirects { settings.httpFollowRedirects = httpFollowRedirects }
+        if let httpMaxResponseBytes { settings.httpMaxResponseBytes = httpMaxResponseBytes }
         settings.sshConnections = connections
     }
 }
