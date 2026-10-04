@@ -315,7 +315,15 @@ private struct DetailTopStrip: View {
         .padding(.trailing, 6)
         .frame(height: WindowChrome.topBarHeight)
         // This strip sits at the very top of a frameless window, so it is the
-        // window's title bar in every sense but the system's.
+        // window's title bar in every sense but the system's. It otherwise
+        // inherits `detailColumn`'s `theme.background` fill, which reads a
+        // few shades lighter than the sidebar header beside it — correct
+        // for the content area below, but a visible seam at the one row
+        // meant to read as a single, continuous title bar rather than two
+        // panes glued together. Matching the sidebar's own color here, and
+        // only here, keeps that seam where every other macOS app has it —
+        // right below the toolbar — instead of running through it.
+        .background(theme.sidebar)
         .background(WindowDragArea())
     }
 }
