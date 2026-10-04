@@ -73,6 +73,13 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   in the app.
 - **Notes panel** — a scratchpad beside the terminal (⌥⌘N), saved as you type
   and kept out of exported snapshots.
+- **HTTP client** — a request builder and response viewer, as a split pane or
+  a right-hand panel (⌥⌘R): method, URL, headers, body; pretty-printed JSON;
+  ⌘Return sends from anywhere in the pane; "Copy as cURL"; per-pane history.
+  Requests only ever go out over HTTPS, or plain HTTP to this Mac itself —
+  never a relaxed ATS exception for an arbitrary host. History is redacted
+  the same way terminal output is before it touches disk, and stays out of
+  exported snapshots.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -95,8 +102,8 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   live, so changing it applies without a relaunch. Splitting or closing a pane
   is not animated.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, AI, Backup,
-  Shortcuts, and Advanced, all applying live.
+  cursor, scrollback, GPU), Panels, Connections, Security, AI, HTTP Client,
+  Backup, Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY. When a
@@ -251,7 +258,7 @@ iterminalctl browser.screenshot path=~/shot.png
 | `help`, `ping`, `app.info` | — |
 | `workspace.list`, `workspace.create` | `name` |
 | `tab.list`, `tab.create`, `tab.select`, `tab.close` | `id`, `workspace`, `directory` |
-| `pane.list`, `pane.split`, `pane.close` | `direction`, `kind` |
+| `pane.list`, `pane.split`, `pane.close` | `direction`, `kind` (`terminal`, `browser`, `files`, `http`) |
 | `terminal.send`, `terminal.capture` | `text`, `newline`, `session` |
 | `browser.open` / `newTab` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
 | `files.list` | `path`, `connection`, `hidden` |
@@ -296,6 +303,7 @@ iterminalctl subscribe events=session.exited,tab.created
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle (`connection` set on a remote tab) |
 | `dock.session.moved` | a running shell was moved from a pane into the dock |
+| `http.sent` | an HTTP client pane's request finished — status on success, error on failure |
 
 From an unfocused pane (or while the app is in the background), try:
 
@@ -396,8 +404,10 @@ consults URLSession's delegate.
   which is why sending the screen stays off until you say otherwise.
 - **App Transport Security stays on**, with two narrow exemptions: web-view
   content, so the browser pane can preview a plain-http dev server, and local
-  networking, so the assistant can reach a model server on loopback. Anything
-  routable still has to be HTTPS.
+  networking, so the assistant and the HTTP client panel can reach a server on
+  loopback. Anything routable still has to be HTTPS — the HTTP client refuses
+  a plain `http://` request to any other host outright, rather than letting it
+  fail as a confusing network error.
 - **Certificate validation is never disabled.** A self-signed Proxmox host is
   reached by pinning the one certificate you confirmed by fingerprint, for that
   host and port alone — the system's own verdict is tried first, so pinning can
@@ -420,6 +430,7 @@ consults URLSession's delegate.
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
+| HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
 | Focus composer | ⇧⌘R |
 | Minimise / expand composer | ⇧⌘M |
@@ -436,7 +447,8 @@ Sources/
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
 │   │                TerminalSession (PTY lifecycle, cwd/title/git metadata)
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
-│   ├── Panels/      scriptable browser pane, file pane
+│   ├── Panels/      scriptable browser pane, file pane, HTTP client pane
+│   ├── HTTP/        request/response types, formatting — Foundation-only
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── API/         Unix-socket server, message envelope, command router
@@ -621,6 +633,8 @@ scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 - [x] Pane attention notifications (OSC 9/777) via the event bus
 - [ ] Editable key bindings
 - [x] Workspace snapshots: export/import with no account required
+- [x] HTTP client pane: request builder, response viewer, history
+- [ ] HTTP client: declared-site explorer (`robots.txt` / `sitemap.xml`), saved `.http` collections
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 
