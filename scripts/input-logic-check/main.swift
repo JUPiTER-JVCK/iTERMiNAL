@@ -1267,6 +1267,24 @@ do {
         HTTPMessage.curlCommand(for: quoted) == "curl -X 'GET' 'https://example.com/a'\"'\"'s'",
         "a single quote in the URL is escaped for a POSIX shell: \(HTTPMessage.curlCommand(for: quoted))"
     )
+
+    // normalizedURL: a bare host gets https:// the way an address bar would;
+    // an explicit scheme is trusted as-is; "host:port" is not misread as a
+    // scheme, which is the one case that actually broke while writing this.
+    func normalized(_ input: String) -> URL? { HTTPMessage.normalizedURL(from: input) }
+    check(normalized("google.com")?.absoluteString == "https://google.com", "a bare host gets https://")
+    check(normalized("https://google.com")?.absoluteString == "https://google.com", "an explicit https URL is unchanged")
+    check(normalized("http://localhost:8080")?.absoluteString == "http://localhost:8080",
+          "an explicit http URL to loopback is not upgraded to https")
+    check(normalized("localhost:8080")?.host == "localhost" && normalized("localhost:8080")?.port == 8080,
+          "host:port with no scheme is read as a host and a port, not a scheme named \"localhost\"")
+    check(normalized("example.com:3000")?.host == "example.com" && normalized("example.com:3000")?.port == 3000,
+          "the same holds for a non-local host:port")
+    check(normalized("example.com/path")?.absoluteString == "https://example.com/path", "a bare host with a path gets https://")
+    check(normalized("  example.com  ")?.absoluteString == "https://example.com", "surrounding whitespace is trimmed first")
+    check(normalized("") == nil, "an empty string is not a URL")
+    check(normalized("   ") == nil, "whitespace alone is not a URL")
+    check(normalized("not a url with spaces") == nil, "text with raw spaces is rejected, not mangled into something that parses")
 }
 
 // MARK: HTTP response formatting

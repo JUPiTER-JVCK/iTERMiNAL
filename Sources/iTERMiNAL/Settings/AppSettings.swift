@@ -148,6 +148,17 @@ final class AppSettings: ObservableObject {
     /// pressed. On by default, and only ever shown when an assistant is set up.
     @Published var assistantOfferErrorHelp: Bool { didSet { defaults.set(assistantOfferErrorHelp, forKey: "assistantOfferErrorHelp") } }
 
+    // MARK: HTTP client
+    /// Seconds before a request gives up. Applies to the HTTP client panel's
+    /// own requests only — unrelated to the assistant's or Proxmox's clients.
+    @Published var httpRequestTimeout: Double { didSet { defaults.set(httpRequestTimeout, forKey: "httpRequestTimeout") } }
+    @Published var httpFollowRedirects: Bool { didSet { defaults.set(httpFollowRedirects, forKey: "httpFollowRedirects") } }
+    /// The real download-abort cap: a response is cancelled once it has sent
+    /// this many bytes, so a huge or runaway body is never fully buffered.
+    /// Separate from (and upstream of) the response viewer's own, fixed,
+    /// cosmetic rendering limit.
+    @Published var httpMaxResponseBytes: Int { didSet { defaults.set(httpMaxResponseBytes, forKey: "httpMaxResponseBytes") } }
+
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
         didSet { persistConnections() }
@@ -219,6 +230,9 @@ final class AppSettings: ObservableObject {
         assistantIncludeGitBranch = defaults.object(forKey: "assistantIncludeGitBranch") as? Bool ?? true
         assistantIncludeWorkspace = defaults.object(forKey: "assistantIncludeWorkspace") as? Bool ?? true
         assistantOfferErrorHelp = defaults.object(forKey: "assistantOfferErrorHelp") as? Bool ?? true
+        httpRequestTimeout = defaults.object(forKey: "httpRequestTimeout") as? Double ?? 30
+        httpFollowRedirects = defaults.object(forKey: "httpFollowRedirects") as? Bool ?? true
+        httpMaxResponseBytes = defaults.object(forKey: "httpMaxResponseBytes") as? Int ?? 10_000_000
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -425,6 +439,9 @@ final class AppSettings: ObservableObject {
         assistantIncludeGitBranch = true
         assistantIncludeWorkspace = true
         assistantOfferErrorHelp = true
+        httpRequestTimeout = 30
+        httpFollowRedirects = true
+        httpMaxResponseBytes = 10_000_000
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

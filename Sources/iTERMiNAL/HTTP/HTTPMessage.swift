@@ -35,7 +35,7 @@ struct HTTPMethod: RawRepresentable, Hashable {
 /// One header row. `name`/`value` are `var` because the row is edited in
 /// place in a form; `id` is stable across those edits so SwiftUI's list
 /// diffing never confuses an edited row for a different one.
-struct HTTPHeaderField: Identifiable, Equatable {
+struct HTTPHeaderField: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
     var value: String
@@ -95,5 +95,27 @@ enum HTTPMessage {
     /// single quotes.
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    /// Turns what a person typed into the URL field into a real URL: adds
+    /// `https://` when there is no scheme at all, the way an address bar
+    /// would, and otherwise leaves an explicit scheme exactly as written —
+    /// including a plain `http://`, which the networking layer decides
+    /// whether to allow, not this function.
+    ///
+    /// Deliberately checks for a literal `"://"` rather than trusting
+    /// `URL`'s own `scheme` — checked directly while writing this:
+    /// `URL(string: "localhost:8080")` parses with `scheme == "localhost"`
+    /// and `host == nil`, reading the port as a bogus scheme. Trusting that
+    /// would reject the single most common thing to type here — a bare
+    /// local address with a port — as invalid.
+    static func normalizedURL(from input: String) -> URL? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("://") {
+            guard let url = URL(string: trimmed), url.host != nil else { return nil }
+            return url
+        }
+        return URL(string: "https://" + trimmed)
     }
 }
