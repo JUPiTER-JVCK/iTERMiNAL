@@ -99,6 +99,20 @@ final class HTTPClientModel: ObservableObject, Identifiable {
         )
         history.insert(entry, at: 0)
         HTTPHistoryStore.append(entry)
+
+        // Built as two separately-optional keys, not one boxed as `Any` —
+        // a present-but-nil value isn't how this app's other API events
+        // represent "no value", and would depend on JSONSerialization
+        // handling a boxed Optional the same way on every platform rather
+        // than just the one this was checked on.
+        var eventData: [String: Any] = [
+            "pane": id.uuidString,
+            "method": spec.method.rawValue,
+            "url": spec.url,
+        ]
+        if let statusCode { eventData["status"] = statusCode }
+        if let errorDescription { eventData["error"] = errorDescription }
+        EventBus.shared.publish(APIEvent("http.sent", eventData))
     }
 }
 

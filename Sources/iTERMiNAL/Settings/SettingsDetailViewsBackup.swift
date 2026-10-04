@@ -89,6 +89,7 @@ struct ShortcutsSettingsView: View {
         ("Toggle browser panel", "⌥⌘B"),
         ("Toggle files panel", "⌥⌘F"),
         ("Toggle notes panel", "⌥⌘N"),
+        ("Toggle HTTP Client panel", "⌥⌘R"),
         ("Toggle superfile", "⌥⌘S"),
         ("Toggle btop", "⌥⌘P"),
         ("Settings", "⌘,"),

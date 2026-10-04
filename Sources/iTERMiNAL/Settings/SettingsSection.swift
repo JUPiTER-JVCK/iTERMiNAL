@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, terminal, composer, panels, connections, security, ai, backup, shortcuts, advanced
+    case general, appearance, terminal, composer, panels, connections, security, ai, http, backup, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .connections: return "Connections"
         case .security: return "Security"
         case .ai: return "AI"
+        case .http: return "HTTP Client"
         case .backup: return "Backup"
         case .shortcuts: return "Shortcuts"
         case .advanced: return "Advanced"
@@ -32,6 +33,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .connections: return "Saved SSH hosts used for remote sessions and SFTP."
         case .security: return "The local scripting API and what this app does with your data."
         case .ai: return "OpenAI-compatible assistant behind the @ai composer prefix."
+        case .http: return "Request timeout, redirects, and response size for the HTTP client panel."
         case .backup: return "Where your setup is stored, and snapshots that move it."
         case .shortcuts: return "Every keyboard shortcut in the app."
         case .advanced: return "Session state, resetting preferences, and version info."
@@ -48,6 +50,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .connections: return "network"
         case .security: return "lock.shield"
         case .ai: return "sparkles"
+        case .http: return "arrow.up.arrow.down"
         case .backup: return "externaldrive"
         case .shortcuts: return "keyboard"
         case .advanced: return "wrench.and.screwdriver"
@@ -67,7 +70,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             switch self {
             case .workspace: return [.general, .appearance, .terminal, .composer]
             case .surfaces: return [.panels, .connections]
-            case .system: return [.security, .ai, .backup, .shortcuts, .advanced]
+            case .system: return [.security, .ai, .http, .backup, .shortcuts, .advanced]
             }
         }
     }
