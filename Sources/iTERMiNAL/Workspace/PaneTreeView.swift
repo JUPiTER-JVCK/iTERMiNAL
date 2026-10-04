@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Renders a tab's layout tree: splits become HSplitView/VSplitView, leaves
-/// host a terminal, browser, or file pane.
+/// host a terminal, browser, file, or HTTP client pane.
 ///
 /// A tab with a single pane draws no card and no focus ring — there is
 /// nothing to disambiguate, and the reference app keeps its content flush to
@@ -19,6 +19,8 @@ struct PaneTreeView: View {
             BrowserPaneView(model: model)
         case .files(let model):
             FilePaneView(model: model)
+        case .http(let model):
+            HTTPClientPaneView(model: model)
         case .split(let direction, let children):
             if direction == .horizontal {
                 HSplitView {

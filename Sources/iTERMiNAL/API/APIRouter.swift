@@ -121,6 +121,7 @@ final class APIRouter {
             switch request.string("kind") ?? "terminal" {
             case "browser": kind = .browser
             case "files": kind = .files
+            case "http": kind = .http
             default: kind = .terminal
             }
             var connectionID: UUID?
@@ -413,6 +414,13 @@ final class APIRouter {
                 "id": files.id.uuidString,
                 "path": files.directory,
                 "remote": files.isRemote,
+            ]]
+        case .http(let client):
+            return [[
+                "kind": "http",
+                "id": client.id.uuidString,
+                "url": client.urlText,
+                "method": client.method.rawValue,
             ]]
         case .split(let direction, let children):
             return children.flatMap { child -> [[String: Any]] in

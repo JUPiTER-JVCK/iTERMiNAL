@@ -1050,6 +1050,8 @@ struct RightPanelView: View {
             ToolPanelView(tool: .superfile)
         case .btop:
             ToolPanelView(tool: .btop)
+        case .http:
+            HTTPClientPaneView(model: store.panelHTTPClient)
         case nil:
             PanelPicker()
         }
