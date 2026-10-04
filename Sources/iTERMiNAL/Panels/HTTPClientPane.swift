@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// One request/response pane: the fields that make up a request, what came
 /// back, and history of what was sent before. Used both as a split-pane
@@ -98,5 +99,108 @@ final class HTTPClientModel: ObservableObject, Identifiable {
         )
         history.insert(entry, at: 0)
         HTTPHistoryStore.append(entry)
+    }
+}
+
+/// The pane itself: a toolbar (method, URL, Send/Cancel, overflow), then
+/// history beside a stacked request builder and response view. Used
+/// directly for both a split-pane leaf and the right-hand sliding panel —
+/// this one, unlike Browser's, only ever holds one request at a time, so
+/// there is no separate tabbed wrapper the way `BrowserPanelView` needs.
+struct HTTPClientPaneView: View {
+    @ObservedObject var model: HTTPClientModel
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var urlFieldFocused: Bool
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        VStack(spacing: 0) {
+            toolbar(theme: theme)
+            FadedDivider()
+            HSplitView {
+                HTTPHistoryListView(model: model)
+                    .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
+                VSplitView {
+                    HTTPRequestBuilderView(model: model)
+                        .frame(minHeight: 120)
+                    HTTPResponseView(model: model)
+                        .frame(minHeight: 120)
+                }
+            }
+        }
+        .background(theme.background)
+        .onAppear { urlFieldFocused = true }
+    }
+
+    private func toolbar(theme: Theme) -> some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(HTTPMethod.common, id: \.self) { method in
+                    Button(method.rawValue) { model.method = method }
+                }
+            } label: {
+                Text(model.method.rawValue)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .frame(width: 64, alignment: .leading)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            TextField("https://example.com", text: $model.urlText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .focused($urlFieldFocused)
+                .onSubmit(send)
+
+            if model.isSending {
+                Button("Cancel", action: model.cancelInFlightRequest)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.red)
+            } else {
+                Button("Send", action: send)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+            }
+
+            Menu {
+                Button("Copy as cURL", action: copyAsCURL)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .foregroundStyle(theme.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            // ⌘Return sends from anywhere in the pane, not only the URL
+            // field — an invisible button carrying only the shortcut.
+            // `allowsHitTesting(false)` keeps it from swallowing a stray
+            // click that lands in a gap between the real toolbar controls.
+            Button(action: send) { EmptyView() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        )
+    }
+
+    private func send() {
+        model.send(settings: settings)
+    }
+
+    private func copyAsCURL() {
+        let spec = HTTPRequestSpec(
+            method: model.method,
+            url: model.urlText,
+            headers: model.headerFields.filter { !$0.name.isEmpty },
+            body: HTTPMethod.bodylessByConvention.contains(model.method) ? nil : model.bodyText
+        )
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(HTTPMessage.curlCommand(for: spec), forType: .string)
     }
 }
