@@ -187,7 +187,11 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        completionHandler(followRedirects && isRedirectAllowed(request) ? request : nil)
+        guard followRedirects, isRedirectAllowed(request) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(sanitizedForRedirect(request, from: task))
     }
 
     /// The same plain-HTTP policy `execute` checks on the request it builds,
@@ -202,5 +206,36 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
             return AssistantDestination.isLoopback(host: host)
         }
         return true
+    }
+
+    /// `URLSession` carries the original request's headers into a redirect
+    /// unmodified — `Authorization`, `Cookie`, anything typed into the
+    /// builder — even when the scheme/loopback check above allows the
+    /// target through. That's fine for a same-origin redirect (a trailing
+    /// slash, a path move), but a cross-origin one otherwise hands
+    /// whatever credentials this request carried to a *different* host —
+    /// exactly what a malicious or compromised endpoint could exploit with
+    /// nothing more than a single 3xx response. Strip the headers HTTP
+    /// itself defines as credential-bearing whenever the origin changes;
+    /// leave every header alone when it doesn't.
+    private func sanitizedForRedirect(_ request: URLRequest, from task: URLSessionTask) -> URLRequest {
+        guard let originalURL = task.originalRequest?.url, let redirectURL = request.url,
+              !isSameOrigin(originalURL, redirectURL) else {
+            return request
+        }
+        var sanitized = request
+        for header in ["Authorization", "Proxy-Authorization", "Cookie"] {
+            sanitized.setValue(nil, forHTTPHeaderField: header)
+        }
+        return sanitized
+    }
+
+    private func isSameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        func effectivePort(_ url: URL) -> Int {
+            url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)
+        }
+        return lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && effectivePort(lhs) == effectivePort(rhs)
     }
 }
