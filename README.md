@@ -542,8 +542,9 @@ and the composer's **+** menu.
 
 Switch an HTTP pane from **Request** to **Explore** and it becomes a command
 line over one website's published paths. Type an address (`example.com`, or
-`http://localhost:3000` for a local server) and press Return. An illustrative
-session:
+`http://localhost:3000` for a local server) and press Return — or, from
+Request, press the list icon beside Send to map the address in the URL field.
+An illustrative session:
 
 ```
 $ example.com
@@ -585,7 +586,10 @@ followed a few levels, a few at a time), and the page you entered. `ls`,
   another scheme) is reported and not requested, and a redirect off the site
   is shown, not followed — otherwise a site could aim this app at an address
   of its choosing. Different hosts are never merged: `www.example.com` is not
-  `example.com`.
+  `example.com`. The one exception is for the address you typed: when the
+  site's own redirect says its front door is its `www.` twin (or the reverse),
+  both over https on the same port, `open` maps that host and says so —
+  `google.com` sends you to `www.google.com`, and that is where the map is.
 - **Bounded.** Four sitemaps at a time, at most 40 files, three levels deep,
   25,000 paths per `open`; responses stop at the HTTP client's size limit.
   `.gz` sitemaps are not read.

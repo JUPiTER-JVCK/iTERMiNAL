@@ -193,6 +193,30 @@ enum ExplorerPolicy {
         origin.root + "/robots.txt"
     }
 
+    /// Where a site's own redirect says its front door is, when that is the
+    /// same site spelled the other way: `example.com` sending you to
+    /// `www.example.com`, or back. The one cross-origin move `open` makes,
+    /// and only for an address the person typed.
+    ///
+    /// Narrow on purpose. Both ends must be `https`, on the same port, and
+    /// the two hosts must differ by exactly a leading `www.` — so a site
+    /// cannot use its own redirect to send this app to an address of its
+    /// choosing (`evil.test` → `internal.corp`, `www.example.com.evil.test`,
+    /// `sub.example.com`). Anything else stays a redirect that is shown and
+    /// not followed.
+    static func canonicalOrigin(for origin: SiteOrigin, location: String, requestedURL: String) -> SiteOrigin? {
+        guard origin.scheme == "https",
+              let base = URL(string: requestedURL),
+              let target = URL(string: location, relativeTo: base)?.absoluteURL,
+              let candidate = SiteOrigin(url: target),
+              candidate != origin,
+              candidate.scheme == "https",
+              candidate.port == origin.port else { return nil }
+        func bare(_ host: String) -> String { host.hasPrefix("www.") ? String(host.dropFirst(4)) : host }
+        guard candidate.host != origin.host, bare(candidate.host) == bare(origin.host) else { return nil }
+        return candidate
+    }
+
     struct SitemapTargets: Equatable {
         /// Absolute URLs to request.
         var fetch: [String] = []

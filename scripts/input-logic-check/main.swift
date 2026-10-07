@@ -1842,6 +1842,28 @@ do {
     let seen = ExplorerPolicy.sitemapTargets(declared: ["/a.xml", "/b.xml", "/c.xml"], origin: origin, alreadySeen: ["https://example.com/a.xml"], budget: 1)
     check(seen.fetch == ["https://example.com/b.xml"] && seen.overBudget == 1, "already-read sitemaps are skipped and the budget is a hard stop")
     check(ExplorerPolicy.sitemapTargets(declared: ["/a.xml"], origin: origin, alreadySeen: [], budget: 0).fetch.isEmpty, "no budget, no fetches")
+    // The one cross-origin move `open` makes: a site's own bare <-> www redirect.
+    func moved(_ from: String, _ location: String, requested: String? = nil) -> String? {
+        ExplorerPolicy.canonicalOrigin(for: SiteOrigin(urlString: from)!, location: location, requestedURL: requested ?? (from + "/robots.txt"))?.root
+    }
+    check(moved("https://example.com", "https://www.example.com/robots.txt") == "https://www.example.com", "example.com may move to its www. twin")
+    check(moved("https://www.example.com", "https://example.com/robots.txt") == "https://example.com", "and www. back to the bare host")
+    check(moved("https://example.com", "https://EXAMPLE.com/x") == nil, "the same host spelled differently is not a move")
+    check(moved("https://example.com", "/robots.txt") == nil, "a same-origin redirect is not a move")
+    check(moved("https://example.com", "https://evil.test/robots.txt") == nil, "another site is not a move — it is a redirect that is shown and not followed")
+    check(moved("https://example.com", "https://www.example.com.evil.test/robots.txt") == nil, "a host that merely starts with www.example.com is another site")
+    check(moved("https://example.com", "https://sub.example.com/robots.txt") == nil, "only www. counts, not any subdomain")
+    check(moved("https://example.com", "https://wwwexample.com/robots.txt") == nil, "www without the dot is another site")
+    check(moved("https://example.com", "https://www.example.com:8443/robots.txt") == nil, "another port is another origin")
+    check(moved("https://example.com", "http://www.example.com/robots.txt") == nil, "a downgrade to http is never followed")
+    check(moved("https://example.com:8443", "http://www.example.com:8443/robots.txt") == nil, "a downgrade to http on the same port is never followed either")
+    check(moved("http://localhost:3000", "https://www.localhost:3000/") == nil, "an http origin never moves, even to https")
+    check(moved("https://example.com", "//www.example.com/robots.txt") == "https://www.example.com", "a protocol-relative Location resolves against the request")
+    check(moved("https://example.com", "https://www.www.example.com/x") == nil, "www.www. is not a twin")
+    check(moved("https://example.com", "not a url at all") == nil, "an unusable Location is not a move")
+    check(moved("https://example.com", "") == nil, "an empty Location is not a move")
+    check(ExplorerPolicy.canonicalOrigin(for: SiteOrigin(urlString: "http://localhost:3000")!, location: "http://www.localhost:3000/", requestedURL: "http://localhost:3000/robots.txt") == nil,
+          "a plain-http origin never moves")
     check(ExplorerPolicy.sitemapConcurrency <= 6 && ExplorerPolicy.maxSitemapFiles <= 50 && ExplorerPolicy.maxSitemapDepth <= 4,
           "the fan-out limits stay small")
 }
