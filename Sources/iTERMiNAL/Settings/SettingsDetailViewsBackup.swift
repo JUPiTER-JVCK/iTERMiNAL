@@ -86,6 +86,7 @@ struct ShortcutsSettingsView: View {
         ("Close pane", "⇧⌘W"),
         ("Close tab", "⌥⌘W"),
         ("Toggle terminal dock", "⌘J"),
+        ("Toggle sidebar", "⌃⌘S"),
         ("Toggle browser panel", "⌥⌘B"),
         ("Toggle files panel", "⌥⌘F"),
         ("Toggle notes panel", "⌥⌘N"),

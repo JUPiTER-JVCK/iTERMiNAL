@@ -64,6 +64,11 @@ enum Motion {
         reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity)
     }
 
+    /// The workspaces panel sliding in from the rail.
+    static func railPanelTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity)
+    }
+
     /// The terminal dock rising from the bottom edge.
     static func dockTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)

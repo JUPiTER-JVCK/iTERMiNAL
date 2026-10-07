@@ -46,11 +46,22 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   single-line commands are suggested. The chip above the input names the
   terminal it will run in, and switches it to a private shell of its own if you
   want one.
-- **Dockable panels** — a terminal dock along the bottom and a browser or file
-  panel down the right, opened independently from the toggles at the top right
-  of the content area, with draggable dividers whose sizes persist. A dock tab
-  can be a local shell, a saved connection, or a running shell moved down from
-  a pane, and it reopens as whatever it was.
+- **Framed window with an icon rail** — one top bar and an icon rail down the
+  left edge frame the content, which sits in a rounded card. The rail holds
+  Terminal, Workspaces and Connect, with a `···` menu for the rest (Tasks,
+  Automations, Skills): each has a pin that puts its icon on the rail. The
+  Workspaces panel opens beside the content and can be pinned there, or left
+  unpinned to float over it until you pick something or click away (⌃⌘S shows
+  or hides it). A button at the bottom left of the frame toggles the terminal
+  dock. Settings → Appearance sets the frame's tint, corner radius and edge
+  thickness, whether it is translucent or outlined, and the interface
+  typeface; a preview there shows the change as you make it.
+- **Dockable panels** — a terminal dock along the bottom and a browser, file,
+  notes or HTTP panel down the right, opened from the one button at the top
+  right (each can also open in full view, across the whole content area), with
+  draggable dividers whose sizes persist. A dock tab can be a local shell, a
+  saved connection, or a running shell moved down from a pane, and it reopens
+  as whatever it was.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
@@ -81,6 +92,10 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   through this app's best-effort secret masking (values that look like
   credentials, not a guarantee) before it touches disk, and stays out of
   exported snapshots.
+- **Site explorer** — the HTTP pane's second mode (Request | Explore): type an
+  address and walk what the site publishes like a directory, with `ls`, `cd`,
+  `tree`, `find`, `get` and Tab completion. See
+  [Site explorer](#site-explorer) for what it reads and what it won't.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -430,6 +445,7 @@ consults URLSession's delegate.
 | Split with browser | ⇧⌘B |
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
+| Show / hide sidebar | ⌃⌘S |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
@@ -444,12 +460,14 @@ consults URLSession's delegate.
 Sources/
 ├── iTERMiNAL/
 │   ├── App/         entry point, window scene, menu commands
-│   ├── Chrome/      sidebar, composer, command palette, themes
+│   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
+│   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
 │   │                TerminalSession (PTY lifecycle, cwd/title/git metadata)
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
 │   ├── Panels/      scriptable browser pane, file pane, HTTP client pane
-│   ├── HTTP/        request/response types, formatting — Foundation-only
+│   ├── HTTP/        request/response types, formatting, site-explorer parsers and
+│   │                path tree — Foundation-only
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── API/         Unix-socket server, message envelope, command router
@@ -519,6 +537,69 @@ and the composer's **+** menu.
    localhost. Plain HTTP works here only because ATS is given the
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
+
+## Site explorer
+
+Switch an HTTP pane from **Request** to **Explore** and it becomes a command
+line over one website's published paths. Type an address (`example.com`, or
+`http://localhost:3000` for a local server) and press Return. An illustrative
+session:
+
+```
+$ example.com
+mapping example.com — reading what the site publishes
+robots.txt  200  14 paths, 1 sitemaps
+sitemap  /sitemap.xml  1,204 paths
+reading the page you entered for links
+page  200  37 links added
+mapped 1,251 paths — 1,204 from sitemaps, 14 from robots.txt, 37 from links
+example.com:/ $ ls -l
+--D-  admin/
+S---  blog/      312 inside
+---L  about
+example.com:/ $ cd blog
+example.com:/blog $ get 2024/post-1
+```
+
+| Command | Does |
+|---|---|
+| `ls [-l] [path]` | list a directory; `-l` shows where each entry came from — `S` sitemap, `A` robots Allow, `D` robots Disallow, `L` found as a link |
+| `cd [path]`, `pwd` | move around (`..`, `/`, `~`, relative and absolute paths) |
+| `tree [-L n] [path]`, `find <text>` | the map below a directory; known paths containing some text |
+| `get [path]` (or `cat`) | fetch one address and print the response; links in it are added to the map |
+| `req [path]` | load an address into the request builder, without sending |
+| `open <address>`, `refresh`, `info`, `clear`, `help` | map another site; read the declarations again; what was read and from where |
+
+Tab completes names from the map, ↑ ↓ recall earlier lines, Esc cancels.
+
+**What it reads, and what it never does.** The map is made only of what the
+site itself declares or you fetched: its `robots.txt` (every `Allow` and
+`Disallow` path, as written), the sitemaps that file names (an index is
+followed a few levels, a few at a time), and the page you entered. `ls`,
+`cd`, `tree` and `find` read that map and send nothing.
+
+- **No guessing.** It never probes for common directories, never tries a
+  wordlist, and does not fall back to `/sitemap.xml` when `robots.txt`
+  doesn't declare one. `get` fetches an address you typed, one at a time.
+- **One site.** A sitemap or `Sitemap:` line that names another host (or
+  another scheme) is reported and not requested, and a redirect off the site
+  is shown, not followed — otherwise a site could aim this app at an address
+  of its choosing. Different hosts are never merged: `www.example.com` is not
+  `example.com`.
+- **Bounded.** Four sitemaps at a time, at most 40 files, three levels deep,
+  25,000 paths per `open`; responses stop at the HTTP client's size limit.
+  `.gz` sitemaps are not read.
+- **Lossy where it says so.** Links come from `href`/`src` in HTML and from
+  URL-shaped strings in JSON — not scripts, and `<base>` is ignored. A
+  server with directory listings on shows up as ordinary links. Settings →
+  HTTP Client can switch link-reading off, leaving only what is declared.
+- **robots.txt rules are prefixes**, shown as the site wrote them;
+  patterns containing `*` or `$` name nothing and are left out.
+
+The map lives in memory for the pane and is not saved with a layout or in a
+snapshot. A `get` is recorded in the pane's history and on the `http.sent`
+event like any other request; the requests `open` makes on its own are listed
+in the transcript instead.
 
 ## Backup and restore
 
@@ -635,7 +716,8 @@ scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 - [ ] Editable key bindings
 - [x] Workspace snapshots: export/import with no account required
 - [x] HTTP client pane: request builder, response viewer, history
-- [ ] HTTP client: declared-site explorer (`robots.txt` / `sitemap.xml`), saved `.http` collections
+- [x] HTTP client: declared-site explorer (`robots.txt` / `sitemap.xml` / links in fetched pages), command-line navigation
+- [ ] HTTP client: saved `.http` collections
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
 

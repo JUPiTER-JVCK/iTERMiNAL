@@ -225,7 +225,12 @@ indirect enum PaneSnapshot: Codable {
     /// is `HTTPHistoryStore`'s scope key for this pane; carrying the same
     /// one forward on restore is what lets the pane's history survive a
     /// relaunch instead of starting over under a freshly generated ID.
-    case http(url: String?, historyID: UUID)
+    ///
+    /// Optional on the way in, though `snapshot()` always writes one: a
+    /// layout saved before this field existed has to decode, because
+    /// `WorkspaceStore.restore()` throws away the whole saved state when any
+    /// single pane in it won't.
+    case http(url: String?, historyID: UUID?)
     case split(direction: SplitDirection, children: [PaneSnapshot])
 }
 
@@ -263,7 +268,7 @@ extension PaneNode {
         case .files(let path, let connection):
             return PaneNode(content: .files(FileBrowserModel(path: path, connectionID: connection)))
         case .http(let url, let historyID):
-            let client = HTTPClientModel(id: historyID)
+            let client = HTTPClientModel(id: historyID ?? UUID())
             if let url { client.urlText = url }
             return PaneNode(content: .http(client))
         case .split(let direction, let children):

@@ -21,15 +21,22 @@ enum WindowChrome {
     /// breathing room after the last one.
     static let trafficLightWidth: CGFloat = 78
 
-    /// Height of the app's own top bar, shared by the sidebar header and the
-    /// detail strip so the two columns read as one band rather than two rows
-    /// that happen to be adjacent.
-    ///
-    /// The sidebar used to clear the traffic lights by padding *down* past
-    /// them, which left an empty strip above its title and put the two columns
-    /// at different heights — the gap. Clearing them sideways instead puts
-    /// everything on one row, which is what the borderless look needs.
-    static let topBarHeight: CGFloat = 40
+    /// Height of the window's one top bar. The traffic lights float over its
+    /// leading end and everything else in it clears them sideways — padding
+    /// down past them would leave an empty strip above the bar's own content.
+    static let topBarHeight: CGFloat = 44
+
+    /// Width of the icon rail down the left edge, under the top bar.
+    static let railWidth: CGFloat = 56
+
+    /// Width of the workspaces panel, docked beside the content or floating
+    /// over it.
+    static let panelWidth: CGFloat = 284
+
+    /// The least the rail keeps clear below its last icon. The content card
+    /// can be set flush to the window edge (Appearance → Workspace frame), but
+    /// the dock button above it should not sit on the edge with it.
+    static let railBottomInset: CGFloat = 6
 
     /// Applies the frameless configuration to a window.
     ///
@@ -43,21 +50,25 @@ enum WindowChrome {
         window.titleVisibility = .hidden
         // The hairline under the title bar is the last visible trace of it.
         window.titlebarSeparatorStyle = .none
-        // With no title bar to grab, the app's own chrome has to be draggable.
-        // Views that handle their own mouse events — every button, the resize
-        // handles, and the terminal (see TerminalContainerView) — keep them, so
-        // this only picks up the parts that would otherwise do nothing.
-        window.isMovableByWindowBackground = true
+        // Deliberately off. With no title bar to grab, the app's own chrome has
+        // to be draggable — but that is `WindowDragArea`'s job, on the top bar,
+        // the rail and the settings headers, not the whole window's. Turned on,
+        // every SwiftUI `DragGesture` in the app moved the window along with
+        // itself: SwiftUI's hosting view reports "background" for them, so
+        // dragging the composer card, or a panel's resize seam, dragged the
+        // entire application instead.
+        window.isMovableByWindowBackground = false
     }
 }
 
 /// A transparent region that drags the window, standing in for the title bar
 /// that is no longer there.
 ///
-/// `isMovableByWindowBackground` alone is not quite enough to rely on: whether
-/// a click falls through to it depends on what SwiftUI's hosting view reports
-/// for the pixel under the mouse, which is not something this app controls.
-/// Driving the drag loop directly from `mouseDown` does not depend on that.
+/// The only thing that moves the window by dragging: the window is not
+/// movable by its background (see `WindowChrome.apply`), because that also
+/// moved it under every SwiftUI drag handle. Driving the drag loop from
+/// `mouseDown` here puts the movable part exactly where this view is, and
+/// nowhere else.
 ///
 /// Used as a `.background`, behind content that has hit-testing switched off.
 struct WindowDragArea: NSViewRepresentable {
@@ -107,6 +118,19 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async { WindowChrome.apply(to: nsView.window) }
+    }
+}
+
+extension FrameFontDesign {
+    /// The SwiftUI design this choice stands for. Nil for System, which leaves
+    /// the text as it was drawn rather than forcing a design on it.
+    var design: Font.Design? {
+        switch self {
+        case .system: return nil
+        case .rounded: return .rounded
+        case .serif: return .serif
+        case .monospaced: return .monospaced
+        }
     }
 }
 
