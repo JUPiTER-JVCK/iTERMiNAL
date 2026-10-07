@@ -51,21 +51,25 @@ enum WindowChrome {
         window.titleVisibility = .hidden
         // The hairline under the title bar is the last visible trace of it.
         window.titlebarSeparatorStyle = .none
-        // With no title bar to grab, the app's own chrome has to be draggable.
-        // Views that handle their own mouse events — every button, the resize
-        // handles, and the terminal (see TerminalContainerView) — keep them, so
-        // this only picks up the parts that would otherwise do nothing.
-        window.isMovableByWindowBackground = true
+        // Deliberately off. With no title bar to grab, the app's own chrome has
+        // to be draggable — but that is `WindowDragArea`'s job, on the top bar,
+        // the rail and the settings headers, not the whole window's. Turned on,
+        // every SwiftUI `DragGesture` in the app moved the window along with
+        // itself: SwiftUI's hosting view reports "background" for them, so
+        // dragging the composer card, or a panel's resize seam, dragged the
+        // entire application instead.
+        window.isMovableByWindowBackground = false
     }
 }
 
 /// A transparent region that drags the window, standing in for the title bar
 /// that is no longer there.
 ///
-/// `isMovableByWindowBackground` alone is not quite enough to rely on: whether
-/// a click falls through to it depends on what SwiftUI's hosting view reports
-/// for the pixel under the mouse, which is not something this app controls.
-/// Driving the drag loop directly from `mouseDown` does not depend on that.
+/// The only thing that moves the window by dragging: the window is not
+/// movable by its background (see `WindowChrome.apply`), because that also
+/// moved it under every SwiftUI drag handle. Driving the drag loop from
+/// `mouseDown` here puts the movable part exactly where this view is, and
+/// nowhere else.
 ///
 /// Used as a `.background`, behind content that has hit-testing switched off.
 struct WindowDragArea: NSViewRepresentable {
