@@ -1033,6 +1033,13 @@ final class WorkspaceStore: ObservableObject {
         withAnimation(Motion.panel) { rightPanelExpanded.toggle() }
     }
 
+    /// Opens `panel` and lets the trailing region fill the whole content
+    /// area — the "full view" of the panels menu.
+    func openPanelExpanded(_ panel: SidePanel) {
+        openPanel(panel)
+        withAnimation(Motion.panel) { rightPanelExpanded = true }
+    }
+
     // MARK: Bottom terminal dock
 
     func toggleBottomDock() {
