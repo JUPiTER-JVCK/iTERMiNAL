@@ -46,11 +46,19 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   single-line commands are suggested. The chip above the input names the
   terminal it will run in, and switches it to a private shell of its own if you
   want one.
-- **Dockable panels** — a terminal dock along the bottom and a browser or file
-  panel down the right, opened independently from the toggles at the top right
-  of the content area, with draggable dividers whose sizes persist. A dock tab
-  can be a local shell, a saved connection, or a running shell moved down from
-  a pane, and it reopens as whatever it was.
+- **Framed window with an icon rail** — one top bar and an icon rail down the
+  left edge frame the content, which sits in a rounded card. The rail holds
+  Terminal, Workspaces and Connect, with a `···` menu for the rest (Tasks,
+  Automations, Skills): each has a pin that puts its icon on the rail. The
+  Workspaces panel opens beside the content and can be pinned there, or left
+  unpinned to float over it until you pick something or click away (⌃⌘S shows
+  or hides it).
+- **Dockable panels** — a terminal dock along the bottom and a browser, file,
+  notes or HTTP panel down the right, opened from the one button at the top
+  right (each can also open in full view, across the whole content area), with
+  draggable dividers whose sizes persist. A dock tab can be a local shell, a
+  saved connection, or a running shell moved down from a pane, and it reopens
+  as whatever it was.
 - **Task manager** — every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
@@ -430,6 +438,7 @@ consults URLSession's delegate.
 | Split with browser | ⇧⌘B |
 | Close pane / tab | ⇧⌘W / ⌥⌘W |
 | Terminal dock | ⌘J |
+| Show / hide sidebar | ⌃⌘S |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
@@ -444,7 +453,8 @@ consults URLSession's delegate.
 Sources/
 ├── iTERMiNAL/
 │   ├── App/         entry point, window scene, menu commands
-│   ├── Chrome/      sidebar, composer, command palette, themes
+│   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
+│   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
 │   │                TerminalSession (PTY lifecycle, cwd/title/git metadata)
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence

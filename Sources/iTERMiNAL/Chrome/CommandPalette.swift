@@ -159,6 +159,12 @@ struct CommandPaletteView: View {
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()
             },
+            PaletteAction(id: "sidebar.toggle", title: "Toggle Sidebar", subtitle: "Show or hide the workspaces panel", systemImage: "sidebar.left", shortcut: "⌃⌘S") {
+                withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
+            },
+            PaletteAction(id: "sidebar.pin", title: settings.railPanelPinned ? "Unpin Sidebar" : "Pin Sidebar", subtitle: settings.railPanelPinned ? "Float the panel over the content" : "Keep the panel beside the content", systemImage: settings.railPanelPinned ? "pin.slash" : "pin") {
+                withAnimation(Motion.panel) { settings.railPanelPinned.toggle() }
+            },
             PaletteAction(id: "composer.focus", title: "Focus Composer", subtitle: "Run a command in its own shell", systemImage: "text.cursor", shortcut: "⇧⌘R") {
                 store.focusComposer()
             },

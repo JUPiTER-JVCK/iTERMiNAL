@@ -111,6 +111,22 @@ final class AppSettings: ObservableObject {
     @Published var projectsExpanded: Bool { didSet { defaults.set(projectsExpanded, forKey: "projectsExpanded") } }
     @Published var recentsExpanded: Bool { didSet { defaults.set(recentsExpanded, forKey: "recentsExpanded") } }
 
+    // MARK: Left rail
+    /// `RailItem` raw values pinned to the rail, in order. Read through
+    /// `pinnedRailItems`, which drops anything stale.
+    @Published var railPinnedItems: [String] { didSet { defaults.set(railPinnedItems, forKey: "railPinnedItems") } }
+    /// Whether the workspaces panel is showing beside the rail at all.
+    @Published var railPanelOpen: Bool { didSet { defaults.set(railPanelOpen, forKey: "railPanelOpen") } }
+    /// Docked beside the content (true), or floating over it until dismissed
+    /// (false).
+    @Published var railPanelPinned: Bool { didSet { defaults.set(railPanelPinned, forKey: "railPanelPinned") } }
+
+    var pinnedRailItems: [RailItem] { RailPins.decode(railPinnedItems) }
+
+    func toggleRailPin(_ item: RailItem) {
+        railPinnedItems = RailPins.encode(RailPins.toggled(item, in: pinnedRailItems))
+    }
+
     // MARK: Security / automation
     /// The local socket API is powerful (it can type into live shells), so it
     /// is opt-in and off until the user turns it on.
@@ -218,6 +234,12 @@ final class AppSettings: ObservableObject {
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
         recentsExpanded = defaults.object(forKey: "recentsExpanded") as? Bool ?? false
+
+        railPinnedItems = defaults.stringArray(forKey: "railPinnedItems") ?? RailPins.encode(RailItem.defaultPinned)
+        // Open and docked by default, so a first launch looks like the sidebar
+        // it replaced rather than hiding the tab list.
+        railPanelOpen = defaults.object(forKey: "railPanelOpen") as? Bool ?? true
+        railPanelPinned = defaults.object(forKey: "railPanelPinned") as? Bool ?? true
 
         localAPIEnabled = defaults.bool(forKey: "localAPIEnabled")
         apiAllowBrowserControl = defaults.object(forKey: "apiAllowBrowserControl") as? Bool ?? true
@@ -408,6 +430,9 @@ final class AppSettings: ObservableObject {
         accentID = "green"
         backgroundOpacity = 1.0
         sidebarTranslucent = false
+        railPinnedItems = RailPins.encode(RailItem.defaultPinned)
+        railPanelOpen = true
+        railPanelPinned = true
         showSystemMetrics = true
         terminalFontName = ""
         terminalFontSize = 13

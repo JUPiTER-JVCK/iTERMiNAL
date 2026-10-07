@@ -160,6 +160,7 @@ jobs:
             Sources/iTERMiNAL/HTTP/HTTPMessage.swift \
             Sources/iTERMiNAL/HTTP/HTTPResponseFormatter.swift \
             Sources/iTERMiNAL/HTTP/HTTPRedaction.swift \
+            Sources/iTERMiNAL/Chrome/RailModel.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

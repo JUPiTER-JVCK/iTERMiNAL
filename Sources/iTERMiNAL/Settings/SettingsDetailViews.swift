@@ -91,7 +91,7 @@ struct AppearanceSettingsView: View {
 
             Section("Sidebar") {
                 Toggle("Translucent sidebar", isOn: $settings.sidebarTranslucent)
-                Text("Off by default, matching the flat sidebar of the app this one is modelled on. On, the sidebar picks up the desktop behind it the way most macOS apps do.")
+                Text("Off by default, matching the flat chrome of the app this one is modelled on. On, the top bar, the icon rail and the workspaces panel pick up the desktop behind them the way most macOS apps do.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

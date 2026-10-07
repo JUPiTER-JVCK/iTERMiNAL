@@ -94,6 +94,13 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.showCommandPalette = true
             }
             .keyboardShortcut("p", modifiers: .command)
+
+            // Replaces `SidebarCommands()`, which drove the split view this
+            // window no longer has. Same shortcut, so it stays where it was.
+            Button(settings.railPanelOpen ? "Hide Sidebar" : "Show Sidebar") {
+                withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
+            }
+            .keyboardShortcut("s", modifiers: [.command, .control])
         }
 
         CommandMenu("Terminal") {
@@ -230,7 +237,5 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: [.command, .option])
         }
-
-        SidebarCommands()
     }
 }

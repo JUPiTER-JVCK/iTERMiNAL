@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Left rail modelled on the reference app: a titled header with search and
-/// compose actions, quick-action rows, three collapsible sections (Pinned,
-/// Projects, Recents), and a pinned status row at the bottom.
+/// The workspaces panel, opened from the left rail: a titled header with
+/// search and a pin button, a New terminal row, three collapsible sections
+/// (Pinned, Projects, Recents), and a status row at the bottom. Docked beside
+/// the content when pinned, floating over it until dismissed when not.
 struct SidebarView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -18,12 +19,6 @@ struct SidebarView: View {
     @State private var renamingTab: WorkspaceTab?
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
-
-    /// Live shells, shown as a badge so the count is visible without opening
-    /// the page.
-    private var runningTaskCount: Int {
-        store.allTasks().filter(\.session.isRunning).count
-    }
 
     /// How many tabs a project shows before "Show more".
     private let collapsedTabLimit = 5
@@ -41,29 +36,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     SidebarActionRow(icon: "square.and.pencil", title: "New terminal", shortcutHint: "⌘T") {
                         store.newTab()
-                    }
-                    SidebarConnectionRow()
-                    SidebarActionRow(
-                        icon: "clock",
-                        title: "Automations",
-                        isActive: store.detailMode == .automations
-                    ) {
-                        store.detailMode = .automations
-                    }
-                    SidebarActionRow(
-                        icon: "list.bullet.rectangle",
-                        title: "Tasks",
-                        badge: runningTaskCount,
-                        isActive: store.detailMode == .tasks
-                    ) {
-                        store.detailMode = .tasks
-                    }
-                    SidebarActionRow(
-                        icon: "book",
-                        title: "Skills",
-                        isActive: store.detailMode == .skills
-                    ) {
-                        store.detailMode = .skills
+                        dismissIfFloating()
                     }
 
                     pinnedSection(theme: theme)
@@ -108,20 +81,11 @@ struct SidebarView: View {
     // MARK: Header
 
     private func header(theme: Theme) -> some View {
-        HStack(spacing: 6) {
-            // Just the name. The menu that used to hang off this offered New
-            // Workspace, New Terminal and Settings — all three of which are
-            // already their own rows in this same sidebar.
-            // 15pt rather than 19: the row is now 40pt tall and starts 78pt in
-            // to clear the traffic lights, which at the sidebar's 240pt
-            // minimum leaves the title and its two buttons about 150pt to
-            // share. The old size fit only at wider settings.
-            Text("iTERMiNAL")
+        HStack(spacing: 8) {
+            Text("Workspaces")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
-                .fixedSize()
-                // Lets the drag area behind it take the click — see below.
-                .allowsHitTesting(false)
+                .lineLimit(1)
 
             Spacer()
 
@@ -133,30 +97,37 @@ struct SidebarView: View {
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Search")
 
+            // Pinned: docked beside the content and stays. Unpinned: floats
+            // over it, and goes away when you pick something or click off.
             Button {
-                store.newTab()
+                withAnimation(Motion.panel) { settings.railPanelPinned.toggle() }
             } label: {
-                Image(systemName: "square.and.pencil")
+                Image(systemName: settings.railPanelPinned ? "pin.fill" : "pin")
                     .font(.system(size: 12))
+                    .foregroundStyle(settings.railPanelPinned ? theme.textPrimary : theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("New terminal")
+            .help(settings.railPanelPinned ? "Unpin — float over the content" : "Pin — keep beside the content")
+            .accessibilityLabel(settings.railPanelPinned ? "Unpin workspaces panel" : "Pin workspaces panel")
         }
         .foregroundStyle(theme.textSecondary)
-        // Clear the traffic lights sideways, not downwards. Padding down past
-        // them left an empty band above the title and sat this row lower than
-        // the detail column's strip — the gap. Sharing one height with that
-        // strip puts the whole top of the window on a single line.
-        .padding(.leading, WindowChrome.trafficLightWidth)
-        .padding(.trailing, 10)
-        .frame(height: WindowChrome.topBarHeight)
-        // With no title bar, this row is what the user grabs to move the
-        // window.
-        .background(WindowDragArea())
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+    }
+
+    /// A floating panel has done its job once you've gone somewhere; a
+    /// pinned one stays put.
+    private func dismissIfFloating() {
+        guard !settings.railPanelPinned else { return }
+        withAnimation(Motion.panel) { settings.railPanelOpen = false }
     }
 
     private func searchField(theme: Theme) -> some View {
@@ -329,6 +300,7 @@ struct SidebarView: View {
                 ForEach(recents) { recent in
                     SidebarRecentRow(recent: recent) {
                         store.reopen(recent)
+                        dismissIfFloating()
                     }
                 }
             }
@@ -343,6 +315,7 @@ struct SidebarView: View {
             onSelect: {
                 store.selectedTabID = tab.id
                 store.detailMode = .terminal
+                dismissIfFloating()
             },
             onRename: {
                 renameText = tab.displayName
@@ -516,14 +489,16 @@ struct SidebarActionRow: View {
     }
 }
 
-/// "Connect" row: a saved SSH/mosh host in a new tab, a saved screen-sharing
-/// endpoint through the system's client, or anything the network is currently
-/// advertising.
-struct SidebarConnectionRow: View {
+/// The "Connect" menu: a saved SSH/mosh host in a new tab, a saved
+/// screen-sharing endpoint through the system's client, or anything the
+/// network is currently advertising. The label is the caller's — the rail
+/// shows it as an icon.
+struct ConnectMenu<Label: View>: View {
+    let label: Label
+
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject private var discovery = ServiceDiscovery.shared
-    @State private var hovering = false
 
     var body: some View {
         Menu {
@@ -568,12 +543,10 @@ struct SidebarConnectionRow: View {
                 discovery.restart()
             }
         } label: {
-            SidebarRowContent(icon: "network", title: "Connect", isHovering: hovering)
+            label
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .onHover { hovering = $0 }
-        .padding(.horizontal, 8)
     }
 
     /// Resolves the advertised service to an address, then opens it. The

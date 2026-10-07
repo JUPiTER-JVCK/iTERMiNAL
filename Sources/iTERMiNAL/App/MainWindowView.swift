@@ -1,32 +1,34 @@
 import SwiftUI
 import AppKit
 
+/// The window: a frame of chrome — the top bar across the whole width and the
+/// icon rail down the left edge, one color — around the content, which sits in
+/// a rounded card inside it. The workspaces panel docks inside the card beside
+/// the content when pinned, and floats over the card when not.
 struct MainWindowView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let process = ProcessMetrics.shared
 
-    /// Tracked rather than left to SwiftUI because hiding the sidebar slides
-    /// the detail column under the traffic lights, and the top strip has to
-    /// know to get out of their way — there is no title bar holding them any
-    /// more.
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 285, max: 360)
-        } detail: {
-            DetailView(
-                trafficLightInset: columnVisibility == .detailOnly
-                    ? WindowChrome.trafficLightWidth
-                    : 0
-            )
+        let theme = Theme.current(for: colorScheme)
+        ZStack {
+            chromeBackground(theme)
+
+            VStack(spacing: 0) {
+                TopBar()
+
+                HStack(spacing: 0) {
+                    SidebarRail()
+                    contentCard(theme)
+                }
+            }
         }
         .frame(minWidth: 900, minHeight: 560)
-        // Sidebar and detail column run to the top edge; the traffic lights
-        // float over the sidebar header, which insets itself to clear them.
+        // The bars run to the top edge; the traffic lights float over the top
+        // bar, which insets itself to clear them.
         .framelessWindow()
         .sheet(isPresented: $store.showCommandPalette) {
             CommandPaletteView()
@@ -36,17 +38,68 @@ struct MainWindowView: View {
         .onAppear { process.start() }
         .onDisappear { process.stop() }
     }
+
+    /// One layer under both bars, so they can't differ: with a flat color or
+    /// with vibrancy, the top bar and the rail are the same surface.
+    @ViewBuilder
+    private func chromeBackground(_ theme: Theme) -> some View {
+        if settings.sidebarTranslucent {
+            VisualEffectView(material: .sidebar).ignoresSafeArea()
+        } else {
+            theme.sidebar.ignoresSafeArea()
+        }
+    }
+
+    private func contentCard(_ theme: Theme) -> some View {
+        let shape = RoundedRectangle(cornerRadius: WindowChrome.cardCornerRadius, style: .continuous)
+        return HStack(spacing: 0) {
+            if settings.railPanelOpen && settings.railPanelPinned {
+                SidebarView()
+                    .frame(width: WindowChrome.panelWidth)
+                    .transition(Motion.railPanelTransition(reduceMotion: reduceMotion))
+                FadedDivider(axis: .vertical)
+            }
+            DetailView()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.background)
+        .overlay(alignment: .topLeading) { floatingPanel(theme) }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(theme.surfaceBorder))
+        .padding(.trailing, WindowChrome.cardEdgeInset)
+        .padding(.bottom, WindowChrome.cardEdgeInset)
+    }
+
+    /// The panel when it isn't pinned: over the content, with a scrim that
+    /// puts it away when you click off it. A click that dismisses it does not
+    /// also reach what is underneath — the same as any popover.
+    @ViewBuilder
+    private func floatingPanel(_ theme: Theme) -> some View {
+        if settings.railPanelOpen && !settings.railPanelPinned {
+            let shape = RoundedRectangle(cornerRadius: WindowChrome.cardCornerRadius, style: .continuous)
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(Motion.panel) { settings.railPanelOpen = false }
+                    }
+
+                SidebarView()
+                    .frame(width: WindowChrome.panelWidth)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(theme.surfaceBorder))
+                    .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 4)
+                    .padding(8)
+                    .transition(Motion.railPanelTransition(reduceMotion: reduceMotion))
+            }
+        }
+    }
 }
 
-/// The detail column: a top strip with the panel toggles, the main surface,
-/// an optional right panel beside it, and an optional terminal dock beneath
-/// them both. The dock sits inside this column, so it spans the content and
-/// the right panel but stops at the sidebar — matching the reference app.
+/// The content: the main surface, an optional right panel beside it, and an
+/// optional terminal dock beneath them both. The dock sits inside this column,
+/// so it spans the content and the right panel but stops at the sidebar panel.
 struct DetailView: View {
-    /// Leading space the top strip keeps clear for the traffic lights, which
-    /// float over this column whenever the sidebar is hidden.
-    var trafficLightInset: CGFloat = 0
-
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -75,14 +128,6 @@ struct DetailView: View {
     private func detailColumn(in size: CGSize) -> some View {
         let theme = Theme.current(for: colorScheme)
         return VStack(spacing: 0) {
-            // The strip spans the whole detail column rather than living
-            // inside the content VStack: nested there, it narrowed whenever a
-            // panel opened and the right-aligned toggles slid with it.
-            // No divider under the strip: it is the window's top bar now, not
-            // a toolbar sitting on top of the content, and a rule across the
-            // whole width is the one line a borderless design cannot have.
-            DetailTopStrip(leadingInset: trafficLightInset)
-
             // The trailing panel can never take so much width that the
             // terminal is squeezed to a sliver — clamped against what is
             // actually available.
@@ -236,125 +281,6 @@ struct DetailView: View {
                 }
             }
         }
-    }
-}
-
-/// Title on the left, panel toggles on the right. Each toggle fills in when
-/// its panel is open, the way the reference app marks an active panel.
-private struct DetailTopStrip: View {
-    /// Extra leading padding so the tab name does not appear under the traffic
-    /// lights when this column starts at the window's left edge.
-    var leadingInset: CGFloat = 0
-
-    @EnvironmentObject private var store: WorkspaceStore
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        HStack(spacing: 6) {
-            // Hit-testing off so the drag area behind it gets the click: with
-            // no title bar left, this strip is what the user grabs to move the
-            // window.
-            Text(store.selectedTab?.displayName ?? "iTERMiNAL")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.textPrimary)
-                .lineLimit(1)
-                .allowsHitTesting(false)
-
-            Spacer(minLength: 12)
-
-            // The bundled tools sit left of the layout toggles, and apart from
-            // them: these start a program, the rest arrange the window.
-            ForEach(SidePanel.allCases.filter(\.isTool)) { panel in
-                let isOpen = store.rightRegionOpen && store.openPanels.contains(panel)
-                StripToggle(
-                    icon: panel.icon,
-                    help: "\(isOpen ? "Close" : "Open") \(panel.title) — \(panel.tool?.summary ?? "")",
-                    isActive: isOpen
-                ) {
-                    store.togglePanel(panel)
-                }
-            }
-
-            Rectangle()
-                .fill(theme.surfaceBorder)
-                .frame(width: 1, height: 16)
-                .padding(.horizontal, 3)
-
-            StripToggle(
-                icon: "rectangle.bottomthird.inset.filled",
-                help: "Toggle terminal dock",
-                isActive: store.bottomDockOpen
-            ) {
-                store.toggleBottomDock()
-            }
-
-            ForEach(SidePanel.allCases.filter { !$0.isTool }) { panel in
-                StripToggle(
-                    icon: panel.icon,
-                    help: "Toggle \(panel.title) panel",
-                    isActive: store.rightRegionOpen && store.openPanels.contains(panel)
-                ) {
-                    store.togglePanel(panel)
-                }
-            }
-
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 26, height: 26)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Settings")
-        }
-        .padding(.leading, 14 + leadingInset)
-        // Small enough that the last icon sits in the window's actual corner,
-        // which is the whole point of moving them up here.
-        .padding(.trailing, 6)
-        .frame(height: WindowChrome.topBarHeight)
-        // This strip sits at the very top of a frameless window, so it is the
-        // window's title bar in every sense but the system's. It otherwise
-        // inherits `detailColumn`'s `theme.background` fill, which reads a
-        // few shades lighter than the sidebar header beside it — correct
-        // for the content area below, but a visible seam at the one row
-        // meant to read as a single, continuous title bar rather than two
-        // panes glued together. Matching the sidebar's own color here, and
-        // only here, keeps that seam where every other macOS app has it —
-        // right below the toolbar — instead of running through it.
-        .background(theme.sidebar)
-        .background(WindowDragArea())
-    }
-}
-
-private struct StripToggle: View {
-    let icon: String
-    let help: String
-    let isActive: Bool
-    let action: () -> Void
-
-    @State private var hovering = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 13))
-                .foregroundStyle(isActive ? theme.textPrimary : theme.textSecondary)
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isActive ? theme.surface : theme.surface.opacity(hovering ? 0.5 : 0))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(Motion.hover, value: hovering)
-        .animation(Motion.hover, value: isActive)
-        .onHover { hovering = $0 }
-        .help(help)
     }
 }
 

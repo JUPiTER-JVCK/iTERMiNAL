@@ -1475,5 +1475,30 @@ do {
     check(HTTPRedaction.redactedURL(once) == once, "redacting an already-redacted URL changes nothing: \(once)")
 }
 
+// MARK: Rail pins
+
+do {
+    check(RailPins.decode([]) == [], "nothing stored means nothing pinned")
+    check(RailPins.decode(["tasks", "skills"]) == [.tasks, .skills], "stored pins keep their order")
+    check(RailPins.decode(["skills", "tasks", "skills"]) == [.skills, .tasks],
+          "a repeated pin is dropped and the first position wins")
+    check(RailPins.decode(["terminal", "workspaces", "bogus", "tasks"]) == [.tasks],
+          "always-on items and unknown values are dropped rather than trusted")
+    check(RailPins.decode(RailPins.encode([.automations, .tasks])) == [.automations, .tasks],
+          "encoding then decoding returns the same list")
+
+    check(RailPins.toggled(.automations, in: [.tasks]) == [.tasks, .automations], "pinning appends after the others")
+    check(RailPins.toggled(.tasks, in: [.tasks, .skills]) == [.skills], "toggling a pinned item unpins it")
+    check(RailPins.toggled(.skills, in: []) == [.skills], "pinning into an empty list")
+    check(RailPins.toggled(.terminal, in: [.tasks]) == [.tasks], "an always-on item can't be pinned")
+    check(RailPins.toggled(.workspaces, in: [.tasks]) == [.tasks], "and can't be unpinned either")
+
+    check(RailItem.fixed.count + RailItem.pinnable.count == RailItem.allCases.count
+          && Set(RailItem.fixed).isDisjoint(with: Set(RailItem.pinnable)),
+          "every item is exactly one of always-on or pinnable")
+    check(RailItem.defaultPinned.allSatisfy(\.isPinnable), "the default pins are all pinnable")
+    check(Set(RailItem.allCases.map(\.icon)).count == RailItem.allCases.count, "each item has its own icon")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
