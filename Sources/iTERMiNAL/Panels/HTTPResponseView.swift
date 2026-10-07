@@ -13,13 +13,6 @@ struct HTTPResponseView: View {
     @State private var headersExpanded = false
     @State private var copied = false
 
-    /// The rendering cap passed to `HTTPResponseFormatter`. Separate from
-    /// `settings.httpMaxResponseBytes`, which is the real download-abort
-    /// cap enforced upstream in the networking layer — this one only bounds
-    /// how much of an already-downloaded body gets turned into on-screen
-    /// text.
-    private static let maxRenderedCharacters = 200_000
-
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         Group {
@@ -27,8 +20,8 @@ struct HTTPResponseView: View {
                 sendingView(theme: theme)
             } else if let error = model.lastError {
                 errorView(error, theme: theme)
-            } else if let response = model.lastResponse {
-                responseView(response, theme: theme)
+            } else if let response = model.lastResponse, let formatted = model.lastFormatted {
+                responseView(response, formatted: formatted, theme: theme)
             } else {
                 emptyView(theme: theme)
             }
@@ -72,15 +65,12 @@ struct HTTPResponseView: View {
         .padding(10)
     }
 
-    private func responseView(_ response: HTTPResponseSummary, theme: Theme) -> some View {
-        let contentType = response.headers.first { $0.name.lowercased() == "content-type" }?.value
-        let formatted = HTTPResponseFormatter.format(
-            response.body,
-            contentType: contentType,
-            maxCharacters: Self.maxRenderedCharacters
-        )
-
-        return ScrollView {
+    private func responseView(
+        _ response: HTTPResponseSummary,
+        formatted: HTTPResponseFormatter.FormattedBody,
+        theme: Theme
+    ) -> some View {
+        ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 statusLine(response, theme: theme)
 

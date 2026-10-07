@@ -34,8 +34,19 @@ final class HTTPClientModel: ObservableObject, Identifiable {
 
     @Published private(set) var isSending = false
     @Published private(set) var lastResponse: HTTPResponseSummary?
+    /// `lastResponse`'s body, decoded and pretty-printed once when it arrives.
+    /// Formatting inside the response view's body re-parsed up to a 10 MB
+    /// JSON document on every redraw — and every keystroke in the URL or body
+    /// field redraws it, because the view observes this same model.
+    @Published private(set) var lastFormatted: HTTPResponseFormatter.FormattedBody?
     @Published private(set) var lastError: HTTPClientError?
     @Published private(set) var history: [HTTPHistoryEntry]
+
+    /// How much of a body is turned into on-screen text. Separate from
+    /// `settings.httpMaxResponseBytes`, the real download-abort cap enforced
+    /// upstream in the networking layer — this one only bounds the rendered
+    /// string.
+    static let maxRenderedCharacters = 200_000
 
     private let executor = HTTPRequestExecutor()
     private var sendTask: Task<Void, Never>?
@@ -63,8 +74,20 @@ final class HTTPClientModel: ObservableObject, Identifiable {
             guard let self else { return }
             do {
                 let response = try await self.executor.execute(spec, settings: settings)
+                // Off the main actor: pretty-printing a large body takes
+                // long enough to be felt, and `HTTPResponseFormatter` is
+                // plain Foundation with no shared state.
+                let contentType = response.headers.first { $0.name.lowercased() == "content-type" }?.value
+                let formatted = await Task.detached(priority: .userInitiated) {
+                    HTTPResponseFormatter.format(
+                        response.body,
+                        contentType: contentType,
+                        maxCharacters: HTTPClientModel.maxRenderedCharacters
+                    )
+                }.value
                 guard !Task.isCancelled else { return }
                 self.lastResponse = response
+                self.lastFormatted = formatted
                 self.recordHistory(spec: spec, statusCode: response.statusCode, errorDescription: nil)
             } catch is CancellationError {
                 return
