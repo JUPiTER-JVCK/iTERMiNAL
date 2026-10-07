@@ -22,10 +22,13 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     /// directory by this value, so two panes never show or clear each
     /// other's requests. For a split-pane leaf this is persisted in
     /// `PaneSnapshot.http` and passed back into `init(id:)` on restore, so
-    /// the pane's history survives a relaunch under the same scope; the
-    /// side panel's single instance gets a fresh one every launch, the same
-    /// as the fields in its builder do.
+    /// the pane's history survives a relaunch under the same scope. The
+    /// side panel's single instance uses `sidePanelHistoryID`: its builder
+    /// fields start empty each launch, but its history is kept, and a fixed
+    /// ID means it doesn't leave a new directory behind every time.
     let id: UUID
+
+    static let sidePanelHistoryID = UUID(uuidString: "6F0C5A0E-8B1D-4E55-9C47-3D2A1B7E9F10")!
 
     @Published var method: HTTPMethod = .get
     @Published var urlText: String = ""

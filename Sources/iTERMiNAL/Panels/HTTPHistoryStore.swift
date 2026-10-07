@@ -47,10 +47,12 @@ enum HTTPHistoryStore {
             .appendingPathComponent("HTTPHistory", isDirectory: true)
     }()
 
+    /// Only names the directory. Creating it here made every pane — including
+    /// every one that never sent anything — leave an empty folder behind just
+    /// by being opened; `append` creates it when there is something to put in
+    /// it.
     private static func directory(for scope: UUID) -> URL {
-        let directory = rootDirectory.appendingPathComponent(scope.uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+        rootDirectory.appendingPathComponent(scope.uuidString, isDirectory: true)
     }
 
     /// Redacts the request's own URL, headers, and body, then writes one
@@ -66,6 +68,7 @@ enum HTTPHistoryStore {
         redacted.body = entry.body.map(SecretRedactor.redact)
 
         let directory = directory(for: scope)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let data = try? JSONEncoder.httpHistory.encode(redacted) else { return }
         let fileURL = directory.appendingPathComponent("\(redacted.id.uuidString).json")
         try? data.write(to: fileURL, options: [.atomic])
@@ -91,6 +94,26 @@ enum HTTPHistoryStore {
         let directory = directory(for: scope)
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for file in files { try? FileManager.default.removeItem(at: file) }
+    }
+
+    /// Removes the history of every pane that isn't in `ids`: panes closed
+    /// since the last launch, an import that replaced the layout, a previous
+    /// launch's side panel, and the flat files the pre-scoping layout left
+    /// directly under the root. A closed pane's history is unreachable —
+    /// nothing in the UI can name it again — so keeping it would only be
+    /// keeping a (redacted, best-effort) record of requests on disk for no
+    /// one.
+    static func pruneAll(keeping ids: Set<UUID>) {
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for item in items {
+            guard let id = UUID(uuidString: item.lastPathComponent), ids.contains(id) else {
+                try? FileManager.default.removeItem(at: item)
+                continue
+            }
+        }
     }
 
     /// Drops the oldest files once there are more than `maxEntries`, by

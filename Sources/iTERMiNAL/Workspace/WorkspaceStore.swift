@@ -215,7 +215,7 @@ final class WorkspaceStore: ObservableObject {
     /// inside a tab's split layout).
     lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
-    lazy var panelHTTPClient = HTTPClientModel()
+    lazy var panelHTTPClient = HTTPClientModel(id: HTTPClientModel.sidePanelHistoryID)
 
     /// Built on first use like the panels above, but through an explicit
     /// backing store rather than `lazy` so quitting can flush a pending write
@@ -301,6 +301,7 @@ final class WorkspaceStore: ObservableObject {
         // Covers the launch that skipped restore entirely: Recents is empty,
         // so every transcript on disk is orphaned.
         pruneOrphanedTranscripts()
+        pruneOrphanedHTTPHistory()
     }
 
     private func bootstrap() {
@@ -510,6 +511,17 @@ final class WorkspaceStore: ObservableObject {
     /// designing against.
     func pruneOrphanedTranscripts() {
         TranscriptStore.pruneAll(keeping: Set(recentSessions.map(\.id)))
+    }
+
+    /// HTTP history is keyed by pane, and a pane that no longer exists can't
+    /// be reached to read or clear it. Sweeps on launch and after an import —
+    /// the two points where the set of panes changes wholesale. Built from
+    /// the panes in the layout rather than `allHTTPClients()`, which would
+    /// instantiate the side panel's lazy model just to read its ID.
+    func pruneOrphanedHTTPHistory() {
+        var live = Set(workspaces.flatMap { $0.tabs.flatMap { $0.root.allHTTPClients() } }.map(\.id))
+        live.insert(HTTPClientModel.sidePanelHistoryID)
+        HTTPHistoryStore.pruneAll(keeping: live)
     }
 
     func clearRecents() {
@@ -1256,6 +1268,7 @@ final class WorkspaceStore: ObservableObject {
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
         pruneOrphanedTranscripts()
+        pruneOrphanedHTTPHistory()
         if workspaces.isEmpty {
             bootstrap()
             return
