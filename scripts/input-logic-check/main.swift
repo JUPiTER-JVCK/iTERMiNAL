@@ -1422,5 +1422,58 @@ do {
     check(longPlain.wasTruncated, "format applies the rendering limit, independent of any upstream byte cap")
 }
 
+// MARK: HTTP redaction
+
+do {
+    // Credential headers are masked whole, whatever the value looks like —
+    // a session cookie has no shape for SecretRedactor to recognise.
+    check(HTTPRedaction.redactedHeaderValue(name: "Cookie", value: "sessionid=abc123def456; theme=dark") == "[redacted]",
+          "a Cookie header is masked whole, not just the parts that look like secrets")
+    check(HTTPRedaction.redactedHeaderValue(name: "Set-Cookie", value: "session=abc123; Path=/; HttpOnly") == "[redacted]",
+          "a Set-Cookie header is masked whole")
+    check(HTTPRedaction.redactedHeaderValue(name: "COOKIE", value: "a=b") == "[redacted]",
+          "header names are matched case-insensitively")
+    check(HTTPRedaction.redactedHeaderValue(name: "Authorization", value: "Basic dXNlcjpwYXNz") == "[redacted]",
+          "an Authorization header is masked whole, scheme included")
+    check(HTTPRedaction.redactedHeaderValue(name: "Proxy-Authorization", value: "Bearer abcdefghijkl") == "[redacted]",
+          "Proxy-Authorization is masked whole")
+    check(HTTPRedaction.redactedHeaderValue(name: "Cookie", value: "") == "",
+          "an empty credential header stays empty rather than gaining a mask")
+
+    // Everything else still goes through SecretRedactor, with its name as
+    // context, and a harmless header comes back untouched.
+    check(HTTPRedaction.redactedHeaderValue(name: "X-Api-Key", value: "sk_live_abcdef1234567890") == "[redacted]",
+          "a header named for a key is masked via SecretRedactor with its name as context")
+    check(HTTPRedaction.redactedHeaderValue(name: "Accept", value: "application/json") == "application/json",
+          "a harmless header is returned untouched")
+    check(HTTPRedaction.redactedHeaderValue(name: "User-Agent", value: "iTERMiNAL/1.0 (macOS)") == "iTERMiNAL/1.0 (macOS)",
+          "a header value with parentheses and slashes is returned untouched")
+
+    // URLs: credentials in the userinfo, SecretRedactor's own shapes, and
+    // the named query parameters — with everything else left exactly as is.
+    check(HTTPRedaction.redactedURL("https://example.com/cb?code=AUTHCODE123&state=xyz") == "https://example.com/cb?code=[redacted]&state=xyz",
+          "an OAuth code is masked and the state parameter beside it is not")
+    check(HTTPRedaction.redactedURL("https://user:pass@example.com/path") == "https://user:[redacted]@example.com/path",
+          "URL userinfo credentials are masked")
+    check(HTTPRedaction.redactedURL("https://example.com/x?token=abc&page=2") == "https://example.com/x?token=[redacted]&page=2",
+          "a parameter SecretRedactor already names is still masked")
+    check(HTTPRedaction.redactedURL("https://example.com/f?X-Amz-Signature=deadbeef&X-Amz-Expires=60") == "https://example.com/f?X-Amz-Signature=[redacted]&X-Amz-Expires=60",
+          "a presigned-URL signature is masked case-insensitively and its expiry is not")
+    check(HTTPRedaction.redactedURL("https://example.com/cb#access_token=abc&state=xyz") == "https://example.com/cb#access_token=[redacted]&state=xyz",
+          "an implicit-flow fragment is redacted pair by pair, so state survives")
+    check(HTTPRedaction.redactedURL("https://example.com/#/cb?code=abc") == "https://example.com/#/cb?code=[redacted]",
+          "a code inside a hash-routed fragment is masked too")
+    check(HTTPRedaction.redactedURL("https://example.com/a?code=abc#frag") == "https://example.com/a?code=[redacted]#frag",
+          "a real fragment after the query is preserved")
+    check(HTTPRedaction.redactedURL("https://example.com/%63ode?%63ode=abc") == "https://example.com/%63ode?%63ode=[redacted]",
+          "a percent-encoded parameter name is decoded before matching, and the path is left alone")
+    check(HTTPRedaction.redactedURL("https://example.com/plain/path") == "https://example.com/plain/path",
+          "a URL with no query comes back unchanged")
+    check(HTTPRedaction.redactedURL("https://example.com/a?flag&page=2&=x") == "https://example.com/a?flag&page=2&=x",
+          "valueless and nameless parameters survive untouched")
+    let once = HTTPRedaction.redactedURL("https://user:pass@example.com/a?code=1&token=2")
+    check(HTTPRedaction.redactedURL(once) == once, "redacting an already-redacted URL changes nothing: \(once)")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

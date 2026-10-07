@@ -59,8 +59,10 @@ enum HTTPHistoryStore {
     /// trying to parse every file's own timestamp.
     static func append(_ entry: HTTPHistoryEntry, scope: UUID) {
         var redacted = entry
-        redacted.url = SecretRedactor.redact(entry.url)
-        redacted.headers = entry.headers.map { HTTPHeaderField(id: $0.id, name: $0.name, value: redactedHeaderValue(name: $0.name, value: $0.value)) }
+        redacted.url = HTTPRedaction.redactedURL(entry.url)
+        redacted.headers = entry.headers.map {
+            HTTPHeaderField(id: $0.id, name: $0.name, value: HTTPRedaction.redactedHeaderValue(name: $0.name, value: $0.value))
+        }
         redacted.body = entry.body.map(SecretRedactor.redact)
 
         let directory = directory(for: scope)
@@ -69,25 +71,6 @@ enum HTTPHistoryStore {
         try? data.write(to: fileURL, options: [.atomic])
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         prune(in: directory)
-    }
-
-    /// `SecretRedactor`'s own patterns are context-dependent — they key off
-    /// a header *name* next to its value, such as `Authorization: …` or
-    /// `api_key=…` — so redacting a bare value alone, with no name beside
-    /// it, never gives them anything to match. Redacting `"name: value"`
-    /// together and then stripping the name back off recovers the redacted
-    /// value with that context intact; if the known "name: " prefix somehow
-    /// didn't survive (nothing in `SecretRedactor`'s patterns today would
-    /// touch it, but this is cheap insurance against a future one that
-    /// might), redacting the bare value is still strictly safer than
-    /// skipping redaction outright.
-    private static func redactedHeaderValue(name: String, value: String) -> String {
-        let prefix = "\(name): "
-        let redacted = SecretRedactor.redact(prefix + value)
-        if redacted.hasPrefix(prefix) {
-            return String(redacted.dropFirst(prefix.count))
-        }
-        return SecretRedactor.redact(value)
     }
 
     /// Every entry saved for `scope`, newest first.

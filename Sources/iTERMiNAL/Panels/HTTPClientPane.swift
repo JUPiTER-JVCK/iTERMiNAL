@@ -124,10 +124,13 @@ final class HTTPClientModel: ObservableObject, Identifiable {
         // represent "no value", and would depend on JSONSerialization
         // handling a boxed Optional the same way on every platform rather
         // than just the one this was checked on.
+        // The URL goes out redacted, the same as it is written to history:
+        // an API subscriber has no more business seeing `?code=…` or
+        // `user:password@` than the history file does.
         var eventData: [String: Any] = [
             "pane": id.uuidString,
             "method": spec.method.rawValue,
-            "url": spec.url,
+            "url": HTTPRedaction.redactedURL(spec.url),
         ]
         if let statusCode { eventData["status"] = statusCode }
         if let errorDescription { eventData["error"] = errorDescription }
