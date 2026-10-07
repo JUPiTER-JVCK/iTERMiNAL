@@ -129,6 +129,14 @@ final class HTTPClientModel: ObservableObject, Identifiable {
         }
     }
 
+    /// The "Map" button beside the address: switch to Explore and map the
+    /// site that address is on, the same as typing `open <address>` there.
+    /// Nothing is sent until this is pressed — Send still sends one request.
+    func mapSite(settings: AppSettings) {
+        mode = .explore
+        explorer.mapSite(urlText, settings: settings)
+    }
+
     func cancelInFlightRequest() {
         sendTask?.cancel()
         sendTask = nil
@@ -268,6 +276,15 @@ struct HTTPClientPaneView: View {
                 .focused($urlFieldFocused)
                 .onSubmit(send)
 
+            // Next to Send, so an address typed here can be mapped as well as
+            // sent: Explore reads what the site publishes and lets you walk it.
+            Button(action: mapSite) {
+                Image(systemName: "list.bullet.indent")
+            }
+            .buttonStyle(.plain)
+            .help("Map this site — read the paths it publishes (robots.txt, sitemaps) and walk them like a directory")
+            .accessibilityLabel("Map site")
+
             if model.isSending {
                 Button("Cancel", action: model.cancelInFlightRequest)
                     .buttonStyle(.plain)
@@ -281,6 +298,7 @@ struct HTTPClientPaneView: View {
             }
 
             Menu {
+                Button("Map This Site", action: mapSite)
                 Button("Copy as cURL", action: copyAsCURL)
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -306,6 +324,10 @@ struct HTTPClientPaneView: View {
 
     private func send() {
         model.send(settings: settings)
+    }
+
+    private func mapSite() {
+        model.mapSite(settings: settings)
     }
 
     private func copyAsCURL() {

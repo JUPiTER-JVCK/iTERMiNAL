@@ -42,15 +42,27 @@ final class SiteExplorerModel: ObservableObject {
     /// Set by the owner: put this address in the request builder.
     var loadIntoBuilder: ((String) -> Void)?
 
+    /// How a request is sent. The real one is `HTTPRequestExecutor`, with
+    /// redirects that leave the origin not followed; a different one can be
+    /// put here to drive the model without a network.
+    typealias Fetcher = (HTTPRequestSpec, AppSettings) async throws -> HTTPResponseSummary
+    var fetcher: Fetcher
+
     private var tree: SitePathTree?
     private var entryURL: URL?
     private var discoveryLog: [String] = []
-    private let executor = HTTPRequestExecutor()
     private var task: Task<Void, Never>?
     private var nextLineID = 0
     private var commandHistory: [String] = []
     private var historyCursor: Int?
     private var draft = ""
+
+    init() {
+        let executor = HTTPRequestExecutor()
+        fetcher = { spec, settings in
+            try await executor.execute(spec, settings: settings, sameOriginRedirectsOnly: true)
+        }
+    }
 
     var prompt: String { ExplorerFormat.prompt(origin: origin, cwd: cwd) }
 
@@ -91,6 +103,20 @@ final class SiteExplorerModel: ObservableObject {
             return
         }
         run(ExplorerCommandParser.parse(line, siteIsOpen: tree != nil), settings: settings)
+    }
+
+    /// "Map" in the request toolbar: the address in the URL field, opened as if
+    /// it had been typed at the prompt. An empty field just shows the prompt.
+    func mapSite(_ address: String, settings: AppSettings) {
+        showGreetingIfNeeded()
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard !isWorking else {
+            append(.error, "still working — press Esc to cancel it first")
+            return
+        }
+        append(.input, "\(prompt) open \(trimmed)")
+        run(.open(trimmed), settings: settings)
     }
 
     /// ↑ at the prompt.
@@ -286,8 +312,13 @@ final class SiteExplorerModel: ObservableObject {
 
     /// robots.txt, then the sitemaps it names, then the page that was typed.
     /// Each step is something the site published or the person entered.
+    ///
+    /// `mayMove` is true once: if the site's own redirect says its front door
+    /// is its `www.` twin (or the reverse), the map is of that host instead —
+    /// and a second such redirect is just a redirect, so two hosts that point
+    /// at each other can't send this around in a circle.
     @MainActor
-    private func discover(origin: SiteOrigin, entry: URL, settings: AppSettings) async {
+    private func discover(origin: SiteOrigin, entry: URL, settings: AppSettings, mayMove: Bool = true) async {
         // 1. robots.txt, from its standard place at the root.
         var declaredSitemaps: [String] = []
         let robotsURL = ExplorerPolicy.robotsURL(for: origin)
@@ -307,7 +338,12 @@ final class SiteExplorerModel: ObservableObject {
                 if robots.patternsSkipped > 0 { detail += ", \(robots.patternsSkipped) patterns left out" }
                 note("robots.txt  \(response.statusCode)  \(detail)")
             } else if (300..<400).contains(response.statusCode) {
-                noteRedirect(response, what: "robots.txt")
+                if mayMove, let moved = canonicalMove(response, from: origin, requested: robotsURL) {
+                    let newEntry = move(to: moved, from: origin, entry: entry)
+                    await discover(origin: moved, entry: newEntry, settings: settings, mayMove: false)
+                    return
+                }
+                noteRedirect(response, what: "robots.txt", origin: origin, requested: robotsURL)
             } else {
                 note("robots.txt  \(response.statusCode)  none published")
             }
@@ -332,7 +368,12 @@ final class SiteExplorerModel: ObservableObject {
                     let added = await addPageAndLinks(from: response)
                     note("page  \(response.statusCode)  \(added) links added")
                 } else if (300..<400).contains(response.statusCode) {
-                    noteRedirect(response, what: "the page")
+                    if mayMove, let moved = canonicalMove(response, from: origin, requested: entry.absoluteString) {
+                        let newEntry = move(to: moved, from: origin, entry: entry)
+                        await discover(origin: moved, entry: newEntry, settings: settings, mayMove: false)
+                        return
+                    }
+                    noteRedirect(response, what: "the page", origin: origin, requested: entry.absoluteString)
                 } else {
                     note("page  \(response.statusCode)")
                 }
@@ -387,10 +428,10 @@ final class SiteExplorerModel: ObservableObject {
             while index < targets.fetch.count, !Task.isCancelled {
                 let chunk = Array(targets.fetch[index..<min(index + ExplorerPolicy.sitemapConcurrency, targets.fetch.count)])
                 index += chunk.count
-                let executor = self.executor
+                let fetcher = self.fetcher
                 let results = await withTaskGroup(of: SitemapResult.self) { group -> [SitemapResult] in
                     for url in chunk {
-                        group.addTask { await SiteExplorerModel.readSitemap(url, executor: executor, settings: settings) }
+                        group.addTask { await SiteExplorerModel.readSitemap(url, fetcher: fetcher, settings: settings) }
                     }
                     var collected: [SitemapResult] = []
                     for await result in group { collected.append(result) }
@@ -437,14 +478,15 @@ final class SiteExplorerModel: ObservableObject {
     }
 
     /// One sitemap, fetched and parsed off the main actor.
-    private static func readSitemap(_ url: String, executor: HTTPRequestExecutor, settings: AppSettings) async -> SitemapResult {
+    private static func readSitemap(_ url: String, fetcher: Fetcher, settings: AppSettings) async -> SitemapResult {
         var result = SitemapResult(url: url)
         let spec = HTTPRequestSpec(method: .get, url: url, headers: [], body: nil)
         do {
-            let response = try await executor.execute(spec, settings: settings, sameOriginRedirectsOnly: true)
+            let response = try await fetcher(spec, settings)
             guard (200..<300).contains(response.statusCode) else {
                 if (300..<400).contains(response.statusCode) {
-                    result.problem = "redirects off this site (\(response.statusCode)) — not followed"
+                    let to = response.headers.first { $0.name.lowercased() == "location" }.map { " to \($0.value)" } ?? ""
+                    result.problem = "redirects\(to) (\(response.statusCode)) — not followed off this site"
                 } else {
                     result.problem = "\(response.statusCode)"
                 }
@@ -564,7 +606,7 @@ final class SiteExplorerModel: ObservableObject {
     private func fetch(_ url: String, settings: AppSettings) async -> FetchOutcome {
         let spec = HTTPRequestSpec(method: .get, url: url, headers: [], body: nil)
         do {
-            return .response(try await executor.execute(spec, settings: settings, sameOriginRedirectsOnly: true))
+            return .response(try await fetcher(spec, settings))
         } catch is CancellationError {
             return .cancelled
         } catch let error as HTTPClientError {
@@ -581,9 +623,39 @@ final class SiteExplorerModel: ObservableObject {
         if discoveryLog.count > 100 { discoveryLog.removeFirst() }
     }
 
-    private func noteRedirect(_ response: HTTPResponseSummary, what: String) {
-        let target = header(response, "location").map { " to \($0)" } ?? ""
+    private func noteRedirect(_ response: HTTPResponseSummary, what: String, origin: SiteOrigin? = nil, requested: String? = nil) {
+        let location = header(response, "location")
+        let target = location.map { " to \($0)" } ?? ""
+        // A redirect that stays on the site isn't followed when the
+        // "Follow redirects" setting is off — say that, not "off this site".
+        if let origin, let requested, let location,
+           let base = URL(string: requested), let url = URL(string: location, relativeTo: base)?.absoluteURL,
+           origin.contains(url) {
+            note("\(what)  \(response.statusCode)  redirects\(target) — not followed (Settings → HTTP Client → Follow redirects is off)")
+            return
+        }
         note("\(what)  \(response.statusCode)  redirects\(target) — not followed off this site. `open` that address to map it instead.")
+    }
+
+    /// Where a 3xx says the site's front door really is, when that is the
+    /// same site's `www.` twin — see `ExplorerPolicy.canonicalOrigin`.
+    private func canonicalMove(_ response: HTTPResponseSummary, from origin: SiteOrigin, requested: String) -> SiteOrigin? {
+        guard let location = header(response, "location") else { return nil }
+        return ExplorerPolicy.canonicalOrigin(for: origin, location: location, requestedURL: requested)
+    }
+
+    /// Starts the map over at the host the site sent us to, keeping the path
+    /// and query that were typed. Said out loud, so it is never a surprise.
+    private func move(to moved: SiteOrigin, from old: SiteOrigin, entry: URL) -> URL {
+        note("\(old.display) redirects to \(moved.display) — mapping \(moved.display) instead")
+        origin = moved
+        tree = SitePathTree(origin: moved)
+        cwd = []
+        var components = URLComponents(url: entry, resolvingAgainstBaseURL: false)
+        components?.host = moved.host
+        let newEntry = components?.url ?? URL(string: moved.root + "/") ?? entry
+        entryURL = newEntry
+        return newEntry
     }
 
     private func header(_ response: HTTPResponseSummary, _ name: String) -> String? {
