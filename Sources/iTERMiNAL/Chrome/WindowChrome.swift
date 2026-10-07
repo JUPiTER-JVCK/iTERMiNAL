@@ -33,11 +33,10 @@ enum WindowChrome {
     /// over it.
     static let panelWidth: CGFloat = 284
 
-    /// The content sits in a rounded card inside the frame the top bar and
-    /// rail make. The card runs to this far from the right and bottom edges,
-    /// so the frame reads as an outline all the way round rather than an L.
-    static let cardCornerRadius: CGFloat = 10
-    static let cardEdgeInset: CGFloat = 6
+    /// The least the rail keeps clear below its last icon. The content card
+    /// can be set flush to the window edge (Appearance → Workspace frame), but
+    /// the dock button above it should not sit on the edge with it.
+    static let railBottomInset: CGFloat = 6
 
     /// Applies the frameless configuration to a window.
     ///
@@ -119,6 +118,19 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async { WindowChrome.apply(to: nsView.window) }
+    }
+}
+
+extension FrameFontDesign {
+    /// The SwiftUI design this choice stands for. Nil for System, which leaves
+    /// the text as it was drawn rather than forcing a design on it.
+    var design: Font.Design? {
+        switch self {
+        case .system: return nil
+        case .rounded: return .rounded
+        case .serif: return .serif
+        case .monospaced: return .monospaced
+        }
     }
 }
 

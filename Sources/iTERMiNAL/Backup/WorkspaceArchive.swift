@@ -66,6 +66,17 @@ struct PreferencesArchive: Codable {
     var httpRequestTimeout: Double?
     var httpFollowRedirects: Bool?
     var httpMaxResponseBytes: Int?
+    /// The window frame's look and the interface typeface. Appearance
+    /// preferences like `theme` and `accentID`, so they travel; optional
+    /// because older archives predate them.
+    var sidebarTranslucent: Bool?
+    var frameTintSource: String?
+    var frameTintStrength: Double?
+    var frameCustomHex: String?
+    var frameCornerRadius: Double?
+    var frameGap: Double?
+    var frameShowsBorder: Bool?
+    var uiFontDesign: String?
     var connections: [SSHConnection]
 
     init(settings: AppSettings) {
@@ -100,6 +111,14 @@ struct PreferencesArchive: Codable {
         httpRequestTimeout = settings.httpRequestTimeout
         httpFollowRedirects = settings.httpFollowRedirects
         httpMaxResponseBytes = settings.httpMaxResponseBytes
+        sidebarTranslucent = settings.sidebarTranslucent
+        frameTintSource = settings.frameTintSource.rawValue
+        frameTintStrength = settings.frameTintStrength
+        frameCustomHex = settings.frameCustomHex
+        frameCornerRadius = settings.frameCornerRadius
+        frameGap = settings.frameGap
+        frameShowsBorder = settings.frameShowsBorder
+        uiFontDesign = settings.uiFontDesign.rawValue
         connections = settings.sshConnections
     }
 
@@ -168,6 +187,27 @@ struct PreferencesArchive: Codable {
         if let httpRequestTimeout { settings.httpRequestTimeout = httpRequestTimeout }
         if let httpFollowRedirects { settings.httpFollowRedirects = httpFollowRedirects }
         if let httpMaxResponseBytes { settings.httpMaxResponseBytes = httpMaxResponseBytes }
+        // An archive is a file someone could have edited, so a value is only
+        // adopted when it is one the settings screen could have produced:
+        // a known name, a color that parses, a number inside its range.
+        if let sidebarTranslucent { settings.sidebarTranslucent = sidebarTranslucent }
+        if let frameTintSource, let source = FrameTintSource(rawValue: frameTintSource) {
+            settings.frameTintSource = source
+        }
+        if let frameTintStrength {
+            settings.frameTintStrength = FrameStyle.clamp(frameTintStrength, to: FrameStyle.strengthRange)
+        }
+        if let frameCustomHex, let value = FrameStyle.parseHex(frameCustomHex) {
+            settings.frameCustomHex = FrameStyle.hexString(value)
+        }
+        if let frameCornerRadius {
+            settings.frameCornerRadius = FrameStyle.clamp(frameCornerRadius, to: FrameStyle.radiusRange)
+        }
+        if let frameGap { settings.frameGap = FrameStyle.clamp(frameGap, to: FrameStyle.gapRange) }
+        if let frameShowsBorder { settings.frameShowsBorder = frameShowsBorder }
+        if let uiFontDesign, let design = FrameFontDesign(rawValue: uiFontDesign) {
+            settings.uiFontDesign = design
+        }
         settings.sshConnections = connections
     }
 }

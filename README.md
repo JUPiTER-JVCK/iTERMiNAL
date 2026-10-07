@@ -52,7 +52,10 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   Automations, Skills): each has a pin that puts its icon on the rail. The
   Workspaces panel opens beside the content and can be pinned there, or left
   unpinned to float over it until you pick something or click away (⌃⌘S shows
-  or hides it).
+  or hides it). A button at the bottom left of the frame toggles the terminal
+  dock. Settings → Appearance sets the frame's tint, corner radius and edge
+  thickness, whether it is translucent or outlined, and the interface
+  typeface; a preview there shows the change as you make it.
 - **Dockable panels** — a terminal dock along the bottom and a browser, file,
   notes or HTTP panel down the right, opened from the one button at the top
   right (each can also open in full view, across the whole content area), with

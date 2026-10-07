@@ -15,7 +15,7 @@ struct MainWindowView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         ZStack {
-            chromeBackground(theme)
+            FrameSurface()
 
             VStack(spacing: 0) {
                 TopBar()
@@ -39,19 +39,8 @@ struct MainWindowView: View {
         .onDisappear { process.stop() }
     }
 
-    /// One layer under both bars, so they can't differ: with a flat color or
-    /// with vibrancy, the top bar and the rail are the same surface.
-    @ViewBuilder
-    private func chromeBackground(_ theme: Theme) -> some View {
-        if settings.sidebarTranslucent {
-            VisualEffectView(material: .sidebar).ignoresSafeArea()
-        } else {
-            theme.sidebar.ignoresSafeArea()
-        }
-    }
-
     private func contentCard(_ theme: Theme) -> some View {
-        let shape = RoundedRectangle(cornerRadius: WindowChrome.cardCornerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: settings.frameCornerRadius, style: .continuous)
         return HStack(spacing: 0) {
             if settings.railPanelOpen && settings.railPanelPinned {
                 SidebarView()
@@ -65,9 +54,13 @@ struct MainWindowView: View {
         .background(theme.background)
         .overlay(alignment: .topLeading) { floatingPanel(theme) }
         .clipShape(shape)
-        .overlay(shape.strokeBorder(theme.surfaceBorder))
-        .padding(.trailing, WindowChrome.cardEdgeInset)
-        .padding(.bottom, WindowChrome.cardEdgeInset)
+        .overlay {
+            if settings.frameShowsBorder {
+                shape.strokeBorder(theme.surfaceBorder)
+            }
+        }
+        .padding(.trailing, settings.frameGap)
+        .padding(.bottom, settings.frameGap)
     }
 
     /// The panel when it isn't pinned: over the content, with a scrim that
@@ -76,7 +69,7 @@ struct MainWindowView: View {
     @ViewBuilder
     private func floatingPanel(_ theme: Theme) -> some View {
         if settings.railPanelOpen && !settings.railPanelPinned {
-            let shape = RoundedRectangle(cornerRadius: WindowChrome.cardCornerRadius, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: settings.frameCornerRadius, style: .continuous)
             ZStack(alignment: .topLeading) {
                 Color.clear
                     .contentShape(Rectangle())

@@ -77,6 +77,16 @@ struct Theme {
         scheme == .dark ? .dark : .light
     }
 
+    /// The chrome color — the top bar, the rail, and the workspaces panel —
+    /// named once so the frame tint (see `FrameStyle`) mixes into exactly the
+    /// color the theme paints, not a copy that could drift.
+    static let darkSidebarHex: UInt32 = 0x0C0C0E
+    static let lightSidebarHex: UInt32 = 0xF7F7F8
+
+    static func sidebarHex(for scheme: ColorScheme) -> UInt32 {
+        scheme == .dark ? darkSidebarHex : lightSidebarHex
+    }
+
     static let darkFloatingSurfaceHex: UInt32 = 0x25252B
     static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
 
@@ -100,7 +110,7 @@ struct Theme {
 
     static let dark = Theme(
         background: Color(p3: 0x131316),
-        sidebar: Color(p3: 0x0C0C0E),
+        sidebar: Color(p3: Theme.darkSidebarHex),
         surface: Color(p3: 0x1D1D21),
         surfaceHover: Color(p3: 0x26262B),
         surfaceBorder: Color.white.opacity(0.07),
@@ -116,7 +126,7 @@ struct Theme {
 
     static let light = Theme(
         background: Color(p3: 0xFFFFFF),
-        sidebar: Color(p3: 0xF7F7F8),
+        sidebar: Color(p3: Theme.lightSidebarHex),
         surface: Color(p3: 0xF1F1F3),
         surfaceHover: Color(p3: 0xE8E8EB),
         surfaceBorder: Color.black.opacity(0.08),
@@ -213,7 +223,9 @@ struct FadedDivider: View {
 struct AccentOption: Identifiable {
     let id: String
     let name: String
-    let color: Color
+    let hex: UInt32
+
+    var color: Color { Color(hex: hex) }
 }
 
 /// Per-item colour identity, the way the reference app gives every project
@@ -245,16 +257,21 @@ enum IdentityPalette {
 
 enum Accents {
     static let all: [AccentOption] = [
-        AccentOption(id: "green", name: "Green", color: Color(hex: 0x10A37F)),
-        AccentOption(id: "blue", name: "Blue", color: Color(hex: 0x3B82F6)),
-        AccentOption(id: "purple", name: "Purple", color: Color(hex: 0x8B5CF6)),
-        AccentOption(id: "orange", name: "Orange", color: Color(hex: 0xF97316)),
-        AccentOption(id: "pink", name: "Pink", color: Color(hex: 0xEC4899)),
-        AccentOption(id: "graphite", name: "Graphite", color: Color(hex: 0x8E8EA0)),
+        AccentOption(id: "green", name: "Green", hex: 0x10A37F),
+        AccentOption(id: "blue", name: "Blue", hex: 0x3B82F6),
+        AccentOption(id: "purple", name: "Purple", hex: 0x8B5CF6),
+        AccentOption(id: "orange", name: "Orange", hex: 0xF97316),
+        AccentOption(id: "pink", name: "Pink", hex: 0xEC4899),
+        AccentOption(id: "graphite", name: "Graphite", hex: 0x8E8EA0),
     ]
 
     static func color(for id: String) -> Color {
-        all.first { $0.id == id }?.color ?? all[0].color
+        (all.first { $0.id == id } ?? all[0]).color
+    }
+
+    /// The accent as 0xRRGGBB, for the frame tint to mix with.
+    static func hex(for id: String) -> UInt32 {
+        (all.first { $0.id == id } ?? all[0]).hex
     }
 }
 

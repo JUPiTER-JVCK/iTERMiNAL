@@ -50,14 +50,9 @@ struct SidebarView: View {
             Spacer(minLength: 0)
             SidebarStatusRow()
         }
-        .background {
-            // The reference app draws a flat sidebar; vibrancy is opt-in.
-            if settings.sidebarTranslucent {
-                VisualEffectView(material: .sidebar).ignoresSafeArea()
-            } else {
-                theme.sidebar.ignoresSafeArea()
-            }
-        }
+        // The same surface as the bars it sits beside: flat, translucent or
+        // tinted, whatever Appearance → Workspace frame says.
+        .background { FrameSurface() }
         .alert("Rename Tab", isPresented: isRenamingTab, presenting: renamingTab) { tab in
             TextField("Name", text: $renameText)
             Button("Rename") {
@@ -545,8 +540,15 @@ struct ConnectMenu<Label: View>: View {
         } label: {
             label
         }
-        .menuStyle(.borderlessButton)
+        // `.button`, not `.borderlessButton`: the borderless style draws the
+        // label itself, at the system's own size, and ignored the rail icon's
+        // font and frame — so this one icon came out smaller than the rest.
+        // With a plain button style the label is the caller's view, drawn as
+        // given.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     /// Resolves the advertised service to an address, then opens it. The

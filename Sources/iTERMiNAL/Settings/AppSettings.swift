@@ -60,6 +60,64 @@ final class AppSettings: ObservableObject {
     /// not want a timer taking them either.
     @Published var showSystemMetrics: Bool { didSet { defaults.set(showSystemMetrics, forKey: "showSystemMetrics") } }
 
+    // MARK: Workspace frame
+    /// What the top bar, the rail and the workspaces panel are tinted with,
+    /// and how much. A tint mixed into the theme's chrome color rather than a
+    /// color of its own — see `FrameTintSource`.
+    @Published var frameTintSource: FrameTintSource { didSet { defaults.set(frameTintSource.rawValue, forKey: "frameTintSource") } }
+    @Published var frameTintStrength: Double { didSet { defaults.set(frameTintStrength, forKey: "frameTintStrength") } }
+    /// "#RRGGBB", for the Custom tint.
+    @Published var frameCustomHex: String { didSet { defaults.set(frameCustomHex, forKey: "frameCustomHex") } }
+    /// The content card's corner radius, and how far it stays from the
+    /// window's right and bottom edges — the thickness of the frame there.
+    @Published var frameCornerRadius: Double { didSet { defaults.set(frameCornerRadius, forKey: "frameCornerRadius") } }
+    @Published var frameGap: Double { didSet { defaults.set(frameGap, forKey: "frameGap") } }
+    /// The hairline around the content card.
+    @Published var frameShowsBorder: Bool { didSet { defaults.set(frameShowsBorder, forKey: "frameShowsBorder") } }
+    /// The interface's typeface. The terminal keeps its own font setting.
+    @Published var uiFontDesign: FrameFontDesign { didSet { defaults.set(uiFontDesign.rawValue, forKey: "uiFontDesign") } }
+
+    /// The Custom tint as a number, falling back to the default when the
+    /// stored text is not a color.
+    var frameCustomValue: UInt32 {
+        FrameStyle.parseHex(frameCustomHex) ?? FrameStyle.defaultCustomHex
+    }
+
+    /// The color the frame is tinted with, or nil when it isn't.
+    var frameTintHex: UInt32? {
+        FrameStyle.tintHex(
+            source: frameTintSource,
+            accentHex: Accents.hex(for: accentID),
+            customHex: frameCustomValue
+        )
+    }
+
+    /// The flat color of the top bar, rail and workspaces panel: the theme's
+    /// chrome color, untouched when there is no tint.
+    func frameColor(for scheme: ColorScheme) -> Color {
+        guard frameTintHex != nil else { return Theme.current(for: scheme).sidebar }
+        return Color(p3: FrameStyle.frameHex(
+            base: Theme.sidebarHex(for: scheme),
+            source: frameTintSource,
+            accentHex: Accents.hex(for: accentID),
+            customHex: frameCustomValue,
+            strength: frameTintStrength
+        ))
+    }
+
+    /// Puts the frame back to how it looked before any of this was
+    /// adjustable. The translucent switch is part of the frame's look, so it
+    /// goes too; the interface font is not — that is a separate choice.
+    func resetFrame() {
+        sidebarTranslucent = false
+        frameTintSource = .none
+        frameTintStrength = FrameStyle.defaultStrength
+        frameCustomHex = FrameStyle.hexString(FrameStyle.defaultCustomHex)
+        frameCornerRadius = FrameStyle.defaultRadius
+        frameGap = FrameStyle.defaultGap
+        frameShowsBorder = true
+    }
+
     // MARK: Terminal
     @Published var terminalFontName: String { didSet { defaults.set(terminalFontName, forKey: "terminalFontName") } }
     @Published var terminalFontSize: Double { didSet { defaults.set(terminalFontSize, forKey: "terminalFontSize") } }
@@ -206,6 +264,23 @@ final class AppSettings: ObservableObject {
         backgroundOpacity = defaults.object(forKey: "backgroundOpacity") as? Double ?? 1.0
         sidebarTranslucent = defaults.bool(forKey: "sidebarTranslucent")
         showSystemMetrics = defaults.object(forKey: "showSystemMetrics") as? Bool ?? true
+
+        frameTintSource = FrameTintSource(rawValue: defaults.string(forKey: "frameTintSource") ?? "") ?? .none
+        frameTintStrength = FrameStyle.clamp(
+            defaults.object(forKey: "frameTintStrength") as? Double ?? FrameStyle.defaultStrength,
+            to: FrameStyle.strengthRange
+        )
+        frameCustomHex = defaults.string(forKey: "frameCustomHex") ?? FrameStyle.hexString(FrameStyle.defaultCustomHex)
+        frameCornerRadius = FrameStyle.clamp(
+            defaults.object(forKey: "frameCornerRadius") as? Double ?? FrameStyle.defaultRadius,
+            to: FrameStyle.radiusRange
+        )
+        frameGap = FrameStyle.clamp(
+            defaults.object(forKey: "frameGap") as? Double ?? FrameStyle.defaultGap,
+            to: FrameStyle.gapRange
+        )
+        frameShowsBorder = defaults.object(forKey: "frameShowsBorder") as? Bool ?? true
+        uiFontDesign = FrameFontDesign(rawValue: defaults.string(forKey: "uiFontDesign") ?? "") ?? .system
 
         terminalFontName = defaults.string(forKey: "terminalFontName") ?? ""
         terminalFontSize = defaults.object(forKey: "terminalFontSize") as? Double ?? 13
@@ -429,7 +504,8 @@ final class AppSettings: ObservableObject {
         theme = .system
         accentID = "green"
         backgroundOpacity = 1.0
-        sidebarTranslucent = false
+        resetFrame()
+        uiFontDesign = .system
         railPinnedItems = RailPins.encode(RailItem.defaultPinned)
         railPanelOpen = true
         railPanelPinned = true

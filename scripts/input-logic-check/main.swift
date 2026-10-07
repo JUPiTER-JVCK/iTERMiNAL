@@ -1500,5 +1500,84 @@ do {
     check(Set(RailItem.allCases.map(\.icon)).count == RailItem.allCases.count, "each item has its own icon")
 }
 
+// MARK: Frame style
+
+do {
+    // Mixing
+    check(FrameStyle.mix(base: 0x0C0C0E, tint: 0xFF0000, amount: 0) == 0x0C0C0E, "no tint amount leaves the base alone")
+    check(FrameStyle.mix(base: 0x000000, tint: 0xFFFFFF, amount: 0.2) == 0x333333, "20% white into black is 0x33 per channel")
+    check(FrameStyle.mix(base: 0xFFFFFF, tint: 0x000000, amount: 0.2) == 0xCCCCCC, "20% black into white is 0xCC per channel")
+    check(FrameStyle.mix(base: 0x0C0C0E, tint: 0x3B82F6, amount: 1.0)
+          == FrameStyle.mix(base: 0x0C0C0E, tint: 0x3B82F6, amount: FrameStyle.strengthRange.upperBound),
+          "an amount past the cap is clamped to it, not honoured")
+    check(FrameStyle.mix(base: 0x0C0C0E, tint: 0x3B82F6, amount: -3)
+          == 0x0C0C0E, "a negative amount mixes nothing")
+    check(FrameStyle.mix(base: 0x0C0C0E, tint: 0x3B82F6, amount: .nan) == 0x0C0C0E, "NaN mixes nothing")
+    check(FrameStyle.mix(base: 0xF7F7F8, tint: 0xF97316, amount: 0.35) <= 0xFFFFFF, "a mix stays a valid 24-bit color")
+
+    // Channels are independent: a pure-red tint moves red toward 255 and the
+    // others toward 0, never the reverse.
+    let redShift = FrameStyle.mix(base: 0x808080, tint: 0xFF0000, amount: 0.25)
+    check((redShift >> 16) & 0xFF > 0x80 && (redShift >> 8) & 0xFF < 0x80 && redShift & 0xFF < 0x80,
+          "each channel moves toward its own tint channel")
+
+    // Choosing the frame color
+    check(FrameStyle.frameHex(base: 0x0C0C0E, source: .none, accentHex: 0x10A37F, customHex: 0x123456, strength: 0.3) == 0x0C0C0E,
+          "no tint gives the theme's own color untouched")
+    check(FrameStyle.frameHex(base: 0x0C0C0E, source: .accent, accentHex: 0x10A37F, customHex: 0x123456, strength: 0.2)
+          == FrameStyle.mix(base: 0x0C0C0E, tint: 0x10A37F, amount: 0.2), "accent tints with the accent color")
+    check(FrameStyle.frameHex(base: 0x0C0C0E, source: .custom, accentHex: 0x10A37F, customHex: 0x123456, strength: 0.2)
+          == FrameStyle.mix(base: 0x0C0C0E, tint: 0x123456, amount: 0.2), "custom tints with the picked color")
+    check(FrameStyle.frameHex(base: 0x0C0C0E, source: .orange, accentHex: 0x10A37F, customHex: 0x123456, strength: 0.2)
+          == FrameStyle.mix(base: 0x0C0C0E, tint: FrameTintSource.orange.presetHex!, amount: 0.2), "a named color tints with its own value")
+    check(FrameStyle.tintHex(source: .none, accentHex: 1, customHex: 2) == nil, "none has no tint color")
+    check(FrameTintSource.allCases.filter { $0.presetHex != nil }.count == 7, "seven named colors")
+    check(Set(FrameTintSource.allCases.compactMap(\.presetHex)).count == 7, "named colors are all distinct")
+    check(Set(FrameTintSource.allCases.map(\.label)).count == FrameTintSource.allCases.count, "every tint choice has its own label")
+
+    // The darkest and lightest frame at the strongest tint still sit on the
+    // right side of mid-grey, so the theme's text stays legible on them.
+    func luma(_ hex: UInt32) -> Double {
+        0.2126 * Double((hex >> 16) & 0xFF) + 0.7152 * Double((hex >> 8) & 0xFF) + 0.0722 * Double(hex & 0xFF)
+    }
+    let strongest = FrameStyle.strengthRange.upperBound
+    var darkOK = true, lightOK = true
+    for source in FrameTintSource.allCases {
+        let tint = FrameStyle.tintHex(source: source, accentHex: 0xF97316, customHex: 0xFFFFFF) ?? 0
+        guard source != .none else { continue }
+        if luma(FrameStyle.mix(base: 0x0C0C0E, tint: tint, amount: strongest)) > 110 { darkOK = false }
+        if luma(FrameStyle.mix(base: 0xF7F7F8, tint: tint, amount: strongest)) < 150 { lightOK = false }
+    }
+    check(darkOK, "a dark frame stays dark under any tint, even a white custom one, at the strongest setting")
+    check(lightOK, "a light frame stays light under any tint at the strongest setting")
+
+    // Hex text
+    check(FrameStyle.hexString(0x3B82F6) == "#3B82F6", "formats as #RRGGBB")
+    check(FrameStyle.hexString(0x00000A) == "#00000A", "short values keep their leading zeros")
+    check(FrameStyle.hexString(0) == "#000000", "zero is six zeros")
+    check(FrameStyle.parseHex("#3B82F6") == 0x3B82F6, "parses with a hash")
+    check(FrameStyle.parseHex("3b82f6") == 0x3B82F6, "parses lowercase without a hash")
+    check(FrameStyle.parseHex("  #abc ") == 0xAABBCC, "expands three-digit shorthand and trims spaces")
+    check(FrameStyle.parseHex("") == nil, "empty is not a color")
+    check(FrameStyle.parseHex("#12345") == nil, "five digits is not a color")
+    check(FrameStyle.parseHex("#1234567") == nil, "seven digits is not a color")
+    check(FrameStyle.parseHex("zzzzzz") == nil, "non-hex is not a color")
+    check(FrameStyle.parseHex(FrameStyle.hexString(0xABCDEF)) == 0xABCDEF, "format then parse round-trips")
+    check(FrameStyle.parseHex("#３B82F6") == nil, "a fullwidth digit is rejected rather than crashing")
+
+    // Geometry
+    check(FrameStyle.clamp(99, to: FrameStyle.radiusRange) == 20, "radius clamps to its top")
+    check(FrameStyle.clamp(-5, to: FrameStyle.gapRange) == 0, "gap clamps to its bottom")
+    check(FrameStyle.clamp(.nan, to: FrameStyle.radiusRange) == 0, "NaN clamps to the bottom of the range")
+    check(FrameStyle.clamp(.infinity, to: FrameStyle.radiusRange) == 0, "infinity clamps to the bottom too, not the top")
+    check(FrameStyle.radiusRange.contains(FrameStyle.defaultRadius)
+          && FrameStyle.gapRange.contains(FrameStyle.defaultGap)
+          && FrameStyle.strengthRange.contains(FrameStyle.defaultStrength),
+          "the defaults sit inside their own ranges")
+    check(FrameFontDesign.allCases.count == 4 && Set(FrameFontDesign.allCases.map(\.label)).count == 4,
+          "four interface fonts with their own labels")
+    check(FrameFontDesign(rawValue: "bogus") == nil, "an unknown stored font design is not accepted")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

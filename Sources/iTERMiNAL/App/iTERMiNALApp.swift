@@ -20,6 +20,8 @@ struct ITerminalApp: App {
                 // selection — falls back to the *system* accent unless the
                 // hierarchy is tinted.
                 .tint(settings.accentColor)
+                // Nil for System, which leaves every font as it was drawn.
+                .fontDesign(settings.uiFontDesign.design)
         }
         // Hides the title and makes the bar transparent. It does not remove
         // the title-bar-height safe area SwiftUI still insets content below —
@@ -38,6 +40,7 @@ struct ITerminalApp: App {
                 .environmentObject(store)
                 .preferredColorScheme(settings.preferredColorScheme)
                 .tint(settings.accentColor)
+                .fontDesign(settings.uiFontDesign.design)
         }
     }
 }

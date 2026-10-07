@@ -4,6 +4,31 @@ import SwiftUI
 // the icon rail down the left edge. Both sit on the window's chrome color; the
 // content lives in a rounded card inside them (see `MainWindowView`).
 
+// MARK: - Surface
+
+/// The fill behind the top bar and the rail — and the workspaces panel, which
+/// is the same family — as one view, so they can't differ: flat or with
+/// vibrancy, tinted or not, they are always the same surface.
+struct FrameSurface: View {
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if settings.sidebarTranslucent {
+            // Vibrancy can't be mixed with a color, so the tint goes over it.
+            ZStack {
+                VisualEffectView(material: .sidebar)
+                if let tint = settings.frameTintHex {
+                    Color(hex: tint).opacity(settings.frameTintStrength)
+                }
+            }
+            .ignoresSafeArea()
+        } else {
+            settings.frameColor(for: colorScheme).ignoresSafeArea()
+        }
+    }
+}
+
 // MARK: - Top bar
 
 /// The window's one top bar, standing in for the system title bar: the
@@ -158,8 +183,20 @@ struct SidebarRail: View {
             }
 
             Spacer(minLength: 0)
+
+            // The bottom left of the frame: the terminal dock, the one panel
+            // that is always a keystroke away, so it gets a button where the
+            // dock itself opens.
+            RailButton(
+                icon: "rectangle.bottomthird.inset.filled",
+                title: "Terminal dock (⌘J)",
+                isActive: store.bottomDockOpen
+            ) {
+                store.toggleBottomDock()
+            }
         }
         .padding(.top, 6)
+        .padding(.bottom, max(settings.frameGap, WindowChrome.railBottomInset))
         .frame(width: WindowChrome.railWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         // Empty rail is chrome like the bar above it: drag it to move the
