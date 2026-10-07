@@ -232,6 +232,12 @@ final class AppSettings: ObservableObject {
     /// Separate from (and upstream of) the response viewer's own, fixed,
     /// cosmetic rendering limit.
     @Published var httpMaxResponseBytes: Int { didSet { defaults.set(httpMaxResponseBytes, forKey: "httpMaxResponseBytes") } }
+    /// Whether the site explorer reads links out of pages that were fetched —
+    /// the page typed into `open`, a `get`, or a send from the request view —
+    /// and adds the ones on the site being mapped. Reads bytes already in
+    /// hand; it never fetches a link. Off leaves the map to robots.txt and the
+    /// sitemaps it declares.
+    @Published var httpRecordDiscoveredLinks: Bool { didSet { defaults.set(httpRecordDiscoveredLinks, forKey: "httpRecordDiscoveredLinks") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -330,6 +336,7 @@ final class AppSettings: ObservableObject {
         httpRequestTimeout = defaults.object(forKey: "httpRequestTimeout") as? Double ?? 30
         httpFollowRedirects = defaults.object(forKey: "httpFollowRedirects") as? Bool ?? true
         httpMaxResponseBytes = defaults.object(forKey: "httpMaxResponseBytes") as? Int ?? 10_000_000
+        httpRecordDiscoveredLinks = defaults.object(forKey: "httpRecordDiscoveredLinks") as? Bool ?? true
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -543,6 +550,7 @@ final class AppSettings: ObservableObject {
         httpRequestTimeout = 30
         httpFollowRedirects = true
         httpMaxResponseBytes = 10_000_000
+        httpRecordDiscoveredLinks = true
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

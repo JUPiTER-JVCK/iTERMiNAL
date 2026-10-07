@@ -1,6 +1,12 @@
 import SwiftUI
 import AppKit
 
+/// Which half of the pane is showing: composing a request, or walking a
+/// site's published paths from a command line.
+enum HTTPPaneMode: String, CaseIterable {
+    case request, explore
+}
+
 /// One request/response pane: the fields that make up a request, what came
 /// back, and history of what was sent before. Used both as a split-pane
 /// leaf and as the right-hand sliding panel — the same view, the same way
@@ -34,6 +40,11 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     @Published var urlText: String = ""
     @Published var headerFields: [HTTPHeaderField] = [HTTPHeaderField(name: "", value: "")]
     @Published var bodyText: String = ""
+    @Published var mode: HTTPPaneMode = .request
+
+    /// The command-line site explorer. Not part of what is saved with a
+    /// layout: a map is rebuilt by asking, never by reopening the app.
+    let explorer = SiteExplorerModel()
 
     @Published private(set) var isSending = false
     @Published private(set) var lastResponse: HTTPResponseSummary?
@@ -57,6 +68,17 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     init(id: UUID = UUID()) {
         self.id = id
         history = HTTPHistoryStore.loadAll(scope: id)
+        // A `get` typed at the explorer's prompt is a request this pane sent,
+        // so it goes through the same history and event as any other.
+        explorer.recordRequest = { [weak self] spec, statusCode, errorDescription in
+            self?.recordHistory(spec: spec, statusCode: statusCode, errorDescription: errorDescription)
+        }
+        explorer.loadIntoBuilder = { [weak self] url in
+            guard let self else { return }
+            self.method = .get
+            self.urlText = url
+            self.mode = .request
+        }
     }
 
     /// Builds a request from the current fields and sends it, replacing any
@@ -91,6 +113,9 @@ final class HTTPClientModel: ObservableObject, Identifiable {
                 guard !Task.isCancelled else { return }
                 self.lastResponse = response
                 self.lastFormatted = formatted
+                // A page fetched here counts as one the person fetched: if it
+                // is on the site being explored, its links join the map.
+                self.explorer.recordDiscovered(from: response, settings: settings)
                 self.recordHistory(spec: spec, statusCode: response.statusCode, errorDescription: nil)
             } catch is CancellationError {
                 return
@@ -178,21 +203,49 @@ struct HTTPClientPaneView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         VStack(spacing: 0) {
-            toolbar(theme: theme)
+            modeBar(theme: theme)
             FadedDivider()
-            HSplitView {
-                HTTPHistoryListView(model: model)
-                    .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
-                VSplitView {
-                    HTTPRequestBuilderView(model: model)
-                        .frame(minHeight: 120)
-                    HTTPResponseView(model: model)
-                        .frame(minHeight: 120)
+            switch model.mode {
+            case .request:
+                toolbar(theme: theme)
+                FadedDivider()
+                HSplitView {
+                    HTTPHistoryListView(model: model)
+                        .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
+                    VSplitView {
+                        HTTPRequestBuilderView(model: model)
+                            .frame(minHeight: 120)
+                        HTTPResponseView(model: model)
+                            .frame(minHeight: 120)
+                    }
                 }
+            case .explore:
+                SiteExplorerView(explorer: model.explorer)
             }
         }
         .background(theme.background)
-        .onAppear { urlFieldFocused = true }
+        .onAppear { if model.mode == .request { urlFieldFocused = true } }
+        .onChange(of: model.mode) { _, mode in
+            if mode == .request { urlFieldFocused = true }
+        }
+    }
+
+    /// Request or Explore. A segmented control rather than a menu item: the
+    /// explorer is half of what this pane is for, and should be visible.
+    private func modeBar(theme: Theme) -> some View {
+        HStack {
+            Picker("Mode", selection: $model.mode) {
+                Text("Request").tag(HTTPPaneMode.request)
+                Text("Explore").tag(HTTPPaneMode.explore)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Request: build and send one request · Explore: walk the paths a site publishes, like a directory")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     private func toolbar(theme: Theme) -> some View {

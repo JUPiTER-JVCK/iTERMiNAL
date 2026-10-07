@@ -66,6 +66,7 @@ struct PreferencesArchive: Codable {
     var httpRequestTimeout: Double?
     var httpFollowRedirects: Bool?
     var httpMaxResponseBytes: Int?
+    var httpRecordDiscoveredLinks: Bool?
     /// The window frame's look and the interface typeface. Appearance
     /// preferences like `theme` and `accentID`, so they travel; optional
     /// because older archives predate them.
@@ -111,6 +112,7 @@ struct PreferencesArchive: Codable {
         httpRequestTimeout = settings.httpRequestTimeout
         httpFollowRedirects = settings.httpFollowRedirects
         httpMaxResponseBytes = settings.httpMaxResponseBytes
+        httpRecordDiscoveredLinks = settings.httpRecordDiscoveredLinks
         sidebarTranslucent = settings.sidebarTranslucent
         frameTintSource = settings.frameTintSource.rawValue
         frameTintStrength = settings.frameTintStrength
@@ -187,6 +189,7 @@ struct PreferencesArchive: Codable {
         if let httpRequestTimeout { settings.httpRequestTimeout = httpRequestTimeout }
         if let httpFollowRedirects { settings.httpFollowRedirects = httpFollowRedirects }
         if let httpMaxResponseBytes { settings.httpMaxResponseBytes = httpMaxResponseBytes }
+        if let httpRecordDiscoveredLinks { settings.httpRecordDiscoveredLinks = httpRecordDiscoveredLinks }
         // An archive is a file someone could have edited, so a value is only
         // adopted when it is one the settings screen could have produced:
         // a known name, a color that parses, a number inside its range.

@@ -44,7 +44,18 @@ enum HTTPClientError: LocalizedError {
 /// self-signed certificate — an arbitrary third-party API gets no such
 /// special treatment, the same as the AI assistant's client.
 final class HTTPRequestExecutor {
-    func execute(_ spec: HTTPRequestSpec, settings: AppSettings) async throws -> HTTPResponseSummary {
+    /// `sameOriginRedirectsOnly` is for requests this app makes on a site's
+    /// behalf — the site explorer reading robots.txt, a sitemap, or one page
+    /// of the site being mapped. A redirect that leaves the origin is not
+    /// followed: the 3xx comes back as the response, `Location` and all, and
+    /// the caller decides. Without it, a site could point its own robots.txt
+    /// at an address of its choosing — an internal host, say — and have this
+    /// app fetch it.
+    func execute(
+        _ spec: HTTPRequestSpec,
+        settings: AppSettings,
+        sameOriginRedirectsOnly: Bool = false
+    ) async throws -> HTTPResponseSummary {
         guard let url = HTTPMessage.normalizedURL(from: spec.url), let host = url.host, !host.isEmpty else {
             throw HTTPClientError.invalidURL(spec.url)
         }
@@ -73,6 +84,7 @@ final class HTTPRequestExecutor {
         let startedAt = Date()
         let runner = SizeLimitingRedirectRunner(
             followRedirects: settings.httpFollowRedirects,
+            sameOriginRedirectsOnly: sameOriginRedirectsOnly,
             maxResponseBytes: settings.httpMaxResponseBytes
         )
         let (data, http) = try await runner.run(request, timeout: settings.httpRequestTimeout)
@@ -110,13 +122,15 @@ final class HTTPRequestExecutor {
 /// requests that have nothing to do with each other.
 private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate {
     private let followRedirects: Bool
+    private let sameOriginRedirectsOnly: Bool
     private let maxResponseBytes: Int
     private var accumulated = Data()
     private var exceededLimit = false
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
 
-    init(followRedirects: Bool, maxResponseBytes: Int) {
+    init(followRedirects: Bool, sameOriginRedirectsOnly: Bool, maxResponseBytes: Int) {
         self.followRedirects = followRedirects
+        self.sameOriginRedirectsOnly = sameOriginRedirectsOnly
         self.maxResponseBytes = maxResponseBytes
     }
 
@@ -188,6 +202,15 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         guard followRedirects, isRedirectAllowed(request) else {
+            completionHandler(nil)
+            return
+        }
+        // Compared with where the request *started*, not the hop before: a
+        // chain that wanders off and back is still not the site it began at.
+        if sameOriginRedirectsOnly,
+           let original = task.originalRequest?.url, let target = request.url,
+           !isSameOrigin(original, target) {
+            // `nil` hands the 3xx itself back as the response.
             completionHandler(nil)
             return
         }
