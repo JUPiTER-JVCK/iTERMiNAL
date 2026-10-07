@@ -160,6 +160,11 @@ jobs:
             Sources/iTERMiNAL/HTTP/HTTPMessage.swift \
             Sources/iTERMiNAL/HTTP/HTTPResponseFormatter.swift \
             Sources/iTERMiNAL/HTTP/HTTPRedaction.swift \
+            Sources/iTERMiNAL/HTTP/RobotsTxtParser.swift \
+            Sources/iTERMiNAL/HTTP/SitemapParser.swift \
+            Sources/iTERMiNAL/HTTP/ResponseLinkScanner.swift \
+            Sources/iTERMiNAL/HTTP/SitePathTree.swift \
+            Sources/iTERMiNAL/HTTP/SiteExplorerCommands.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
             scripts/input-logic-check/main.swift

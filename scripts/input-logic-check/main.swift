@@ -1579,5 +1579,397 @@ do {
     check(FrameFontDesign(rawValue: "bogus") == nil, "an unknown stored font design is not accepted")
 }
 
+// MARK: Site explorer: robots.txt
+
+do {
+    let robots = RobotsTxtParser.parse("""
+    # a comment
+    User-agent: *
+    Disallow: /admin/
+    DISALLOW: /private/file.txt   # trailing comment
+    Allow: /public/
+    Disallow:
+    Disallow: /*.json$
+    Disallow: /tmp/*
+    Disallow: /search?q=
+    Disallow: /admin/
+    User-agent: bot
+    Disallow: /bot-only/
+    Sitemap: https://example.com/sitemap.xml
+    sitemap: https://example.com/news.xml
+    Sitemap: https://example.com/sitemap.xml
+    Crawl-delay: 10
+    """)
+    check(robots.disallowed == ["/admin/", "/private/file.txt", "/search", "/bot-only/"],
+          "Disallow paths are read from every group, once each, with comments and queries dropped")
+    check(robots.allowed == ["/public/"], "Allow paths are read")
+    check(robots.sitemaps == ["https://example.com/sitemap.xml", "https://example.com/news.xml"],
+          "Sitemap lines are collected without repeats, whatever the case of the directive")
+    check(robots.patternsSkipped == 2, "wildcard rules are counted as skipped and not treated as paths")
+    check(RobotsTxtParser.parse("Disallow:\nAllow:\n") == RobotsTxt(), "an empty Disallow names nothing")
+    check(RobotsTxtParser.parse("<html><body>Not found</body></html>") == RobotsTxt(), "an HTML soft-404 yields nothing")
+    check(RobotsTxtParser.parse("") == RobotsTxt(), "an empty file yields nothing")
+    check(RobotsTxtParser.parse("Disallow: /a\r\nDisallow: /b\rDisallow: /c").disallowed == ["/a", "/b", "/c"],
+          "CRLF and bare CR line endings both split")
+    check(RobotsTxtParser.parse("Disallow: relative/path").disallowed.isEmpty, "a rule that isn't an absolute path is ignored")
+    check(RobotsTxtParser.parse("Sitemap:").sitemaps.isEmpty, "an empty Sitemap value is ignored")
+}
+
+// MARK: Site explorer: sitemaps
+
+do {
+    func xml(_ body: String) -> Data { Data(body.utf8) }
+    let urlset = SitemapParser.parse(xml("""
+    <?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+      <url><loc> https://example.com/a </loc><lastmod>2024-01-01</lastmod>
+        <image:image><image:loc>https://cdn.example.com/pic.png</image:loc></image:image></url>
+      <url><loc>https://example.com/b?x=1&amp;y=2</loc></url>
+    </urlset>
+    """))
+    check(urlset?.urls == ["https://example.com/a", "https://example.com/b?x=1&y=2"],
+          "a urlset yields its page locations, trimmed, entities decoded, image locations ignored")
+    check(urlset?.childSitemaps.isEmpty == true, "a urlset has no child sitemaps")
+
+    let index = SitemapParser.parse(xml("""
+    <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <sitemap><loc>https://example.com/s1.xml</loc></sitemap>
+      <sitemap><loc>https://example.com/s2.xml</loc></sitemap>
+    </sitemapindex>
+    """))
+    check(index?.childSitemaps == ["https://example.com/s1.xml", "https://example.com/s2.xml"] && index?.urls.isEmpty == true,
+          "a sitemap index yields child sitemaps and no pages")
+
+    check(SitemapParser.parse(xml("<urlset></urlset>")) == SitemapContents(), "an empty urlset is an empty sitemap, not nothing")
+    check(SitemapParser.parse(xml("<html><body><a href='/x'>x</a></body></html>")) == nil, "HTML is not a sitemap")
+    check(SitemapParser.parse(xml("<rss><channel><item><loc>https://example.com/a</loc></item></channel></rss>")) == nil,
+          "well-formed XML with another root is not a sitemap")
+    check(SitemapParser.parse(xml("this is not xml")) == nil, "plain text is not a sitemap")
+    check(SitemapParser.parse(Data()) == nil, "empty data is not a sitemap")
+    // Truncated XML: whatever it returns, it must not crash.
+    _ = SitemapParser.parse(xml("<urlset><url><loc>https://example.com/a</loc>"))
+
+    let xxe = SitemapParser.parse(xml("""
+    <?xml version="1.0"?>
+    <!DOCTYPE urlset [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+    <urlset><url><loc>https://example.com/&xxe;</loc></url></urlset>
+    """))
+    check(!(xxe?.urls.joined().contains("root:") ?? false), "an external entity is not resolved into a location")
+
+    var big = "<urlset>"
+    for i in 0..<(SitemapParser.maxEntries + 100) { big += "<url><loc>https://example.com/p\(i)</loc></url>" }
+    big += "</urlset>"
+    let capped = SitemapParser.parse(xml(big))
+    check(capped?.urls.count == SitemapParser.maxEntries && capped?.wasCapped == true,
+          "a file past the entry cap stops at the cap and says so")
+}
+
+// MARK: Site explorer: link scanner
+
+do {
+    let page = """
+    <html><head><link rel="stylesheet" href="/static/site.css"><script src='js/app.js'></script></head>
+    <body>
+      <a href="/about">About</a> <a HREF='/docs/'>Docs</a> <a href=/bare>bare</a>
+      <a href="../up">up</a> <a href="https://example.com/abs?a=1&amp;b=2#frag">abs</a>
+      <a href="https://other.org/x">elsewhere</a>
+      <a href="mailto:a@b.c">m</a> <a href="javascript:void(0)">j</a> <a href="#top">t</a>
+      <a href="data:text/plain;base64,AAAA">d</a> <img src="//cdn.example.com/p.png">
+      <a href="ftp://files.example.com/x">ftp</a> <a href="file:///etc/passwd">file</a>
+      <a href="/about">About again</a>
+    </body></html>
+    """
+    let found = ResponseLinkScanner.links(in: Data(page.utf8), contentKind: .html, baseURL: "https://example.com/dir/page.html")
+    check(found == [
+        "https://example.com/static/site.css",
+        "https://example.com/dir/js/app.js",
+        "https://example.com/about",
+        "https://example.com/docs/",
+        "https://example.com/bare",
+        "https://example.com/up",
+        "https://example.com/abs?a=1&b=2",
+        "https://other.org/x",
+        "https://cdn.example.com/p.png",
+    ], "HTML links are resolved against the page, fragments dropped, non-web schemes skipped, repeats removed")
+
+    let json = """
+    {"name": "/not/a/link", "url": "/v1/items", "links": {"next": "/v1/items?page=2", "self": "https://api.example.com/v1/items"},
+     "items": [{"href": "https://api.example.com/v1/items/1"}, {"title": "https://api.example.com/v1/items/2"}], "path": "/etc/passwd"}
+    """
+    let jsonLinks = ResponseLinkScanner.links(in: Data(json.utf8), contentKind: .json, baseURL: "https://api.example.com/v1/")
+    check(Set(jsonLinks) == [
+        "https://api.example.com/v1/items", "https://api.example.com/v1/items?page=2",
+        "https://api.example.com/v1/items/1", "https://api.example.com/v1/items/2",
+    ], "JSON: absolute URLs anywhere, root-relative paths only under link-like keys")
+    check(ResponseLinkScanner.links(in: Data("not json".utf8), contentKind: .json, baseURL: "https://example.com").isEmpty,
+          "invalid JSON yields no links")
+    check(ResponseLinkScanner.links(in: Data("<a href='/x'>".utf8), contentKind: .plainText, baseURL: "https://example.com").isEmpty,
+          "a plain-text body is not scanned")
+    check(ResponseLinkScanner.links(in: Data("<a href='/x'>".utf8), contentKind: .html, baseURL: "not a url").isEmpty,
+          "an unusable base URL yields nothing rather than guessing")
+
+    var many = ""
+    for i in 0..<(ResponseLinkScanner.maxLinks + 50) { many += "<a href=\"/p\(i)\">x</a>" }
+    check(ResponseLinkScanner.links(in: Data(many.utf8), contentKind: .html, baseURL: "https://example.com").count == ResponseLinkScanner.maxLinks,
+          "links are capped")
+    var deep = "\"x\""
+    for _ in 0..<200 { deep = "[" + deep + "]" }
+    check(ResponseLinkScanner.links(in: Data(deep.utf8), contentKind: .json, baseURL: "https://example.com").isEmpty,
+          "absurdly deep JSON does not crash the walk")
+}
+
+// MARK: Site explorer: origin and tree
+
+do {
+    let origin = SiteOrigin(urlString: "https://Example.com")!
+    check(origin == SiteOrigin(urlString: "https://example.com:443/anything")!, "host case and the default port don't distinguish origins")
+    check(origin != SiteOrigin(urlString: "https://www.example.com")!, "www. is a different host — never folded")
+    check(origin != SiteOrigin(urlString: "http://example.com")!, "http is a different origin from https — never folded")
+    check(origin != SiteOrigin(urlString: "https://example.com:8443")!, "a different port is a different origin")
+    check(SiteOrigin(urlString: "ftp://example.com") == nil, "only http(s) has an origin")
+    check(origin.root == "https://example.com" && SiteOrigin(urlString: "http://localhost:3000")!.root == "http://localhost:3000",
+          "the root URL carries a port only when it isn't the default")
+    check(SiteOrigin(urlString: "http://[::1]:8080/x")!.root == "http://[::1]:8080", "an IPv6 literal is bracketed in the root")
+    check(SiteOrigin(urlString: "http://localhost:3000")!.display == "localhost:3000", "a prompt shows host and port")
+
+    var tree = SitePathTree(origin: origin)
+    check(tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap) == .added, "a new path is added")
+    check(tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .discovered) == .merged, "the same path again merges")
+    check(tree.provenance(of: ["blog", "2024", "post-1"]) == [.sitemap, .discovered], "a path keeps every way it was found")
+    check(tree.insert(url: "https://www.example.com/x", provenance: .sitemap) == .foreign, "another host is refused")
+    check(tree.insert(url: "http://example.com/x", provenance: .sitemap) == .foreign, "another scheme is refused")
+    check(tree.insert(url: "ftp://example.com/x", provenance: .sitemap) == .invalid, "a non-web URL is invalid")
+    check(tree.foreignCount == 2 && tree.foreignSamples.count == 2, "refused entries are counted and sampled for the report")
+    check(tree.contains(["blog"]) && tree.provenance(of: ["blog"]) == [], "a directory that only a deeper path implies exists, with no provenance of its own")
+    check(tree.declaredCount == 1, "implied directories don't count as declared paths")
+    check(tree.insert(path: "/blog/", provenance: .robotsDisallow) == .added, "an implied directory can later be declared")
+    check(tree.declaredCount == 2, "and then counts")
+    check(tree.isDirectory(["blog"]) && !tree.isDirectory(["blog", "2024", "post-1"]), "directories have children or a trailing slash; leaves are files")
+    check(tree.insert(path: "/private/", provenance: .robotsDisallow) == .added && tree.isDirectory(["private"]),
+          "a path written with a trailing slash is a directory even with nothing under it")
+
+    check(tree.insert(path: "/a/../b/./c", provenance: .robotsAllow) == .added && tree.contains(["b", "c"]) && !tree.contains(["a"]),
+          "dot segments are resolved before a path is stored")
+    check(tree.insert(path: "/../etc", provenance: .robotsAllow) == .invalid, "a path that climbs out of the root is refused")
+    check(tree.insert(path: "//x///y//", provenance: .robotsAllow) == .added && tree.contains(["x", "y"]), "empty segments collapse")
+    check(tree.insert(path: String(repeating: "/a", count: 70), provenance: .robotsAllow) == .invalid, "a path deeper than the cap is refused")
+    check(tree.insert(path: "/" + String(repeating: "a", count: 3000), provenance: .robotsAllow) == .invalid, "an overlong path is refused")
+    check(tree.insert(path: "/", provenance: .robotsAllow) == .added, "the root can be declared")
+
+    var queries = SitePathTree(origin: origin)
+    queries.insert(url: "https://example.com/search?q=a", provenance: .discovered)
+    queries.insert(url: "https://example.com/search?q=b", provenance: .discovered)
+    queries.insert(url: "https://example.com/search", provenance: .discovered)
+    let search = queries.entries(at: [])!.first!
+    check(queries.entries(at: [])!.count == 1 && search.queryVariants == 2, "query variants fold into a count on one node")
+
+    var names = SitePathTree(origin: origin)
+    for path in ["/zeta", "/Alpha", "/docs/a", "/beta/", "/my%20docs/x", "/bad%0Aname", "/rtl%E2%80%AEtxt.exe", "/100%25/x"] {
+        names.insert(path: path, provenance: .robotsAllow)
+    }
+    let listed = names.entries(at: [])!
+    check(listed.map(\.name) == ["100%", "beta", "docs", "my docs", "Alpha", "bad%0Aname", "rtl%E2%80%AEtxt.exe", "zeta"],
+          "entries list directories first, then by name")
+    check(listed.contains { $0.name == "my docs" && $0.rawName == "my%20docs" }, "a percent-encoded name is shown decoded")
+    check(listed.contains { $0.name == "bad%0Aname" }, "a name that would decode to a newline is shown encoded, so it can't split a line")
+    check(listed.contains { $0.name.contains("%E2%80%AE") }, "a bidirectional override is shown encoded, so it can't disguise a name")
+    check(SitePathTree.isPlainText("naïve – ok") && !SitePathTree.isPlainText("a\u{0007}b") && !SitePathTree.isPlainText("a\u{202E}b"),
+          "plain text passes; control and override characters don't")
+    check(names.rawSegment(matching: "my docs", under: []) == "my%20docs" && names.rawSegment(matching: "my%20docs", under: []) == "my%20docs",
+          "a name matches by its decoded or its raw form")
+    check(names.rawSegment(matching: "nope", under: []) == nil, "an unknown name matches nothing")
+    check(names.entries(at: ["nope"]) == nil && names.entries(at: ["docs", "a"])?.isEmpty == true, "no entries for a missing path; none inside a file")
+
+    var nav = SitePathTree(origin: origin)
+    nav.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap)
+    nav.insert(url: "https://example.com/my%20docs/a%20b", provenance: .sitemap)
+    check(nav.resolve("blog", from: []) == ["blog"] && nav.resolve("2024/post-1", from: ["blog"]) == ["blog", "2024", "post-1"],
+          "relative paths resolve against the current directory")
+    check(nav.resolve("/blog", from: ["x"]) == ["blog"] && nav.resolve("", from: ["blog"]) == ["blog"], "absolute paths ignore it; empty means here")
+    check(nav.resolve("..", from: ["blog", "2024"]) == ["blog"] && nav.resolve("../..", from: ["blog"]) == [], ".. goes up")
+    check(nav.resolve("../../../..", from: ["blog"]) == [], ".. at the root stays at the root, as in a shell")
+    check(nav.resolve("~", from: ["blog"]) == [] && nav.resolve("~/blog", from: ["x"]) == ["blog"], "~ is the top")
+    check(nav.resolve("./blog/./2024", from: []) == ["blog", "2024"], ". is skipped")
+    check(nav.resolve("my docs/a b", from: []) == ["my%20docs", "a%20b"], "typed names find their encoded segments")
+    check(nav.resolve("new folder/x", from: []) == ["new%20folder", "x"], "an unknown name is percent-encoded")
+    check(nav.resolve("100%/x", from: []) == ["100%25", "x"] && nav.resolve("a%41", from: []) == ["a%41"],
+          "a lone % is encoded; an existing escape is left alone")
+    check(nav.url(for: ["blog", "2024"]) == "https://example.com/blog/2024/" && nav.url(for: ["blog", "2024", "post-1"]) == "https://example.com/blog/2024/post-1",
+          "a directory's URL ends in a slash; a file's doesn't")
+    check(nav.url(for: []) == "https://example.com/" && nav.url(for: ["x"], query: "a=1") == "https://example.com/x?a=1", "root and query URLs")
+    check(SitePathTree.display([]) == "/" && SitePathTree.display(["my%20docs", "x"]) == "/my docs/x", "a path is displayed decoded")
+
+    var finder = SitePathTree(origin: origin)
+    for path in ["/blog/Hello-World", "/blog/other", "/docs/hello.txt", "/about"] { finder.insert(path: path, provenance: .robotsAllow) }
+    check(finder.paths(containing: "hello", limit: 10) == ["/blog/Hello-World", "/docs/hello.txt"], "find matches case-insensitively and lists paths")
+    check(finder.paths(containing: "o", limit: 2).count == 2, "find stops at its limit")
+    var counted = SitePathTree(origin: origin)
+    counted.insert(url: "https://example.com/a", provenance: .sitemap)
+    counted.insert(url: "https://example.com/a", provenance: .discovered)
+    counted.insert(path: "/b", provenance: .robotsDisallow)
+    check(counted.counts() == (sitemap: 1, robots: 1, discovered: 1), "counts say how many paths each source contributed")
+}
+
+// MARK: Site explorer: what may be fetched
+
+do {
+    let origin = SiteOrigin(urlString: "https://example.com")!
+    check(ExplorerPolicy.robotsURL(for: origin) == "https://example.com/robots.txt", "robots.txt is read from the root")
+    check(ExplorerPolicy.robotsURL(for: SiteOrigin(urlString: "http://localhost:8080/x")!) == "http://localhost:8080/robots.txt",
+          "and from a local server's own root")
+
+    // The boundary: a site that declares no sitemap gets no sitemap request.
+    check(ExplorerPolicy.sitemapTargets(declared: [], origin: origin, alreadySeen: [], budget: 10) == .init(),
+          "nothing declared means nothing to fetch — there is no fall-back to /sitemap.xml")
+    check(ExplorerPolicy.sitemapTargets(declared: [""], origin: origin, alreadySeen: [], budget: 10).fetch.isEmpty, "a blank declaration fetches nothing")
+
+    let targets = ExplorerPolicy.sitemapTargets(
+        declared: [
+            "https://example.com/sitemap.xml", "/news.xml", "https://example.com/sitemap.xml",
+            "https://evil.example.net/s.xml", "http://example.com/old.xml", "https://www.example.com/w.xml",
+            "//cdn.example.com/s.xml", "sitemap.xml", "ftp://example.com/s.xml", "http://169.254.169.254/latest",
+        ],
+        origin: origin, alreadySeen: [], budget: 10
+    )
+    check(targets.fetch == ["https://example.com/sitemap.xml", "https://example.com/news.xml"],
+          "only same-origin declarations are fetched, a root-relative one read against the site, repeats once")
+    check(targets.foreign == ["https://evil.example.net/s.xml", "http://example.com/old.xml", "https://www.example.com/w.xml",
+                              "http://169.254.169.254/latest"],
+          "declarations on another host, scheme or address are never fetched — a robots.txt can't aim this app elsewhere")
+    check(targets.invalid.contains("//cdn.example.com/s.xml") && targets.invalid.contains("sitemap.xml") && targets.invalid.contains("ftp://example.com/s.xml"),
+          "protocol-relative, scheme-less and non-web declarations are set aside, not guessed at")
+
+    let seen = ExplorerPolicy.sitemapTargets(declared: ["/a.xml", "/b.xml", "/c.xml"], origin: origin, alreadySeen: ["https://example.com/a.xml"], budget: 1)
+    check(seen.fetch == ["https://example.com/b.xml"] && seen.overBudget == 1, "already-read sitemaps are skipped and the budget is a hard stop")
+    check(ExplorerPolicy.sitemapTargets(declared: ["/a.xml"], origin: origin, alreadySeen: [], budget: 0).fetch.isEmpty, "no budget, no fetches")
+    check(ExplorerPolicy.sitemapConcurrency <= 6 && ExplorerPolicy.maxSitemapFiles <= 50 && ExplorerPolicy.maxSitemapDepth <= 4,
+          "the fan-out limits stay small")
+}
+
+// MARK: Site explorer: the command line
+
+do {
+    func parse(_ line: String, open: Bool = true) -> ExplorerCommand { ExplorerCommandParser.parse(line, siteIsOpen: open) }
+    check(parse("") == .empty && parse("   ") == .empty, "a blank line does nothing")
+    check(parse("ls") == .ls(path: nil, long: false) && parse("ls blog") == .ls(path: "blog", long: false), "ls, with and without a path")
+    check(parse("ls -l") == .ls(path: nil, long: true) && parse("ll /x") == .ls(path: "/x", long: true) && parse("ls -la a") == .ls(path: "a", long: true),
+          "ls -l, ll and combined flags")
+    check(parse("ls -z") == .invalid("ls: invalid option -- 'z'") && parse("ls a b") == .invalid("ls: one path at a time"), "ls refuses what it doesn't understand")
+    check(parse("cd") == .cd(path: nil) && parse("cd ..") == .cd(path: "..") && parse("cd a b") == .invalid("cd: too many arguments"), "cd")
+    check(parse("cd \"my docs\"") == .cd(path: "my docs") && parse("cd my\\ docs") == .cd(path: "my docs") && parse("cd 'a b'") == .cd(path: "a b"),
+          "quotes and escapes group a name with spaces")
+    check(parse("cd \"unterminated") == .invalid("unterminated quote"), "an unterminated quote is reported")
+    check(parse("pwd") == .pwd && parse("help") == .help && parse("?") == .help && parse("clear") == .clear && parse("info") == .info && parse("refresh") == .refresh,
+          "the no-argument commands")
+    check(parse("tree") == .tree(path: nil, depth: 3) && parse("tree -L 5 x") == .tree(path: "x", depth: 5) && parse("tree -L2") == .tree(path: nil, depth: 2),
+          "tree and its depth flag, either spelling")
+    check(parse("tree -L 99") == .tree(path: nil, depth: ExplorerCommandParser.maxTreeDepth) && parse("tree -L 0") == .invalid("tree: -L needs a depth of 1 or more"),
+          "tree depth is bounded")
+    check(parse("find hello world") == .find("hello world") && parse("find") == .invalid("find: what are you looking for? (find <text>)"), "find")
+    check(parse("get") == .get(path: nil) && parse("get /a") == .get(path: "/a") && parse("cat /a") == .get(path: "/a") && parse("get a b") == .invalid("get: one address at a time"),
+          "get, and its cat alias")
+    check(parse("req /a") == .request(path: "/a") && parse("request") == .request(path: nil), "req loads without sending")
+    check(parse("open example.com") == .open("example.com") && parse("open") == .invalid("open: give one address (open example.com)"), "open")
+    check(parse("LS") == .ls(path: nil, long: false), "command names are case-insensitive")
+
+    // An address on its own opens a site — only while none is open.
+    check(parse("example.com", open: false) == .open("example.com") && parse("https://example.com/blog", open: false) == .open("https://example.com/blog"),
+          "an address typed on its own opens it, when nothing is open")
+    check(parse("localhost:3000", open: false) == .open("localhost:3000") && parse("localhost", open: false) == .open("localhost"), "so does localhost")
+    check(parse("example.com", open: true) == .invalid("command not found: example.com  (try `help`)"),
+          "with a site open, a stray word is an unknown command, not a guess that it was a host")
+    check(parse("frobnicate", open: false) == .invalid("command not found: frobnicate  (try `help`)"), "a word that isn't an address or a command is not found")
+    check(parse("example.com extra", open: false) != .open("example.com"), "an address with arguments is not auto-opened")
+
+    check(ExplorerCommandParser.split("a 'b c' \"d e\" f\\ g") == ["a", "b c", "d e", "f g"], "split handles both quote kinds and escapes")
+    check(ExplorerCommandParser.split("''") == [""] && ExplorerCommandParser.split("a  b") == ["a", "b"], "an empty quoted word is a word; runs of spaces are one gap")
+    check(ExplorerCommandParser.looksLikeAddress("a.co") && !ExplorerCommandParser.looksLikeAddress("./x") && !ExplorerCommandParser.looksLikeAddress("word"), "what looks like an address")
+}
+
+// MARK: Site explorer: resolving a typed address
+
+do {
+    let origin = SiteOrigin(urlString: "https://example.com")!
+    var tree = SitePathTree(origin: origin)
+    tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap)
+    func target(_ argument: String?, cwd: [String] = []) -> ExplorerTarget { ExplorerTarget.resolve(argument: argument, cwd: cwd, tree: tree) }
+    check(target(nil, cwd: ["blog"]) == .url("https://example.com/blog/"), "no argument means here")
+    check(target("2024/post-1", cwd: ["blog"]) == .url("https://example.com/blog/2024/post-1"), "a relative path")
+    check(target("/blog/2024") == .url("https://example.com/blog/2024/"), "a known directory ends in a slash")
+    check(target("/unknown/page") == .url("https://example.com/unknown/page"), "an address that isn't on the map is still the person's to ask for")
+    check(target("/search?q=a b&r=%41") == .url("https://example.com/search?q=a%20b&r=%41"), "a query is encoded where it must be, and an existing escape is left alone")
+    check(target("/x/") == .url("https://example.com/x/"), "a trailing slash typed is kept")
+    check(target("/x#frag") == .url("https://example.com/x"), "a fragment is dropped; it isn't for the server")
+    check(target("https://example.com/other?z=1") == .url("https://example.com/other?z=1"), "a full address on this site is used as typed")
+    if case .error = target("https://other.org/x") {} else { check(false, "an address on another site is refused") }
+    if case .error = target("https://www.example.com/x") {} else { check(false, "www. is another site too") }
+    check(target("../..", cwd: ["blog", "2024"]) == .url("https://example.com/"), ".. resolves before the address is built")
+}
+
+// MARK: Site explorer: layout and completion
+
+do {
+    let origin = SiteOrigin(urlString: "https://example.com")!
+    var tree = SitePathTree(origin: origin)
+    tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap)
+    tree.insert(url: "https://example.com/blog/2024/post-2", provenance: .sitemap)
+    tree.insert(path: "/admin/", provenance: .robotsDisallow)
+    tree.insert(path: "/robots-note.txt", provenance: .robotsAllow)
+    tree.insert(url: "https://example.com/search?q=1", provenance: .discovered)
+    tree.insert(url: "https://example.com/search?q=2", provenance: .discovered)
+    tree.insert(path: "/my%20docs/a", provenance: .robotsAllow)
+
+    check(ExplorerFormat.prompt(origin: nil, cwd: []) == "$" && ExplorerFormat.prompt(origin: origin, cwd: ["blog"]) == "example.com:/blog $",
+          "the prompt names the site and directory")
+    check(ExplorerFormat.ls(tree.entries(at: [])!, long: false) == ["admin/", "blog/", "my docs/", "robots-note.txt", "search"], "ls: one per line, directories marked")
+    let long = ExplorerFormat.ls(tree.entries(at: [])!, long: true)
+    check(long[0].hasPrefix("--D-  admin/") && long[1].contains("blog/") && long[1].contains("1 inside") && long[1].hasPrefix("----"),
+          "ls -l: flags first, then the name and what's inside; an implied directory has none")
+    check(long[1].contains("implied"), "and says it is implied")
+    check(long.last!.hasPrefix("---L") && long.last!.contains("2 with ?query"), "ls -l shows link provenance and folded queries")
+    check(ExplorerFormat.tree(at: [], in: tree, maxDepth: 3, maxLines: 100) == [
+        "├── admin/", "├── blog/", "│   └── 2024/", "│       ├── post-1", "│       └── post-2",
+        "├── my docs/", "│   └── a", "├── robots-note.txt", "└── search",
+    ], "tree draws the map with box lines")
+    check(ExplorerFormat.tree(at: [], in: tree, maxDepth: 1, maxLines: 100).contains("├── blog/  [1]"), "a directory cut off by the depth shows how much is inside")
+    let cut = ExplorerFormat.tree(at: [], in: tree, maxDepth: 3, maxLines: 3)
+    check(cut.count == 4 && cut.last!.hasPrefix("… more not shown"), "tree stops at its line cap and says so")
+    check(ExplorerFormat.tree(at: ["nope"], in: tree, maxDepth: 3, maxLines: 10).isEmpty, "tree of a missing path is empty")
+
+    check(ExplorerFormat.responseSummary(status: 200, contentType: "text/html", byteCount: 2048, milliseconds: 84).hasPrefix("200  text/html  ")
+          && ExplorerFormat.responseSummary(status: 404, contentType: nil, byteCount: 0, milliseconds: 5).contains("no content-type"),
+          "a response is summarised on one line")
+    check(!ExplorerFormat.responseSummary(status: 302, contentType: nil, byteCount: 0, milliseconds: 1).contains("Zero"),
+          "an empty body is a number, not the word Zero")
+    let headers = [HTTPHeaderField(name: "Set-Cookie", value: "sid=secret"), HTTPHeaderField(name: "Server", value: "nginx"),
+                   HTTPHeaderField(name: "Location", value: "https://example.com/new\nX-Injected: 1")]
+    check(ExplorerFormat.headerLines(headers) == ["location: https://example.com/new X-Injected: 1", "server: nginx"],
+          "only a few headers are printed, a cookie never, and a value can't add a line")
+    check(ExplorerFormat.bodyPreview("a\nb\nc\nd", maxLines: 2, maxLength: 10) == ["a", "b", "… 2 more lines — `req` opens this in the request view"],
+          "a body preview stops at its line cap and says how much is left")
+    check(ExplorerFormat.bodyPreview(String(repeating: "x", count: 50), maxLines: 5, maxLength: 10) == [String(repeating: "x", count: 10) + "…"],
+          "a long line is cut")
+    check(ExplorerFormat.bodyPreview("", maxLines: 5, maxLength: 10).isEmpty, "an empty body previews as nothing")
+    check(ExplorerFormat.sanitized("ok \u{1B}[31mred\u{07}\u{202E}x\n\ty") == "ok ·[31mred··x· y", "text from a server is cleaned of control and override characters before it is shown")
+    check(ExplorerFormat.sanitized("plain – naïve 日本") == "plain – naïve 日本", "ordinary text, accents and other scripts pass through")
+    check(ExplorerFormat.helpLines.count > 10 && ExplorerFormat.helpLines.contains { $0.contains("never guesses") }, "help states the no-guessing rule")
+
+    func complete(_ line: String, cwd: [String] = []) -> ExplorerCompleter.Completion? { ExplorerCompleter.complete(line: line, cwd: cwd, tree: tree) }
+    check(complete("tr") == .init(line: "tree ", candidates: []) && complete("") == nil && complete("zz") == nil, "a command completes when it's the only match")
+    check(complete("c")?.candidates == ["cat", "cd", "clear"] && complete("c")?.line == "c", "an ambiguous command lists its matches")
+    check(complete("cd bl") == .init(line: "cd blog/", candidates: []), "a unique directory completes with a slash")
+    check(complete("get robots-n") == .init(line: "get robots-note.txt", candidates: []), "a unique file completes without one")
+    check(complete("cd blog/20") == .init(line: "cd blog/2024/", candidates: []), "completion works below the top")
+    check(complete("cd 2", cwd: ["blog"]) == .init(line: "cd 2024/", candidates: []), "and from the current directory")
+    check(complete("cd /bl") == .init(line: "cd /blog/", candidates: []), "and from an absolute path")
+    check(complete("ls blog/2024/post-")?.line == "ls blog/2024/post-" && complete("ls blog/2024/post-")?.candidates == ["post-1", "post-2"],
+          "several matches list themselves and complete as far as they agree")
+    check(complete("cd my") == .init(line: "cd my\\ docs/", candidates: []), "a name with a space is completed escaped")
+    check(complete("cd zzz") == nil && complete("cd nope/x") == nil, "no match, no completion")
+    check(complete("find bl") == nil && complete("open exa") == nil, "only path commands complete paths")
+    check(ExplorerCompleter.complete(line: "cd bl", cwd: [], tree: nil) == nil, "with no site open there is nothing to complete")
+    check(complete("cd \"bl") == nil, "a quoted word is left alone")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
