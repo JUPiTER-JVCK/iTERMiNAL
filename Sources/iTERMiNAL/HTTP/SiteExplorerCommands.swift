@@ -305,9 +305,19 @@ enum ExplorerTarget: Equatable {
 // MARK: - Layout
 
 enum ExplorerFormat {
+    /// The longest a prompt is allowed to be. It is drawn at its natural
+    /// width beside the field, so a deep directory must not push the field
+    /// out of a narrow panel: the path loses its front, then the host its end.
+    static let maxPromptLength = 44
+
     static func prompt(origin: SiteOrigin?, cwd: [String]) -> String {
         guard let origin else { return "$" }
-        return "\(origin.display):\(SitePathTree.display(cwd)) $"
+        var host = origin.display
+        if host.count > 28 { host = String(host.prefix(27)) + "…" }
+        var path = SitePathTree.display(cwd)
+        let room = maxPromptLength - host.count - 3  // ":" and " $"
+        if path.count > room { path = "…" + String(path.suffix(max(room - 1, 1))) }
+        return "\(host):\(path) $"
     }
 
     /// One entry per line. Long form adds where each came from — see the

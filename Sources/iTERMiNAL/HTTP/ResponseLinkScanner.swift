@@ -44,7 +44,22 @@ enum ResponseLinkScanner {
         options: [.caseInsensitive]
     )
 
-    private static func htmlLinks(_ html: String, base: URL) -> [String] {
+    // Scripts, styles and comments hold text that merely looks like attributes
+    // (`src=` inside a JavaScript string, a commented-out link). Reading them
+    // as links put junk paths on the map — found running this against a real
+    // front page — so their *contents* are removed before the pattern runs.
+    // The opening tag stays: `<script src="/app.js">` is a file of the site.
+    private static let nonMarkupPattern = try! NSRegularExpression(
+        pattern: #"<!--.*?-->|(<script\b[^>]*>).*?</script\s*>|(<style\b[^>]*>).*?</style\s*>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators]
+    )
+
+    private static func htmlLinks(_ source: String, base: URL) -> [String] {
+        let html = nonMarkupPattern.stringByReplacingMatches(
+            in: source,
+            range: NSRange(location: 0, length: (source as NSString).length),
+            withTemplate: "$1$2 "
+        )
         let ns = html as NSString
         var collector = Collector(limit: maxLinks)
         attributePattern.enumerateMatches(in: html, range: NSRange(location: 0, length: ns.length)) { match, _, stop in
@@ -132,11 +147,22 @@ enum ResponseLinkScanner {
         }
     }
 
+    private static let unwritableInLink: CharacterSet = {
+        var set = CharacterSet(charactersIn: "<>{}\"\\`")
+        set.formUnion(.whitespacesAndNewlines)
+        set.formUnion(.controlCharacters)
+        return set
+    }()
+
     /// `value` as an absolute http(s) URL with no fragment, or nil for
     /// anything else — `mailto:`, `javascript:`, `data:`, a bare `#anchor`.
     private static func resolve(_ value: String, against base: URL) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+        // Not characters a written address contains. A value with any of them
+        // is code or broken markup that got this far, and `URL` would
+        // percent-encode it into a path that looks real.
+        guard trimmed.rangeOfCharacter(from: unwritableInLink) == nil else { return nil }
         guard let url = URL(string: trimmed, relativeTo: base)?.absoluteURL else { return nil }
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         guard url.host?.isEmpty == false else { return nil }

@@ -1692,6 +1692,20 @@ do {
         "https://cdn.example.com/p.png",
     ], "HTML links are resolved against the page, fragments dropped, non-web schemes skipped, repeats removed")
 
+    // Found running this against a real front page: text inside a script that
+    // merely looks like an attribute became a junk path on the map.
+    let messy = """
+    <a href="/real">r</a>
+    <script>var s=document.createElement('script');s.src=f},0)};}).call(this);</script>
+    <SCRIPT type="text/javascript">x = "<a href='/in-script'>link</a>"</SCRIPT>
+    <style>a{background:url(src=/in-style)}</style>
+    <!-- <a href="/commented-out">c</a> -->
+    <a href="/after">a</a> <a href="/bad<value">b</a> <a href="{{template}}">t</a> <a href='/has space'>s</a>
+    """
+    check(ResponseLinkScanner.links(in: Data(messy.utf8), contentKind: .html, baseURL: "https://example.com/") == [
+        "https://example.com/real", "https://example.com/after",
+    ], "links inside scripts, styles and comments are not links, and neither are values that aren't written addresses")
+
     let json = """
     {"name": "/not/a/link", "url": "/v1/items", "links": {"next": "/v1/items?page=2", "self": "https://api.example.com/v1/items"},
      "items": [{"href": "https://api.example.com/v1/items/1"}, {"title": "https://api.example.com/v1/items/2"}], "path": "/etc/passwd"}
@@ -1941,6 +1955,11 @@ do {
     tree.insert(url: "https://example.com/search?q=2", provenance: .discovered)
     tree.insert(path: "/my%20docs/a", provenance: .robotsAllow)
 
+    let longPrompt = ExplorerFormat.prompt(origin: origin, cwd: ["a-very-long-directory-name", "another-long-directory-name", "third-long-directory-name"])
+    check(longPrompt.count <= ExplorerFormat.maxPromptLength && longPrompt.hasPrefix("example.com:…") && longPrompt.hasSuffix("third-long-directory-name $"),
+          "a deep directory shortens the front of the path, so the prompt never pushes the field away")
+    let longHost = ExplorerFormat.prompt(origin: SiteOrigin(urlString: "https://" + String(repeating: "a", count: 60) + ".example.com")!, cwd: ["x"])
+    check(longHost.count <= ExplorerFormat.maxPromptLength && longHost.contains("…") && longHost.hasSuffix(":/x $"), "and a very long host is shortened too")
     check(ExplorerFormat.prompt(origin: nil, cwd: []) == "$" && ExplorerFormat.prompt(origin: origin, cwd: ["blog"]) == "example.com:/blog $",
           "the prompt names the site and directory")
     check(ExplorerFormat.ls(tree.entries(at: [])!, long: false) == ["admin/", "blog/", "my docs/", "robots-note.txt", "search"], "ls: one per line, directories marked")

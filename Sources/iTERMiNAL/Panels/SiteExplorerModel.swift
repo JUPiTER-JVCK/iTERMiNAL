@@ -485,7 +485,8 @@ final class SiteExplorerModel: ObservableObject {
             let response = try await fetcher(spec, settings)
             guard (200..<300).contains(response.statusCode) else {
                 if (300..<400).contains(response.statusCode) {
-                    result.problem = "redirects off this site (\(response.statusCode)) — not followed"
+                    let to = response.headers.first { $0.name.lowercased() == "location" }.map { " to \($0.value)" } ?? ""
+                    result.problem = "redirects\(to) (\(response.statusCode)) — not followed off this site"
                 } else {
                     result.problem = "\(response.statusCode)"
                 }
