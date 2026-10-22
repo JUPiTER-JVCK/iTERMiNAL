@@ -11,9 +11,12 @@ import SwiftUI
 /// It drives the app through its own models rather than clicking on it, then
 /// asks each window to draw itself into a bitmap (`cacheDisplay`). That needs
 /// no Screen Recording permission, which a CI runner will not grant, and gives
-/// the same pixels at 2x whatever display the runner happens to have. What it
-/// cannot draw: web views and anything Metal-backed — none of which the
-/// pictures below use.
+/// the same pixels at 2x whatever display the runner happens to have.
+///
+/// `cacheDisplay` runs each view's `draw(_:)` and nothing else, so what a view
+/// paints through a layer property is missing from it. The terminal's
+/// background is one (see `terminalBackgrounds`) and is put back by hand; web
+/// views and Metal-backed layers are others, and none of the pictures use them.
 ///
 /// The scenes run against a small sample project and a local web server that
 /// the workflow prepares (scripts/screenshots), so nothing in a picture is
@@ -23,6 +26,10 @@ enum ScreenshotMode {
     private static let demoVariable = "ITERMINAL_DEMO_DIR"
     private static let logVariable = "ITERMINAL_FIXTURE_LOG"
     private static let site = "http://localhost:8765"
+
+    /// What the composer shows in the hero picture: a command word, flags, a
+    /// string, a pipe and a redirect, to show the input's colouring.
+    private static let composerSample = #"git log --oneline --graph -n 20 | grep -i "merge" > merges.txt"#
 
     /// Called once the app has launched.
     static func startIfRequested() {
@@ -61,16 +68,16 @@ enum ScreenshotMode {
         let fixtureLog = environment[logVariable]
 
         // Dark, with everything else at its default: the look most people see
-        // the app in, and what the README describes.
+        // the app in, and what the README describes. The CPU and memory of the
+        // machine it happens to run on are not part of that.
         settings.theme = .dark
         settings.composerEnabled = true
         settings.railPanelOpen = true
         settings.railPanelPinned = true
+        settings.showSystemMetrics = false
 
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
-        window.setContentSize(NSSize(width: 1280, height: 800))
-        window.setFrameOrigin(NSPoint(x: 40, y: 40))
+        await bringToFront(window)
+        fit(window)
         await pause(1.5)
         say("main window: \(describe(window))")
 
@@ -106,6 +113,8 @@ enum ScreenshotMode {
             await pause(2.0)
             session.send(text: "clear; git log --oneline --graph --decorate -n 14; echo; ls -F\n")
             await pause(2.5)
+            say("composer: \(typeIntoComposer(composerSample, in: window) ? "typed" : "no input field found")")
+            await pause(1.0)
             return capture(window, "main", in: directory)
         }
 
@@ -116,10 +125,17 @@ enum ScreenshotMode {
             model.mode = .request
             model.method = .get
             model.urlText = "\(site)/api/users"
+            model.headerFields = [
+                HTTPHeaderField(name: "Accept", value: "application/json"),
+                HTTPHeaderField(name: "Cache-Control", value: "no-cache"),
+            ]
             model.send(settings: settings)
             let finished = await until(timeout: 20) { !model.isSending }
             say("request finished: \(finished)")
-            await pause(1.5)
+            await pause(1.0)
+            // The response is the point of this picture, so it gets the room.
+            giveResponseRoom(in: window)
+            await pause(1.0)
             return capture(window, "http-request", in: directory)
         }
 
@@ -137,6 +153,7 @@ enum ScreenshotMode {
 
         await scene("splits") {
             store.closeRightRegion()
+            _ = typeIntoComposer("", in: window)
             guard let tab = docs, let first = tab.primarySession else { return false }
             store.selectedTabID = tab.id
             store.focusedSessionID = first.id
@@ -232,8 +249,10 @@ enum ScreenshotMode {
         )
         window.isReleasedWhenClosed = false
         window.contentView = hosting
-        window.setContentSize(target)
-        window.setFrameOrigin(NSPoint(x: 80, y: 80))
+        // The frame, not the content size: with the title bar drawn over the
+        // content, a content size leaves a title-bar-high strip of bare window
+        // under it.
+        window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: target), display: true)
         window.orderFront(nil)
         await pause(2.0)
         let ok = capture(window, name, in: directory)
@@ -257,6 +276,35 @@ enum ScreenshotMode {
         return nil
     }
 
+    /// Asks to be the front app, and says whether it worked: a window that is
+    /// not key draws grey traffic lights and no focus, which is not how the app
+    /// looks to anyone using it. The system may decline a request from an app
+    /// nobody launched by hand.
+    @MainActor
+    private static func bringToFront(_ window: NSWindow) async {
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        await pause(1.0)
+        if !NSApp.isActive {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            window.makeKeyAndOrderFront(nil)
+            await pause(1.0)
+        }
+        say("active: \(NSApp.isActive), key: \(window.isKeyWindow)")
+    }
+
+    /// The largest window that fits the screen with room to spare, at the
+    /// proportions of a laptop's. The runner's display is small (1024x768),
+    /// and the system keeps a window inside what is visible.
+    @MainActor
+    private static func fit(_ window: NSWindow) {
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let width = min(1024, visible.width)
+        let height = min(visible.height, (width * 2 / 3).rounded())
+        let frame = NSRect(x: visible.minX, y: visible.maxY - height, width: width, height: height)
+        window.setFrame(frame, display: true)
+    }
+
     @MainActor
     private static func describe(_ window: NSWindow) -> String {
         let frame = window.frame
@@ -268,8 +316,54 @@ enum ScreenshotMode {
     private static func describeDisplays() {
         if NSScreen.screens.isEmpty { say("no screens") }
         for (index, screen) in NSScreen.screens.enumerated() {
-            say("screen \(index): \(Int(screen.frame.width))x\(Int(screen.frame.height)), scale \(screen.backingScaleFactor)")
+            let visible = screen.visibleFrame
+            say("screen \(index): \(Int(screen.frame.width))x\(Int(screen.frame.height)), scale \(screen.backingScaleFactor), "
+                + "visible \(Int(visible.width))x\(Int(visible.height))")
         }
+    }
+
+    // MARK: Driving the interface
+
+    /// Types into the composer the way a person would: through its text view,
+    /// so its colouring and suggestions run. An empty string clears it.
+    @MainActor
+    private static func typeIntoComposer(_ text: String, in window: NSWindow) -> Bool {
+        guard let root = window.contentView, let field = firstView(ofType: CommandTextView.self, in: root) else {
+            return false
+        }
+        let whole = NSRange(location: 0, length: (field.string as NSString).length)
+        field.insertText(text, replacementRange: whole)
+        return true
+    }
+
+    /// The response half of the request pane is a split view under the request
+    /// builder. Its divider is moved up, so the response is what fills the pane.
+    @MainActor
+    private static func giveResponseRoom(in window: NSWindow) {
+        guard let root = window.contentView else { return }
+        let stacked = allViews(of: NSSplitView.self, in: root).first {
+            !$0.isVertical && $0.arrangedSubviews.count == 2
+        }
+        guard let split = stacked else {
+            say("response: no stacked split view found")
+            return
+        }
+        split.setPosition((split.bounds.height * 0.28).rounded(), ofDividerAt: 0)
+        split.layoutSubtreeIfNeeded()
+        say("response: divider moved, split is \(Int(split.bounds.height)) high")
+    }
+
+    @MainActor
+    private static func allViews<V: NSView>(of type: V.Type, in root: NSView) -> [V] {
+        var found: [V] = []
+        if let match = root as? V { found.append(match) }
+        for child in root.subviews { found.append(contentsOf: allViews(of: type, in: child)) }
+        return found
+    }
+
+    @MainActor
+    private static func firstView<V: NSView>(ofType type: V.Type, in root: NSView) -> V? {
+        allViews(of: type, in: root).first
     }
 
     // MARK: Pictures
@@ -281,6 +375,26 @@ enum ScreenshotMode {
         guard let content = window.contentView else { return false }
         window.displayIfNeeded()
         return write(content.superview ?? content, name, in: directory, scale: 2)
+    }
+
+    /// Where each terminal in `root` paints its background, and in what colour.
+    ///
+    /// A terminal's background is its container's `layer.backgroundColor`, and
+    /// `cacheDisplay` does not draw layer properties: the first screenshots had
+    /// a terminal's text floating on nothing, in light grey against white. The
+    /// rectangles come back in `root`'s coordinates with the origin at the
+    /// bottom left, whichever way `root` is flipped.
+    @MainActor
+    private static func terminalBackgrounds(in root: NSView) -> [(rect: NSRect, color: NSColor)] {
+        allViews(of: TerminalContainerView.self, in: root).compactMap { container in
+            guard let cgColor = container.layer?.backgroundColor,
+                  let color = NSColor(cgColor: cgColor) else { return nil }
+            let visible = container.visibleRect
+            guard !visible.isEmpty else { return nil }
+            var rect = container.convert(visible, to: root)
+            if root.isFlipped { rect.origin.y = root.bounds.height - rect.maxY }
+            return (rect, color)
+        }
     }
 
     @MainActor
@@ -302,7 +416,9 @@ enum ScreenshotMode {
             return false
         }
 
-        let finished = framed(plain, cornerRadius: 11, margin: 36) ?? plain
+        let backgrounds = terminalBackgrounds(in: view)
+        say("\(name): \(backgrounds.count) terminal background(s) put back")
+        let finished = framed(plain, under: backgrounds, cornerRadius: 11, margin: 36) ?? plain
         guard let data = finished.representation(using: .png, properties: [:]) else {
             say("\(name): could not encode a PNG")
             return false
@@ -354,11 +470,18 @@ enum ScreenshotMode {
     }
 
     /// `picture` with rounded corners, on a transparent margin, with a soft
-    /// shadow under it — the way a window looks in a macOS screenshot.
+    /// shadow under it — the way a window looks in a macOS screenshot — and
+    /// `backgrounds` filled in beneath it: the picture is transparent where a
+    /// terminal should be, so they show through there and nowhere else.
     ///
     /// Drawn in pixels throughout (the output's size is only set to points at
     /// the end, so the PNG says it is a 2x image).
-    private static func framed(_ picture: NSBitmapImageRep, cornerRadius: CGFloat, margin: CGFloat) -> NSBitmapImageRep? {
+    private static func framed(
+        _ picture: NSBitmapImageRep,
+        under backgrounds: [(rect: NSRect, color: NSColor)],
+        cornerRadius: CGFloat,
+        margin: CGFloat
+    ) -> NSBitmapImageRep? {
         guard picture.size.width > 0 else { return nil }
         let scale = CGFloat(picture.pixelsWide) / picture.size.width
         let pad = (margin * scale).rounded()
@@ -384,6 +507,16 @@ enum ScreenshotMode {
 
         NSGraphicsContext.saveGraphicsState()
         outline.addClip()
+        for background in backgrounds {
+            background.color.setFill()
+            // A path, not NSRect.fill(), which copies rather than composites.
+            NSBezierPath(rect: NSRect(
+                x: pad + background.rect.minX * scale,
+                y: pad + background.rect.minY * scale,
+                width: background.rect.width * scale,
+                height: background.rect.height * scale
+            )).fill()
+        }
         picture.draw(in: rect)
         NSGraphicsContext.restoreGraphicsState()
         NSGraphicsContext.restoreGraphicsState()

@@ -77,17 +77,24 @@ jobs:
       # pictures it got to are always uploaded. Actions starts bash with -e, so
       # that has to be switched off here — `set -uo pipefail` alone leaves it on,
       # and a failing `wait` would end the step before the log was shown.
+      #
+      # The app is run twice, once the way a person starts it (`open`, which
+      # makes it the front app, so its window is key and draws like one) and
+      # once by running the executable, to see which gives the better pictures.
       - name: Take the screenshots
         run: |
           set +e
           set -uo pipefail
-          demo="$RUNNER_TEMP/demo"
-          shots="$GITHUB_WORKSPACE/screenshots"
-          mkdir -p "$shots"
-          scripts/screenshots/prepare-demo.sh "$demo"
+          projects="$HOME/Developer"
+          zdot="$RUNNER_TEMP/zdotdir"
+          requests="$RUNNER_TEMP/requests.log"
+          bundle="$PWD/build/Build/Products/Release/iTERMiNAL.app"
+          out="$GITHUB_WORKSPACE/screenshots"
+          mkdir -p "$out"
+          scripts/screenshots/prepare-demo.sh "$projects" "$zdot"
 
           python3 scripts/screenshots/fixture_server.py \
-            --port 8765 --log "$demo/requests.log" > "$RUNNER_TEMP/fixture.out" 2>&1 &
+            --port 8765 --log "$requests" > "$RUNNER_TEMP/fixture.out" 2>&1 &
           fixture=$!
           trap 'kill "$fixture" 2>/dev/null || true' EXIT
           ready=0
@@ -104,52 +111,76 @@ jobs:
             exit 1
           fi
 
-          # New terminals start in the sample project.
-          defaults write com.jupiterjvck.iterminal defaultDirectory "$demo/hello-api"
           # A sleeping display draws nothing.
-          caffeinate -dimsu -t 900 &
-
+          caffeinate -dimsu -t 1800 &
           # What the app is about to run on, for when a picture comes out wrong.
           sw_vers
           system_profiler SPDisplaysDataType 2>/dev/null | head -30
 
-          app="$PWD/build/Build/Products/Release/iTERMiNAL.app/Contents/MacOS/iTERMiNAL"
-          env SHELL=/bin/zsh ZDOTDIR="$demo/zdotdir" \
-            ITERMINAL_SCREENSHOT_DIR="$shots" \
-            ITERMINAL_DEMO_DIR="$demo/hello-api" \
-            ITERMINAL_FIXTURE_LOG="$demo/requests.log" \
-            "$app" > "$RUNNER_TEMP/app.log" 2>&1 &
-          pid=$!
+          take() {
+            mode="$1"
+            shots="$out/$mode"
+            log="$RUNNER_TEMP/app-$mode.log"
+            mkdir -p "$shots"
+            echo "==== run: $mode"
 
-          status=timeout
-          for _ in $(seq 1 480); do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              wait "$pid"
-              status=$?
-              break
+            # Fresh state, so this run is not a restore of the last one.
+            pkill -x iTERMiNAL 2>/dev/null
+            rm -rf "$HOME/Library/Application Support/iTERMiNAL"
+            defaults delete com.jupiterjvck.iterminal 2>/dev/null
+            # New terminals start in the sample project.
+            defaults write com.jupiterjvck.iterminal defaultDirectory "$projects/hello-api"
+            : > "$requests"
+            : > "$log"
+
+            if [ "$mode" = open ]; then
+              open -n -W --stdout "$log" --stderr "$log" \
+                --env SHELL=/bin/zsh \
+                --env ZDOTDIR="$zdot" \
+                --env ITERMINAL_SCREENSHOT_DIR="$shots" \
+                --env ITERMINAL_DEMO_DIR="$projects/hello-api" \
+                --env ITERMINAL_FIXTURE_LOG="$requests" \
+                "$bundle" > "$RUNNER_TEMP/open-$mode.out" 2>&1 &
+            else
+              env SHELL=/bin/zsh ZDOTDIR="$zdot" \
+                ITERMINAL_SCREENSHOT_DIR="$shots" \
+                ITERMINAL_DEMO_DIR="$projects/hello-api" \
+                ITERMINAL_FIXTURE_LOG="$requests" \
+                "$bundle/Contents/MacOS/iTERMiNAL" > "$log" 2>&1 &
             fi
-            sleep 1
-          done
-          if [ "$status" = timeout ]; then
-            kill "$pid" 2>/dev/null || true
-          fi
-          echo "app exit status: $status"
+            pid=$!
 
-          cp "$RUNNER_TEMP/app.log" "$shots/app.log"
-          cp "$demo/requests.log" "$shots/requests.log"
-          echo "---- app log"
-          cat "$RUNNER_TEMP/app.log"
-          if [ "$status" != 0 ]; then
-            for report in "$HOME"/Library/Logs/DiagnosticReports/iTERMiNAL*; do
-              [ -e "$report" ] || continue
-              echo "---- crash report: $report"
-              head -c 8000 "$report"
+            status=timeout
+            for _ in $(seq 1 300); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                wait "$pid"
+                status=$?
+                break
+              fi
+              sleep 1
             done
-          fi
-          echo "---- files"
-          ls -la "$shots"
+            pkill -x iTERMiNAL 2>/dev/null
+            echo "$mode: launcher exit status: $status"
+            [ -s "$RUNNER_TEMP/open-$mode.out" ] && { echo "---- open said"; cat "$RUNNER_TEMP/open-$mode.out"; }
 
-          if ! ls "$shots"/*.png > /dev/null 2>&1; then
+            cp "$log" "$shots/app.log"
+            cp "$requests" "$shots/requests.log"
+            echo "---- app log ($mode)"
+            cat "$log"
+            if ! grep -q 'finished' "$log"; then
+              for report in "$HOME"/Library/Logs/DiagnosticReports/iTERMiNAL*; do
+                [ -e "$report" ] || continue
+                echo "---- crash report: $report"
+                head -c 8000 "$report"
+              done
+            fi
+            ls -la "$shots"
+          }
+
+          take open
+          take direct
+
+          if ! ls "$out"/*/*.png > /dev/null 2>&1; then
             echo "::error::the app wrote no pictures"
             exit 1
           fi

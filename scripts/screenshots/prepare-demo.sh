@@ -3,22 +3,33 @@
 # some git history, and a zsh setup whose prompt shows nothing about whose
 # machine this is.
 #
-#   scripts/screenshots/prepare-demo.sh <directory>
+#   scripts/screenshots/prepare-demo.sh <projects-dir> <zdotdir>
 #
-# Leaves <directory>/hello-api (a git repository with a branchy history and one
-# uncommitted change) and <directory>/zdotdir (a ZDOTDIR to start zsh with).
-# Everything in it is invented: names, addresses and code alike.
+# Leaves <projects-dir>/hello-api (a git repository with a branchy history and
+# one uncommitted change) and <zdotdir> (a ZDOTDIR to start zsh with). Only
+# those two paths are touched, and an earlier copy of either is replaced.
+# Everything in them is invented: names, addresses and code alike.
 set -euo pipefail
 
-root="${1:?usage: prepare-demo.sh <directory>}"
-repo="$root/hello-api"
+projects="${1:?usage: prepare-demo.sh <projects-dir> <zdotdir>}"
+zdotdir="${2:?usage: prepare-demo.sh <projects-dir> <zdotdir>}"
+repo="$projects/hello-api"
 
-rm -rf "$root"
-mkdir -p "$repo" "$root/zdotdir"
+# It deletes things, so it will not be pointed at anything broad.
+for path in "$projects" "$zdotdir"; do
+  case "$path" in
+    /|"$HOME"|"$HOME"/) echo "refusing to use $path" >&2; exit 2 ;;
+    /*) ;;
+    *) echo "give absolute paths ($path is not)" >&2; exit 2 ;;
+  esac
+done
+
+rm -rf "$repo" "$zdotdir"
+mkdir -p "$repo" "$zdotdir"
 
 # ---- the shell --------------------------------------------------------------
 
-cat > "$root/zdotdir/.zshrc" <<'EOF'
+cat > "$zdotdir/.zshrc" <<'EOF'
 # The directory's name and the branch, and nothing that identifies a machine or
 # a person.
 autoload -Uz vcs_info
