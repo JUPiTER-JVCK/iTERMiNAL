@@ -51,11 +51,12 @@ PAGES = {
     "/blog/scaling-the-api": "2025-04-09",
 }
 
+# Two users, and no value with a slash in it: the whole body fits in the
+# response pane of the screenshot, and the formatter writes "/" as "\/", which
+# is valid JSON but not what a picture of the pane should be remembered for.
 USERS = [
     {"id": 1, "name": "Mina Park", "email": "mina@example.com", "role": "admin", "active": True},
     {"id": 2, "name": "Jonas Weber", "email": "jonas@example.com", "role": "editor", "active": True},
-    {"id": 3, "name": "Priya Nair", "email": "priya@example.com", "role": "viewer", "active": False},
-    {"id": 4, "name": "Tomas Silva", "email": "tomas@example.com", "role": "editor", "active": True},
 ]
 
 ORDERS = [
@@ -91,7 +92,7 @@ def route(path, origin):
     if path == "/sitemap.xml":
         return 200, "application/xml; charset=utf-8", sitemap(origin)
     if path == "/api/users":
-        body = {"users": USERS, "total": len(USERS), "page": 1, "next": "/api/users?page=2"}
+        body = {"users": USERS, "total": len(USERS), "page": 1}
         return 200, "application/json; charset=utf-8", json.dumps(body, indent=2) + "\n"
     if path == "/api/orders":
         return 200, "application/json; charset=utf-8", json.dumps({"orders": ORDERS}, indent=2) + "\n"

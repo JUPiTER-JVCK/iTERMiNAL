@@ -157,19 +157,24 @@ enum ScreenshotMode {
             guard let tab = docs, let first = tab.primarySession else { return false }
             store.selectedTabID = tab.id
             store.focusedSessionID = first.id
+            // The sidebar gives its width to the panes, which are what this
+            // picture is of; lines that wrap in a narrow pane look like a bug.
+            settings.railPanelOpen = false
             await pause(2.0)
             _ = store.splitFocusedPane(.horizontal, kind: .terminal)
             _ = store.splitFocusedPane(.vertical, kind: .files)
             await pause(2.5)
 
             let sessions = tab.root.allSessions()
-            sessions.first?.send(text: "clear; git log --oneline --graph --decorate -n 14\n")
+            sessions.first?.send(text: "clear; git log --oneline -n 14\n")
             if sessions.count > 1 {
                 let command = fixtureLog.map { "clear; tail -n 14 '\($0)'\n" } ?? "clear; ls -F\n"
                 sessions[1].send(text: command)
             }
             await pause(2.5)
-            return capture(window, "splits", in: directory)
+            let taken = capture(window, "splits", in: directory)
+            settings.railPanelOpen = true
+            return taken
         }
 
         await scene("palette") {
@@ -253,9 +258,13 @@ enum ScreenshotMode {
         // content, a content size leaves a title-bar-high strip of bare window
         // under it.
         window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: target), display: true)
-        window.orderFront(nil)
+        window.makeKeyAndOrderFront(nil)
         await pause(2.0)
-        let ok = capture(window, name, in: directory)
+        // The system will not make a window shorter than its content plus a
+        // title bar, even with the content drawn under it; what is left under
+        // the content is bare window, and is left out of the picture.
+        let spare = max(0, window.frame.height - target.height)
+        let ok = capture(window, name, in: directory, trimmingBottom: spare)
         window.orderOut(nil)
         return ok
     }
@@ -348,7 +357,7 @@ enum ScreenshotMode {
             say("response: no stacked split view found")
             return
         }
-        split.setPosition((split.bounds.height * 0.28).rounded(), ofDividerAt: 0)
+        split.setPosition((split.bounds.height * 0.18).rounded(), ofDividerAt: 0)
         split.layoutSubtreeIfNeeded()
         say("response: divider moved, split is \(Int(split.bounds.height)) high")
     }
@@ -371,10 +380,15 @@ enum ScreenshotMode {
     /// The window as it looks on screen — traffic lights included, which live
     /// in the frame view around the content view — at twice its size.
     @MainActor
-    private static func capture(_ window: NSWindow, _ name: String, in directory: URL) -> Bool {
+    private static func capture(
+        _ window: NSWindow,
+        _ name: String,
+        in directory: URL,
+        trimmingBottom trim: CGFloat = 0
+    ) -> Bool {
         guard let content = window.contentView else { return false }
         window.displayIfNeeded()
-        return write(content.superview ?? content, name, in: directory, scale: 2)
+        return write(content.superview ?? content, name, in: directory, scale: 2, trimmingBottom: trim)
     }
 
     /// Where each terminal in `root` paints its background, and in what colour.
@@ -398,7 +412,13 @@ enum ScreenshotMode {
     }
 
     @MainActor
-    private static func write(_ view: NSView, _ name: String, in directory: URL, scale: CGFloat) -> Bool {
+    private static func write(
+        _ view: NSView,
+        _ name: String,
+        in directory: URL,
+        scale: CGFloat,
+        trimmingBottom trim: CGFloat
+    ) -> Bool {
         let bounds = view.bounds
         let width = Int((bounds.width * scale).rounded())
         let height = Int((bounds.height * scale).rounded())
@@ -418,7 +438,7 @@ enum ScreenshotMode {
 
         let backgrounds = terminalBackgrounds(in: view)
         say("\(name): \(backgrounds.count) terminal background(s) put back")
-        let finished = framed(plain, under: backgrounds, cornerRadius: 11, margin: 36) ?? plain
+        let finished = framed(plain, trimmingBottom: trim, under: backgrounds, cornerRadius: 11, margin: 36) ?? plain
         guard let data = finished.representation(using: .png, properties: [:]) else {
             say("\(name): could not encode a PNG")
             return false
@@ -474,27 +494,42 @@ enum ScreenshotMode {
     /// `backgrounds` filled in beneath it: the picture is transparent where a
     /// terminal should be, so they show through there and nowhere else.
     ///
+    /// The picture is drawn as a CGImage, which composites over what is under
+    /// it. `NSBitmapImageRep.draw(in:)` copies instead — its transparent
+    /// pixels replace what was beneath them — which is how a first attempt at
+    /// this lost the terminal backgrounds it had just painted.
+    ///
     /// Drawn in pixels throughout (the output's size is only set to points at
-    /// the end, so the PNG says it is a 2x image).
+    /// the end, so the PNG says it is a 2x image). `trim` points are left off
+    /// the bottom.
     private static func framed(
         _ picture: NSBitmapImageRep,
+        trimmingBottom trim: CGFloat,
         under backgrounds: [(rect: NSRect, color: NSColor)],
         cornerRadius: CGFloat,
         margin: CGFloat
     ) -> NSBitmapImageRep? {
-        guard picture.size.width > 0 else { return nil }
+        guard picture.size.width > 0, let whole = picture.cgImage else { return nil }
         let scale = CGFloat(picture.pixelsWide) / picture.size.width
+        let kept = picture.pixelsHigh - Int((trim * scale).rounded())
+        // A CGImage's origin is its top-left, so keeping the top rows trims the bottom.
+        guard kept > 0,
+              let image = whole.cropping(to: CGRect(x: 0, y: 0, width: picture.pixelsWide, height: kept))
+        else { return nil }
+
         let pad = (margin * scale).rounded()
-        let width = picture.pixelsWide + Int(pad * 2)
-        let height = picture.pixelsHigh + Int(pad * 2)
+        let width = image.width + Int(pad * 2)
+        let height = image.height + Int(pad * 2)
         guard let output = bitmap(width: width, height: height),
               let context = NSGraphicsContext(bitmapImageRep: output) else { return nil }
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        let rect = NSRect(x: pad, y: pad, width: CGFloat(picture.pixelsWide), height: CGFloat(picture.pixelsHigh))
+        let rect = NSRect(x: pad, y: pad, width: CGFloat(image.width), height: CGFloat(image.height))
         let outline = NSBezierPath(roundedRect: rect, xRadius: cornerRadius * scale, yRadius: cornerRadius * scale)
 
+        // The shadow is cast by the outline, and then the inside is cleared
+        // again, so only the part outside the window is left.
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.40)
@@ -506,18 +541,23 @@ enum ScreenshotMode {
         NSGraphicsContext.restoreGraphicsState()
 
         NSGraphicsContext.saveGraphicsState()
+        context.compositingOperation = .clear
+        outline.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        NSGraphicsContext.saveGraphicsState()
         outline.addClip()
         for background in backgrounds {
             background.color.setFill()
             // A path, not NSRect.fill(), which copies rather than composites.
             NSBezierPath(rect: NSRect(
                 x: pad + background.rect.minX * scale,
-                y: pad + background.rect.minY * scale,
+                y: pad + (background.rect.minY - trim) * scale,
                 width: background.rect.width * scale,
                 height: background.rect.height * scale
             )).fill()
         }
-        picture.draw(in: rect)
+        context.cgContext.draw(image, in: rect)
         NSGraphicsContext.restoreGraphicsState()
         NSGraphicsContext.restoreGraphicsState()
 
