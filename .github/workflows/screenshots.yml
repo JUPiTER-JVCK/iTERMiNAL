@@ -1,0 +1,162 @@
+name: Screenshots
+
+# The README's pictures, taken from the real app rather than drawn.
+#
+# The app is built with its capture mode compiled in (SCREENSHOTS — no shipped
+# build defines it), launched against a sample project and a small local web
+# server, and writes PNGs of its own windows. They are uploaded as an artifact
+# to look at and commit; nothing here publishes anything.
+on:
+  push:
+    branches: [claude/macos-terminal-design-planning-rwuvtw]
+    paths:
+      - .github/workflows/screenshots.yml
+      - scripts/screenshots/**
+      - Sources/iTERMiNAL/App/ScreenshotMode.swift
+  # Re-take them by hand after the interface changes. Unlike build.yml's
+  # manual run, this one releases nothing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Screenshots (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same way build.yml installs it, and for the same reason: straight
+      # from its release, not through Homebrew.
+      - name: Install XcodeGen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/xcodegen"
+          mkdir -p "$dir"
+          gh release download --repo yonaskolb/XcodeGen \
+            --pattern '*.zip' --dir "$dir" --clobber
+          for archive in "$dir"/*.zip; do
+            unzip -q "$archive" -d "$dir"
+          done
+          binary=$(find "$dir" -type f -name xcodegen -perm -u+x | head -1)
+          if [ -z "$binary" ]; then
+            echo "::error::no xcodegen binary in the XcodeGen release archive"
+            exit 1
+          fi
+          echo "$(dirname "$binary")" >> "$GITHUB_PATH"
+          "$binary" --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # No bundled btop, superfile or fonts: the app builds and runs without
+      # them (its copy phase says so and carries on), and none of the pictures
+      # are of those. This arch only — the runner's own — to keep it quick.
+      - name: Build with capture mode
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project iTERMiNAL.xcodeproj \
+            -scheme iTERMiNAL \
+            -configuration Release \
+            -destination "platform=macOS" \
+            -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) SCREENSHOTS' \
+            build
+
+      # One step, so the site and the app live and die together. The app's exit
+      # status is reported, not fatal, so its log is always printed and whatever
+      # pictures it got to are always uploaded. Actions starts bash with -e, so
+      # that has to be switched off here — `set -uo pipefail` alone leaves it on,
+      # and a failing `wait` would end the step before the log was shown.
+      - name: Take the screenshots
+        run: |
+          set +e
+          set -uo pipefail
+          demo="$RUNNER_TEMP/demo"
+          shots="$GITHUB_WORKSPACE/screenshots"
+          mkdir -p "$shots"
+          scripts/screenshots/prepare-demo.sh "$demo"
+
+          python3 scripts/screenshots/fixture_server.py \
+            --port 8765 --log "$demo/requests.log" > "$RUNNER_TEMP/fixture.out" 2>&1 &
+          fixture=$!
+          trap 'kill "$fixture" 2>/dev/null || true' EXIT
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:8765/robots.txt; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            echo "::error::the sample site did not start"
+            cat "$RUNNER_TEMP/fixture.out"
+            exit 1
+          fi
+
+          # New terminals start in the sample project.
+          defaults write com.jupiterjvck.iterminal defaultDirectory "$demo/hello-api"
+          # A sleeping display draws nothing.
+          caffeinate -dimsu -t 900 &
+
+          # What the app is about to run on, for when a picture comes out wrong.
+          sw_vers
+          system_profiler SPDisplaysDataType 2>/dev/null | head -30
+
+          app="$PWD/build/Build/Products/Release/iTERMiNAL.app/Contents/MacOS/iTERMiNAL"
+          env SHELL=/bin/zsh ZDOTDIR="$demo/zdotdir" \
+            ITERMINAL_SCREENSHOT_DIR="$shots" \
+            ITERMINAL_DEMO_DIR="$demo/hello-api" \
+            ITERMINAL_FIXTURE_LOG="$demo/requests.log" \
+            "$app" > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+
+          status=timeout
+          for _ in $(seq 1 480); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid"
+              status=$?
+              break
+            fi
+            sleep 1
+          done
+          if [ "$status" = timeout ]; then
+            kill "$pid" 2>/dev/null || true
+          fi
+          echo "app exit status: $status"
+
+          cp "$RUNNER_TEMP/app.log" "$shots/app.log"
+          cp "$demo/requests.log" "$shots/requests.log"
+          echo "---- app log"
+          cat "$RUNNER_TEMP/app.log"
+          if [ "$status" != 0 ]; then
+            for report in "$HOME"/Library/Logs/DiagnosticReports/iTERMiNAL*; do
+              [ -e "$report" ] || continue
+              echo "---- crash report: $report"
+              head -c 8000 "$report"
+            done
+          fi
+          echo "---- files"
+          ls -la "$shots"
+
+          if ! ls "$shots"/*.png > /dev/null 2>&1; then
+            echo "::error::the app wrote no pictures"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: warn

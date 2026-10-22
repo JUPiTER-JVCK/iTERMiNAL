@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
+        // Not in any shipped build: only the Screenshots workflow defines this.
+        #if SCREENSHOTS
+        ScreenshotMode.startIfRequested()
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {

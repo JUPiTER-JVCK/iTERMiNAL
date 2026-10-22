@@ -3,9 +3,15 @@ import SwiftUI
 // Section enum: SettingsSection.swift · AI pane: AISettingsView.swift
 
 struct SettingsRootView: View {
-    @State private var selection: SettingsSection = .general
+    @State private var selection: SettingsSection
     @State private var query = ""
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Opens on `initialSection`. The Settings scene never passes one; it is
+    /// here so the README screenshots can show a section without clicking.
+    init(initialSection: SettingsSection = .general) {
+        _selection = State(initialValue: initialSection)
+    }
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
