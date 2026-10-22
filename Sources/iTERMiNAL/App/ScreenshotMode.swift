@@ -135,7 +135,9 @@ enum ScreenshotMode {
             await pause(1.0)
             // The response is the point of this picture, so it gets the room.
             giveResponseRoom(in: window)
-            await pause(1.0)
+            // And the app's own CPU reading, in the sidebar, a moment to come
+            // back down from sending and laying this out.
+            await pause(3.5)
             return capture(window, "http-request", in: directory)
         }
 
@@ -438,7 +440,16 @@ enum ScreenshotMode {
 
         let backgrounds = terminalBackgrounds(in: view)
         say("\(name): \(backgrounds.count) terminal background(s) put back")
-        let finished = framed(plain, trimmingBottom: trim, under: backgrounds, cornerRadius: 11, margin: 36) ?? plain
+        let dark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let edge = dark ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.20)
+        let finished = framed(
+            plain,
+            trimmingBottom: trim,
+            under: backgrounds,
+            edge: edge,
+            cornerRadius: 11,
+            margin: 36
+        ) ?? plain
         guard let data = finished.representation(using: .png, properties: [:]) else {
             say("\(name): could not encode a PNG")
             return false
@@ -490,7 +501,8 @@ enum ScreenshotMode {
     }
 
     /// `picture` with rounded corners, on a transparent margin, with a soft
-    /// shadow under it — the way a window looks in a macOS screenshot — and
+    /// shadow under it and a hairline round it — the way a window looks in a
+    /// macOS screenshot — and
     /// `backgrounds` filled in beneath it: the picture is transparent where a
     /// terminal should be, so they show through there and nowhere else.
     ///
@@ -506,6 +518,7 @@ enum ScreenshotMode {
         _ picture: NSBitmapImageRep,
         trimmingBottom trim: CGFloat,
         under backgrounds: [(rect: NSRect, color: NSColor)],
+        edge: NSColor,
         cornerRadius: CGFloat,
         margin: CGFloat
     ) -> NSBitmapImageRep? {
@@ -559,6 +572,21 @@ enum ScreenshotMode {
         }
         context.cgContext.draw(image, in: rect)
         NSGraphicsContext.restoreGraphicsState()
+
+        // A hairline round the window, as macOS draws one. Without it a dark
+        // window on a dark page has no edge at all.
+        NSGraphicsContext.saveGraphicsState()
+        edge.setStroke()
+        let line = scale
+        let hairline = NSBezierPath(
+            roundedRect: rect.insetBy(dx: line / 2, dy: line / 2),
+            xRadius: cornerRadius * scale - line / 2,
+            yRadius: cornerRadius * scale - line / 2
+        )
+        hairline.lineWidth = line
+        hairline.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+
         NSGraphicsContext.restoreGraphicsState()
 
         output.size = NSSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
