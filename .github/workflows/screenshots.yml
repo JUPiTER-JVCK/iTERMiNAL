@@ -4,18 +4,24 @@ name: Screenshots
 #
 # The app is built with its capture mode compiled in (SCREENSHOTS — no shipped
 # build defines it), launched against a sample project and a small local web
-# server, and writes PNGs of its own windows. They are uploaded as an artifact
-# to look at and commit; nothing here publishes anything.
+# server, and writes PNGs of its own windows (Sources/iTERMiNAL/App/
+# ScreenshotMode.swift). They are uploaded as an artifact; nothing here
+# publishes anything. To update the README, copy them from the artifact into
+# docs/images/ (workspace, http-client, site-explorer, split-panes and
+# appearance come from main, http-request, http-explore, splits and
+# settings-appearance).
 on:
-  push:
-    branches: [claude/macos-terminal-design-planning-rwuvtw]
+  # Retake them by hand after the interface changes. Unlike build.yml's manual
+  # run, this one releases nothing.
+  workflow_dispatch:
+  # And when the capture itself changes, so that a break in it shows up in the
+  # pull request that causes it. The normal build cannot see one: the capture
+  # code is compiled out of it.
+  pull_request:
     paths:
       - .github/workflows/screenshots.yml
       - scripts/screenshots/**
       - Sources/iTERMiNAL/App/ScreenshotMode.swift
-  # Re-take them by hand after the interface changes. Unlike build.yml's
-  # manual run, this one releases nothing.
-  workflow_dispatch:
 
 permissions:
   contents: read

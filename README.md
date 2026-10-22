@@ -16,6 +16,37 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 > rather than the newest build, [releases/latest](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/latest).
 > The green **Code** button above gives you the source tree, not the app.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/http-client.png" alt="The HTTP client panel after a GET request: the method and address, two headers, and the 200 response with its timing, size and pretty-printed JSON body.">
+      <br><b>HTTP client</b> — build a request, send it, and read the status, timing and formatted body.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/site-explorer.png" alt="The site explorer in the HTTP panel: a command-line session that opens a local site, lists its top-level paths with where each was declared, and prints a tree of /docs.">
+      <br><b>Site explorer</b> — walk what a site publishes (its <code>robots.txt</code>, its sitemaps and the links in pages you fetch) like a directory. It never guesses at paths.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/split-panes.png" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
+      <br><b>Split panes</b> — terminals and the file browser side by side in one tab.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/appearance.png" alt="Settings, Appearance page: theme, accent colours, window opacity, and a preview of the workspace frame.">
+      <br><b>Appearance</b> — theme, accent colour, window opacity and the workspace frame.
+    </td>
+  </tr>
+</table>
+
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), against a made-up sample project and a local test server, so nothing in them is real data. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow) and copy the PNGs from its artifact into `docs/images/`.</sub>
+
 ## Features
 
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
@@ -459,7 +490,8 @@ consults URLSession's delegate.
 ```
 Sources/
 ├── iTERMiNAL/
-│   ├── App/         entry point, window scene, menu commands
+│   ├── App/         entry point, window scene, menu commands; ScreenshotMode takes the
+│   │                README pictures (compiled in only by the Screenshots workflow)
 │   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
 │   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
