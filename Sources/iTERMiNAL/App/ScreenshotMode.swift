@@ -198,6 +198,31 @@ enum ScreenshotMode {
             return await host(CommandPaletteView(), size: nil, name: "palette", in: directory)
         }
 
+        await scene("shortcuts") {
+            store.closeRightRegion()
+            describeMenus()
+            store.showShortcuts()
+            await pause(1.5)
+            guard let sheet = window.attachedSheet else {
+                say("shortcuts: no sheet is attached")
+                return false
+            }
+            let everything = capture(sheet, "shortcuts", in: directory)
+            // The search field has the focus when the window opens, so type
+            // into it the way a person would.
+            if let editor = sheet.firstResponder as? NSTextView {
+                let whole = NSRange(location: 0, length: (editor.string as NSString).length)
+                editor.insertText("shift split", replacementRange: whole)
+                await pause(1.0)
+                _ = capture(sheet, "shortcuts-search", in: directory)
+            } else {
+                say("shortcuts: the search field does not have the focus")
+            }
+            store.showKeyboardShortcuts = false
+            await pause(0.5)
+            return everything
+        }
+
         await scene("settings-appearance") {
             await host(
                 SettingsRootView(initialSection: .appearance),
@@ -331,6 +356,41 @@ enum ScreenshotMode {
             say("screen \(index): \(Int(screen.frame.width))x\(Int(screen.frame.height)), scale \(screen.backingScaleFactor), "
                 + "visible \(Int(visible.width))x\(Int(visible.height))")
         }
+    }
+
+    // MARK: What the menu bar binds
+
+    /// The key equivalents the menu bar actually holds, from AppKit rather than
+    /// from the source text — and how they compare with `ShortcutCatalog`,
+    /// which the logic check can only hold to the source.
+    @MainActor
+    private static func describeMenus() {
+        guard let menus = NSApp.mainMenu else {
+            say("menus: there is no main menu")
+            return
+        }
+        var bound = Set<String>()
+        for menu in menus.items {
+            for item in menu.submenu?.items ?? [] where !item.keyEquivalent.isEmpty {
+                let chord = keys(of: item)
+                bound.insert(chord)
+                say("menu \(menu.title) > \(item.title): \(chord)")
+            }
+        }
+        let listed = Set(ShortcutCatalog.all.filter { $0.source != .view }.flatMap(\.chords).map(\.display))
+        say("menus bind \(bound.count) keys; the catalog lists \(listed.count) outside views")
+        say("in the menus but not the catalog: \(bound.subtracting(listed).sorted())")
+        say("in the catalog but not the menus: \(listed.subtracting(bound).sorted())")
+    }
+
+    private static func keys(of item: NSMenuItem) -> String {
+        let mask = item.keyEquivalentModifierMask
+        var keys = ""
+        if mask.contains(.control) { keys += "⌃" }
+        if mask.contains(.option) { keys += "⌥" }
+        if mask.contains(.shift) { keys += "⇧" }
+        if mask.contains(.command) { keys += "⌘" }
+        return keys + item.keyEquivalent.uppercased()
     }
 
     // MARK: Driving the interface
