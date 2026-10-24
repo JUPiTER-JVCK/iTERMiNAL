@@ -230,7 +230,7 @@ enum ShortcutCatalog {
         ShortcutEntry("split.down", "Split down", [ShortcutChord("d", [shift, cmd])], in: .tabsAndPanes),
         ShortcutEntry("split.browser", "Split with browser", [ShortcutChord("b", [shift, cmd])], in: .tabsAndPanes),
         ShortcutEntry("pane.close", "Close pane", [ShortcutChord("w", [shift, cmd])], in: .tabsAndPanes),
-        ShortcutEntry("tab.close", "Close tab", [ShortcutChord("w", [option, cmd])], in: .tabsAndPanes),
+        ShortcutEntry("tab.close", "Close tab", [ShortcutChord("w", [control, cmd])], in: .tabsAndPanes),
 
         // MARK: Panels
         ShortcutEntry("dock.toggle", "Terminal dock", [ShortcutChord("j", cmd)], in: .panels,

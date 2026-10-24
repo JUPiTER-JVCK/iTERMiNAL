@@ -479,7 +479,7 @@ bind:
 | New workspace | ⇧⌘N |
 | Split right / down | ⌘D / ⇧⌘D |
 | Split with browser | ⇧⌘B |
-| Close pane / tab | ⇧⌘W / ⌥⌘W |
+| Close pane / tab | ⇧⌘W / ⌃⌘W |
 | Terminal dock | ⌘J |
 | Show / hide sidebar | ⌃⌘S |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |

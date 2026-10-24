@@ -2054,6 +2054,21 @@ do {
     let shadowed = all.filter { $0.source == .view }.flatMap(\.chords).filter { windowChords.contains($0) }
     check(shadowed.isEmpty, "a view shortcut hides behind a menu's: \(shadowed.map(\.display))")
 
+    // A chord the standard menus already hold cannot be ours. These are the ones
+    // the built app's menu bar listed — the Screenshots workflow logs every key
+    // equivalent AppKit holds — and an item of ours that wants one arrives with
+    // no key at all, so the shortcut silently does nothing. ⌥⌘W was "Close Tab"
+    // for as long as that existed, and File > Close All has it.
+    let standardMenuChords: [Chord] = [
+        Chord(",", .command), Chord("h", .command), Chord("h", [.option, .command]), Chord("q", .command),
+        Chord("w", .command), Chord("w", [.option, .command]), Chord("m", .command),
+        Chord("z", .command), Chord("z", [.shift, .command]), Chord("x", .command), Chord("c", .command),
+        Chord("v", .command), Chord("a", .command),
+    ]
+    let takenByMacOS = all.filter { $0.source == .bound }.flatMap(\.chords).filter { standardMenuChords.contains($0) }
+    check(takenByMacOS.isEmpty,
+          "a shortcut we bind is one a standard macOS menu item holds, so it arrives with no key: \(takenByMacOS.map(\.display))")
+
     // Search.
     func found(_ query: String) -> [String] { ShortcutCatalog.groups(matching: query).flatMap(\.entries).map(\.id) }
     check(found("split") == ["split.right", "split.down", "split.browser"], "a word finds what starts with it")

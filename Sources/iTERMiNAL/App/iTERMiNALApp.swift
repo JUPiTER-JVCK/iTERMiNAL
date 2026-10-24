@@ -171,10 +171,13 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
 
+            // Not ⌥⌘W: File > Close All holds that, and an item that asks for a
+            // key the standard menus already have is given none — this one had
+            // no shortcut at all until it moved.
             Button("Close Tab") {
                 WorkspaceStore.shared.closeSelectedTab()
             }
-            .keyboardShortcut("w", modifiers: [.command, .option])
+            .keyboardShortcut("w", modifiers: [.command, .control])
         }
 
         CommandMenu("Panels") {
