@@ -167,6 +167,7 @@ jobs:
             Sources/iTERMiNAL/HTTP/SiteExplorerCommands.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
+            Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

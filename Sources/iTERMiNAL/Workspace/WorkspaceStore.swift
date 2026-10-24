@@ -157,6 +157,10 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var rightPanelExpanded = false
     @Published private(set) var bottomDockOpen = false
     @Published var showCommandPalette = false
+    /// The Keyboard Shortcuts window. Opened with `showShortcuts()`, which
+    /// copes with a sheet that is still on its way out; set directly only to
+    /// close it.
+    @Published var showKeyboardShortcuts = false
     /// How many closed sessions the Recents list keeps. An entry pushed off
     /// the end takes its transcript with it, so anything that rebuilds this
     /// list has to respect the same cap.
@@ -796,6 +800,25 @@ final class WorkspaceStore: ObservableObject {
             focusedSessionID = tab.root.firstTerminal()?.id
         }
         EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
+    }
+
+    /// Opens the Keyboard Shortcuts window.
+    ///
+    /// Two sheets cannot be on one window at once, and a second asked for while
+    /// the first is closing is dropped. So when the command palette is up, or
+    /// something — the palette, a popover — has only just been dismissed to run
+    /// the action that called this (`afterPresentation`), the palette is closed
+    /// and the window follows once that has finished.
+    func showShortcuts(afterPresentation: Bool = false) {
+        let wait = afterPresentation || showCommandPalette
+        showCommandPalette = false
+        guard wait else {
+            showKeyboardShortcuts = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.showKeyboardShortcuts = true
+        }
     }
 
     /// Brings the composer forward and puts the caret in it — un-hiding and

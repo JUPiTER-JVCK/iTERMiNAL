@@ -859,7 +859,6 @@ private struct SidebarStatusRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var metrics = ProcessMetrics.shared
-    @State private var showShortcuts = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -895,20 +894,18 @@ private struct SidebarStatusRow: View {
                 Spacer()
 
                 Button {
-                    showShortcuts = true
+                    store.showShortcuts()
                 } label: {
                     Image(systemName: "questionmark.circle")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.textSecondary)
                 }
                 .buttonStyle(.plain)
-                .help("Keyboard shortcuts")
+                .help("Keyboard shortcuts (⌘/)")
+                .accessibilityLabel("Keyboard shortcuts")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-        }
-        .popover(isPresented: $showShortcuts, arrowEdge: .top) {
-            ShortcutsPopover()
         }
     }
 }
@@ -932,41 +929,5 @@ struct MetricReadout: View {
                 .monospacedDigit()
                 .foregroundStyle(theme.textPrimary)
         }
-    }
-}
-
-private struct ShortcutsPopover: View {
-    private let shortcuts: [(String, String)] = [
-        ("Command palette", "⌘K"),
-        ("New terminal tab", "⌘T"),
-        ("New workspace", "⇧⌘N"),
-        ("Split right / down", "⌘D / ⇧⌘D"),
-        ("Split with browser", "⇧⌘B"),
-        ("Close pane / tab", "⇧⌘W / ⌥⌘W"),
-        ("Terminal dock", "⌘J"),
-        ("Browser / Files panel", "⌥⌘B / ⌥⌘F"),
-        ("Focus composer", "⇧⌘R"),
-        ("Minimise composer", "⇧⌘M"),
-        ("Task manager", "⌥⌘T"),
-        ("Settings", "⌘,"),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Shortcuts")
-                .font(.system(size: 12, weight: .semibold))
-            ForEach(shortcuts, id: \.0) { shortcut in
-                HStack {
-                    Text(shortcut.0)
-                        .font(.system(size: 11))
-                    Spacer(minLength: 16)
-                    Text(shortcut.1)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(14)
-        .frame(width: 260)
     }
 }

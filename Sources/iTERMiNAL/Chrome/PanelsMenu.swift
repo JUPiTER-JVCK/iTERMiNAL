@@ -78,6 +78,17 @@ private struct PanelsMenuContent: View {
             )
 
             PanelsMenuRow(
+                icon: "keyboard",
+                title: "Keyboard shortcuts",
+                shortcut: "⌘/",
+                action: {
+                    dismiss()
+                    // The popover is still closing as this runs.
+                    store.showShortcuts(afterPresentation: true)
+                }
+            )
+
+            PanelsMenuRow(
                 icon: "gearshape",
                 title: "Settings…",
                 shortcut: "⌘,",

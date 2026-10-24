@@ -467,9 +467,14 @@ consults URLSession's delegate.
 
 ## Keyboard shortcuts
 
+**Help → Keyboard Shortcuts** (⌘/) lists every shortcut in a window you can
+search, and the same list is under Settings → Shortcuts. The ones the menus
+bind:
+
 | Action | Keys |
 | --- | --- |
-| Command palette | ⌘K |
+| Command palette | ⌘K or ⌘P |
+| Keyboard shortcuts | ⌘/ |
 | New terminal tab | ⌘T |
 | New workspace | ⇧⌘N |
 | Split right / down | ⌘D / ⇧⌘D |
@@ -480,10 +485,18 @@ consults URLSession's delegate.
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
+| Bigger / smaller text, actual size | ⌘+ / ⌘- / ⌘0 |
 | Focus composer | ⇧⌘R |
 | Minimise / expand composer | ⇧⌘M |
+| Explain the last output / suggest a fix | ⌥⌘E / ⌥⌘X |
 | Task manager | ⌥⌘T |
+| Send the request (HTTP client) | ⌘↩ |
 | Settings | ⌘, |
+
+The composer and the site explorer's prompt have keys of their own — ↑ ↓ for
+earlier commands, ⇥ to complete, ⌃R to search history — described under
+Features and listed in the window above. Some actions (Split with Files, Split
+with HTTP Client) have no shortcut; the command palette finds every action.
 
 ## Architecture
 

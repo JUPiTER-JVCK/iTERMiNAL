@@ -110,6 +110,15 @@ struct AppCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .control])
         }
 
+        // Replaces "iTERMiNAL Help", which has no help book behind it and only
+        // ever showed an error.
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                WorkspaceStore.shared.showShortcuts()
+            }
+            .keyboardShortcut("/", modifiers: .command)
+        }
+
         CommandMenu("Terminal") {
             // Bound to the same 9...24 range the Appearance slider uses, so
             // the two can't disagree about what a legal size is.

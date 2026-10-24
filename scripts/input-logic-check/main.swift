@@ -2012,5 +2012,155 @@ do {
     check(complete("cd \"bl") == nil, "a quoted word is left alone")
 }
 
+// MARK: Keyboard shortcuts
+
+// The catalog is only worth showing if it is complete, and it cannot see the
+// menus. So this reads them: every `.keyboardShortcut(` in the app's sources is
+// parsed into a chord, and the catalog has to hold exactly those (the entries
+// marked `.bound`), no more and no fewer. The README's table is held to the
+// same list.
+do {
+    typealias Chord = ShortcutChord
+    let all = ShortcutCatalog.all
+
+    // How a chord prints and reads out.
+    check(Chord("n", [.shift, .command]).display == "⇧⌘N", "shift-command-N prints as ⇧⌘N")
+    check(Chord("w", [.command, .option]).display == "⌥⌘W", "modifiers print in macOS's order, however they were listed")
+    check(Chord("s", [.command, .control]).display == "⌃⌘S", "control comes first")
+    check(Chord("+", .command).display == "⌘+" && Chord("/", .command).display == "⌘/" && Chord(",", .command).display == "⌘,",
+          "punctuation keys print as they are")
+    check(Chord(.return, .command).display == "⌘↩" && Chord(.tab).display == "⇥" && Chord(.escape).display == "esc"
+          && Chord(.up).display == "↑" && Chord(.right).display == "→", "named keys print as their symbols")
+    check(Chord("N", .command) == Chord("n", .command), "a capital is the same key")
+    check(Chord("n", [.shift, .command]).words == ["Shift", "Command", "N"] && Chord(.return, .command).words == ["Command", "Return"]
+          && Chord("-", .command).words == ["Command", "Minus"], "a chord reads out in words")
+    check(Chord("d", [.shift, .command]).symbols == ["⇧", "⌘", "D"], "a chord splits into one cap per key")
+
+    // The list is well formed.
+    let ids = all.map(\.id)
+    check(Set(ids).count == ids.count && !ids.contains(""), "every entry has its own id")
+    check(all.allSatisfy { !$0.title.isEmpty && !$0.chords.isEmpty }, "every entry has a title and at least one chord")
+    check(all.allSatisfy { Set($0.chords).count == $0.chords.count }, "no entry lists the same chord twice")
+    check(ShortcutSection.allCases.allSatisfy { section in all.contains { $0.section == section } }, "every section has something in it")
+    check(ShortcutCatalog.groups(matching: "").map(\.section) == ShortcutSection.allCases, "sections come in their declared order")
+    check(ShortcutCatalog.groups(matching: "").flatMap(\.entries).count == all.count, "an empty query shows everything")
+
+    // What a menu binds wins wherever it is bound, so no two may share a chord,
+    // and a key a view handles for itself must not be one a menu already owns.
+    let windowWide = all.filter { $0.source != .view }
+    let windowChords = windowWide.flatMap(\.chords)
+    check(Set(windowChords).count == windowChords.count,
+          "no two menu or system shortcuts share a chord: \(Dictionary(grouping: windowChords, by: \.display).filter { $0.value.count > 1 }.keys.sorted())")
+    let shadowed = all.filter { $0.source == .view }.flatMap(\.chords).filter { windowChords.contains($0) }
+    check(shadowed.isEmpty, "a view shortcut hides behind a menu's: \(shadowed.map(\.display))")
+
+    // Search.
+    func found(_ query: String) -> [String] { ShortcutCatalog.groups(matching: query).flatMap(\.entries).map(\.id) }
+    check(found("split") == ["split.right", "split.down", "split.browser"], "a word finds what starts with it")
+    check(found("SPLIT") == found("split") && found("  split  ") == found("split"), "case and surrounding space do not matter")
+    check(found("shift split") == ["split.down", "split.browser"], "every word has to match")
+    check(found("⌘d") == ["split.right", "split.down"] && found("⇧⌘d") == ["split.down"], "printed keys find the chords they are in")
+    check(found("zzz").isEmpty, "nothing matches nonsense")
+    check(found("term").contains("tab.new") && found("term").contains("font.bigger"), "a word finds the section it is in")
+    check(found("enter").contains("composer.run") && found("enter").contains("http.send"), "enter finds Return")
+    check(found("alt") == all.filter { $0.chords.contains { $0.modifiers.contains(.option) } }.map(\.id), "alt finds exactly the ⌥ shortcuts")
+    check(found("ctrl") == all.filter { $0.chords.contains { $0.modifiers.contains(.control) } }.map(\.id), "ctrl finds exactly the ⌃ shortcuts")
+    check(found("w").contains("pane.close") && !found("w").contains("sidebar.toggle"),
+          "a letter finds the key and the words that start with it, not \"show\", which only has it inside")
+
+    // Where the sources are, from this file's own path or the working directory.
+    let fileManager = FileManager.default
+    let marker = "Sources/iTERMiNAL/App/iTERMiNALApp.swift"
+    let fromHere = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let root = [fromHere, URL(fileURLWithPath: fileManager.currentDirectoryPath)]
+        .first { fileManager.fileExists(atPath: $0.appendingPathComponent(marker).path) }
+    check(root != nil, "the app's sources can be found to check the shortcuts against")
+
+    if let root {
+        // Every `.keyboardShortcut(` in the app, as a chord.
+        let namedKeys: [String: Chord.Key] = [
+            "return": .return, "tab": .tab, "escape": .escape,
+            "upArrow": .up, "downArrow": .down, "leftArrow": .left, "rightArrow": .right,
+        ]
+        let modifierNames: [String: Chord.Modifiers] = [
+            "command": .command, "shift": .shift, "option": .option, "control": .control,
+        ]
+        let chordCall = try! NSRegularExpression(
+            pattern: #"\.keyboardShortcut\(\s*(?:"([^"\\])"|\.([A-Za-z]+))\s*,\s*modifiers:\s*(\[[^\]]*\]|\.[A-Za-z]+)\s*\)"#)
+        // `.cancelAction` and `.defaultAction` are Esc and Return for a dialog's
+        // buttons: not a chord anyone needs listed.
+        let dialogCall = try! NSRegularExpression(pattern: #"\.keyboardShortcut\(\s*\.(?:cancelAction|defaultAction)\s*\)"#)
+
+        func chords(inSource source: String) -> (chords: [Chord], calls: Int, understood: Int) {
+            // Comments mention the call without making it.
+            let code = source.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+                if let comment = line.range(of: "//") { return String(line[..<comment.lowerBound]) }
+                return String(line)
+            }.joined(separator: "\n")
+            let text = code as NSString
+            let whole = NSRange(location: 0, length: text.length)
+            var found: [Chord] = []
+            var bad = 0
+            for match in chordCall.matches(in: code, range: whole) {
+                var modifiers: Chord.Modifiers = []
+                let list = text.substring(with: match.range(at: 3))
+                for token in list.split(whereSeparator: { !$0.isLetter }) {
+                    if let known = modifierNames[String(token)] { modifiers.insert(known) } else { bad += 1 }
+                }
+                if match.range(at: 1).location != NSNotFound, let character = text.substring(with: match.range(at: 1)).first {
+                    found.append(Chord(character, modifiers))
+                } else if let key = namedKeys[text.substring(with: match.range(at: 2))] {
+                    found.append(Chord(key, modifiers))
+                } else {
+                    bad += 1
+                }
+            }
+            let calls = code.components(separatedBy: ".keyboardShortcut(").count - 1
+            let understood = bad == 0 ? found.count + dialogCall.numberOfMatches(in: code, range: whole) : -1
+            return (found, calls, understood)
+        }
+
+        var bound: [Chord] = []
+        var misread: [String] = []
+        let sources = root.appendingPathComponent("Sources/iTERMiNAL")
+        if let walker = fileManager.enumerator(at: sources, includingPropertiesForKeys: nil) {
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                guard let source = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                let result = chords(inSource: source)
+                bound.append(contentsOf: result.chords)
+                if result.calls != result.understood { misread.append(file.lastPathComponent) }
+            }
+        }
+        check(misread.isEmpty, "a .keyboardShortcut( call this check cannot read in \(misread.sorted()) — teach the check about it, or list the shortcut by hand")
+        check(!bound.isEmpty, "the app's shortcuts were found")
+
+        let listed = Set(all.filter { $0.source == .bound }.flatMap(\.chords))
+        let inCode = Set(bound)
+        check(inCode.count == bound.count, "the same chord is bound twice in the code: \(Dictionary(grouping: bound, by: \.display).filter { $0.value.count > 1 }.keys.sorted())")
+        check(inCode.subtracting(listed).isEmpty,
+              "bound in the code but missing from ShortcutCatalog: \(inCode.subtracting(listed).map(\.display).sorted())")
+        check(listed.subtracting(inCode).isEmpty,
+              "marked .bound in ShortcutCatalog but not bound in the code: \(listed.subtracting(inCode).map(\.display).sorted())")
+
+        // The README's table says the same.
+        if let readme = try? String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8),
+           let start = readme.range(of: "\n## Keyboard shortcuts\n") {
+            let rest = readme[start.upperBound...]
+            let section = String(rest[..<(rest.range(of: "\n## ")?.lowerBound ?? rest.endIndex)])
+            let known = Set(all.flatMap(\.chords).map(\.display))
+            let printed = try! NSRegularExpression(pattern: #"[⌃⌥⇧⌘]+(?:↩|[A-Za-z0-9+\-/,])"#)
+            let text = section as NSString
+            let mentioned = Set(printed.matches(in: section, range: NSRange(location: 0, length: text.length))
+                .map { text.substring(with: $0.range) })
+            check(Set(all.filter { $0.source == .bound }.flatMap(\.chords).map(\.display)).subtracting(mentioned).isEmpty,
+                  "the README's shortcut table is missing: \(Set(all.filter { $0.source == .bound }.flatMap(\.chords).map(\.display)).subtracting(mentioned).sorted())")
+            check(mentioned.subtracting(known).isEmpty,
+                  "the README's shortcut table lists keys the app does not have: \(mentioned.subtracting(known).sorted())")
+        } else {
+            check(false, "the README has a Keyboard shortcuts section to check")
+        }
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

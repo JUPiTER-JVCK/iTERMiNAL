@@ -75,40 +75,33 @@ struct BackupSettingsView: View {
     }
 }
 
+/// Everything the keyboard does, from the same catalog as the Keyboard
+/// Shortcuts window (Help menu, ⌘/), which adds a search box.
 struct ShortcutsSettingsView: View {
-    private let shortcuts: [(action: String, keys: String)] = [
-        ("Command palette", "⌘K"),
-        ("New terminal tab", "⌘T"),
-        ("New workspace", "⇧⌘N"),
-        ("Split right", "⌘D"),
-        ("Split down", "⇧⌘D"),
-        ("Split with browser", "⇧⌘B"),
-        ("Close pane", "⇧⌘W"),
-        ("Close tab", "⌥⌘W"),
-        ("Toggle terminal dock", "⌘J"),
-        ("Toggle sidebar", "⌃⌘S"),
-        ("Toggle browser panel", "⌥⌘B"),
-        ("Toggle files panel", "⌥⌘F"),
-        ("Toggle notes panel", "⌥⌘N"),
-        ("Toggle HTTP Client panel", "⌥⌘R"),
-        ("Toggle superfile", "⌥⌘S"),
-        ("Toggle btop", "⌥⌘P"),
-        ("Settings", "⌘,"),
-    ]
-
     var body: some View {
         Form {
-            Section("Keyboard shortcuts") {
-                ForEach(shortcuts, id: \.action) { shortcut in
-                    HStack {
-                        Text(shortcut.action)
-                        Spacer()
-                        Text(shortcut.keys)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
+            ForEach(ShortcutCatalog.groups(matching: "")) { group in
+                Section(group.section.title) {
+                    ForEach(group.entries) { entry in
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.title)
+                                if let detail = entry.detail {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 12)
+                            ShortcutKeys(chords: entry.chords)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 }
-                Text("Custom key bindings are on the roadmap.")
+            }
+
+            Section {
+                Text("The Help menu shows this list in a window you can search. Custom key bindings are on the roadmap.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
