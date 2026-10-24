@@ -11,6 +11,13 @@ name: Screenshots
 # appearance come from main, http-request, http-explore, splits and
 # settings-appearance).
 on:
+  # TEMPORARY, to be removed before this merges: build and run the app on
+  # pushes to this branch, which has no pull request to do it.
+  push:
+    branches: [claude/macos-terminal-design-planning-rwuvtw]
+    paths:
+      - Sources/iTERMiNAL/App/ScreenshotMode.swift
+      - .github/workflows/screenshots.yml
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
   workflow_dispatch:
