@@ -363,19 +363,36 @@ enum ScreenshotMode {
     /// The key equivalents the menu bar actually holds, from AppKit rather than
     /// from the source text — and how they compare with `ShortcutCatalog`,
     /// which the logic check can only hold to the source.
+    ///
+    /// Every item of the menus this app defines is listed, with or without a
+    /// key: a shortcut the code binds can still arrive with none, and the
+    /// absence is the finding. A chord two items want is reported too.
     @MainActor
     private static func describeMenus() {
         guard let menus = NSApp.mainMenu else {
             say("menus: there is no main menu")
             return
         }
+        let ours: Set<String> = ["View", "Terminal", "Panels", "Help"]
         var bound = Set<String>()
+        var owners: [String: [String]] = [:]
         for menu in menus.items {
-            for item in menu.submenu?.items ?? [] where !item.keyEquivalent.isEmpty {
-                let chord = keys(of: item)
-                bound.insert(chord)
-                say("menu \(menu.title) > \(item.title): \(chord)")
+            for item in menu.submenu?.items ?? [] where !item.isSeparatorItem {
+                let name = "\(menu.title) > \(item.title)"
+                let hasKey = !item.keyEquivalent.isEmpty
+                if hasKey {
+                    let chord = keys(of: item)
+                    bound.insert(chord)
+                    owners[chord, default: []].append(name)
+                }
+                if hasKey || ours.contains(menu.title) {
+                    let notes = (item.isAlternate ? " [alternate]" : "") + (item.isEnabled ? "" : " [disabled]")
+                    say("menu \(name): \(hasKey ? keys(of: item) : "(no key)")\(notes)")
+                }
             }
+        }
+        for (chord, names) in owners.sorted(by: { $0.key < $1.key }) where names.count > 1 {
+            say("shared key \(chord): \(names)")
         }
         let listed = Set(ShortcutCatalog.all.filter { $0.source != .view }.flatMap(\.chords).map(\.display))
         say("menus bind \(bound.count) keys; the catalog lists \(listed.count) outside views")
