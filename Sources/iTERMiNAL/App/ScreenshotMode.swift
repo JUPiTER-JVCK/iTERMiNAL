@@ -376,6 +376,7 @@ enum ScreenshotMode {
         let ours: Set<String> = ["View", "Terminal", "Panels", "Help"]
         var bound = Set<String>()
         var owners: [String: [String]] = [:]
+        var keyless: [String] = []
         for menu in menus.items {
             for item in menu.submenu?.items ?? [] where !item.isSeparatorItem {
                 let name = "\(menu.title) > \(item.title)"
@@ -385,6 +386,7 @@ enum ScreenshotMode {
                     bound.insert(chord)
                     owners[chord, default: []].append(name)
                 }
+                if !hasKey, ours.contains(menu.title) { keyless.append(item.title) }
                 if hasKey || ours.contains(menu.title) {
                     let notes = (item.isAlternate ? " [alternate]" : "") + (item.isEnabled ? "" : " [disabled]")
                     say("menu \(name): \(hasKey ? keys(of: item) : "(no key)")\(notes)")
@@ -394,6 +396,9 @@ enum ScreenshotMode {
         for (chord, names) in owners.sorted(by: { $0.key < $1.key }) where names.count > 1 {
             say("shared key \(chord): \(names)")
         }
+        // The two splits are meant to have none; anything else here is a
+        // shortcut the code binds that the menu bar did not keep.
+        say("items of ours with no key: \(keyless)")
         let listed = Set(ShortcutCatalog.all.filter { $0.source != .view }.flatMap(\.chords).map(\.display))
         say("menus bind \(bound.count) keys; the catalog lists \(listed.count) outside views")
         say("in the menus but not the catalog: \(bound.subtracting(listed).sorted())")
