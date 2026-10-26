@@ -34,6 +34,32 @@ enum DownloadPolicy {
         return nil
     }
 
+    /// The `Referer` to send when fetching `target` because the page at `page`
+    /// named it — what a browser sends by default: the whole page address to the
+    /// same site, only the site's own address to another, and nothing when the
+    /// fetch would go from a secure page to an insecure one. Credentials and the
+    /// fragment are never included. Some hosts refuse an image without one.
+    static func referer(page: String, target: String) -> String? {
+        guard var pageComponents = URLComponents(string: page), let pageHost = pageComponents.host?.lowercased(),
+              let pageScheme = pageComponents.scheme?.lowercased(),
+              let targetComponents = URLComponents(string: target), let targetHost = targetComponents.host?.lowercased(),
+              let targetScheme = targetComponents.scheme?.lowercased() else { return nil }
+        if pageScheme == "https", targetScheme != "https" { return nil }
+        pageComponents.user = nil
+        pageComponents.password = nil
+        pageComponents.fragment = nil
+        func port(_ components: URLComponents, scheme: String) -> Int { components.port ?? (scheme == "https" ? 443 : 80) }
+        let sameOrigin = pageScheme == targetScheme && pageHost == targetHost
+            && port(pageComponents, scheme: pageScheme) == port(targetComponents, scheme: targetScheme)
+        if sameOrigin { return pageComponents.string }
+        var origin = URLComponents()
+        origin.scheme = pageScheme
+        origin.host = pageHost
+        origin.port = pageComponents.port
+        origin.path = "/"
+        return origin.string
+    }
+
     /// Whether a host is this Mac, or on a network that is not the internet:
     /// loopback, private, link-local and unspecified addresses, and names that
     /// only mean something locally.

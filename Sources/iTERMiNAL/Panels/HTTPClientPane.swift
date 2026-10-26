@@ -7,6 +7,12 @@ enum HTTPPaneMode: String, CaseIterable {
     case request, explore
 }
 
+/// What the response area is showing: the body as it came, or the response read
+/// into lists and tables.
+enum HTTPResponseTab: String, CaseIterable {
+    case body, extract
+}
+
 /// One request/response pane: the fields that make up a request, what came
 /// back, and history of what was sent before. Used both as a split-pane
 /// leaf and as the right-hand sliding panel — the same view, the same way
@@ -41,10 +47,15 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     @Published var headerFields: [HTTPHeaderField] = [HTTPHeaderField(name: "", value: "")]
     @Published var bodyText: String = ""
     @Published var mode: HTTPPaneMode = .request
+    @Published var responseTab: HTTPResponseTab = .body
 
     /// The command-line site explorer. Not part of what is saved with a
     /// layout: a map is rebuilt by asking, never by reopening the app.
     let explorer = SiteExplorerModel()
+
+    /// The response read into lists, tables and queries (the Extract tab).
+    /// Like the explorer, it is rebuilt by asking and is not saved with a layout.
+    let extraction = PageExtractionModel()
 
     @Published private(set) var isSending = false
     @Published private(set) var lastResponse: HTTPResponseSummary?
@@ -78,6 +89,18 @@ final class HTTPClientModel: ObservableObject, Identifiable {
             self.method = .get
             self.urlText = url
             self.mode = .request
+        }
+        extraction.openInBrowser = { address in
+            WorkspaceStore.shared.openLinkFromTerminal(address)
+        }
+        // A row's Load as Request / Fetch: the one way from a page's links to the
+        // next page, and a person's click each time.
+        extraction.loadRequest = { [weak self] address, send in
+            guard let self else { return }
+            self.method = .get
+            self.urlText = address
+            self.mode = .request
+            if send { self.send(settings: AppSettings.shared) }
         }
     }
 
@@ -113,6 +136,7 @@ final class HTTPClientModel: ObservableObject, Identifiable {
                 guard !Task.isCancelled else { return }
                 self.lastResponse = response
                 self.lastFormatted = formatted
+                self.extraction.attach(response)
                 // A page fetched here counts as one the person fetched: if it
                 // is on the site being explored, its links join the map.
                 self.explorer.recordDiscovered(from: response, settings: settings)

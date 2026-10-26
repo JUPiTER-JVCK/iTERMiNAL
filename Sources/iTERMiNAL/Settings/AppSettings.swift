@@ -243,6 +243,13 @@ final class AppSettings: ObservableObject {
     /// hand; it never fetches a link. Off leaves the map to robots.txt and the
     /// sitemaps it declares.
     @Published var httpRecordDiscoveredLinks: Bool { didSet { defaults.set(httpRecordDiscoveredLinks, forKey: "httpRecordDiscoveredLinks") } }
+    /// Where files saved from a page go, when it is not the default
+    /// (Downloads/iTERMiNAL). A path on this Mac, so it is left out of exported
+    /// snapshots.
+    @Published var httpDownloadFolder: String { didSet { defaults.set(httpDownloadFolder, forKey: "httpDownloadFolder") } }
+    /// The largest single file a download will take, in megabytes. A file is
+    /// stopped the moment it passes this, before the rest arrives.
+    @Published var httpMaxDownloadMB: Int { didSet { defaults.set(httpMaxDownloadMB, forKey: "httpMaxDownloadMB") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -345,6 +352,8 @@ final class AppSettings: ObservableObject {
         httpFollowRedirects = defaults.object(forKey: "httpFollowRedirects") as? Bool ?? true
         httpMaxResponseBytes = defaults.object(forKey: "httpMaxResponseBytes") as? Int ?? 10_000_000
         httpRecordDiscoveredLinks = defaults.object(forKey: "httpRecordDiscoveredLinks") as? Bool ?? true
+        httpDownloadFolder = defaults.string(forKey: "httpDownloadFolder") ?? ""
+        httpMaxDownloadMB = defaults.object(forKey: "httpMaxDownloadMB") as? Int ?? 250
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -569,6 +578,8 @@ final class AppSettings: ObservableObject {
         httpFollowRedirects = true
         httpMaxResponseBytes = 10_000_000
         httpRecordDiscoveredLinks = true
+        httpDownloadFolder = ""
+        httpMaxDownloadMB = 250
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

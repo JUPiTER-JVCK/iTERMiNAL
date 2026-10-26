@@ -67,6 +67,9 @@ struct PreferencesArchive: Codable {
     var httpFollowRedirects: Bool?
     var httpMaxResponseBytes: Int?
     var httpRecordDiscoveredLinks: Bool?
+    /// The largest file a download takes. The folder they go in is a path on
+    /// one Mac, so it is not carried.
+    var httpMaxDownloadMB: Int?
     /// Coloured command output. Optional: archives written before it existed
     /// still decode, and leave the setting as it is.
     var colorizeOutput: Bool?
@@ -118,6 +121,7 @@ struct PreferencesArchive: Codable {
         httpFollowRedirects = settings.httpFollowRedirects
         httpMaxResponseBytes = settings.httpMaxResponseBytes
         httpRecordDiscoveredLinks = settings.httpRecordDiscoveredLinks
+        httpMaxDownloadMB = settings.httpMaxDownloadMB
         colorizeOutput = settings.colorizeOutput
         colorizeListings = settings.colorizeListings
         colorizeManPages = settings.colorizeManPages
@@ -198,6 +202,7 @@ struct PreferencesArchive: Codable {
         if let httpFollowRedirects { settings.httpFollowRedirects = httpFollowRedirects }
         if let httpMaxResponseBytes { settings.httpMaxResponseBytes = httpMaxResponseBytes }
         if let httpRecordDiscoveredLinks { settings.httpRecordDiscoveredLinks = httpRecordDiscoveredLinks }
+        if let httpMaxDownloadMB, [25, 100, 250, 1000].contains(httpMaxDownloadMB) { settings.httpMaxDownloadMB = httpMaxDownloadMB }
         if let colorizeOutput { settings.colorizeOutput = colorizeOutput }
         if let colorizeListings { settings.colorizeListings = colorizeListings }
         if let colorizeManPages { settings.colorizeManPages = colorizeManPages }

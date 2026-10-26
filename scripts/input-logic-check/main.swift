@@ -2748,6 +2748,11 @@ do {
     check(plan.hosts == ["a.example", "b.example"], "the hosts, most files first")
     check(DownloadPlan.make(urls: (0..<600).map { "https://a.example/\($0).png" }, pageURL: "https://x.example/").items.count == DownloadPlan.maxItems
             && DownloadPlan.make(urls: (0..<600).map { "https://a.example/\($0).png" }, pageURL: "https://x.example/").overLimit == 100, "a batch is capped, and says how many it left out")
+    check(DownloadPolicy.referer(page: "https://a.example/x?token=1#frag", target: "https://a.example/i.png") == "https://a.example/x?token=1", "the same site is told the whole page, minus the fragment")
+    check(DownloadPolicy.referer(page: "https://a.example/x?token=1", target: "https://cdn.example.net/i.png") == "https://a.example/", "another site is told only the site")
+    check(DownloadPolicy.referer(page: "https://u:p@a.example:8443/x#f", target: "https://a.example:8443/i.png") == "https://a.example:8443/x", "credentials never go, and a port is part of the site")
+    check(DownloadPolicy.referer(page: "https://a.example/x", target: "https://a.example:444/i.png") == "https://a.example/", "a different port is a different site")
+    check(DownloadPolicy.referer(page: "https://a.example/x", target: "http://127.0.0.1/i.png") == nil && DownloadPolicy.referer(page: "not a url", target: "https://a.example/") == nil, "nothing from a secure page to an insecure one, or from a page that is not an address")
 }
 
 // MARK: Keyboard shortcuts
