@@ -12,7 +12,8 @@ struct RemoteStep: Equatable {
 enum RemoteAction: Equatable {
     case tryAgain
     /// An `ssh` session to the host, in a tab. A real terminal, so it can ask
-    /// for the password that the file browser cannot.
+    /// for the password that the file browser cannot — and the file browser
+    /// then uses the connection that tab leaves open (`SSHControlSocket`).
     case signInInTerminal
     /// A new tab on this Mac with `command` typed and not run.
     case runInLocalTerminal(label: String, command: String)
@@ -35,8 +36,9 @@ enum RemoteAction: Equatable {
 /// `user@host: Permission denied (publickey,password,keyboard-interactive).`
 /// says what the server did and nothing about what to do next — and the one
 /// thing a person most needs to know is not in it at all: the file browser
-/// runs `sftp` with no keyboard (`BatchMode=yes`), so a host that wants a
-/// password can never be signed in to from here, however right the password.
+/// runs `sftp` with no keyboard (`BatchMode=yes`), so it can't type a password
+/// however right the password. What it can do is use a connection a terminal
+/// tab has signed in and left open, so that is what the steps lead to.
 ///
 /// This reads that text and says it plainly. It only ever *describes*; the
 /// connection it was made for is kept so the wording and the commands name the
@@ -199,17 +201,18 @@ struct RemoteProblem: Equatable {
         switch kind {
         case .signInRefused(let methods):
             let offered = Self.describe(methods)
-            let cannot = "The file browser can only sign in with a key: it has no way to ask you for a password, "
-                + "and iTERMiNAL never handles one."
+            let cannot = "The file browser can't type a password — iTERMiNAL never handles one — so it signs in "
+                + "with a key, or through a terminal tab you have signed in to."
             if methods.isEmpty {
                 return "\(host) answered but didn't accept the sign-in. \(cannot)"
             }
             if methods.contains("publickey") {
                 let others = methods.filter { $0 != "publickey" }
-                let also = others.isEmpty ? "" : " It also allows \(Self.describe(others)), which the file browser can't use."
+                let also = others.isEmpty ? "" : " It also allows \(Self.describe(others)), which the file browser can't ask for."
                 return "\(host) answered, but none of the keys this Mac offered is installed there.\(also) \(cannot)"
             }
-            return "\(host) only accepts \(offered), and the file browser can only sign in with a key."
+            return "\(host) only accepts \(offered), and the file browser can't type one — iTERMiNAL never handles "
+                + "passwords. It can use a terminal tab you have signed in to, though."
         case .tooManyAuthFailures:
             return "ssh offers every key in your agent one after another, and \(host) hung up before it reached "
                 + "the right one — servers allow only a few attempts."
@@ -259,11 +262,21 @@ struct RemoteProblem: Equatable {
     var steps: [RemoteStep] {
         switch kind {
         case .signInRefused(let methods):
+            let signIn = RemoteStep(
+                text: "Press Sign In in a Terminal and enter the password there. The file browser then uses that tab's "
+                    + "connection: the password goes to ssh in the tab, never to iTERMiNAL.",
+                command: nil
+            )
             if !methods.isEmpty, !methods.contains("publickey") {
                 return [
-                    RemoteStep(text: "Use a terminal session for this host instead — it can ask for the password.", command: nil),
+                    signIn,
                     RemoteStep(
-                        text: "To browse files here, ask whoever runs \(host) to allow key sign-in (PubkeyAuthentication yes).",
+                        text: "Keep the tab open while you browse. Closing it closes the connection the file browser is using.",
+                        command: nil
+                    ),
+                    RemoteStep(text: "Then press Try Again.", command: nil),
+                    RemoteStep(
+                        text: "Or ask whoever runs \(host) to allow key sign-in (PubkeyAuthentication yes), which needs no open tab.",
                         command: nil
                     ),
                 ]
@@ -281,6 +294,11 @@ struct RemoteProblem: Equatable {
                 RemoteStep(
                     text: "A key with a passphrase has to be in the agent first, so nothing needs to ask for it:",
                     command: "ssh-add --apple-use-keychain \(Self.identityPath(for: connection))"
+                ),
+                RemoteStep(
+                    text: "Or sign in with the password instead: press Sign In in a Terminal and enter it there. The file "
+                        + "browser uses that tab's connection for as long as the tab stays open.",
+                    command: nil
                 ),
                 RemoteStep(text: "Then press Try Again.", command: nil),
             ]

@@ -135,7 +135,10 @@ final class ScreenshotRun {
         await scene("terminal-colors") { await self.terminalColors() }
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
+        await scene("extract-crawl") { await self.siteCrawl() }
+        await scene("extract-ask") { await self.askAboutPage() }
         await scene("sftp-problems") { await self.remoteProblems() }
+        await scene("sftp-shared") { await self.sharedSignIn() }
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
@@ -411,7 +414,26 @@ final class ScreenshotRun {
         let content = page.images.rows.filter { $0.canDownload && $0.url != nil && $0.cells[3] != "icon" && !($0.url ?? "").hasPrefix("http://cdn.") }
         extraction.selection = Set(content.prefix(3).map(\.id))
         await pause(0.8)
+
+        // Previews start off, and are asked for with the footer's toggle. The
+        // sample site's pictures are real ones; the banner it names over plain
+        // http is not fetched, and the log says why.
+        say("extract: previews are off to begin with: \(!settings.httpImagePreviews), \(extraction.previews.thumbnails.count) requested")
+        settings.httpImagePreviews = true
+        _ = await ScreenshotMode.until(timeout: 30) {
+            let states = extraction.previews.thumbnails.values
+            return !states.isEmpty && !states.contains { if case .loading = $0 { return true } else { return false } }
+        }
+        await pause(0.8)
+        for (address, thumbnail) in extraction.previews.thumbnails.sorted(by: { $0.key < $1.key }) {
+            switch thumbnail {
+            case .ready(let image): say("extract: preview \(address): ready, \(Int(image.size.width)) × \(Int(image.size.height))")
+            case .failed(let reason): say("extract: preview \(address): \(reason)")
+            case .loading: say("extract: preview \(address): still loading")
+            }
+        }
         everything = capture("extract-images") && everything
+        settings.httpImagePreviews = false
 
         // The reading part, as Markdown.
         extraction.select(.text)
@@ -551,6 +573,171 @@ final class ScreenshotRun {
         return feedTaken
     }
 
+    // MARK: The crawl
+
+    /// Lines in the sample site's request log, for what a stretch of the run
+    /// asked of it.
+    private func requestLog() -> [String] {
+        guard let fixtureLog, let text = try? String(contentsOfFile: fixtureLog, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    /// A crawl of the sample site from its article, with the limits the sheet
+    /// starts from. The pictures matter less than what the site saw: robots.txt
+    /// asked for before any page, the one page it asks crawlers to leave alone
+    /// never requested, and the pages one at a time.
+    private func siteCrawl() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.method = .get
+        model.urlText = "\(Self.site)/blog/ledger-notes"
+        model.headerFields = [HTTPHeaderField(name: "Accept", value: "text/html")]
+        model.responseTab = .extract
+        model.send(settings: settings)
+        _ = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+        let read = await ScreenshotMode.until(timeout: 20) {
+            extraction.extraction?.page != nil && extraction.pageURL.hasSuffix("/blog/ledger-notes")
+        }
+        guard read else {
+            say("crawl: the page was not read")
+            closePanels()
+            return false
+        }
+        ScreenshotMode.giveResponseRoom(in: window)
+        ScreenshotMode.giveResponseWidth(in: window)
+        await pause(1.0)
+
+        // The sheet first: what the crawl will do, before it has done anything.
+        let before = requestLog().count
+        extraction.proposeCrawl(settings: settings)
+        await pause(1.5)
+        guard let proposal = extraction.crawlProposal else {
+            say("crawl: no proposal was made")
+            closePanels()
+            return false
+        }
+        say("crawl: proposal for \(proposal.host): \(proposal.candidates) addresses on the page would be queued; "
+            + "up to \(proposal.limits.maxPages) pages, \(proposal.limits.maxDepth) deep, \(proposal.limits.delay) s apart; "
+            + "stays under \(proposal.directory) if asked; refusal \(proposal.refusal.debugDescription)")
+        say("crawl: requests the site saw while the sheet was open: \(requestLog().count - before)")
+        var taken = false
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-crawl-confirm", in: directory)
+        } else {
+            say("crawl: the sheet did not appear")
+        }
+
+        let crawler = extraction.crawler
+        let started = requestLog().count
+        extraction.confirmCrawl(limits: proposal.limits, settings: settings)
+        let finished = await ScreenshotMode.until(timeout: 120) { !crawler.isActive && !crawler.isIdle }
+        say("crawl: finished \(finished): \(crawler.phase)")
+        say("crawl: \(crawler.robotsNote)")
+        for page in crawler.results.pages {
+            say("crawl: page \(page.id) depth \(page.depth) status \(page.status) \(page.url)"
+                + (page.note.isEmpty ? "" : " — \(page.note)") + (page.foundOn.isEmpty ? "" : " (found on \(page.foundOn))"))
+        }
+        say("crawl: kept \(crawler.results.links.rows.count) links, \(crawler.results.images.rows.count) images, "
+            + "\(crawler.results.media.rows.count) media, \(crawler.results.files.rows.count) files")
+        let seen = requestLog().dropFirst(started)
+        say("crawl: the site saw \(seen.count) requests: \(seen.map { $0.split(separator: " ").dropFirst().prefix(2).joined(separator: " ") })")
+        await pause(1.0)
+        taken = capture("extract-crawl") && taken
+
+        crawler.list = .links
+        extraction.selection = []
+        await pause(0.8)
+        taken = capture("extract-crawl-links") && taken
+        closePanels()
+        return taken
+    }
+
+    // MARK: Asking the assistant about a page
+
+    /// The sample article read into rows by the stand-in for a model the
+    /// assistant is pointed at. What the sheet would send is logged whole, and so
+    /// is what each cell of the answer would be allowed to do.
+    private func askAboutPage() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.method = .get
+        model.urlText = "\(Self.site)/blog/ledger-notes"
+        model.headerFields = [HTTPHeaderField(name: "Accept", value: "text/html")]
+        model.responseTab = .extract
+        model.send(settings: settings)
+        _ = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+        let read = await ScreenshotMode.until(timeout: 20) {
+            extraction.extraction?.page != nil && extraction.pageURL.hasSuffix("/blog/ledger-notes")
+        }
+        guard read else {
+            say("ask: the page was not read")
+            closePanels()
+            return false
+        }
+        ScreenshotMode.giveResponseRoom(in: window)
+        ScreenshotMode.giveResponseWidth(in: window)
+        await pause(1.0)
+
+        let question = "The revenue and costs for each region"
+        say("ask: the assistant is set up: \(AssistantServiceProvider.current.isConfigured); it goes to \(AssistantDestination.describe(baseURL: settings.assistantBaseURL))")
+        extraction.proposeAsk(settings: settings, question: question)
+        await pause(1.5)
+        guard let proposal = extraction.askProposal else {
+            say("ask: no sheet was opened")
+            closePanels()
+            return false
+        }
+        if let request = AIExtractionRequest.make(question: proposal.question, page: proposal.page, baseURL: settings.assistantBaseURL) {
+            say("ask: consent: \(request.consentMessage)")
+            say("ask: the page text is \(request.coverage); the whole payload is \(request.preview.count) characters")
+            say("ask: what would be sent begins: \(String(request.preview.prefix(900)).debugDescription)")
+        } else {
+            say("ask: no request could be made")
+        }
+        var taken = false
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-ask-confirm", in: directory)
+        } else {
+            say("ask: the sheet did not appear")
+        }
+
+        let assistant = extraction.assistant
+        extraction.confirmAsk(question: question)
+        _ = await ScreenshotMode.until(timeout: 30) { assistant.phase != .asking }
+        say("ask: \(assistant.phase); outcome \(String(describing: assistant.outcome).prefix(240))")
+        if let table = assistant.table {
+            say("ask: columns \(table.columns); \(table.rows.count) rows: \(table.rows.map(\.cells))")
+        }
+        await pause(1.0)
+        taken = capture("extract-ask") && taken
+
+        // An answer that names an address of its own: only one the page named
+        // is something to act on.
+        extraction.proposeAsk(settings: settings, question: "The author and a link to their profile")
+        await pause(0.6)
+        extraction.confirmAsk(question: "The author and a link to their profile")
+        _ = await ScreenshotMode.until(timeout: 30) { assistant.phase != .asking }
+        if let table = assistant.table {
+            for row in table.rows {
+                say("ask: \(row.cells) — address to act on: \(row.url.debugDescription); can be downloaded: \(row.canDownload)")
+            }
+        } else {
+            say("ask: the second question gave no table: \(assistant.phase)")
+        }
+        closePanels()
+        return taken
+    }
+
     // MARK: Colored output
 
     /// `ls` and a man page in the server tab's own shell, which the app started
@@ -650,6 +837,105 @@ final class ScreenshotRun {
         model.switchTo(connectionID: nil)
         closePanels()
         return first
+    }
+
+    // MARK: A sign-in the file browser shares
+
+    /// A host the file browser cannot sign in to by itself, reached through a
+    /// terminal tab's sign-in. The workflow starts a second throwaway SSH server
+    /// on this machine, which takes one key. The key goes to the *terminal's*
+    /// ssh, in the connection's extra arguments, which the file browser never
+    /// reads — so the browser's own sign-in is refused, as it is for a host that
+    /// wants a password, until the tab has signed in. The key stands in for the
+    /// password; what is shown is that the browser rides on a connection it did
+    /// not make, and that closing the tab ends it.
+    private func sharedSignIn() async -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["ITERMINAL_SSH_SHARED_PORT"], let port = Int(portText),
+              let key = environment["ITERMINAL_SSH_SHARED_KEY"] else {
+            say("shared sign-in: the workflow did not start a server for it")
+            return false
+        }
+        let knownHosts = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iterminal-known-hosts-\(UUID().uuidString.prefix(8))").path
+        let host = SSHConnection(
+            name: "build-vm", host: "127.0.0.1", port: port, username: NSUserName(), initialPath: demo,
+            extraArguments: "-i \(key) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=\(knownHosts)"
+        )
+        let saved = settings.sshConnections
+        settings.sshConnections = saved + [host]
+        defer {
+            settings.sshConnections = saved
+            try? FileManager.default.removeItem(atPath: knownHosts)
+        }
+
+        await baseline()
+        settings.railPanelOpen = false
+        settings.rightPanelWidth = 460
+        store.openPanel(.files)
+        await pause(2.0)
+        let model = store.panelFiles
+        let socketBase = NSTemporaryDirectory()
+        func isOpen() -> Bool { SSHControlSocket.liveSocket(for: host, base: socketBase) != nil }
+
+        // On its own, the browser has no way in.
+        model.switchTo(connectionID: host.id.uuidString)
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(0.8)
+        if let problem = model.listingProblem {
+            say("shared: before: \(problem.title) [\(problem.kind)]; actions \(problem.actions.map(\.title))")
+            say("shared: before: sftp said: \(problem.output.debugDescription)")
+        } else {
+            say("shared: before: no problem was reported; \(model.items.count) items — the server let the browser in on its own")
+        }
+        say("shared: before: a connection is open: \(isOpen())")
+
+        // The button: a tab signed in to the host, listening for the browser.
+        model.perform(.signInInTerminal)
+        say("shared: the sign-in note: \(model.errorMessage.debugDescription)")
+        guard let tab = store.selectedTab else {
+            say("shared: no tab opened")
+            return false
+        }
+        let up = await ScreenshotMode.until(timeout: 40) { isOpen() }
+        say("shared: the tab's connection is open: \(up); the socket path is \(SSHControlSocket.path(for: host, base: socketBase)?.count ?? -1) characters")
+        guard up else {
+            for line in (tab.primarySession?.captureVisibleText() ?? "").split(separator: "\n").suffix(8) {
+                say("shared: the tab says: \(line)")
+            }
+            store.closeTab(tab)
+            model.switchTo(connectionID: nil)
+            closePanels()
+            return false
+        }
+
+        // Back to the server tab for the picture; the sign-in tab stays open.
+        if let server {
+            store.selectedTabID = server.id
+            store.focusedSessionID = server.primarySession?.id
+        }
+        await tidyServer()
+        model.reload()
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(1.0)
+        say("shared: after: \(model.items.count) items in \(model.directory); through a tab: \(model.usesSharedSignIn); "
+            + "problem: \(model.listingProblem?.title ?? "none")")
+        say("shared: after: the first items: \(model.items.prefix(6).map(\.name))")
+        let taken = capture("files-sftp-shared")
+
+        // Closing the tab's session ends the connection, and the browser says so.
+        tab.primarySession?.send(text: "exit\n")
+        let closed = await ScreenshotMode.until(timeout: 30) { !isOpen() }
+        say("shared: after the tab's shell exited the connection is closed: \(closed)")
+        model.reload()
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(0.8)
+        say("shared: afterwards: \(model.listingProblem?.title ?? "no problem"); \(model.items.count) items; through a tab: \(model.usesSharedSignIn)")
+
+        store.closeTab(tab)
+        model.switchTo(connectionID: nil)
+        closePanels()
+        return taken
     }
 
     // MARK: The right-click menu

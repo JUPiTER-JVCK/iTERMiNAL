@@ -31,7 +31,8 @@ enum SSHTransport: String, Codable, CaseIterable, Identifiable {
 /// sessions.
 ///
 /// It deliberately holds no secret. Authentication is delegated to the system:
-/// SFTP runs non-interactively and therefore needs keys/agent, while a terminal
+/// SFTP runs non-interactively and therefore needs keys/agent — or the
+/// connection a terminal tab has signed in and left open — while a terminal
 /// session has a real TTY, so ssh can prompt for a password or 2FA itself and
 /// this app still never sees, stores, or transmits one.
 struct SSHConnection: Codable, Identifiable, Hashable {
@@ -96,5 +97,29 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     var subtitle: String {
         let base = port == 22 ? destination : "\(destination):\(port)"
         return transport == .ssh ? base : "\(base) · \(transport.label)"
+    }
+
+    /// What `ssh -t` runs on the host so a session opens where the connection's
+    /// start directory is: `cd <path> && exec $SHELL -l`, or nil without one.
+    ///
+    /// `$SHELL` is for the *host's* shell to fill in. `ssh` is started directly,
+    /// with no shell of this Mac's in between to read it, so a backslash in front
+    /// of it — which would be right if there were one — arrives as a backslash,
+    /// and the host is asked to run a program named `$SHELL`.
+    var startupCommand: String? {
+        guard let path = initialPath?.trimmingCharacters(in: .whitespaces), !path.isEmpty else { return nil }
+        return "cd \(Self.remoteShellPath(path)) && exec $SHELL -l"
+    }
+
+    /// `path` as the host's shell should read it: single-quoted, but for a
+    /// leading `~` or `~/`, which is left outside the quotes so the host fills in
+    /// that account's home folder (inside them it would be a folder named `~`).
+    static func remoteShellPath(_ path: String) -> String {
+        func quoted(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+        if path == "~" { return "~" }
+        if path.hasPrefix("~/") { return "~/" + quoted(String(path.dropFirst(2))) }
+        return quoted(path)
     }
 }

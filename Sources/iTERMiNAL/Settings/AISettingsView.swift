@@ -114,9 +114,15 @@ struct AISettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Asking about a web page") {
+                Text("In the HTTP client's Extract tab, Ask… sends the text of the page you have in hand, its address and title, and what you asked for, to the same endpoint — after a sheet that says where it goes and can show every character. Keys and passwords are masked first (best effort, and nothing else is, so don't send a private page), the text is cut at 12,000 characters, and the answer comes back as a table of text that is only ever shown: nothing in it is run, opened or fetched.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Privacy") {
                 Text("""
-                Prompts and the context toggles above go to the configured endpoint when you submit `@ai …` in the composer, and the command and output Explain / Fix it show go when you send them. Nothing is sent until an API key is saved (or the base URL is a localhost OpenAI-compatible server). Suggested commands are shown only — they can be put in the input to review and are never auto-executed.
+                Prompts and the context toggles above go to the configured endpoint when you submit `@ai …` in the composer, and the command and output Explain / Fix it show go when you send them, and a web page's text goes when you press Ask on the sheet in Extract. Nothing is sent until an API key is saved (or the base URL is a localhost OpenAI-compatible server). Suggested commands are shown only — they can be put in the input to review and are never auto-executed.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)

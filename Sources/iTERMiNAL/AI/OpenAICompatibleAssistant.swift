@@ -24,6 +24,14 @@ final class OpenAICompatibleAssistant: AssistantService {
     }
 
     func complete(prompt: String, context: AssistantContext) async throws -> String {
+        try await send(system: Self.systemPrompt, user: Self.userContent(prompt: prompt, context: context), temperature: nil)
+    }
+
+    func complete(system: String, user: String, temperature: Double?) async throws -> String {
+        try await send(system: system, user: user, temperature: temperature)
+    }
+
+    private func send(system: String, user: String, temperature: Double?) async throws -> String {
         guard isConfigured else { throw AssistantError.notConfigured }
 
         let base = settings.assistantBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,9 +51,10 @@ final class OpenAICompatibleAssistant: AssistantService {
         let body = ChatCompletionRequest(
             model: settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines),
             messages: [
-                .init(role: "system", content: Self.systemPrompt),
-                .init(role: "user", content: Self.userContent(prompt: prompt, context: context)),
-            ]
+                .init(role: "system", content: system),
+                .init(role: "user", content: user),
+            ],
+            temperature: temperature
         )
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -142,6 +151,9 @@ private struct ChatCompletionRequest: Encodable {
 
     var model: String
     var messages: [Message]
+    /// Left out of the request when nil, so the wire format of every other call
+    /// is what it always was.
+    var temperature: Double?
 }
 
 private struct ChatCompletionResponse: Decodable {

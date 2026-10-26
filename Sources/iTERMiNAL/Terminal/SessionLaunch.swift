@@ -54,11 +54,14 @@ enum SessionLaunchError: LocalizedError {
 /// provider, which must run non-interactively), password and 2FA prompts work
 /// normally and no credential ever passes through this app.
 enum SessionLaunch {
+    /// `controlPath` is for a session whose sign-in the file browser is to
+    /// share: `ssh` listens there once it is signed in (see `SSHControlSocket`).
     static func configuration(
         for kind: SessionKind,
         settings: AppSettings,
         directory: String?,
-        shellOverride: String? = nil
+        shellOverride: String? = nil,
+        controlPath: String? = nil
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         switch kind {
         case .localShell:
@@ -75,7 +78,7 @@ enum SessionLaunch {
             guard let connection = settings.sshConnections.first(where: { $0.id == id }) else {
                 return .failure(.unknownConnection)
             }
-            return remoteConfiguration(connection)
+            return remoteConfiguration(connection, controlPath: controlPath)
 
         case .tool(let tool):
             guard let executable = tool.resolvedExecutable else {
@@ -102,12 +105,16 @@ enum SessionLaunch {
     }
 
     private static func remoteConfiguration(
-        _ connection: SSHConnection
+        _ connection: SSHConnection,
+        controlPath: String? = nil
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         var executable: String
         var args: [String] = []
 
-        switch connection.transport {
+        // The file browser speaks SSH whatever the saved transport is, so a
+        // sign-in made for it is an `ssh` one too.
+        let transport: SSHTransport = controlPath == nil ? connection.transport : .ssh
+        switch transport {
         case .ssh:
             guard let path = resolveExecutable("ssh") else {
                 return .failure(.missingExecutable("ssh"))
@@ -119,8 +126,19 @@ enum SessionLaunch {
             if let identity = connection.identityFile?.trimmingCharacters(in: .whitespaces), !identity.isEmpty {
                 args.append(contentsOf: ["-i", (identity as NSString).expandingTildeInPath])
             }
-            args.append(contentsOf: tokenize(connection.extraArguments))
-            if let remoteCommand = startupCommand(for: connection) {
+            // Arguments written for mosh or a custom command are not ssh's.
+            if connection.transport == .ssh {
+                args.append(contentsOf: tokenize(connection.extraArguments))
+            }
+            if let controlPath {
+                // After the person's own arguments, so a ControlPath they chose
+                // is theirs to keep: where ssh is given an option twice, the
+                // first one counts. A socket left by an ssh that was killed
+                // would stop this one from listening, so it goes first.
+                SSHControlSocket.removeStale(controlPath)
+                args.append(contentsOf: SSHControlSocket.masterArguments(path: controlPath))
+            }
+            if let remoteCommand = connection.startupCommand {
                 // -t forces a TTY so the login shell behaves interactively.
                 args.append("-t")
                 args.append(connection.destination)
@@ -159,18 +177,6 @@ enum SessionLaunch {
             environment: environment(),
             initialDirectory: NSHomeDirectory()
         ))
-    }
-
-    /// `cd <path> && exec $SHELL -l` when the connection names a start
-    /// directory, so the remote session opens where the user expects.
-    private static func startupCommand(for connection: SSHConnection) -> String? {
-        guard let path = connection.initialPath?.trimmingCharacters(in: .whitespaces),
-              !path.isEmpty else { return nil }
-        return "cd \(singleQuoted(path)) && exec \\$SHELL -l"
-    }
-
-    private static func singleQuoted(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private static func substitutePlaceholders(_ command: String, _ connection: SSHConnection) -> String {

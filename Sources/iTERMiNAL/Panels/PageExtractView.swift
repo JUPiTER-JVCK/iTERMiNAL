@@ -47,6 +47,12 @@ struct PageExtractView: View {
         .sheet(isPresented: $extraction.showingDownloadProgress) {
             DownloadProgressSheet(downloader: extraction.downloader, extraction: extraction)
         }
+        .sheet(item: $extraction.crawlProposal) { proposal in
+            CrawlConfirmSheet(extraction: extraction, proposal: proposal)
+        }
+        .sheet(item: $extraction.askProposal) { proposal in
+            AskAssistantSheet(extraction: extraction, proposal: proposal)
+        }
     }
 
     // MARK: Header and chips
@@ -61,6 +67,30 @@ struct PageExtractView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.textSecondary)
             Spacer(minLength: 0)
+            // A crawl is a thing to ask for, in its own words, not a side effect
+            // of looking at a list: it opens a sheet that says what it will do.
+            if result.page != nil {
+                Button {
+                    extraction.proposeAsk(settings: settings)
+                } label: {
+                    Label("Ask…", systemImage: "sparkles")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textPrimary)
+                .disabled(extraction.assistant.phase == .asking)
+                .help("Ask the AI assistant to pull something out of this page's text, after showing you what would be sent and where")
+                Button {
+                    extraction.proposeCrawl(settings: settings)
+                } label: {
+                    Label("Crawl…", systemImage: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textPrimary)
+                .disabled(extraction.crawler.isActive)
+                .help("Follow this page's links to the other pages of the site, a few at a time, after showing you what it will do")
+            }
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -108,6 +138,10 @@ struct PageExtractView: View {
             ExtractText(extraction: extraction, result: result, theme: theme)
         case .query:
             ExtractQuery(extraction: extraction, theme: theme)
+        case .crawl:
+            CrawlView(extraction: extraction, crawler: extraction.crawler, theme: theme)
+        case .ask:
+            AskResultView(extraction: extraction, assistant: extraction.assistant, theme: theme)
         case .tables:
             if let page = result.page, !page.tables.isEmpty {
                 VStack(spacing: 0) {

@@ -181,10 +181,16 @@ jobs:
             Sources/iTERMiNAL/HTTP/QueryRunner.swift \
             Sources/iTERMiNAL/HTTP/ResponseExtractor.swift \
             Sources/iTERMiNAL/HTTP/DownloadPlan.swift \
+            Sources/iTERMiNAL/HTTP/ImagePreviewPolicy.swift \
+            Sources/iTERMiNAL/HTTP/RobotsRules.swift \
+            Sources/iTERMiNAL/HTTP/CrawlFrontier.swift \
+            Sources/iTERMiNAL/HTTP/CrawlResults.swift \
+            Sources/iTERMiNAL/HTTP/AIExtraction.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
             Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
             Sources/iTERMiNAL/Files/SSHConnection.swift \
+            Sources/iTERMiNAL/Files/SSHControlSocket.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
             scripts/input-logic-check/main.swift

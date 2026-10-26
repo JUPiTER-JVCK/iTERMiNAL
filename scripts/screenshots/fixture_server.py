@@ -186,9 +186,20 @@ def changelog_page():
     return page("Changelog · hello-api", body, active="/changelog")
 
 
+# Each post points to the next, so a crawl that starts on the front page finds
+# the second post two links away and the third three.
+NEXT_POST = {
+    "/blog/hello-world": ("/blog/launch-notes", "Launch notes"),
+    "/blog/launch-notes": ("/blog/scaling-the-api", "Scaling the API"),
+}
+
+
 def plain_page(path):
     title = (path.strip("/").split("/")[-1] or "home").replace("-", " ").capitalize()
     body = "<h1>{0}</h1>\n<p class=\"lead\">Nothing more to see on this made-up page.</p>".format(title)
+    if path in NEXT_POST:
+        href, label = NEXT_POST[path]
+        body += '\n<p>Next: <a href="{}">{}</a></p>'.format(href, label)
     return page("{} · hello-api".format(title), body, active=path)
 
 
@@ -278,7 +289,9 @@ def article_page(origin):
         '<p><a class="btn" href="/files/ledger-q2.pdf">The full report (PDF)</a> '
         '<a class="btn alt" href="/files/ledger-data.csv">The data (CSV)</a> '
         '<a href="/files/ledger-archive.zip" download>Everything, zipped</a></p>\n'
-        '<p>Questions? <a href="mailto:desk@example.com">Write to the desk</a>. <a href="#top">Back to the top</a>.</p>\n'
+        '<p>Questions? <a href="mailto:desk@example.com">Write to the desk</a>. <a href="#top">Back to the top</a>. '
+        # The one link on the page that robots.txt asks crawlers to leave alone.
+        '<a href="/admin/">Staff area</a>.</p>\n'
         "</article>"
     )
     head = (
@@ -364,6 +377,32 @@ ASSISTANT_REPLIES = (
 ASSISTANT_DEFAULT = "I'm a stand-in for a model, used to take screenshots."
 
 
+# What the stand-in "extracts" from the sample article, by what is asked for: rows
+# as JSON, in a code fence the way models tend to write them. The second answer
+# names one address the article does (its author's page, on the sample site) and
+# one it does not, to show that only the first is more than text.
+SITE_ORIGIN = ORIGIN.format(port=8765)
+
+EXTRACTIONS = (
+    (
+        ("region", "revenue", "costs"),
+        lambda: [
+            {"region": "North", "revenue": 12, "costs": 7},
+            {"region": "South", "revenue": 8, "costs": 5},
+            {"region": "East", "revenue": 15, "costs": 9},
+            {"region": "West", "revenue": 10, "costs": 6},
+        ],
+    ),
+    (
+        ("author", "profile"),
+        lambda: [
+            {"author": "Ada Byron", "profile": SITE_ORIGIN + "/about"},
+            {"author": "A. Reviewer", "profile": "https://invented.example/reviewer"},
+        ],
+    ),
+)
+
+
 def assistant_reply(request_body):
     """The text of a chat-completions reply to the last user message in the request."""
     try:
@@ -374,6 +413,13 @@ def assistant_reply(request_body):
     for message in messages:
         if message.get("role") == "user":
             asked = str(message.get("content", ""))
+    # A page to be read into rows: the request names what to take out of it.
+    if "What to extract:" in asked:
+        wanted = asked.rsplit("What to extract:", 1)[-1].lower()
+        for keywords, rows in EXTRACTIONS:
+            if any(word in wanted for word in keywords):
+                return "```json\n" + json.dumps(rows(), indent=2) + "\n```"
+        return "[]"
     # Only the request itself, not the context lines (directory, branch) above it.
     asked = asked.rsplit("Request:", 1)[-1].lower()
     for keywords, reply in ASSISTANT_REPLIES:
@@ -382,7 +428,7 @@ def assistant_reply(request_body):
     return ASSISTANT_DEFAULT
 
 
-def make_handler(origin, log_path):
+def make_handler(origin, log_path, detail_path=""):
     class Handler(BaseHTTPRequestHandler):
         server_version = "hello-api/0.3.0"
         sys_version = ""
@@ -439,6 +485,18 @@ def make_handler(origin, log_path):
                 self.wfile.write(data)
 
         def log_request(self, code="-", size="-"):
+            if detail_path:
+                # Who asked, and what they sent along: the crawl is checked
+                # against this, not against a picture.
+                detail = "{} {} {} {} agent={!r} accept={!r} cookie={} authorization={} referer={!r}\n".format(
+                    time.strftime("%H:%M:%S"), self.command, self.path, code,
+                    self.headers.get("User-Agent", ""), self.headers.get("Accept", ""),
+                    "yes" if self.headers.get("Cookie") else "no",
+                    "yes" if self.headers.get("Authorization") else "no",
+                    self.headers.get("Referer", ""),
+                )
+                with open(detail_path, "a", encoding="utf-8") as handle:
+                    handle.write(detail)
             if not log_path:
                 return
             line = "{} {} {} {}\n".format(time.strftime("%H:%M:%S"), self.command, self.path, code)
@@ -474,12 +532,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--log", default="")
+    parser.add_argument("--detail-log", default="")
     args = parser.parse_args()
 
     origin = ORIGIN.format(port=args.port)
-    handler = make_handler(origin, args.log)
-    if args.log:
-        open(args.log, "w", encoding="utf-8").close()
+    handler = make_handler(origin, args.log, args.detail_log)
+    for path in (args.log, args.detail_log):
+        if path:
+            open(path, "w", encoding="utf-8").close()
     try:
         server = DualStackServer(("::", args.port), handler)
     except OSError:

@@ -22,7 +22,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
-A tour of the app in twenty-seven pictures, in five groups.
+A tour of the app in thirty-three pictures, in five groups.
 
 ### The window
 
@@ -110,8 +110,8 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images with their descriptions, addresses, sizes and where each came from, three of them ticked, and Filter, All, Download and Export controls beneath.">
-      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images, video and audio, files, tables, text.
+      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images, each with a small picture, its description, address and size, three ticked, and Filter, Previews, All, Download and Export controls beneath.">
+      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images (with previews, if you turn them on), video and audio, files, tables, text.
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/extract-query.png" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
@@ -120,22 +120,52 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
-      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+      <img src="docs/images/extract-crawl-confirm.png" alt="The crawl sheet: the site, up to 25 pages, 2 links deep, a second between requests, an option to stay under the page's folder, and four lines on what it will and won't do.">
+      <br><b>Crawl</b> — follow a page's own links to the rest of its site, after a sheet that says how far, how fast, and what it will and won't do.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
-      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+      <img src="docs/images/extract-crawl.png" alt="The crawl's pages: each address reached with its status, title and depth, and the one robots.txt rules out listed as left alone.">
+      <br><b>What a crawl reached</b> — one page at a time, <code>robots.txt</code> first and obeyed: the page it rules out is listed, not fetched. See <a href="#extract">Extract</a>.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
+      <img src="docs/images/extract-ask-confirm.png" alt="The Ask sheet: a request, the question that would be sent and where, and a disclosure for every character of it.">
+      <br><b>Ask the assistant</b> — says where the page's text would go, and shows every character of it, before anything is sent.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-ask.png" alt="The assistant's answer as a table of regions with revenue and costs, labelled as written by the assistant.">
+      <br><b>Rows from a page</b> — the answer as a table of text, labelled as a model's. It is only ever shown: nothing in it is run, opened or fetched.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
+      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-crawl-links.png" alt="The links found on the crawled pages, each once with how often it came up and the first page it was found on.">
+      <br><b>What a crawl found</b> — every link, image, video and file on the pages it reached, each once, with the page it was first found on, in the same lists as above.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
+      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+    </td>
+    <td width="50%" valign="top">
       <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
       <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
     </td>
+  </tr>
+  <tr>
     <td width="50%" valign="top">
       <img src="docs/images/files-sftp-denied.png" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
       <br><b>When a host won't let you in</b> — what went wrong, what to do in order, and a button for the next move. See <a href="#when-a-host-cant-be-reached">When a host can't be reached</a>.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/files-sftp-shared.png" alt="The file browser listing a host after a terminal tab signed in to it, with a link icon beside the path.">
+      <br><b>A host that wants a password</b> — sign in once in a terminal tab, where the password goes to <code>ssh</code> and not to the app, and the file browser uses that connection. See <a href="#a-host-that-wants-a-password">A host that wants a password</a>.
     </td>
   </tr>
   <tr>
@@ -181,7 +211,7 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and an SSH server on localhost that lets no one in — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty-seven into `docs/images/`.</sub>
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-three into `docs/images/`.</sub>
 
 ## Features
 
@@ -572,7 +602,8 @@ Both features run the system's own clients, reusing your `~/.ssh/config`,
 `known_hosts`, agent, and keys — this app never stores, prompts for, or
 transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
 you for a password or 2FA code itself; the file browser runs `sftp`
-non-interactively and therefore **requires key-based authentication**.
+non-interactively, so it signs in **with a key, or through a terminal tab you
+have signed in to** ([below](#a-host-that-wants-a-password)).
 
 ### Screen sharing, and what the network is advertising
 
@@ -642,7 +673,8 @@ shows, in place of the listing:
 - the buttons that go with it — **Try Again**; **Set Up Key…**, which opens a
   tab on this Mac with the `ssh-copy-id` command typed and *not* run, so you
   press Return and enter the host's password once, in a real terminal;
-  **Sign In in a Terminal**; **Forget Old Key…** for a changed host key; and
+  **Sign In in a Terminal**, which opens an `ssh` tab the file browser can then
+  use; **Forget Old Key…** for a changed host key; and
   **Connection Settings…**;
 - the exact words `sftp` used, folded away under **What sftp said**, never
   replaced by the summary.
@@ -660,8 +692,35 @@ Details.
 does and shows the same words, so a host can be checked with its settings in
 front of you. When a key is named for a host, `ssh` is told to offer only that
 one (`IdentitiesOnly=yes`), so a server that allows few attempts doesn't hang
-up before reaching it. A host that accepts only a password can't be browsed
-from here; use a terminal session to it, or install a key.
+up before reaching it.
+
+### A host that wants a password
+
+The file browser has no keyboard, and iTERMiNAL never handles a password, so it
+can't sign in to a host that takes only a password — or a code from a phone — by
+itself. It doesn't have to. Press **Sign In in a Terminal** on the message, enter
+the password in the tab that opens (to `ssh`, in a real terminal, as for any
+session), and press **Try Again**. That tab's `ssh` was started with
+`ControlMaster=yes`, so it keeps its connection open for others, and the file
+browser's `sftp` joins it (`ControlMaster=no`) instead of signing in again. A
+small link icon in the file browser's toolbar says it is doing that.
+
+- **The connection is the tab's.** Closing the tab, or `exit`, ends it, and the
+  file browser is back to the message until you sign in again. Nothing is left
+  running behind it — there is no `ControlPersist`.
+- **The socket is yours alone.** It lives in a folder of its own in your
+  temporary folder, named for the host, port and user, so a connection is only
+  ever shared with its own destination. It is used only if that folder is a real
+  folder (not a link) owned by you and closed to everyone else, and only if the
+  socket in it is one you made: a socket anyone else could have put there would
+  be handed every file that went through it. A socket left behind by an `ssh`
+  that was killed is cleared away before a new sign-in listens.
+- **It works whatever the saved transport is**: the tab it opens is `ssh`. When
+  the transport is `ssh`, the connection's extra arguments go along (so
+  `-J bastion` carries the file browser through the jump host too), and a
+  `ControlPath` you gave there stays yours — which leaves the file browser no
+  socket of the app's to join.
+- **A key is still better** where you can have one: nothing needs to stay open.
 
 ## Security model
 
@@ -892,7 +951,10 @@ in the transcript instead.
 The HTTP pane's response area has two tabs: **Body**, the response as it came,
 and **Extract**, which reads that one response into lists and tables. It works
 on what is already in hand: opening the tab requests nothing, and nothing in it
-follows a link by itself.
+follows a link by itself. What does reach out is something you ask for by name —
+**Fetch** on a row, **Download**, **Previews**, **Crawl…**, **Ask…** — and each of
+them says what it will ask of whom before it does, or, for a preview, is off
+until you turn it on.
 
 **For a web page**, a row of chips opens each list — only the ones with
 something in them:
@@ -972,11 +1034,91 @@ Download.
   itself, as everywhere in the HTTP client, and a redirect is judged by the
   same rules as the first address.
 
-**What it never does.** It doesn't crawl: no list follows its links, and
-nothing is fetched except a row you chose to fetch or download. It doesn't
-guess at addresses, run a page's scripts (so what scripts draw isn't there — the
-Overview says so), or log in. The reading is lossy where HTML is: a page that
-puts its content in scripts has little in the response to read.
+**Previews.** The Images list can show a small picture beside each address —
+the **Previews** button beside the filter, or Settings → HTTP Client. They start
+off: a picture is a request to the site that hosts it, which you didn't type,
+and it is decoded by the system's image code, as Quick Look would. Turned on, a
+picture is fetched as you scroll to its row, three at a time, for at most 60
+pictures a page, none over 5 MB or 40 megapixels, and not SVG. The rules are
+downloads' rules — no cookies or credentials, a `Referer` like a browser's,
+nothing aimed at your network, a redirect judged again — and a row that isn't
+fetched says why when you point at its frame.
+
+**Crawling.** **Crawl…**, at the top right of the Extract tab for a web page,
+follows the page's links to the other pages of the same site and gathers what
+they hold into the lists above. A sheet comes first, and nothing is requested
+until you press Start: the site; how many pages (10 to 200, the one in hand
+counted); how deep (1 to 4 links from here); how long to wait between requests
+(half a second to five); and, if you like, to stay under the page's own folder.
+
+- **robots.txt comes first, and is obeyed.** It is read the way RFC 9309 says: the
+  group that names iTERMiNAL, or failing that the one for everyone; the longest
+  matching rule wins, and an allow beats a disallow of the same length; `*` and a
+  closing `$` work in patterns. A page it asks crawlers to leave alone is listed,
+  marked as left alone, and not fetched — and doesn't use up a place in the page
+  limit. A `Crawl-delay` longer than your wait is waited out, up to 30 seconds. A
+  robots.txt the server can't deliver (a 5xx, or a redirect off the site) stops the
+  crawl before it begins; one that isn't there (any 4xx) asks nothing, as the RFC
+  says.
+- **Only what the pages declare, on one site.** A link is followed only if it is
+  an address the page names, with the same scheme, host and port as the page the
+  crawl began on — exactly, so `www.` is another site — and inside the folder if
+  you chose that. A link to another site is listed and not followed. Nothing is
+  guessed, and no common path is tried.
+- **One page at a time**, with the wait between, so it never asks more of a site
+  than a person clicking quickly would. Nothing in it goes past the ceilings: 200
+  pages, 4 deep, half a second apart, and a queue of at most 5,000 addresses.
+- **Web pages only.** An address that ends like a picture, an archive, a document
+  or a script isn't requested, and any other whose response says it isn't a web
+  page is stopped at the headers, before its body is taken. No page is read past
+  2 MB, and a redirect within the site is followed while one that leaves it is
+  noted and not followed.
+- **It says who is asking**: `User-Agent: iTERMiNAL/<version>
+  (+https://github.com/JUPiTER-JVCK/iTERMiNAL)`. Each request stands alone — no
+  cookies, no credentials, nothing carried from one to the next — and the
+  headers the page was first fetched with are not sent.
+- **What it found** is the crawl's own tab: the pages (address, status, title,
+  depth, how many links and images, size, and the page that linked to it), and
+  the links, images, video and audio, and files found on any of them, each once
+  with the first page it was found on, in the same lists as above — so Filter,
+  Export and Download work on them. **Stop** ends it after the request in flight,
+  and what was found stays. A crawl is kept while you look at other pages of the
+  same site and dropped when you fetch a page of another, and it is not saved
+  with a layout or in a snapshot.
+
+**Asking the assistant.** **Ask…**, beside Crawl…, has the AI assistant you set up
+in Settings → AI read the page's text into rows. Say what you want — "every
+product with its price" — and a sheet shows where it would go (the assistant on
+this Mac, which stays there, or the named host) and, one click away, every
+character of what would be sent. Nothing is sent until you press Ask.
+
+- **What goes** is the page's reading as Markdown, its address and title, and your
+  request, under a system prompt the sheet shows too. Anything that looks like a
+  key or a password is masked first — best effort, and nothing else is, so don't
+  ask about a private page — the text is cut at 12,000 characters at the end of a
+  whole line, and the sheet says how much of the page that is.
+- **The model is told the page is data**, not instructions (a page can try to be
+  the second), to answer only from the text, not to invent values or addresses,
+  and to reply with a JSON array of objects. The request goes with temperature 0.
+- **What comes back is only ever shown.** A JSON array of objects — also inside a
+  code fence, with words around it, or as an object holding the list — becomes a
+  table, its keys in order as columns, at most 500 rows, 20 columns and 300
+  characters a cell; anything else is shown as the text it is. Nothing in an
+  answer is run, opened or fetched. A cell is an address you can open or fetch
+  only if the page itself named that address, so one the model made up is just
+  text; nothing in an answer can be downloaded; and an export puts an apostrophe
+  before a cell a spreadsheet would run.
+- It uses the endpoint, key and context settings of Settings → AI, and an answer
+  is of the page it was asked of: fetching another page clears it. It was written
+  by a model, so it can be wrong — the list says so above the rows.
+
+**What it never does.** Nothing is fetched except a row you chose to fetch or
+download, a preview you turned on, or a crawl you started from its sheet; the
+one thing that is sent anywhere else is the page's text to your assistant, after
+its own sheet. It doesn't guess at addresses, run a page's scripts (so what
+scripts draw isn't there — the Overview says so), or log in. The reading is lossy
+where HTML is: a page that puts its content in scripts has little in the
+response to read.
 
 Nothing here is saved with a layout or in a snapshot, and the download folder
 is a path on this Mac, so it isn't in exported settings either.

@@ -60,13 +60,18 @@ struct HTTPClientSettingsView: View {
                     Text("1 GB").tag(1000)
                 }
 
+                Toggle("Show image previews in Extract", isOn: $settings.httpImagePreviews)
+                Text("Previews put a small picture beside each address in the Images list. Each is a request to the site that hosts the image, made as you scroll to its row — at most \(ImagePreviewPolicy.perResponse) for a page, a few at a time, and none larger than \(ImagePreviewPolicy.maxBytes / 1_000_000) MB. They follow the same rules as downloads below, and are decoded by the system's image code, so they start off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text("Extract → Download saves the images, video, audio and files a page names — only the ones you pick, after showing you which sites and which folder. Files go in a folder per site, never over one that is there, marked as downloaded from the web so macOS asks before opening anything that could run. Requests carry no cookies, no credentials and none of the headers the page was fetched with, and a redirect to somewhere this app would not go is refused. A page from the internet cannot make this app fetch from this Mac or its network.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Privacy") {
-                Text("Requests are sent only when you press Send or ⌘Return, press Return on an explorer command, or choose Fetch on a row of the Extract tab — never as you type a URL. `open` in the explorer reads a site's robots.txt, the sitemaps it declares, and the page you entered; `get` fetches the one address you give it. Extract reads only the response you already have and asks for nothing more; a file is fetched only when you press Download on a list you were shown. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, with values that look like credentials masked (best effort, not a guarantee) before being written to disk, and are left out of exported snapshots.")
+                Text("Requests are sent only when you press Send or ⌘Return, press Return on an explorer command, or choose Fetch on a row of the Extract tab — never as you type a URL. `open` in the explorer reads a site's robots.txt, the sitemaps it declares, and the page you entered; `get` fetches the one address you give it. Extract reads only the response you already have. It asks for more only when you tell it to: a file when you press Download on a list you were shown, a small picture per row if you turned Previews on, the pages of a crawl you started from its sheet (one at a time, after reading the site's robots.txt), and, from Ask…, the AI assistant you set up in Settings → AI, which gets the page's text after a sheet that shows what and where. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, with values that look like credentials masked (best effort, not a guarantee) before being written to disk, and are left out of exported snapshots.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

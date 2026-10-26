@@ -188,8 +188,9 @@ final class AssetDownloader: ObservableObject {
     }
 }
 
-/// One download task, with the policy applied as the bytes arrive.
-private final class FileFetch: NSObject, URLSessionDownloadDelegate {
+/// One download task, with the policy applied as the bytes arrive. Shared with
+/// the image previews, which are the same kind of request under a smaller cap.
+final class FileFetch: NSObject, URLSessionDownloadDelegate {
     enum Outcome {
         case file(URL, HTTPURLResponse, Int64)
         case failed(String)
@@ -212,10 +213,10 @@ private final class FileFetch: NSObject, URLSessionDownloadDelegate {
         self.onProgress = onProgress
     }
 
-    func run(_ request: URLRequest, timeout: TimeInterval) async -> Outcome {
+    func run(_ request: URLRequest, timeout: TimeInterval, resourceTimeout: TimeInterval = 3_600) async -> Outcome {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = 3_600
+        configuration.timeoutIntervalForResource = resourceTimeout
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         // Nothing of the person's goes along with a request a page chose.
         configuration.httpCookieAcceptPolicy = .never

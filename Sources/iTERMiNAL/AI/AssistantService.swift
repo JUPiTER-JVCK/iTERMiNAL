@@ -18,6 +18,11 @@ struct AssistantContext {
 protocol AssistantService: AnyObject {
     var isConfigured: Bool { get }
     func complete(prompt: String, context: AssistantContext) async throws -> String
+    /// A request with its own system prompt and the whole of the user's message,
+    /// for work that is not about the terminal — reading a web page into rows —
+    /// where the terminal helper's instructions would only get in the way.
+    /// `temperature` is left to the server's default when nil.
+    func complete(system: String, user: String, temperature: Double?) async throws -> String
 }
 
 enum AssistantError: LocalizedError {
@@ -52,6 +57,10 @@ final class NullAssistantService: AssistantService {
     var isConfigured: Bool { false }
 
     func complete(prompt: String, context: AssistantContext) async throws -> String {
+        throw AssistantError.notConfigured
+    }
+
+    func complete(system: String, user: String, temperature: Double?) async throws -> String {
         throw AssistantError.notConfigured
     }
 }

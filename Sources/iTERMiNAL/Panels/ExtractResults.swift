@@ -8,6 +8,9 @@ struct ExtractResults: View {
     let table: ResultTable
     let section: ExtractSection
     let theme: Theme
+    /// What to say above the list in place of what the section would say: a
+    /// crawl's lists are of many pages, not of the one in hand.
+    var noteOverride: String?
 
     @EnvironmentObject private var settings: AppSettings
 
@@ -21,6 +24,9 @@ struct ExtractResults: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if section == .images, settings.httpImagePreviews {
+                ImagePreviewNote(loader: extraction.previews, theme: theme)
             }
             if rows.isEmpty {
                 Text(table.rows.isEmpty ? "Nothing here." : "Nothing matches the filter.")
@@ -42,6 +48,10 @@ struct ExtractResults: View {
     private var noteLine: String? {
         var parts: [String] = []
         if table.truncated { parts.append("More was found than is listed.") }
+        if let noteOverride {
+            parts.append(noteOverride)
+            return parts.joined(separator: " ")
+        }
         switch section {
         case .media:
             if table.rows.contains(where: { !$0.canDownload }) {
@@ -49,6 +59,10 @@ struct ExtractResults: View {
             }
         case .links:
             parts.append("Every link on the page. The ones that point to files can be saved, and are in Files too.")
+        case .crawledPages:
+            parts.append("The pages the crawl came to, in the order it reached them. One that robots.txt asks to be left alone is listed and was not fetched.")
+        case .askAnswer:
+            parts.append("Written by the assistant from the page's text, and only text: check what matters against the page itself.")
         default:
             break
         }
@@ -63,7 +77,18 @@ struct ExtractResults: View {
         var badges: [String]
     }
 
+    /// A crawl's lists end in the page each address was found on; it is said in
+    /// a badge, as a path.
     private func summary(for row: ResultTable.Row) -> RowSummary {
+        var result = baseSummary(for: row)
+        if table.columns.last == "Found on", let foundOn = row.cells.last, !foundOn.isEmpty {
+            let path = URLComponents(string: foundOn).map { $0.percentEncodedPath.isEmpty ? "/" : $0.percentEncodedPath } ?? foundOn
+            result.badges.append("on " + path)
+        }
+        return result
+    }
+
+    private func baseSummary(for row: ResultTable.Row) -> RowSummary {
         let cells = row.cells
         func cell(_ index: Int) -> String { index < cells.count ? cells[index] : "" }
         func fileName(_ url: String) -> String {
@@ -114,6 +139,10 @@ struct ExtractResults: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isSelected ? "Deselect" : "Select")
+            }
+            if section == .images, settings.httpImagePreviews, row.canDownload, let address = row.url {
+                ImagePreviewThumb(loader: extraction.previews, address: address, theme: theme)
+                    .onAppear { extraction.previews.request(address, pageURL: extraction.pageURL) }
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(text.title)
@@ -269,6 +298,16 @@ struct ExtractResults: View {
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary)
                 .monospacedDigit()
+
+            if section == .images {
+                Toggle(isOn: $settings.httpImagePreviews) {
+                    Label("Previews", systemImage: "photo")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .help("Show a small picture beside each image. Each one is fetched from the site that hosts it, so this is off until you turn it on.")
+            }
 
             Spacer(minLength: 0)
 

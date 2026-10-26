@@ -71,9 +71,9 @@ struct ConnectionsSettingsView: View {
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
 
-                Terminal sessions get a real TTY, so ssh can prompt you for a password or 2FA code itself. The file browser runs sftp non-interactively (it has no TTY to prompt on), so browsing a host requires key-based authentication.
+                Terminal sessions get a real TTY, so ssh can prompt you for a password or 2FA code itself. The file browser runs sftp non-interactively (it has no TTY to prompt on), so it signs in with a key — or through a terminal tab you have signed in to.
 
-                A host that only wants a password can't be browsed. Test File Access, above, says so in plain words, and offers to type the ssh-copy-id command that installs a key — you press Return and enter the password once, in a real terminal.
+                A host that only wants a password: Test File Access, above, says so in plain words. Press Sign In in a Terminal, enter the password in the tab that opens, and keep the tab open — the file browser uses that connection, and the password goes to ssh in the tab, never to iTERMiNAL. Or install a key: it offers to type the ssh-copy-id command, and you press Return and enter the password once.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)

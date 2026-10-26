@@ -51,10 +51,18 @@ final class HTTPRequestExecutor {
     /// the caller decides. Without it, a site could point its own robots.txt
     /// at an address of its choosing — an internal host, say — and have this
     /// app fetch it.
+    ///
+    /// `maxResponseBytes` asks for a lower cap than the setting's, never a
+    /// higher one. `acceptResponse` sees the status line and headers before any
+    /// of the body is taken: saying no ends the request there, and what comes
+    /// back is the headers with an empty body — a crawl uses it to not download
+    /// a picture it was never going to read.
     func execute(
         _ spec: HTTPRequestSpec,
         settings: AppSettings,
-        sameOriginRedirectsOnly: Bool = false
+        sameOriginRedirectsOnly: Bool = false,
+        maxResponseBytes: Int? = nil,
+        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil
     ) async throws -> HTTPResponseSummary {
         guard let url = HTTPMessage.normalizedURL(from: spec.url), let host = url.host, !host.isEmpty else {
             throw HTTPClientError.invalidURL(spec.url)
@@ -85,7 +93,8 @@ final class HTTPRequestExecutor {
         let runner = SizeLimitingRedirectRunner(
             followRedirects: settings.httpFollowRedirects,
             sameOriginRedirectsOnly: sameOriginRedirectsOnly,
-            maxResponseBytes: settings.httpMaxResponseBytes
+            maxResponseBytes: min(maxResponseBytes ?? Int.max, settings.httpMaxResponseBytes),
+            acceptResponse: acceptResponse
         )
         let (data, http) = try await runner.run(request, timeout: settings.httpRequestTimeout)
         let duration = Date().timeIntervalSince(startedAt)
@@ -124,14 +133,20 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
     private let followRedirects: Bool
     private let sameOriginRedirectsOnly: Bool
     private let maxResponseBytes: Int
+    private let acceptResponse: ((HTTPURLResponse) -> Bool)?
     private var accumulated = Data()
     private var exceededLimit = false
+    private var stoppedAtHeaders = false
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
 
-    init(followRedirects: Bool, sameOriginRedirectsOnly: Bool, maxResponseBytes: Int) {
+    init(
+        followRedirects: Bool, sameOriginRedirectsOnly: Bool, maxResponseBytes: Int,
+        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil
+    ) {
         self.followRedirects = followRedirects
         self.sameOriginRedirectsOnly = sameOriginRedirectsOnly
         self.maxResponseBytes = maxResponseBytes
+        self.acceptResponse = acceptResponse
     }
 
     func run(_ request: URLRequest, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
@@ -162,6 +177,21 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
         }
     }
 
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        // The headers are in; the body has not been asked for yet.
+        if let acceptResponse, let http = response as? HTTPURLResponse, !acceptResponse(http) {
+            stoppedAtHeaders = true
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         accumulated.append(data)
         if accumulated.count > maxResponseBytes {
@@ -174,6 +204,11 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
         defer {
             continuation = nil
             session.finishTasksAndInvalidate()
+        }
+        // Stopped on purpose at the headers: that is an answer, not a failure.
+        if stoppedAtHeaders, let http = task.response as? HTTPURLResponse {
+            continuation?.resume(returning: (Data(), http))
+            return
         }
         if exceededLimit {
             continuation?.resume(throwing: HTTPClientError.responseTooLarge(maxResponseBytes))

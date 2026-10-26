@@ -250,6 +250,15 @@ final class AppSettings: ObservableObject {
     /// The largest single file a download will take, in megabytes. A file is
     /// stopped the moment it passes this, before the rest arrives.
     @Published var httpMaxDownloadMB: Int { didSet { defaults.set(httpMaxDownloadMB, forKey: "httpMaxDownloadMB") } }
+    /// Whether Extract's Images list shows a small picture beside each address.
+    /// Each is fetched from the site that hosts it, so it starts off.
+    @Published var httpImagePreviews: Bool { didSet { defaults.set(httpImagePreviews, forKey: "httpImagePreviews") } }
+    /// What the crawl sheet starts from: how many pages, how deep, and how long
+    /// to wait between requests. Each is brought inside the crawl's ceilings
+    /// (`CrawlLimits`) whatever is stored here.
+    @Published var httpCrawlPages: Int { didSet { defaults.set(httpCrawlPages, forKey: "httpCrawlPages") } }
+    @Published var httpCrawlDepth: Int { didSet { defaults.set(httpCrawlDepth, forKey: "httpCrawlDepth") } }
+    @Published var httpCrawlDelay: Double { didSet { defaults.set(httpCrawlDelay, forKey: "httpCrawlDelay") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -354,6 +363,10 @@ final class AppSettings: ObservableObject {
         httpRecordDiscoveredLinks = defaults.object(forKey: "httpRecordDiscoveredLinks") as? Bool ?? true
         httpDownloadFolder = defaults.string(forKey: "httpDownloadFolder") ?? ""
         httpMaxDownloadMB = defaults.object(forKey: "httpMaxDownloadMB") as? Int ?? 250
+        httpImagePreviews = defaults.object(forKey: "httpImagePreviews") as? Bool ?? false
+        httpCrawlPages = defaults.object(forKey: "httpCrawlPages") as? Int ?? 25
+        httpCrawlDepth = defaults.object(forKey: "httpCrawlDepth") as? Int ?? 2
+        httpCrawlDelay = defaults.object(forKey: "httpCrawlDelay") as? Double ?? 1
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -580,6 +593,10 @@ final class AppSettings: ObservableObject {
         httpRecordDiscoveredLinks = true
         httpDownloadFolder = ""
         httpMaxDownloadMB = 250
+        httpImagePreviews = false
+        httpCrawlPages = 25
+        httpCrawlDepth = 2
+        httpCrawlDelay = 1
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true
