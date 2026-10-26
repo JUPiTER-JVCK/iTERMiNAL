@@ -39,6 +39,12 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
 
     let webView: WKWebView
 
+    /// Follows the page's own title. A page names itself when its `<title>` is
+    /// read, which is not always before the load is reported finished, and a
+    /// script can rename it at any time after — so the tab's title is kept in
+    /// step with it, not read at those two moments only.
+    private var titleObservation: NSKeyValueObservation?
+
     /// Completions waiting for the current navigation to settle.
     private var navigationCompletions: [(Result<String, Error>) -> Void] = []
 
@@ -50,6 +56,13 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         super.init()
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        // A title arriving is news; one going away is left to the navigation
+        // callbacks, so the old title stays in the tab until the new page has
+        // one rather than flashing "New tab" between the two.
+        titleObservation = webView.observe(\.title, options: [.new]) { [weak self] web, _ in
+            guard let title = web.title, !title.isEmpty else { return }
+            DispatchQueue.main.async { self?.pageTitle = title }
+        }
         if autoLoad || initialURL != nil {
             loadCurrentText()
         }
