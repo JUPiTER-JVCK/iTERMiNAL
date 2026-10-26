@@ -125,6 +125,11 @@ final class AppSettings: ObservableObject {
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
+    /// Colour for what ordinary commands print — see `OutputColors`. On by
+    /// default: a shell that prints `ls` in one colour is the surprising one.
+    @Published var colorizeOutput: Bool { didSet { defaults.set(colorizeOutput, forKey: "colorizeOutput") } }
+    @Published var colorizeListings: Bool { didSet { defaults.set(colorizeListings, forKey: "colorizeListings") } }
+    @Published var colorizeManPages: Bool { didSet { defaults.set(colorizeManPages, forKey: "colorizeManPages") } }
 
     // MARK: Panels
     @Published var browserHomepage: String { didSet { defaults.set(browserHomepage, forKey: "browserHomepage") } }
@@ -294,6 +299,9 @@ final class AppSettings: ObservableObject {
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
         useGPURendering = defaults.bool(forKey: "useGPURendering")
+        colorizeOutput = defaults.object(forKey: "colorizeOutput") as? Bool ?? true
+        colorizeListings = defaults.object(forKey: "colorizeListings") as? Bool ?? true
+        colorizeManPages = defaults.object(forKey: "colorizeManPages") as? Bool ?? true
 
         browserHomepage = defaults.string(forKey: "browserHomepage") ?? "https://www.google.com"
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
@@ -449,6 +457,13 @@ final class AppSettings: ObservableObject {
         return SymbolsFont.withFallback(font)
     }
 
+    /// What to add to a new shell's environment to colour its output, or nil
+    /// when that is off.
+    var outputColors: OutputColors? {
+        guard colorizeOutput, colorizeListings || colorizeManPages else { return nil }
+        return OutputColors(listings: colorizeListings, manPages: colorizeManPages)
+    }
+
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
         TerminalTheme.theme(id: terminalThemeID, darkMode: darkMode)
     }
@@ -523,6 +538,9 @@ final class AppSettings: ObservableObject {
         scrollbackLines = 10_000
         terminalThemeID = "auto"
         useGPURendering = false
+        colorizeOutput = true
+        colorizeListings = true
+        colorizeManPages = true
         browserHomepage = "https://www.google.com"
         showHiddenFiles = false
         followTerminalDirectory = true

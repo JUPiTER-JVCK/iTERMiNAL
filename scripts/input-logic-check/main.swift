@@ -2152,6 +2152,54 @@ do {
           "no command offered contains a line break, so typing one into a terminal cannot run it")
 }
 
+// MARK: Coloured command output
+
+// The environment that makes `ls` and `man` print in colour. The colours are
+// ANSI numbers, so the theme decides what they look like; what is checked here
+// is that the two `ls` dialects are written from one table, that nothing a
+// person already set is replaced, and that NO_COLOR is obeyed.
+do {
+    check(OutputColors.bsdLSColors == "ExGxFxdxCxegedabagacad", "BSD LSCOLORS is the eleven pairs, written from the table")
+    check(OutputColors.bsdLSColors.count == 22, "eleven pairs of two letters")
+    check(OutputColors.bsdPair(sgr: "01;34") == "Ex" && OutputColors.bsdPair(sgr: "34;46") == "eg"
+            && OutputColors.bsdPair(sgr: "33") == "dx" && OutputColors.bsdPair(sgr: "0") == "xx",
+          "SGR codes become BSD letters: capital for bold, x for 'leave it'")
+    check(OutputColors.bsdPair(sgr: "1") == "xx", "bold with no colour has nothing to capitalise")
+
+    let gnu = OutputColors.gnuLSColors
+    let entries = gnu.split(separator: ":").map(String.init)
+    check(entries.first == "rs=0" && entries.contains("di=01;34") && entries.contains("ex=01;32") && entries.contains("ln=01;36"),
+          "GNU LS_COLORS names the same kinds by key")
+    check(entries.contains("*.tar=01;31") && entries.contains("*.png=01;35") && entries.contains("*.mp3=00;36"), "and colours archives, pictures and audio by ending")
+    check(entries.allSatisfy { $0.range(of: #"^[*.a-z0-9]+=[0-9;]+$"#, options: .regularExpression) != nil },
+          "every LS_COLORS entry is key=codes")
+    check(Set(entries.map { $0.split(separator: "=")[0] }).count == entries.count, "no key is given twice")
+    check(OutputColors.listingStyles.count == 11 && Set(OutputColors.listingStyles.map(\.kind)).count == 11, "all eleven BSD kinds are in the table, once")
+
+    let both = OutputColors(listings: true, manPages: true).environment(inheriting: [:])
+    check(both["CLICOLOR"] == "1" && both["LSCOLORS"] == OutputColors.bsdLSColors && both["LS_COLORS"] == gnu, "listings sets the three ls variables")
+    check(both["LESS_TERMCAP_md"] == "\u{1B}[1;31m" && both["LESS_TERMCAP_us"] == "\u{1B}[1;32m" && both["LESS_TERMCAP_me"] == "\u{1B}[0m",
+          "man pages: bold red, underline green, reset, with a real escape character")
+    check(both["LESS_TERMCAP_so"] == "\u{1B}[1;33;44m" && both["GROFF_NO_SGR"] == "1", "and less's status line, and groff's overstrikes")
+    check(both.count == 3 + 7 + 1, "and nothing else")
+
+    check(OutputColors(listings: true, manPages: false).environment(inheriting: [:]).keys.sorted() == ["CLICOLOR", "LSCOLORS", "LS_COLORS"],
+          "listings alone touches only ls")
+    check(OutputColors(listings: false, manPages: true).environment(inheriting: [:]).keys.allSatisfy { $0.hasPrefix("LESS_TERMCAP_") || $0 == "GROFF_NO_SGR" },
+          "man pages alone leaves ls alone")
+    check(OutputColors(listings: false, manPages: false).environment(inheriting: [:]).isEmpty, "both off is nothing")
+
+    // What a person has already said is theirs.
+    let owned = OutputColors(listings: true, manPages: true).environment(inheriting: ["LS_COLORS": "di=1", "LESS_TERMCAP_md": "x"])
+    check(owned["LS_COLORS"] == nil && owned["LESS_TERMCAP_md"] == nil, "a variable already set is not replaced")
+    check(owned["LSCOLORS"] != nil && owned["LESS_TERMCAP_us"] != nil, "and the rest still arrive")
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["CLICOLOR": "0"])["CLICOLOR"] == nil, "CLICOLOR=0 is a choice, and respected")
+
+    // NO_COLOR.
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": "1"]).isEmpty, "NO_COLOR turns it all off")
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": ""]).count == 11, "an empty NO_COLOR is not a request")
+}
+
 // MARK: Keyboard shortcuts
 
 // The catalog is only worth showing if it is complete, and it cannot see the

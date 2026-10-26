@@ -67,7 +67,7 @@ enum SessionLaunch {
                 executable: shell.path,
                 args: shell.args,
                 execName: shell.execName,
-                environment: environment(),
+                environment: environment(colors: settings.outputColors),
                 initialDirectory: directory ?? settings.resolvedInitialDirectory
             ))
 
@@ -181,12 +181,20 @@ enum SessionLaunch {
             .replacingOccurrences(of: "%d", with: connection.destination)
     }
 
-    static func environment() -> [String] {
+    /// `colors` is for a shell, whose `ls` and `man` print for a person to read:
+    /// remote sessions, which have another machine's environment, and the
+    /// bundled tools, which draw their own colours, do not get it.
+    static func environment(colors: OutputColors? = nil) -> [String] {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
         env["TERM_PROGRAM"] = "iTERMiNAL"
+        if let colors {
+            // Only what is not set already, and the shell's own startup files
+            // run after this — so a person's `.zshrc` has the last word.
+            for (name, value) in colors.environment(inheriting: env) { env[name] = value }
+        }
         return env.map { "\($0.key)=\($0.value)" }
     }
 

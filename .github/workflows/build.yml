@@ -170,6 +170,7 @@ jobs:
             Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
             Sources/iTERMiNAL/Files/SSHConnection.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
+            Sources/iTERMiNAL/Terminal/OutputColors.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
