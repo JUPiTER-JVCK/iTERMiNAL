@@ -379,11 +379,14 @@ ASSISTANT_DEFAULT = "I'm a stand-in for a model, used to take screenshots."
 
 # What the stand-in "extracts" from the sample article, by what is asked for: rows
 # as JSON, in a code fence the way models tend to write them. The second answer
-# names an address the page does not, to show that one is only text.
+# names one address the article does (its author's page, on the sample site) and
+# one it does not, to show that only the first is more than text.
+SITE_ORIGIN = ORIGIN.format(port=8765)
+
 EXTRACTIONS = (
     (
         ("region", "revenue", "costs"),
-        lambda origin: [
+        lambda: [
             {"region": "North", "revenue": 12, "costs": 7},
             {"region": "South", "revenue": 8, "costs": 5},
             {"region": "East", "revenue": 15, "costs": 9},
@@ -392,15 +395,15 @@ EXTRACTIONS = (
     ),
     (
         ("author", "profile"),
-        lambda origin: [
-            {"author": "Ada Byron", "profile": origin + "/about"},
+        lambda: [
+            {"author": "Ada Byron", "profile": SITE_ORIGIN + "/about"},
             {"author": "A. Reviewer", "profile": "https://invented.example/reviewer"},
         ],
     ),
 )
 
 
-def assistant_reply(request_body, origin=""):
+def assistant_reply(request_body):
     """The text of a chat-completions reply to the last user message in the request."""
     try:
         messages = json.loads(request_body or b"{}").get("messages", [])
@@ -415,7 +418,7 @@ def assistant_reply(request_body, origin=""):
         wanted = asked.rsplit("What to extract:", 1)[-1].lower()
         for keywords, rows in EXTRACTIONS:
             if any(word in wanted for word in keywords):
-                return "```json\n" + json.dumps(rows(origin), indent=2) + "\n```"
+                return "```json\n" + json.dumps(rows(), indent=2) + "\n```"
         return "[]"
     # Only the request itself, not the context lines (directory, branch) above it.
     asked = asked.rsplit("Request:", 1)[-1].lower()
@@ -454,7 +457,7 @@ def make_handler(origin, log_path, detail_path=""):
                 "model": "sample",
                 "choices": [{
                     "index": 0,
-                    "message": {"role": "assistant", "content": assistant_reply(body, origin)},
+                    "message": {"role": "assistant", "content": assistant_reply(body)},
                     "finish_reason": "stop",
                 }],
             })

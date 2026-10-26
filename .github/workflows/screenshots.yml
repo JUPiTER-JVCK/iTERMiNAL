@@ -8,7 +8,7 @@ name: Screenshots
 # (Sources/iTERMiNAL/App/Screenshot*.swift). They are uploaded as an artifact;
 # nothing here publishes anything. To update the README, download the artifact,
 # unpack it, and run scripts/screenshots/publish.py on the folder: it writes the
-# twenty-seven pictures the README shows into docs/images/. The artifact holds more
+# thirty-three pictures the README shows into docs/images/. The artifact holds more
 # than that — each file is named for what it shows, and app.log says what the
 # app saw while it took them.
 on:

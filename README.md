@@ -22,7 +22,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
-A tour of the app in twenty-seven pictures, in five groups.
+A tour of the app in thirty-three pictures, in five groups.
 
 ### The window
 
@@ -110,8 +110,8 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images with their descriptions, addresses, sizes and where each came from, three of them ticked, and Filter, All, Download and Export controls beneath.">
-      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images, video and audio, files, tables, text.
+      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images, each with a small picture, its description, address and size, three ticked, and Filter, Previews, All, Download and Export controls beneath.">
+      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images (with previews, if you turn them on), video and audio, files, tables, text.
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/extract-query.png" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
@@ -120,22 +120,52 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
-      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+      <img src="docs/images/extract-crawl-confirm.png" alt="The crawl sheet: the site, up to 25 pages, 2 links deep, a second between requests, an option to stay under the page's folder, and four lines on what it will and won't do.">
+      <br><b>Crawl</b> — follow a page's own links to the rest of its site, after a sheet that says how far, how fast, and what it will and won't do.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
-      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+      <img src="docs/images/extract-crawl.png" alt="The crawl's pages: each address reached with its status, title and depth, and the one robots.txt rules out listed as left alone.">
+      <br><b>What a crawl reached</b> — one page at a time, <code>robots.txt</code> first and obeyed: the page it rules out is listed, not fetched. See <a href="#extract">Extract</a>.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
+      <img src="docs/images/extract-ask-confirm.png" alt="The Ask sheet: a request, the question that would be sent and where, and a disclosure for every character of it.">
+      <br><b>Ask the assistant</b> — says where the page's text would go, and shows every character of it, before anything is sent.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-ask.png" alt="The assistant's answer as a table of regions with revenue and costs, labelled as written by the assistant.">
+      <br><b>Rows from a page</b> — the answer as a table of text, labelled as a model's. It is only ever shown: nothing in it is run, opened or fetched.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
+      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-crawl-links.png" alt="The links found on the crawled pages, each once with how often it came up and the first page it was found on.">
+      <br><b>What a crawl found</b> — every link, image, video and file on the pages it reached, each once, with the page it was first found on, in the same lists as above.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
+      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+    </td>
+    <td width="50%" valign="top">
       <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
       <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
     </td>
+  </tr>
+  <tr>
     <td width="50%" valign="top">
       <img src="docs/images/files-sftp-denied.png" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
       <br><b>When a host won't let you in</b> — what went wrong, what to do in order, and a button for the next move. See <a href="#when-a-host-cant-be-reached">When a host can't be reached</a>.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/files-sftp-shared.png" alt="The file browser listing a host after a terminal tab signed in to it, with a link icon beside the path.">
+      <br><b>A host that wants a password</b> — sign in once in a terminal tab, where the password goes to <code>ssh</code> and not to the app, and the file browser uses that connection. See <a href="#a-host-that-wants-a-password">A host that wants a password</a>.
     </td>
   </tr>
   <tr>
@@ -181,7 +211,7 @@ A tour of the app in twenty-seven pictures, in five groups.
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and an SSH server on localhost that lets no one in — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty-seven into `docs/images/`.</sub>
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-three into `docs/images/`.</sub>
 
 ## Features
 
