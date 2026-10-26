@@ -147,6 +147,19 @@ A tour of the app in twenty pictures, in four groups.
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
   support, alternate-screen apps, configurable scrollback and cursor style,
   and an opt-in Metal GPU renderer.
+- **Right-click menu** — right-click a terminal (or the margin around it) for
+  Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that
+  is a tab or a pane, Split Right, Split Down and New Tab. Copy is greyed out
+  until something is selected; Paste goes to the terminal you clicked, even if
+  another one had the keyboard; Clear Scrollback drops only the history above
+  the screen, so it is safe while a program is running. A program that has
+  switched on mouse reporting does not receive the right button (the terminal
+  engine never reported it), so the menu takes nothing from it.
+- **Colored output** — `ls` prints folders, links and programs in color, and
+  `man` pages (and anything read through `less`) get colored headings, options
+  and placeholders, with no shell plugin to install: the app gives each local
+  shell the environment those plugins set. See
+  [Colored output](#colored-output).
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions); a landing screen with quick-start cards and
@@ -203,7 +216,9 @@ A tour of the app in twenty pictures, in four groups.
   a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
-  saved host over SFTP, with upload, download, and drag-and-drop.
+  saved host over SFTP, with upload, download, and drag-and-drop. When a host
+  turns the file browser away it says why and what to do about it — see
+  [When a host can't be reached](#when-a-host-cant-be-reached).
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -222,6 +237,13 @@ A tour of the app in twenty pictures, in four groups.
   address and walk what the site publishes like a directory, with `ls`, `cd`,
   `tree`, `find`, `get` and Tab completion. See
   [Site explorer](#site-explorer) for what it reads and what it won't.
+- **Extract** — the response area's second tab reads the response in hand into
+  lists you can filter, copy, save and open: a page's links, images, video and
+  audio, files, headings, tables, metadata, structured data and readable text
+  (plain or Markdown), and the rows of JSON, CSV and feeds — with a query box
+  that speaks CSS selectors, XPath, JSONPath and regular expressions. Images,
+  media and files can be downloaded, after a sheet that says from where, into
+  which folder, and what will not be fetched. See [Extract](#extract).
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -356,6 +378,43 @@ if [[ "$TERM_PROGRAM" == "iTERMiNAL" ]]; then
   precmd_functions+=(_iterminal_cwd)
 fi
 ```
+
+## Colored output
+
+Settings → Terminal → **Colored output**, on by default, applies to terminals
+opened after you change it. It does what the zsh plugins
+[zsh-colored-man-pages](https://github.com/ael-code/zsh-colored-man-pages),
+[zsh-colorls](https://github.com/Kallahan23/zsh-colorls) and
+[zpm-zsh/colors](https://github.com/zpm-zsh/colors) do, with nothing to install
+and for whichever shell the terminal starts — bash and fish get it too. It
+wraps and intercepts nothing: it adds a few environment variables, the ones
+those commands already read, to each **local** shell.
+
+| Setting | Variables | What you see |
+|---|---|---|
+| **ls: directories, links and scripts** | `CLICOLOR=1`, `LSCOLORS` | macOS's `ls`: folders in bold blue, symbolic links in bold cyan, programs in bold green, and sockets, pipes, devices, set-id files and writable folders in the usual extra colors. macOS's `ls` colors by kind of file and has no way to color by ending: an archive or a picture is plain there. |
+| | `LS_COLORS` | GNU `ls --color` and eza read this instead, and add archives (red), pictures and video (magenta) and audio (cyan) by their ending. |
+| **man pages and less** | `LESS_TERMCAP_*`, `GROFF_NO_SGR=1` | Headings, command names and option names in bold red; what you fill in (`file`) in green; `less`'s own status line in yellow on blue. These are the choices zsh-colored-man-pages made. |
+
+- **The theme decides how they look.** Every color is an ANSI palette number,
+  never an RGB value, so the output follows a theme change and reads on a light
+  theme and a dark one alike. The terminal draws bold in the bright variant of
+  a color, so "bold blue" is whatever bright blue the theme has.
+- **Anything you set wins.** The variables are set before your shell's startup
+  files run, so a `LSCOLORS` or `LESS_TERMCAP_md` in `.zshrc` replaces ours, and
+  a variable already present in the environment the app was started with is
+  left alone. A non-empty `NO_COLOR` — the convention for "no color, anywhere"
+  — switches the whole thing off.
+- **Local shells only.** SSH and Mosh sessions, superfile and btop are not
+  given any of it.
+- **Some commands only color when asked.** `grep` prints its matches plain
+  unless it is given `--color`, whatever the environment says, and iTERMiNAL
+  does not edit your shell's startup files. Settings → Terminal → *grep, GNU ls
+  and other commands* shows the three aliases to add and has a Copy button.
+- **What it is not.** The terminal never rewrites output after the fact, and
+  nothing here wraps commands in a colorizer the way zpm-zsh/colorize wraps
+  them with `grc`. What you type in the composer is colored separately — see
+  the composer in [Features](#features).
 
 ## Ghostty configuration
 
@@ -527,6 +586,42 @@ certificate needs no pin. The pin is honoured by both the API client and the
 browser panel, because WKWebView runs its own trust evaluation and never
 consults URLSession's delegate.
 
+### When a host can't be reached
+
+The file browser runs `sftp` with no keyboard, so it can fail in ways `sftp`'s
+own one-line message does not explain. The commonest is
+`Permission denied (publickey,password,keyboard-interactive)`: the server
+turned down every key this Mac offered, *and* the file browser has no way to
+answer a password prompt, however right the password. The panel used to show
+that line, cut short, over an "Empty folder". It now reads what `sftp` said and
+shows, in place of the listing:
+
+- the problem in one line, and why it happened;
+- what to do, in order, with the commands to copy;
+- the buttons that go with it — **Try Again**; **Set Up Key…**, which opens a
+  tab on this Mac with the `ssh-copy-id` command typed and *not* run, so you
+  press Return and enter the host's password once, in a real terminal;
+  **Sign In in a Terminal**; **Forget Old Key…** for a changed host key; and
+  **Connection Settings…**;
+- the exact words `sftp` used, folded away under **What sftp said**, never
+  replaced by the summary.
+
+It tells these apart: a refused sign-in (and which methods the server does
+accept), too many keys offered, a changed host key, an identity file that is
+missing or readable by others, a refused connection, no answer, no route, a name
+that doesn't resolve, a connection closed before sign-in, a host with SFTP off
+or a login that prints text, and a folder that is missing or off limits.
+Anything else is shown as `sftp` said it, with a Try Again. A failed upload,
+download or delete leaves the listing alone and shows a one-line strip with
+Details.
+
+**Settings → Connections → Test File Access** signs in the way the file browser
+does and shows the same words, so a host can be checked with its settings in
+front of you. When a key is named for a host, `ssh` is told to offer only that
+one (`IdentitiesOnly=yes`), so a server that allows few attempts doesn't hang
+up before reaching it. A host that accepts only a password can't be browsed
+from here; use a terminal session to it, or install a key.
+
 ## Security model
 
 - **The scripting API is opt-in.** It ships disabled, with separate toggles for
@@ -550,6 +645,12 @@ consults URLSession's delegate.
   loopback. Anything routable still has to be HTTPS — the HTTP client refuses
   a plain `http://` request to any other host outright, rather than letting it
   fail as a confusing network error.
+- **Downloads wait for a yes, and a page can't aim them at your network.**
+  Extract fetches only the files you tick, after a sheet that shows the sites
+  and the folder. A page from the internet can't make the app request this Mac
+  or the network it is on — a redirect included — and requests carry no cookies
+  or credentials. Files are never overwritten and are marked as downloaded from
+  the web. See [Extract](#extract) for the rules and their one stated gap.
 - **Certificate validation is never disabled.** A self-signed Proxmox host is
   reached by pinning the one certificate you confirmed by fingerprint, for that
   host and port alone — the system's own verdict is tried first, so pinning can
@@ -744,6 +845,97 @@ The map lives in memory for the pane and is not saved with a layout or in a
 snapshot. A `get` is recorded in the pane's history and on the `http.sent`
 event like any other request; the requests `open` makes on its own are listed
 in the transcript instead.
+
+## Extract
+
+The HTTP pane's response area has two tabs: **Body**, the response as it came,
+and **Extract**, which reads that one response into lists and tables. It works
+on what is already in hand: opening the tab requests nothing, and nothing in it
+follows a link by itself.
+
+**For a web page**, a row of chips opens each list — only the ones with
+something in them:
+
+| List | Shows |
+|---|---|
+| Overview | Title, description, site, author, date, language, encoding, canonical address, preview image, the feeds the page declares, and a count of everything below |
+| Text | The reading part of the page — `<article>`, else `<main>`, else the biggest block of text — as plain text or Markdown, with Copy and Save… |
+| Links | Every link, with its text, whether it is the same site, its `rel`, and how often it appears. Links to a place further down the same page are counted, not listed; so are images written into the markup as `data:` addresses |
+| Images | `<img>` (including `srcset` and the lazy-load attributes sites use), `<picture>`, video posters, icons, `og:image` and `twitter:image`, with size and where each came from |
+| Video & audio | `<video>`, `<audio>`, `<source>`, caption tracks, `og:video` and `og:audio`, and embedded players. YouTube, Vimeo, Dailymotion, Spotify, SoundCloud and Twitch are named, with their watch page; a player is a page, not a file, so it is listed and not downloadable. A streaming playlist (`.m3u8`) is saved as the playlist, not stitched into a video |
+| Files | Links to documents, archives, spreadsheets and the like, by their ending |
+| Headings, Tables, Meta, Structured data, Scripts & styles, Forms | The outline; each `<table>` as a table; the `<meta>` and `<link>` tags; JSON-LD and microdata; the scripts and stylesheets the page loads; each form's method, action and fields |
+
+**For data**, a JSON array of objects, a CSV or TSV file, an RSS or Atom feed
+and a sitemap each become a table (**Records**), and any other response lists
+the addresses found in it.
+
+**Query** asks the response a question of your own, in the language a scraper
+would use:
+
+- **CSS** — type, `#id`, `.class`, attribute selectors (`[a^=v]`, `[a$=v]`,
+  `[a*=v]` and the rest), the four combinators, `:first-child` and its family,
+  `:nth-…(An+B)`, `:not()`, `:has()`, `:empty`, and `:contains("text")`; end
+  with `::text`, `::html` or `::attr(name)` to say what to take, as in Scrapy.
+- **XPath** — the part of XPath 1.0 that scraping uses: paths, `//`, `@attr`,
+  `text()`, predicates with `contains`, `starts-with`, `not`, `position()` and
+  `last()`. Other axes and unions are not supported.
+- **JSONPath** — `$`, members, `[*]`, `..`, slices, several at once, and
+  `[?(@.price < 10 && @.stock)]` filters.
+- **Regex** — over the response as text; each capture group is a column, and a
+  pattern that takes more than three seconds is stopped.
+
+A query that can't be read says where it went wrong. Examples in the menu are
+questions about the markup in front of you, not addresses.
+
+**Taking things out.** Every list can be filtered; copied or saved as CSV, TSV,
+JSON, a Markdown table or a plain list of addresses (a cell a spreadsheet would
+run as a formula — one that starts with `=`, `@`, or a `+`/`-` that isn't a
+number — gets a leading apostrophe, since a page can put anything in a link's
+text); and each row has a menu: **Copy Address**, **Open in Browser Panel**,
+**Load as Request**, **Fetch (GET)**, **Download…**. Load and Fetch are how you
+get from one page to the next, one click each. **Save…** beside the tabs saves
+the response body itself.
+
+**Downloading.** Tick the rows you want (or use *All*) and choose Download. A
+sheet shows how many files, the sites they come from, the folder, the size
+limit, each file's name and address, and — under *will not be fetched* — every
+address the rules below left out and why. Nothing is requested until you press
+Download.
+
+- Files go in `~/Downloads/iTERMiNAL/<site>/` unless Settings → HTTP Client
+  names another folder, each under the name its address gives it (a name with
+  no ending gets one from the type the server declared), numbered if that name
+  is taken — **nothing is ever overwritten** — and marked as downloaded from
+  the web, so macOS asks before it opens anything that could run. The first
+  download into Downloads makes macOS ask whether iTERMiNAL may use that
+  folder (Desktop and Documents do the same); a folder anywhere else, chosen
+  in Settings, never asks.
+- Three at a time, up to 500 files per batch, and no file larger than the
+  limit in Settings (25 MB, 100 MB, 250 MB or 1 GB; a file is stopped the
+  moment it passes it, before the rest arrives). *Stop* ends the batch.
+- Requests carry no cookies, no credentials and none of the headers the page
+  was fetched with: a file on another site isn't owed the login to this one.
+  The `Referer` is what a browser sends — the page's address to the same site,
+  only the site's own address to another, nothing from a secure page to an
+  insecure one.
+- **A page can't aim this app at your network.** Addresses come from the page
+  you fetched, so an address on this Mac or a network that isn't the internet —
+  loopback, private and link-local ranges, `.local` and one-word names, and
+  unusual spellings of an IP address — is refused unless the page itself came
+  from there. Names are judged as written, not looked up, so a public name
+  that someone has pointed at a private address is not caught. Plain `http://`
+  is used only for this Mac itself, as everywhere in the HTTP client, and a
+  redirect is judged by the same rules as the first address.
+
+**What it never does.** It doesn't crawl: no list follows its links, and
+nothing is fetched except a row you chose to fetch or download. It doesn't
+guess at addresses, run a page's scripts (so what scripts draw isn't there — the
+Overview says so), or log in. The reading is lossy where HTML is: a page that
+puts its content in scripts has little in the response to read.
+
+Nothing here is saved with a layout or in a snapshot, and the download folder
+is a path on this Mac, so it isn't in exported settings either.
 
 ## Backup and restore
 
