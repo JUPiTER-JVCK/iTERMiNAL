@@ -8,7 +8,7 @@ struct OutputColorsSettingsSection: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var copied = false
 
-    /// Typed by hand because a command only colours when asked: `grep` prints
+    /// Typed by hand because a command only colors when asked: `grep` prints
     /// its matches plain unless it is given `--color`, whatever the
     /// environment says. This app does not edit shell startup files.
     private static let grepAliases = """
@@ -32,15 +32,15 @@ struct OutputColorsSettingsSection: View {
             )
 
             Text("""
-            Applies to new terminals. The colours are your theme's own — bold blue is whatever blue the theme calls blue — so they follow a theme change. \
+            Applies to new terminals. The colors are your theme's own — bold blue is whatever blue the theme calls blue — so they follow a theme change. \
             Your shell's startup files run afterwards, so anything you set there wins, and the NO_COLOR convention switches this off.
             """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            DisclosureGroup("grep and other commands") {
+            DisclosureGroup("grep, GNU ls and other commands") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Some commands print colour only when asked. For grep, add these to your .zshrc — iTERMiNAL doesn't edit your shell's files:")
+                    Text("Some commands print color only when asked. For grep, add these to your .zshrc — iTERMiNAL doesn't edit your shell's files:")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(alignment: .top) {
@@ -50,6 +50,10 @@ struct OutputColorsSettingsSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button(copied ? "Copied" : "Copy") { copy() }
                     }
+                    Text("macOS's own ls colors folders, links and programs, and nothing else. GNU ls (with --color) and eza also read LS_COLORS, which is set too, and color archives, pictures and audio.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 4)
             }
@@ -64,10 +68,13 @@ struct OutputColorsSettingsSection: View {
     }
 }
 
-/// A few lines of `ls -l` and a man page in the theme's own colours.
+/// A few lines of `ls -l` and a man page in the theme's own colors.
 ///
 /// Drawn from the same tables the environment is written from, so the sample
-/// cannot say one thing while the terminal does another.
+/// cannot say one thing while the terminal does another. The listing is what
+/// macOS's own `ls` prints, which colors by kind of file and never by ending:
+/// a picture or an archive is plain there, and only the tools that read
+/// `LS_COLORS` color it.
 private struct OutputColorsPreview: View {
     let theme: TerminalTheme
     let listings: Bool
@@ -90,7 +97,7 @@ private struct OutputColorsPreview: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(hex: theme.background)))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("A sample of coloured ls and man page output in this theme")
+        .accessibilityLabel("A sample of colored ls and man page output in this theme")
     }
 
     // MARK: Rows
@@ -105,19 +112,13 @@ private struct OutputColorsPreview: View {
         listings ? OutputColors.listingStyles.first { $0.kind == kind }?.sgr : nil
     }
 
-    private func extensionStyle(_ ending: String) -> String? {
-        guard listings else { return nil }
-        return OutputColors.extensionStyles.first { $0.endings.contains(ending) }?.sgr
-    }
-
     private var listingRows: [[Run]] {
         var rows: [[Run]] = []
         rows.append([run("drwxr-xr-x  "), run("Documents", style(.directory))])
         rows.append([run("lrwxr-xr-x  "), run("current", style(.symlink)), run(" -> releases/v2.4")])
         rows.append([run("-rwxr-xr-x  "), run("deploy.sh", style(.executable))])
-        rows.append([run("-rw-r--r--  "), run("backup.tar.gz", extensionStyle("gz"))])
-        rows.append([run("-rw-r--r--  "), run("photo.png", extensionStyle("png"))])
         rows.append([run("-rw-r--r--  "), run("notes.txt")])
+        rows.append([run("-rw-r--r--  "), run("photo.png")])
         return rows
     }
 
@@ -143,7 +144,7 @@ private struct OutputColorsPreview: View {
             .lineLimit(1)
     }
 
-    /// One run, drawn as a terminal would draw its SGR codes: the colour from
+    /// One run, drawn as a terminal would draw its SGR codes: the color from
     /// the theme's sixteen, and — as SwiftTerm does — the bright one for bold.
     private func text(_ piece: Run) -> Text {
         var foregroundIndex: Int?
