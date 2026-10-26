@@ -431,8 +431,11 @@ final class ScreenshotRun {
             extraction.queryLanguage = language
             extraction.queryText = text
             extraction.queryOutput = output
+            // Until it is done: a result from the one before is already there,
+            // and a Run pressed while one is running is ignored.
+            _ = await ScreenshotMode.until(timeout: 10) { !extraction.isQuerying }
             extraction.runQuery()
-            _ = await ScreenshotMode.until(timeout: 10) { extraction.queryResult != nil || extraction.queryError != nil }
+            _ = await ScreenshotMode.until(timeout: 10) { !extraction.isQuerying }
             say("extract: \(language.rawValue) \(text): \(extraction.queryError ?? "\(extraction.queryResult?.table.rows.count ?? -1) rows")"
                 + " \(extraction.queryResult?.table.rows.prefix(3).map { $0.cells.joined(separator: " | ") } ?? [])")
         }
@@ -590,6 +593,10 @@ final class ScreenshotRun {
         await pause(1.8)
         var taken = capture("terminal-colors")
 
+        // The composer put down to its pill, so the pager's status line — the
+        // last line of the terminal — is not behind it.
+        settings.composerCollapsed = true
+        await pause(0.8)
         await run("man ls", in: session)
         await pause(3.0)
         taken = capture("terminal-colors-man") && taken
@@ -597,6 +604,7 @@ final class ScreenshotRun {
         session.send(text: "q")
         await pause(1.0)
         session.send(text: "clear\n")
+        settings.composerCollapsed = false
         await pause(0.8)
         return taken
     }
@@ -1134,7 +1142,7 @@ final class ScreenshotRun {
             (.panels, "settings-panels", 640),
             (.security, "settings-security", 640),
             (.ai, "settings-ai", 640),
-            (.http, "settings-http", 860),
+            (.http, "settings-http", 640),
             (.advanced, "settings-advanced", 640),
         ]
         for (section, name, height) in pages {
@@ -1147,14 +1155,16 @@ final class ScreenshotRun {
                 )
             }
         }
-        // The Terminal page again, tall enough to show all of it: the colors sit
-        // below what the usual window shows.
-        await scene("settings-terminal-colors") {
+        // The HTTP Client page again, scrolled to the end: the Downloads settings
+        // and the privacy note sit below what the usual window shows. (A window
+        // cannot be made taller than the screen, so it is the page that moves.)
+        await scene("settings-http-downloads") {
             await ScreenshotMode.host(
-                SettingsRootView(initialSection: .terminal),
-                size: NSSize(width: 940, height: 1100),
-                name: "settings-terminal-colors",
-                in: self.directory
+                SettingsRootView(initialSection: .http),
+                size: NSSize(width: 940, height: 640),
+                name: "settings-http-downloads",
+                in: self.directory,
+                scrolledToEnd: true
             )
         }
 

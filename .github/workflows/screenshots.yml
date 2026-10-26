@@ -12,15 +12,6 @@ name: Screenshots
 # than that — each file is named for what it shows, and app.log says what the
 # app saw while it took them.
 on:
-  # TEMPORARY, to be removed before this merges: build and run the app on
-  # pushes to this branch, which has no pull request to do it.
-  push:
-    branches: [claude/macos-terminal-design-planning-rwuvtw]
-    paths:
-      - .github/workflows/screenshots.yml
-      - .github/workflows/build.yml
-      - Sources/**
-      - scripts/**
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
   workflow_dispatch:
@@ -46,30 +37,6 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
       - uses: actions/checkout@v5
-
-      # TEMPORARY, with the push trigger above. This branch has no pull
-      # request, so build.yml's check of the logic that has no AppKit in it does
-      # not run on it, and that logic was written on Linux. It runs here, on
-      # macOS, with the file list taken from build.yml so the two cannot drift.
-      # A failure is reported and does not stop the pictures.
-      - name: Check input logic (macOS)
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          files=$(python3 - <<'PY'
-          import re
-          step = open(".github/workflows/build.yml").read().split("- name: Check input logic", 1)[1]
-          found = []
-          for line in step.split("swiftc -o", 1)[1].splitlines():
-              found += re.findall(r"\S+\.swift", line)
-              if not line.rstrip().endswith("\\"):
-                  break
-          print(" ".join(found))
-          PY
-          )
-          echo "$files" | wc -w
-          swiftc -o "$RUNNER_TEMP/input-logic-check" $files
-          "$RUNNER_TEMP/input-logic-check"
 
       # The same way build.yml installs it, and for the same reason: straight
       # from its release, not through Homebrew.

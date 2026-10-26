@@ -75,7 +75,8 @@ extension ScreenshotMode {
         _ content: Content,
         size: NSSize?,
         name: String,
-        in directory: URL
+        in directory: URL,
+        scrolledToEnd: Bool = false
     ) async -> Bool {
         let settings = AppSettings.shared
         let root = content
@@ -105,6 +106,23 @@ extension ScreenshotMode {
         window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: target), display: true)
         window.makeKeyAndOrderFront(nil)
         await pause(2.0)
+        if scrolledToEnd {
+            // The widest scroll view is the page; the narrow one beside it is the
+            // list of pages.
+            let scrollers = allViews(of: NSScrollView.self, in: hosting)
+            if let page = scrollers.max(by: { $0.contentView.bounds.width < $1.contentView.bounds.width }),
+               let document = page.documentView {
+                let overflow = document.frame.height - page.contentView.bounds.height
+                say("\(name): the page is \(Int(document.frame.height)) high in a view \(Int(page.contentView.bounds.height)) high")
+                if overflow > 0 {
+                    page.contentView.scroll(to: NSPoint(x: 0, y: document.isFlipped ? overflow : 0))
+                    page.reflectScrolledClipView(page.contentView)
+                    await pause(0.8)
+                }
+            } else {
+                say("\(name): no scroll view to move")
+            }
+        }
         // The system will not make a window shorter than its content plus a
         // title bar, even with the content drawn under it; what is left under
         // the content is bare window, and is left out of the picture.
