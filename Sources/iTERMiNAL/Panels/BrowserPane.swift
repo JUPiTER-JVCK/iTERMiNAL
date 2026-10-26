@@ -533,10 +533,6 @@ final class BrowserTabsModel: ObservableObject {
         }
         EventBus.shared.publish(APIEvent("browser.tab.closed", ["tab": id.uuidString]))
     }
-
-    func title(for model: BrowserModel) -> String {
-        model.pageTitle.isEmpty ? "New tab" : model.pageTitle
-    }
 }
 
 /// The right-hand browser panel: a tab strip, a navigation row, and either a
@@ -569,7 +565,6 @@ struct BrowserPanelView: View {
                     ForEach(model.tabs) { tab in
                         BrowserTabChip(
                             tab: tab,
-                            title: model.title(for: tab),
                             isSelected: model.active?.id == tab.id,
                             onSelect: { model.selectedID = tab.id },
                             onClose: { model.closeTab(tab.id) }
@@ -600,13 +595,20 @@ struct BrowserPanelView: View {
 /// One tab chip: favicon-ish glyph, title, and a close button.
 private struct BrowserTabChip: View {
     @ObservedObject var tab: BrowserModel
-    let title: String
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Read here, from the tab this chip observes, and not handed down by the
+    /// panel: the panel does not redraw when a page names itself, so a title it
+    /// passed in would stay what it was when the strip was last drawn — "New
+    /// tab" over a page that has loaded.
+    private var title: String {
+        tab.pageTitle.isEmpty ? "New tab" : tab.pageTitle
+    }
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
