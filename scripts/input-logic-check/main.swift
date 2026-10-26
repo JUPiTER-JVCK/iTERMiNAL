@@ -2012,5 +2012,958 @@ do {
     check(complete("cd \"bl") == nil, "a quoted word is left alone")
 }
 
+// MARK: Remote problems (SFTP)
+
+// What `sftp` says when it cannot do its job, said so that a person can act on
+// it. The strings are what OpenSSH prints; the first is the one that started
+// this: a Mac that offers a key, a password and keyboard-interactive, and a
+// file browser that can only use the first.
+do {
+    let host = SSHConnection(name: "Studio", host: "192.168.1.148", username: "mb_pro")
+    func kind(_ output: String, _ connection: SSHConnection = host) -> RemoteProblem.Kind {
+        RemoteProblem.classify(output: output, connection: connection).kind
+    }
+
+    // A sign-in that was turned away.
+    let refused = "mb_pro@192.168.1.148: Permission denied (publickey,password,keyboard-interactive).\nConnection closed"
+    check(kind(refused) == .signInRefused(methods: ["publickey", "password", "keyboard-interactive"]),
+          "a refused sign-in names the methods the server offered")
+    let problem = RemoteProblem.classify(output: refused, connection: host)
+    check(problem.title == "Couldn't sign in to mb_pro@192.168.1.148", "and the title says who it was for")
+    check(problem.explanation.contains("can only sign in with a key") && problem.explanation.contains("never handles one"),
+          "the explanation says what the file browser can do, and that no password goes through this app")
+    check(problem.explanation.contains("also allows a password or a keyboard-interactive prompt"),
+          "and which of the server's other methods it cannot use")
+    check(problem.output == refused, "what sftp said is kept exactly")
+    check(problem.actions == [
+        .tryAgain, .runInLocalTerminal(label: "Set Up Key…", command: "ssh-copy-id mb_pro@192.168.1.148"),
+        .signInInTerminal, .editConnection,
+    ], "a refused key offers to try again, to set one up, to sign in in a terminal, and to edit the host")
+    check(problem.steps.first?.command == "ssh-copy-id mb_pro@192.168.1.148", "the first step is the command that fixes it")
+    check(kind("mb_pro@192.168.1.148: Permission denied (publickey).") == .signInRefused(methods: ["publickey"]),
+          "one method is one method")
+    check(kind("Warning: Permanently added '192.168.1.148' (ED25519) to the list of known hosts.\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .signInRefused(methods: ["publickey"]), "a first-connection warning above it changes nothing")
+    check(kind("mb_pro@192.168.1.148's password: \nPermission denied, please try again.") == .signInRefused(methods: []),
+          "the older wording is still a refused sign-in")
+
+    // A server that takes no keys at all cannot be used from here.
+    let passwordOnly = RemoteProblem.classify(output: "mb_pro@192.168.1.148: Permission denied (password,keyboard-interactive).", connection: host)
+    check(passwordOnly.explanation.contains("only accepts a password or a keyboard-interactive prompt"),
+          "a host without key sign-in is described as such")
+    check(passwordOnly.steps.first?.command == nil && passwordOnly.steps.first?.text.contains("terminal session") == true,
+          "and the way forward is a terminal session, not a key")
+    check(!passwordOnly.actions.contains { if case .runInLocalTerminal = $0 { return true } else { return false } },
+          "it is not offered a key to install, since the host would not take it")
+
+    // Keys that cannot be offered.
+    check(kind("Received disconnect from 192.168.1.148 port 22:2: Too many authentication failures\nDisconnected from 192.168.1.148 port 22")
+            == .tooManyAuthFailures, "too many keys offered is its own problem")
+    check(kind("Permissions 0644 for '/Users/me/.ssh/id_rsa' are too open.\nIt is required that your private key files are NOT accessible by others.\nThis private key will be ignored.\nLoad key \"/Users/me/.ssh/id_rsa\": bad permissions\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .identityFile(path: "/Users/me/.ssh/id_rsa", reason: "too open"), "a key others can read is named, not lost in a refusal")
+    check(RemoteProblem.classify(output: "Permissions 0644 for '/Users/me/.ssh/my key' are too open.", connection: host).steps.first?.command
+            == "chmod 600 '/Users/me/.ssh/my key'", "and the fix is quoted for a path with a space")
+    check(kind("Warning: Identity file /Users/me/.ssh/nope not accessible: No such file or directory.\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .identityFile(path: "/Users/me/.ssh/nope", reason: "missing"), "a named key that is not there is named")
+    check(kind("Load key \"/Users/me/.ssh/id\": invalid format") == .identityFile(path: "/Users/me/.ssh/id", reason: "invalid format"),
+          "a key that will not load says why")
+
+    // The host's own key.
+    let changed = """
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+    Offending ED25519 key in /Users/me/.ssh/known_hosts:12
+    Host key verification failed.
+    Connection closed
+    """
+    check(kind(changed) == .hostKeyChanged(offending: "/Users/me/.ssh/known_hosts:12"), "a changed host key points at the line in known_hosts")
+    check(kind("Host key verification failed.") == .hostKeyChanged(offending: nil), "and without the banner it is still that")
+    check(RemoteProblem.classify(output: changed, connection: host).explanation.contains("intercepted"),
+          "the explanation does not pretend a changed key is harmless")
+    check(RemoteProblem.forgetHostKeyCommand(for: host) == "ssh-keygen -R 192.168.1.148", "forgetting a host on the usual port")
+    let elsewhere = SSHConnection(name: "x", host: "192.168.1.148", port: 2222, username: "mb_pro")
+    check(RemoteProblem.forgetHostKeyCommand(for: elsewhere) == "ssh-keygen -R '[192.168.1.148]:2222'",
+          "and on another port, where known_hosts writes it as [host]:port and the shell needs it quoted")
+    check(RemoteProblem.classify(output: changed, connection: host).actions.contains(
+        .runInLocalTerminal(label: "Forget Old Key…", command: "ssh-keygen -R 192.168.1.148")), "the old key can be forgotten from a button")
+
+    // Not reached at all.
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Connection refused\nConnection closed") == .connectionRefused, "refused")
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Operation timed out") == .timedOut, "timed out, as macOS says it")
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Connection timed out") == .timedOut, "and as Linux does")
+    check(kind("ssh: connect to host 10.0.0.9 port 22: No route to host") == .unreachable, "no route")
+    check(kind("ssh: connect to host 10.0.0.9 port 22: Network is unreachable") == .unreachable, "no network")
+    check(RemoteProblem.classify(output: "ssh: connect to host 10.0.0.9 port 22: No route to host", connection: host).explanation.contains("local network"),
+          "a missing route also names the macOS local-network permission, which blocks exactly this")
+    check(kind("ssh: Could not resolve hostname nas.local: nodename nor servname provided, or not known") == .hostNotFound, "a name that does not resolve, on macOS")
+    check(kind("ssh: Could not resolve hostname nas: Name or service not known") == .hostNotFound, "and on Linux")
+    check(kind("Connection closed by 192.168.1.148 port 22") == .connectionDropped, "closed by the host")
+    check(kind("kex_exchange_identification: read: Connection reset by peer") == .connectionDropped, "reset before the handshake")
+    check(kind("Connection closed") == .connectionDropped, "a bare 'Connection closed' is the fallback, not a diagnosis")
+    check(kind("subsystem request failed on channel 0\nConnection closed") == .noSFTP, "SFTP switched off, whatever line follows")
+    check(kind("Received message too long 1953724755") == .noSFTP, "a login that prints text breaks the protocol")
+    check(RemoteProblem.timedOut(connection: host).kind == .timedOut && RemoteProblem.timedOut(connection: host).steps.last?.command == "nc -vz 192.168.1.148 22",
+          "our own watchdog is a timeout, with a way to test the port")
+
+    // After signing in, about a path.
+    check(kind("Couldn't canonicalize: No such file or directory") == .pathNotFound, "a start directory that is not there")
+    check(kind("Can't ls: \"/nope\" not found") == .pathNotFound, "a folder that is not found")
+    check(kind("remote readdir(\"/root\"): Permission denied") == .pathDenied, "a folder the account may not open is not a failed sign-in")
+    check(kind("Couldn't remove file: Permission denied") == .pathDenied, "nor is a file it may not remove")
+
+    // Nothing recognised keeps the words it was given.
+    let odd = RemoteProblem.classify(output: "something unexpected\nConnection closed", connection: host)
+    check(odd.kind == .other && odd.explanation == "something unexpected", "an unknown failure is shown as it was said")
+    check(RemoteProblem.classify(output: "", connection: host).explanation == "sftp stopped without saying why.", "and silence is said as silence")
+
+    // Wording helpers.
+    check(RemoteProblem.describe(["publickey"]) == "a key", "one method")
+    check(RemoteProblem.describe(["publickey", "password"]) == "a key or a password", "two")
+    check(RemoteProblem.describe(["publickey", "password", "keyboard-interactive"]) == "a key, a password or a keyboard-interactive prompt", "three")
+
+    // Commands: right for this host, and never able to run on their own.
+    check(RemoteProblem.keySetupCommand(for: host) == "ssh-copy-id mb_pro@192.168.1.148", "the usual key setup")
+    let configured = SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519")
+    check(RemoteProblem.keySetupCommand(for: configured) == "ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
+          "with the port and the key it was set up with, the ~ left to the shell")
+    let spaced = SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id")
+    check(RemoteProblem.keySetupCommand(for: spaced) == "ssh-copy-id -i ~/'My Keys/id' u@h", "a key path with a space is quoted after the ~")
+    let hostile = SSHConnection(name: "b", host: "h; rm -rf ~", username: "it's")
+    check(RemoteProblem.keySetupCommand(for: hostile) == "ssh-copy-id 'it'\\''s@h; rm -rf ~'", "nothing in a saved host can end the command early")
+    check(RemoteProblem.shellQuoted("plain-1.2/x") == "plain-1.2/x" && RemoteProblem.shellQuoted("a b") == "'a b'"
+            && RemoteProblem.shellQuoted("") == "''" && RemoteProblem.shellQuoted("[h]:1") == "'[h]:1'", "quoting only when something needs it")
+
+    var everyProblem: [RemoteProblem] = []
+    for output in [refused, changed, "ssh: connect to host h port 22: Connection refused", "subsystem request failed on channel 0",
+                   "Too many authentication failures", "Couldn't canonicalize: No such file or directory", "", "xyz"] {
+        for connection in [host, configured, spaced, hostile] {
+            everyProblem.append(RemoteProblem.classify(output: output, connection: connection))
+        }
+    }
+    check(everyProblem.allSatisfy { !$0.title.isEmpty && !$0.explanation.isEmpty }, "every problem has a title and an explanation")
+    var commands: [String] = []
+    for problem in everyProblem {
+        commands += problem.steps.compactMap(\.command)
+        for case .runInLocalTerminal(_, let command) in problem.actions { commands.append(command) }
+    }
+    check(!commands.isEmpty && commands.allSatisfy { !$0.contains("\n") && !$0.contains("\r") },
+          "no command offered contains a line break, so typing one into a terminal cannot run it")
+}
+
+// MARK: Coloured command output
+
+// The environment that makes `ls` and `man` print in colour. The colours are
+// ANSI numbers, so the theme decides what they look like; what is checked here
+// is that the two `ls` dialects are written from one table, that nothing a
+// person already set is replaced, and that NO_COLOR is obeyed.
+do {
+    check(OutputColors.bsdLSColors == "ExGxFxdxCxegedabagacad", "BSD LSCOLORS is the eleven pairs, written from the table")
+    check(OutputColors.bsdLSColors.count == 22, "eleven pairs of two letters")
+    check(OutputColors.bsdPair(sgr: "01;34") == "Ex" && OutputColors.bsdPair(sgr: "34;46") == "eg"
+            && OutputColors.bsdPair(sgr: "33") == "dx" && OutputColors.bsdPair(sgr: "0") == "xx",
+          "SGR codes become BSD letters: capital for bold, x for 'leave it'")
+    check(OutputColors.bsdPair(sgr: "1") == "xx", "bold with no colour has nothing to capitalise")
+
+    let gnu = OutputColors.gnuLSColors
+    let entries = gnu.split(separator: ":").map(String.init)
+    check(entries.first == "rs=0" && entries.contains("di=01;34") && entries.contains("ex=01;32") && entries.contains("ln=01;36"),
+          "GNU LS_COLORS names the same kinds by key")
+    check(entries.contains("*.tar=01;31") && entries.contains("*.png=01;35") && entries.contains("*.mp3=00;36"), "and colours archives, pictures and audio by ending")
+    check(entries.allSatisfy { $0.range(of: #"^[*.a-z0-9]+=[0-9;]+$"#, options: .regularExpression) != nil },
+          "every LS_COLORS entry is key=codes")
+    check(Set(entries.map { $0.split(separator: "=")[0] }).count == entries.count, "no key is given twice")
+    check(OutputColors.listingStyles.count == 11 && Set(OutputColors.listingStyles.map(\.kind)).count == 11, "all eleven BSD kinds are in the table, once")
+
+    let both = OutputColors(listings: true, manPages: true).environment(inheriting: [:])
+    check(both["CLICOLOR"] == "1" && both["LSCOLORS"] == OutputColors.bsdLSColors && both["LS_COLORS"] == gnu, "listings sets the three ls variables")
+    check(both["LESS_TERMCAP_md"] == "\u{1B}[1;31m" && both["LESS_TERMCAP_us"] == "\u{1B}[1;32m" && both["LESS_TERMCAP_me"] == "\u{1B}[0m",
+          "man pages: bold red, underline green, reset, with a real escape character")
+    check(both["LESS_TERMCAP_so"] == "\u{1B}[1;33;44m" && both["GROFF_NO_SGR"] == "1", "and less's status line, and groff's overstrikes")
+    check(both.count == 3 + 7 + 1, "and nothing else")
+
+    check(OutputColors(listings: true, manPages: false).environment(inheriting: [:]).keys.sorted() == ["CLICOLOR", "LSCOLORS", "LS_COLORS"],
+          "listings alone touches only ls")
+    check(OutputColors(listings: false, manPages: true).environment(inheriting: [:]).keys.allSatisfy { $0.hasPrefix("LESS_TERMCAP_") || $0 == "GROFF_NO_SGR" },
+          "man pages alone leaves ls alone")
+    check(OutputColors(listings: false, manPages: false).environment(inheriting: [:]).isEmpty, "both off is nothing")
+
+    // What a person has already said is theirs.
+    let owned = OutputColors(listings: true, manPages: true).environment(inheriting: ["LS_COLORS": "di=1", "LESS_TERMCAP_md": "x"])
+    check(owned["LS_COLORS"] == nil && owned["LESS_TERMCAP_md"] == nil, "a variable already set is not replaced")
+    check(owned["LSCOLORS"] != nil && owned["LESS_TERMCAP_us"] != nil, "and the rest still arrive")
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["CLICOLOR": "0"])["CLICOLOR"] == nil, "CLICOLOR=0 is a choice, and respected")
+
+    // NO_COLOR.
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": "1"]).isEmpty, "NO_COLOR turns it all off")
+    check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": ""]).count == 11, "an empty NO_COLOR is not a request")
+}
+
+// MARK: Page parsing: entities, the tree, selectors
+
+// What extraction stands on: a parser that copes with the markup real pages
+// have, and selectors that find things in what it builds.
+do {
+    // Character references.
+    check(HTMLEntities.decode("a &amp; b &lt;i&gt; &quot;q&quot; &#39;s&#39; &apos;t&apos; &#x27;u&#x27;") == "a & b <i> \"q\" 's' 't' 'u'", "the usual references")
+    check(HTMLEntities.decode("caf&eacute; &nbsp;&copy;&hellip;") == "café \u{A0}©…", "named ones beyond the basics")
+    check(HTMLEntities.decode("&#150;&#x1F600;&#0;&#xD800;&#x110000;") == "–😀\u{FFFD}\u{FFFD}\u{FFFD}", "numeric ones: Windows-1252 for 128–159, and the replacement character for nonsense")
+    check(HTMLEntities.decode("&bogus; &; &#; &#x; & &amp") == "&bogus; &; &#; &#x; & &", "unknown or broken ones are left as written; in text &amp needs no semicolon")
+    check(HTMLEntities.decode("?a=1&copy=2&amp=3", inAttribute: true) == "?a=1&copy=2&amp=3", "in an attribute a name without ; is never a reference, so a query string survives")
+    check(HTMLEntities.decode("?a=1&amp;b=2", inAttribute: true) == "?a=1&b=2", "and with ; it is")
+    check(HTMLEntities.decode("plain text") == "plain text", "no ampersand, no work")
+
+    // Structure.
+    func tags(_ node: HTMLNode) -> [String] { node.descendantElements().map(\.tag) }
+    let basic = HTMLParser.parse("<DIV ID=a Class=\"x y\"><P>Hi <B>there</B></P></DIV>")
+    check(tags(basic) == ["div", "p", "b"], "tags and attributes are lower-cased")
+    check(basic.descendantElements().first?.attribute("id") == "a" && basic.descendantElements().first?.classNames == ["x", "y"], "unquoted and quoted attribute values")
+    check(basic.collapsedText() == "Hi there", "text across elements")
+    let quoting = HTMLParser.parse("<a href='/x?a=1&amp;b=2' title=\"it's\" data-n=5 disabled href=\"ignored\">t</a>").descendantElements()[0]
+    check(quoting.attribute("href") == "/x?a=1&b=2" && quoting.attribute("title") == "it's" && quoting.attribute("data-n") == "5", "single-quoted, double-quoted and bare values, references decoded")
+    check(quoting.hasAttribute("disabled") && quoting.attribute("disabled") == "", "a boolean attribute is present with an empty value")
+    check(quoting.attributes.filter { $0.name == "href" }.count == 1, "the first of a repeated attribute wins")
+    check(HTMLParser.parse("<a title=\"a > b\">x</a>").descendantElements()[0].attribute("title") == "a > b", "a > inside quotes does not end the tag")
+
+    check(tags(HTMLParser.parse("<p>a<br>b<img src=x>c<hr><input type=text>d</p>")) == ["p", "br", "img", "hr", "input"], "void elements have no children and need no end")
+    check(HTMLParser.parse("<p>a<br/>b</p>").descendantElements()[0].children.count == 3, "<br/> is a break, not a container")
+    check(HTMLParser.parse("</br>x").descendantElements().map(\.tag) == ["br"], "a stray </br> is a line break")
+
+    // Elements closed by what follows.
+    let list = HTMLParser.parse("<ul><li>a<li>b<li>c</ul>")
+    check(list.descendantElements()[0].elementChildren.map { $0.collapsedText() } == ["a", "b", "c"], "<li> closes the previous <li>")
+    let nested = HTMLParser.parse("<ul><li>a<ul><li>b</ul><li>c</ul>")
+    check(nested.descendantElements()[0].elementChildren.count == 2 && nested.descendantElements()[0].elementChildren[0].elementChildren.count == 1, "a nested list keeps its own items")
+    check(HTMLParser.parse("<p>one<p>two<div>three</div><p>four").children.map { $0.tag } == ["p", "p", "div", "p"], "<p> closes <p>, and a block closes a paragraph")
+    let table = HTMLParser.parse("<table><tr><td>1<td>2<tr><td>3</table>")
+    check(table.descendantElements().filter { $0.tag == "tr" }.map { $0.elementChildren.count } == [2, 1], "rows and cells close each other")
+    check(HTMLParser.parse("<dl><dt>a<dd>b<dt>c<dd>d</dl>").descendantElements()[0].elementChildren.map(\.tag) == ["dt", "dd", "dt", "dd"], "terms and definitions")
+    check(HTMLParser.parse("<select><option>a<option>b</select>").descendantElements()[0].elementChildren.count == 2, "options close each other")
+    let headless = HTMLParser.parse("<html><head><title>T</title><body><p>x</p></body></html>")
+    check(headless.descendantElements().first { $0.tag == "head" }?.elementChildren.map(\.tag) == ["title"], "a head left open is closed by the first thing that is not head content")
+    check(headless.descendantElements().first { $0.tag == "p" }?.parent?.tag == "body", "so the body's content is in the body")
+    check(HTMLParser.parse("<div><span>unclosed<p>more").descendantElements().map(\.tag) == ["div", "span", "p"], "unclosed tags at the end are fine")
+    check(HTMLParser.parse("<div>a</span>b</div>").children[0].collapsedText() == "ab", "an end tag with nothing to close is ignored")
+
+    // Text that is not markup.
+    let script = HTMLParser.parse("<script>if (a < b && c > d) { x = \"</p>\"; }</script ><p>after</p><STYLE>p > a { }</STYLE>")
+    check(script.children.map(\.tag) == ["script", "p", "style"], "script and style contents are not parsed as markup, and end tags match any case")
+    check(script.children[0].children.first?.text == "if (a < b && c > d) { x = \"</p>\"; }", "and are kept as written")
+    check(HTMLParser.parse("<script>never closed <p>").children[0].children.first?.text == "never closed <p>", "an unclosed script takes the rest")
+    check(HTMLParser.parse("<title>Fish &amp; <b>Chips</b></title>").descendantElements()[0].children.first?.text == "Fish & <b>Chips</b>", "title is text with references decoded")
+    check(HTMLParser.parse("<p>1 < 2 and 3 > 2</p>").collapsedText() == "1 < 2 and 3 > 2", "a < that starts nothing is a less-than sign")
+    check(tags(HTMLParser.parse("<!DOCTYPE html><?xml version=\"1.0\"?><!-- <b>no</b> --><p>x</p><!-- never closed <i>")) == ["p"], "doctype, processing instructions and comments make no elements")
+    check(HTMLParser.parse("<p>a<!-- c -->b</p>").collapsedText() == "ab", "and a comment is not text")
+    check(HTMLParser.parse("<ul>\n  <li>a</li>\n  <li>b</li>\n</ul>").descendantElements()[0].children.count == 2, "formatting whitespace between list items is dropped")
+    check(HTMLParser.parse("<p><b>a</b> <i>b</i></p>").collapsedText() == "a b", "but the space between inline elements is kept")
+    check(HTMLParser.parse("<p>one\n\n   two\t three&nbsp;four</p>").collapsedText() == "one two three four", "whitespace, non-breaking included, collapses")
+    check(HTMLParser.parse("<body>x<script>y</script><style>z</style>w<noscript>n</noscript></body>").collapsedText() == "xw", "text a reader sees leaves out scripts, styles and noscript")
+    let svg = HTMLParser.parse("<svg viewBox='0 0 1 1'><path d='x'/><circle r=1 /></svg><p>after</p>")
+    check(svg.children.map(\.tag) == ["svg", "p"] && svg.children[0].elementChildren.map(\.tag) == ["path", "circle"], "self-closing tags inside svg close, so what follows is outside it")
+
+    // Hostile or huge.
+    let deep = HTMLParser.parse(String(repeating: "<div>", count: 20_000) + "x")
+    check(deep.descendantElements().count == 20_000, "twenty thousand unclosed divs parse without recursion")
+    let wide = HTMLParser.parse(String(repeating: "<p class=a>x &amp; y</p>", count: 60_000))
+    check(wide.children.count == 60_000, "sixty thousand paragraphs")
+    check(HTMLParser.parse("<").children.first?.text == "<" && HTMLParser.parse("<a href=\"x").descendantElements().count == 1, "truncated markup does not hang or crash")
+    check(HTMLParser.parse("").children.isEmpty, "nothing in, nothing out")
+
+    // Back to markup.
+    check(HTMLParser.parse("<p class=\"a\">x &lt; y<br><img src=\"/i.png\"></p>").outerHTML() == "<p class=\"a\">x &lt; y<br><img src=\"/i.png\"></p>", "outerHTML writes what was read")
+    check(HTMLParser.parse("<div><b>x</b>y</div>").descendantElements()[0].innerHTML() == "<b>x</b>y", "innerHTML is the inside")
+
+    // Selectors.
+    let page = HTMLParser.parse("""
+    <html><body>
+    <div id="main" class="wrap big"><h1>Title</h1>
+    <ul class="nav"><li class="a first"><a href="/home" title="Home page">Home</a></li><li class="b"><a href="https://example.com/x.pdf">PDF</a></li><li class="c last"><a href="#top">Top</a></li></ul>
+    <p>One <span>two</span></p><p lang="en-US">Three</p><p></p>
+    <div class="wrap"><span class="x">in</span><span>b</span></div>
+    </div></body></html>
+    """)
+    func pick(_ selector: String) -> [HTMLNode] {
+        do { return try CSSSelector.parse(selector).select(in: page) } catch { check(false, "\(selector) should parse: \(error)"); return [] }
+    }
+    func texts(_ selector: String) -> [String] { pick(selector).map { $0.collapsedText() } }
+
+    check(pick("h1").count == 1 && pick("#main").count == 1 && pick(".wrap").count == 2 && pick("div.wrap.big").count == 1, "type, id and class")
+    check(pick("*").count == page.descendantElements().count, "* is everything")
+    check(texts("ul > li") == ["Home", "PDF", "Top"] && texts("ul li a") == ["Home", "PDF", "Top"] && pick("div > a").isEmpty, "child and descendant")
+    check(texts("h1 + ul").count == 1 && pick("h1 + p").isEmpty && pick("h1 ~ p").count == 3, "adjacent and general sibling")
+    check(texts("li.a, li.c") == ["Home", "Top"], "a list gives document order")
+    check(pick("a[href]").count == 3 && pick("a[href^=\"https\"]").count == 1 && pick("a[href$=\".pdf\"]").count == 1 && pick("a[href*=ome]").count == 1, "attribute presence, prefix, suffix and substring")
+    check(pick("a[title~=page]").count == 1 && pick("p[lang|=en]").count == 1 && pick("a[href=\"/HOME\" i]").count == 1 && pick("a[href=\"/HOME\"]").isEmpty, "word, dash and case-insensitive matches")
+    check(texts("li:first-child") == ["Home"] && texts("li:last-child") == ["Top"] && pick("li:only-child").isEmpty, "first, last, only")
+    check(texts("li:nth-child(2)") == ["PDF"] && texts("li:nth-child(odd)") == ["Home", "Top"] && texts("li:nth-child(even)") == ["PDF"], "nth-child by number and parity")
+    check(texts("li:nth-child(-n+2)") == ["Home", "PDF"] && texts("li:nth-child(2n+1)") == ["Home", "Top"] && texts("li:nth-last-child(1)") == ["Top"], "An+B, negative A, and counting from the end")
+    check(texts("p:first-of-type") == ["One two"] && texts("p:last-of-type") == [""] && texts("p:nth-of-type(2)") == ["Three"], "of-type counts only the same tag")
+    check(texts("li:not(.b)") == ["Home", "Top"] && pick("li:not(.a):not(.b)").count == 1, ":not, alone and chained")
+    check(pick("p:empty").count == 1 && texts("p:contains(\"Three\")") == ["Three"] && pick("p:contains(nope)").isEmpty, ":empty and :contains")
+    check(pick("div:has(ul)").map { $0.id } == ["main"] && pick("ul:has(a[href$=pdf])").count == 1, ":has looks below")
+    check(pick(":root").first?.tag == "html", ":root is the html element")
+    check(pick("LI.a").count == 1 && pick("li.A").isEmpty, "type names ignore case, class names do not")
+    check(pick("div  >  span.x").count == 1 && pick("ul>li>a").count == 3, "spacing around combinators is free")
+    check((try? CSSSelector.parse("li"))?.select(in: page, limit: 2).count == 2, "a limit stops early")
+    check((try? CSSSelector.parse("li"))?.matches(page.descendantElements().first { $0.tag == "li" }!) == true, "one node can be tested")
+
+    func fails(_ selector: String) -> String? {
+        do { _ = try CSSSelector.parse(selector); return nil } catch { return (error as? CSSSelectorError)?.message }
+    }
+    check(fails("ul >") != nil && fails("") != nil && fails("a[href") != nil && fails("a[href=]") != nil && fails("li:nth-child(x)") != nil, "broken selectors are errors, not empty results")
+    check(fails("a:hover")?.contains(":hover") == true, "and a state that needs a browser says so")
+    check(fails("a::text")?.contains("belong at the end") == true, "a pseudo-element in a selector points at where it goes")
+    check(fails("a b )") != nil && fails("a,") != nil, "dangling pieces")
+
+    // A typed selector against a page built to be slow: every way of choosing
+    // the ancestors is tried. The step budget ends it, and says it did. (A
+    // small budget here: the real one is a few seconds of release-build work,
+    // which a build without optimisation takes far longer over.)
+    let smallBudget = 300_000
+    let towerDepth = 300
+    let hostileTree = HTMLParser.parse(String(repeating: "<div>", count: towerDepth) + "x" + String(repeating: "</div>", count: towerDepth))
+    let slowSelector = try! CSSSelector.parse(".absent div div div div div div div div", stepLimit: smallBudget)
+    let slowFound = slowSelector.select(in: hostileTree)
+    check(slowFound.isEmpty && slowSelector.exhausted, "a selector that would try every combination stops at its budget and says so")
+    let quickSelector = try! CSSSelector.parse("div > div > div", stepLimit: smallBudget)
+    check(quickSelector.select(in: hostileTree).count == towerDepth - 2 && !quickSelector.exhausted, "an ordinary selector on the same page finishes, and does not trip it")
+    let wideList = HTMLParser.parse("<ul>" + String(repeating: "<li>x</li>", count: 3_000) + "</ul>")
+    let siblingSelector = try! CSSSelector.parse(".absent ~ li ~ li ~ li ~ li ~ li ~ li ~ li ~ li", stepLimit: smallBudget)
+    check(siblingSelector.select(in: wideList).isEmpty && siblingSelector.exhausted, "sibling combinators over a wide list are counted as well")
+    check(try! CSSSelector.parse("li:nth-child(2)", stepLimit: smallBudget).select(in: wideList).count == 1, "and a wide list is no trouble for what people write")
+    let savedLimit = QueryRunner.cssStepLimit
+    QueryRunner.cssStepLimit = smallBudget
+    let hostileDocument = QueryDocument(body: Data((String(repeating: "<div>", count: towerDepth) + "x").utf8), contentType: "text/html", url: "https://example.com/")
+    var runnerMessage: String?
+    do { _ = try QueryRunner.run(.css, query: ".absent div div div div div div div div", output: .text, in: hostileDocument) } catch { runnerMessage = (error as? QueryError)?.message }
+    QueryRunner.cssStepLimit = savedLimit
+    check(runnerMessage?.contains("takes too long") == true, "the query box reports it as an error, in words")
+}
+
+// MARK: Results: export and file names
+
+// Anything found on a page goes out through these, and a file name from a page
+// is hostile text: the checks are the ways it could go wrong.
+do {
+    var table = ResultTable(columns: ["Text", "URL"])
+    table.append(["Home, sweet \"home\"", "https://example.com/"], url: "https://example.com/")
+    table.append(["line\nbreak", "https://example.com/a?x=1"], url: "https://example.com/a?x=1")
+    table.append(["=HYPERLINK(\"http://evil\")", "https://example.com/"], url: "https://example.com/")
+    table.append(["-5", "-cmd|' /C calc'!A0"])
+    table.append(["short"])
+    check(table.rows.count == 5 && table.rows.map(\.id) == [0, 1, 2, 3, 4], "rows are numbered as they are added")
+    check(table.rows[4].cells == ["short", ""], "a short row is padded to the columns")
+    check(ResultTable.urls(in: table.rows) == ["https://example.com/", "https://example.com/a?x=1"], "the addresses of some rows, once each, in order")
+    check(table.filtered(by: "BREAK").count == 1 && table.filtered(by: "  ").count == 5 && table.filtered(by: "zzz").isEmpty, "filtering ignores case; nothing typed is everything")
+
+    let csv = ResultExport.render(table.rows, columns: table.columns, as: .csv)
+    let lines = csv.components(separatedBy: "\r\n")
+    check(lines[0] == "Text,URL", "CSV starts with the headings")
+    check(lines[1] == "\"Home, sweet \"\"home\"\"\",https://example.com/", "a comma and quotes are quoted and doubled")
+    check(csv.contains("\"line\nbreak\""), "a line break inside a cell is quoted")
+    check(csv.contains("'=HYPERLINK") && !csv.contains(",=HYPERLINK") && !csv.hasPrefix("="), "a cell a spreadsheet would run as a formula is made text")
+    check(csv.contains("\r\n-5,") && csv.contains("'-cmd"), "but a plain negative number is left alone, and other minus-leading text is not")
+    check(csv.hasSuffix("\r\n"), "rows end with CRLF, the last included")
+    check(ResultExport.render(table.rows, columns: table.columns, as: .tsv).hasPrefix("Text\tURL\r\n"), "TSV uses tabs")
+    let json = ResultExport.render(Array(table.rows.prefix(2)), columns: table.columns, as: .json)
+    check(json.hasPrefix("[\n  {\"Text\": \"Home, sweet \\\"home\\\"\", \"URL\": \"https://example.com/\"},"), "JSON keeps column order and escapes quotes")
+    check(json.contains("line\\nbreak") && json.hasSuffix("}\n]\n"), "and line breaks, and ends cleanly")
+    check((try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: String]] != nil, "and is valid JSON")
+    check(ResultExport.render([], columns: ["a"], as: .json) == "[]\n", "no rows is an empty array")
+    check(ResultExport.quoted("tab\there\u{01}") == "\"tab\\there\\u0001\"", "control characters are escaped")
+    check(ResultExport.render(table.rows, columns: table.columns, as: .urls) == "https://example.com/\nhttps://example.com/a?x=1\n", "the URL list is just the addresses")
+    check(ResultExport.render([table.rows[0]], columns: ["a|b", "c"], as: .markdown) == "| a\\|b | c |\n| --- | --- |\n| Home, sweet \"home\" | https://example.com/ |\n", "a Markdown table, pipes escaped")
+
+    // File names.
+    func name(_ url: String, type: String? = nil, disposition: String? = nil) -> String {
+        AssetNaming.fileName(for: url, contentType: type, contentDisposition: disposition)
+    }
+    check(name("https://example.com/img/photo.png?size=large") == "photo.png", "the last part of the path, without the query")
+    check(name("https://example.com/a%20b/caf%C3%A9.jpg") == "café.jpg", "percent-decoded")
+    check(name("https://example.com/") == "download" && name("https://example.com") == "download", "nothing to go on")
+    check(name("https://example.com/download", type: "application/pdf") == "download.pdf" && name("https://example.com/x", type: "image/jpeg; charset=x") == "x.jpg", "an extension comes from the media type when the name has none")
+    check(name("https://example.com/x.bin", type: "image/png") == "x.bin", "and never replaces one that is there")
+    check(name("https://example.com/a", disposition: "attachment; filename=\"report 2024.pdf\"") == "report 2024.pdf", "the server's own filename wins")
+    check(name("https://example.com/a", disposition: "attachment; filename=\"plain.pdf\"; filename*=UTF-8''caf%C3%A9.pdf") == "café.pdf", "and its extended form beats the plain one")
+    check(name("https://example.com/a", disposition: "inline") == "a", "a header with no filename is no help")
+
+    // Everything a page could put in a name to get out of the folder.
+    for hostile in ["../../etc/passwd", "..\\..\\windows\\system32", "/etc/passwd", "a/b/c.txt", "%2e%2e%2f%2e%2e%2fetc%2fpasswd", ".hidden", "...", "..", ".", "name\u{0}.png", "con:fused*?.png", "  spaced  "] {
+        let made = AssetNaming.fileName(for: "https://example.com/x", contentDisposition: "attachment; filename=\"\(hostile)\"")
+        let direct = AssetNaming.sanitize(hostile)
+        for result in [made, direct] where !result.isEmpty {
+            check(!result.contains("/") && !result.contains("\\") && !result.hasPrefix(".") && !result.contains("\u{0}") && !result.contains(":") && !result.contains("*"),
+                  "\(hostile.debugDescription) became \(result.debugDescription), which is a safe name")
+        }
+        check(made != "" && made != "." && made != "..", "\(hostile.debugDescription) still gets a name")
+    }
+    check(AssetNaming.sanitize("%2e%2e%2fx") == "%2e%2e%2fx", "sanitising does not decode (names come decoded already), and a literal % is harmless")
+    check(AssetNaming.fileName(for: "https://example.com/%2e%2e%2f%2e%2e%2fetc%2fpasswd") == "passwd", "an encoded traversal in the path is decoded and then stripped to its last part")
+    let long = String(repeating: "é", count: 400) + ".jpeg"
+    check(AssetNaming.sanitize(long).utf8.count <= 200 && AssetNaming.sanitize(long).hasSuffix(".jpeg"), "a very long name is cut by bytes and keeps its extension")
+    check(AssetNaming.sanitize(String(repeating: "😀", count: 100)).utf8.count <= 200, "even when every character is four bytes")
+    check(AssetNaming.unique("a.png") { _ in false } == "a.png" && AssetNaming.unique("a.png") { $0 == "a.png" } == "a-1.png"
+            && AssetNaming.unique("a.png") { ["a.png", "a-1.png"].contains($0) } == "a-2.png" && AssetNaming.unique("noext") { $0 == "noext" } == "noext-1", "a name already taken gets a number, before the extension")
+
+    check(AssetNaming.kind(ofURL: "https://x.com/a.JPG?x=1") == .image && AssetNaming.kind(ofURL: "https://x.com/a.mp4") == .video && AssetNaming.kind(ofURL: "https://x.com/a.mp3") == .audio
+            && AssetNaming.kind(ofURL: "https://x.com/a.pdf") == .document && AssetNaming.kind(ofURL: "https://x.com/a.zip") == .archive && AssetNaming.kind(ofURL: "https://x.com/a") == .other
+            && AssetNaming.kind(ofURL: "https://x.com/.gitignore") == .other, "what an address's ending says it is")
+}
+
+// MARK: Page extraction
+
+// What a page declares, sorted into lists. The page below has one of most
+// things; each list is checked against what is in it, in document order.
+do {
+    let base = URL(string: "https://news.example.com/2024/06/ledger-report?utm=1")!
+
+    // Addresses.
+    func resolve(_ value: String) -> PageURLs.Resolved? { PageURLs.resolve(value, against: base) }
+    check(resolve("../a.png")?.url == "https://news.example.com/2024/a.png", "a relative address resolves against the page")
+    check(resolve("/x/y")?.url == "https://news.example.com/x/y" && resolve("z")?.url == "https://news.example.com/2024/06/z", "root-relative and plain relative")
+    check(resolve("//cdn.example.com/a.js")?.url == "https://cdn.example.com/a.js", "a protocol-relative address takes the page's scheme")
+    check(resolve("https://x.example/p#frag")?.url == "https://x.example/p", "a fragment is dropped from an address")
+    check(resolve("a b.png")?.url == "https://news.example.com/2024/06/a%20b.png", "a space is encoded, as a browser does")
+    check(resolve("  /tab\tbed\n.png ")?.url == "https://news.example.com/tabbed.png", "whitespace inside an address is ignored, as a browser does")
+    check(resolve("#top")?.isAnchor == true && resolve("#top")?.url.hasSuffix("?utm=1#top") == true, "a pure fragment is an in-page anchor")
+    check(resolve("mailto:a@b.c")?.scheme == .mailto && resolve("tel:+1")?.scheme == .tel && resolve("ftp://h/f")?.scheme == .other("ftp"), "other schemes are kept, named")
+    check(resolve("javascript:void(0)") == nil && resolve("data:image/png;base64,AAA") == nil && resolve("blob:x") == nil && resolve("") == nil && resolve("  ") == nil, "code, inline data and nothing are not addresses")
+    check(resolve("/a<b>c") == nil && resolve("/a\"b") == nil, "characters an address cannot contain make it not one")
+    check(PageURLs.isSameSite("https://www.news.example.com/x", as: base) && PageURLs.isSameSite("https://NEWS.example.com/", as: base) && !PageURLs.isSameSite("https://news.example.org/", as: base) && !PageURLs.isSameSite("https://sub.news.example.com/", as: base),
+          "same site: the same host, a leading www ignored, nothing else folded")
+
+    func srcset(_ value: String) -> [String] { PageURLs.parseSrcset(value).map { "\($0.url) \($0.descriptor ?? "-")" } }
+    check(srcset("a.jpg 1x, b.jpg 2x") == ["a.jpg 1x", "b.jpg 2x"], "an srcset with descriptors")
+    check(srcset("https://i.example/w_300,h_200/a.jpg 300w, https://i.example/b.jpg") == ["https://i.example/w_300,h_200/a.jpg 300w", "https://i.example/b.jpg -"], "a comma inside an address does not split it")
+    check(srcset("a.jpg, b.jpg 2x,") == ["a.jpg -", "b.jpg 2x"] && srcset("") == [] && srcset("  ,  ") == [], "bare candidates, stray commas, nothing")
+    check(PageURLs.cssURLs(in: "background:url('/a.png') no-repeat, url(\"/b.jpg\"), URL( /c.gif )") == ["/a.png", "/b.jpg", "/c.gif"], "url() in CSS, quoted either way or not")
+
+    check(EmbeddedPlayers.describe("https://www.youtube.com/embed/abc123?rel=0") == EmbeddedPlayers.Player(name: "YouTube", watchURL: "https://www.youtube.com/watch?v=abc123"), "a YouTube embed names its watch page")
+    check(EmbeddedPlayers.describe("https://www.youtube-nocookie.com/embed/xyz")?.watchURL == "https://www.youtube.com/watch?v=xyz", "including the no-cookie host")
+    check(EmbeddedPlayers.describe("https://player.vimeo.com/video/76979871")?.watchURL == "https://vimeo.com/76979871", "Vimeo")
+    check(EmbeddedPlayers.describe("https://www.dailymotion.com/embed/video/x7abc")?.watchURL == "https://www.dailymotion.com/video/x7abc", "Dailymotion")
+    check(EmbeddedPlayers.describe("https://open.spotify.com/embed/track/4uLU6hMCjMI75M1A2tKUQC")?.watchURL == "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", "Spotify")
+    check(EmbeddedPlayers.describe("https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fa%2Fb")?.watchURL == "https://soundcloud.com/a/b", "SoundCloud passes the page in its query")
+    check(EmbeddedPlayers.describe("https://example.com/player") == nil, "anything else is not named")
+
+    let article = """
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+    <meta charset="utf-8">
+    <title>The Ledger Report &amp; Outlook – Ledger Weekly</title>
+    <meta name="description" content="A look at the quarter.">
+    <meta name="author" content="Ada Byron">
+    <meta property="og:title" content="The Ledger Report">
+    <meta property="og:site_name" content="Ledger Weekly">
+    <meta property="og:image" content="/img/cover-1200.jpg">
+    <meta property="article:published_time" content="2024-06-01T09:00:00Z">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="canonical" href="https://news.example.com/2024/06/ledger-report">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="alternate" type="application/rss+xml" title="Ledger Weekly feed" href="/feed.xml">
+    <link rel="alternate" hreflang="fr" href="/fr/rapport">
+    <link rel="stylesheet" href="/css/site.css">
+    <link rel="preload" href="/fonts/serif.woff2" as="font">
+    <script src="/js/app.js" defer></script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"The Ledger Report","url":"https://news.example.com/2024/06/ledger-report","author":{"@type":"Person","name":"Ada Byron"}}</script>
+    </head>
+    <body style="background-image:url('/img/paper.png')">
+    <nav><a href="/">Home</a> <a href="/markets">Markets</a> <a href="https://other.example.org/x" rel="nofollow">Partner</a></nav>
+    <article>
+    <h1 id="top-title">The Ledger Report</h1>
+    <p>By Ada Byron. The quarter closed with <a href="/markets/q2">strong gains</a>, according to <a href="https://other.example.org/x">analysts</a>, who expected less; the figures, revised twice, show growth in every region we cover.</p>
+    <h2>Highlights</h2>
+    <ul><li>Revenue up 12%</li><li>Costs flat</li></ul>
+    <figure><img src="/img/chart.png" alt="Revenue chart" width="640" height="360" srcset="/img/chart-320.png 320w, /img/chart-1280.png 1280w"><figcaption>Revenue by region</figcaption></figure>
+    <picture><source srcset="/img/hero.avif" type="image/avif"><img src="/img/hero.jpg" alt="Hero"></picture>
+    <img data-src="/img/lazy.jpg" alt="Lazy one"><img src="data:image/gif;base64,R0lGODlh" alt="">
+    <video src="/media/clip.mp4" poster="/img/poster.jpg"><source src="/media/clip.webm" type="video/webm"><track src="/media/clip.en.vtt" kind="captions" srclang="en"></video>
+    <audio src="/media/podcast.mp3"></audio>
+    <iframe src="https://www.youtube.com/embed/abc123XYZ" title="Video"></iframe>
+    <p>Download the <a href="/files/report.pdf">full report</a> or the <a href="/files/data.zip" download>data</a>. Email <a href="mailto:desk@example.com">the desk</a>, call <a href="tel:+441234">us</a>, <a href="#top-title">jump up</a>, <a href="javascript:void(0)">nothing</a>. More analysis follows in the next sections, with notes on method.</p>
+    <h2>Numbers</h2>
+    <table><caption>Q2 figures</caption><thead><tr><th>Region</th><th>Revenue</th></tr></thead><tbody><tr><td>North</td><td>12</td></tr><tr><td>South</td><td>8</td></tr></tbody></table>
+    </article>
+    <form action="/subscribe" method="post"><input name="email" type="email"><button name="go">Go</button></form>
+    <footer><a href="/about">About</a> <a href="/markets">Markets again</a></footer>
+    </body></html>
+    """
+    let page = PageExtractor.extract(html: article, pageURL: base.absoluteString)
+    func column(_ table: ResultTable, _ index: Int) -> [String] { table.rows.map { $0.cells[index] } }
+    let site = "https://news.example.com"
+
+    check(page.title == "The Ledger Report & Outlook – Ledger Weekly" && page.summary == "A look at the quarter." && page.language == "en-GB", "title, description, language")
+    check(page.canonicalURL == "\(site)/2024/06/ledger-report" && page.siteName == "Ledger Weekly" && page.author == "Ada Byron" && page.published == "2024-06-01T09:00:00Z", "canonical, site, author, date")
+    check(page.previewImage == "\(site)/img/cover-1200.jpg" && page.charset == "utf-8", "the preview image, resolved, and the charset")
+
+    check(column(page.links, 1) == ["\(site)/", "\(site)/markets", "https://other.example.org/x", "\(site)/markets/q2", "\(site)/files/report.pdf", "\(site)/files/data.zip", "mailto:desk@example.com", "tel:+441234", "\(site)/about"],
+          "links, once each, in the order they appear — not scripts, anchors or code")
+    check(column(page.links, 2) == ["same site", "same site", "external", "same site", "same site", "same site", "email", "phone", "same site"], "each says whose it is")
+    check(page.links.rows[1].cells[4] == "2" && page.links.rows[2].cells[4] == "2" && page.links.rows[0].cells[4] == "1", "a link seen twice is one row that counts")
+    check(page.links.rows[2].cells[3] == "nofollow" && page.links.rows[0].cells[0] == "Home" && page.links.rows[3].cells[0] == "strong gains", "rel and the link's own words")
+    check(page.links.rows[6].canDownload == false && page.links.rows[1].canDownload == false && page.links.rows[4].canDownload == true, "a page or an email address is not a file; a PDF is")
+    check(page.anchorCount == 1, "in-page anchors are counted, not listed")
+
+    check(column(page.files, 1) == ["\(site)/files/report.pdf", "\(site)/files/data.zip"] && column(page.files, 0) == ["report.pdf", "data.zip"] && column(page.files, 2) == ["PDF", "ZIP"] && column(page.files, 3) == ["full report", "data"],
+          "files: documents and archives, and anything marked download")
+
+    check(column(page.images, 0) == ["\(site)/img/cover-1200.jpg", "\(site)/favicon.ico", "\(site)/img/paper.png", "\(site)/img/chart.png", "\(site)/img/chart-320.png", "\(site)/img/chart-1280.png", "\(site)/img/hero.avif", "\(site)/img/hero.jpg", "\(site)/img/lazy.jpg", "\(site)/img/poster.jpg"],
+          "images from every place a page keeps them: meta, icons, styles, img, srcset, picture, lazy attributes, posters")
+    check(page.images.rows[3].cells == ["\(site)/img/chart.png", "Revenue chart", "640×360", "img"], "an image row: address, alt, size, where")
+    check(page.images.rows[4].cells[2] == "320w" && page.images.rows[4].cells[3] == "srcset" && page.images.rows[4].cells[1] == "Revenue chart", "an srcset candidate keeps the alt and its own width")
+    check(column(page.images, 3) == ["og:image", "icon", "style", "img", "srcset", "srcset", "picture", "img", "lazy", "poster"], "and where each was found")
+    check(page.inlineDataCount == 1, "an image written into the markup is counted, not listed")
+
+    check(column(page.media, 0) == ["\(site)/media/clip.mp4", "\(site)/media/clip.webm", "\(site)/media/clip.en.vtt", "\(site)/media/podcast.mp3", "https://www.youtube.com/embed/abc123XYZ"], "video, its sources, captions, audio, and an embedded player")
+    check(column(page.media, 1) == ["video", "video", "captions", "audio", "embed"], "with what each is")
+    check(page.media.rows[4].cells[2] == "YouTube" && page.media.rows[4].cells[3] == "https://www.youtube.com/watch?v=abc123XYZ" && page.media.rows[4].canDownload == false && page.media.rows[0].canDownload == true,
+          "a player is named and points at its watch page, and is not a file")
+
+    check(column(page.headings, 0) == ["H1", "H2", "H2"] && column(page.headings, 1) == ["The Ledger Report", "Highlights", "Numbers"] && page.headings.rows[0].cells[2] == "top-title", "the outline")
+    check(page.tables.count == 1 && page.tables[0].caption == "Q2 figures" && page.tables[0].table.columns == ["Region", "Revenue"] && page.tables[0].table.rows.map(\.cells) == [["North", "12"], ["South", "8"]], "a data table, its caption and header")
+    check(page.forms.rows.map(\.cells) == [["POST", "\(site)/subscribe", "email:email, go:button"]], "a form")
+    check(column(page.feeds, 1) == ["\(site)/feed.xml"] && page.feeds.rows[0].cells[0] == "Ledger Weekly feed", "a feed the page advertises")
+    check(page.resources.rows.map { [$0.cells[1]] + [$0.cells[0]] } == [["stylesheet", "\(site)/css/site.css"], ["preload", "\(site)/fonts/serif.woff2"], ["script", "\(site)/js/app.js"]] && page.resources.rows[2].cells[2] == "defer", "stylesheets, preloads, scripts")
+    check(page.structured.rows.map(\.cells) == [["NewsArticle", "The Ledger Report", "\(site)/2024/06/ledger-report", "JSON-LD"]] && page.structuredJSON.count == 1 && page.structuredJSON[0].contains("\"@type\" : \"NewsArticle\""), "structured data")
+    let metaRows = page.meta.rows.map(\.cells)
+    check(metaRows.contains(["standard", "description", "A look at the quarter."]) && metaRows.contains(["social", "og:title", "The Ledger Report"]) && metaRows.contains(["twitter", "twitter:card", "summary_large_image"]) && metaRows.contains(["standard", "charset", "utf-8"]),
+          "meta tags, grouped")
+    check(metaRows.contains(["link", "canonical", "\(site)/2024/06/ledger-report"]) && metaRows.contains(["link", "alternate (fr)", "\(site)/fr/rapport"]), "and the links in the head that say something about the page")
+    check(page.elementCount > 40 && page.textSource == "article", "it counts what it read and says where the reading came from")
+
+    // Reading it.
+    check(page.text.contains("The quarter closed with strong gains, according to analysts") && page.text.contains("Revenue up 12%"), "the reading has the prose")
+    check(!page.text.contains("Home") && !page.text.contains("Markets again") && !page.text.contains("Go") && !page.text.contains("noscript"), "and none of the menu, the footer or the form")
+    check(page.markdown.hasPrefix("# The Ledger Report\n\nBy Ada Byron.") && page.markdown.contains("## Highlights\n\n- Revenue up 12%\n- Costs flat\n"), "headings, paragraphs and a tight list in Markdown")
+    check(page.markdown.contains("[strong gains](\(site)/markets/q2)") && page.markdown.contains("![Revenue chart](\(site)/img/chart.png)"), "links and images, with their addresses resolved")
+    check(page.markdown.contains("| Region | Revenue |\n| --- | --- |\n| North | 12 |\n| South | 8 |"), "a table")
+    check(page.markdown.contains("*Revenue by region*") && !page.markdown.contains("javascript"), "a caption, and no code")
+
+    // A base element moves what relative means — but not whose the page is.
+    let based = PageExtractor.extract(html: "<base href=\"https://cdn.example.net/assets/\"><a href=\"x.html\">x</a><img src=\"i.png\">", pageURL: base.absoluteString)
+    check(column(based.links, 1) == ["https://cdn.example.net/assets/x.html"] && column(based.links, 2) == ["external"] && column(based.images, 0) == ["https://cdn.example.net/assets/i.png"] && based.baseURL == "https://cdn.example.net/assets/", "<base href> changes what relative addresses mean")
+
+    // A page with no article: the reading is where the prose is.
+    let plain = PageExtractor.extract(html: """
+    <html><body><div id="sidebar"><a href="/a">Alpha</a> <a href="/b">Beta</a> <a href="/c">Gamma</a></div>
+    <div class="post"><p>The first paragraph is long enough to count as prose, with a few commas, a clause or two, and a full stop at the end.</p>
+    <p>The second paragraph keeps going in the same way, because a real article has more than one, and this is where the words are.</p></div>
+    <div class="footer-links"><a href="/x">Terms</a> <a href="/y">Privacy</a></div></body></html>
+    """, pageURL: "https://blog.example.com/p")
+    check(plain.text.hasPrefix("The first paragraph") && plain.text.contains("this is where the words are") && !plain.text.contains("Alpha") && !plain.text.contains("Terms"), "without an <article>, the reading is the part with the prose")
+    check(plain.textSource == "div", "and it says which element that was")
+
+    let empty = PageExtractor.extract(html: "<html><head><script>var app = 1;</script></head><body><div id=root></div><script src=/bundle.js></script></body></html>", pageURL: "https://spa.example.com/")
+    check(empty.text.isEmpty && empty.markdown.isEmpty && empty.links.isEmpty && column(empty.resources, 1) == ["script"], "a page drawn by scripts has nothing to read, and says so by being empty")
+    check(PageExtractor.extract(html: "", pageURL: "not a url").links.isEmpty, "empty in, empty out, even with a bad address")
+
+    // Markdown, piece by piece.
+    func markdown(_ body: String) -> String {
+        ReadableText.extract(from: HTMLParser.parse("<html><body><article>\(body)<p>Padding paragraph to make the article long enough to be chosen as the content, with several words in it, and a few more, and some others besides, so that it clears the floor comfortably.</p></article></body></html>"), baseURL: base).markdown
+    }
+    check(markdown("<h3>Sub</h3>").hasPrefix("### Sub\n\n"), "heading levels")
+    check(markdown("<p>a <strong>b</strong> <em>c</em> <code>d</code> <del>e</del></p>").hasPrefix("a **b** *c* `d` ~~e~~"), "inline emphasis, code and strike-through")
+    check(markdown("<ol><li>one</li><li>two<ul><li>nested</li></ul></li></ol>").hasPrefix("1. one\n2. two\n  - nested\n"), "ordered and nested lists")
+    check(markdown("<blockquote><p>quoted</p><p>again</p></blockquote>").hasPrefix("> quoted\n> \n> again") || markdown("<blockquote><p>quoted</p><p>again</p></blockquote>").hasPrefix("> quoted\n\n> again"), "a quotation")
+    check(markdown("<pre>line 1\n  line 2</pre>").hasPrefix("```\nline 1\n  line 2\n```"), "code keeps its lines and indentation")
+    check(markdown("<p>one<br>two</p>").hasPrefix("one\ntwo"), "a line break")
+    check(markdown("<nav><a href=\"/a\">Contents</a></nav><aside><p>Related stories you may like, with many words here to make it paragraph-length text indeed</p></aside><form><label>Search</label><button>Go</button></form><p>kept</p>").hasPrefix("kept"), "navigation, asides and forms inside the article are left out too")
+    check(markdown("<p hidden>no</p><p aria-hidden=\"true\">nor</p><div class=\"social-share\"><p>Share this on social media today please and thank you very much</p></div><p>yes</p>").hasPrefix("yes"), "hidden things and obvious furniture are left out")
+    check(markdown("<table><tr><td>a|b</td><td>c</td></tr><tr><td>1</td><td>2</td></tr></table>").hasPrefix("| a\\|b | c |\n| --- | --- |\n| 1 | 2 |"), "a pipe inside a table cell is escaped")
+    check(markdown("<p>x <a href=\"javascript:void(0)\">act</a> <a href=\"#top\">up</a> <a href=\"/q\">go</a></p>").hasPrefix("x act up [go](https://news.example.com/q)"), "links that go nowhere are just their words")
+}
+
+// MARK: Data formats: JSON, JSONPath, CSV, XML, feeds, XPath, queries
+
+// What a response that is not a page can be asked, and how a scraper's query
+// languages behave. JSON keeps the server's key order and number text, because
+// a table that reorders columns or rounds an id is wrong in a way nobody finds.
+do {
+    // JSON, in order.
+    let doc = try! JSONValue.parse(Data(#"{"b":1,"a":[true,null,"x"],"n":1.50,"big":12345678901234567890,"e":""}"#.utf8))
+    if case .object(let members) = doc {
+        check(members.map(\.key) == ["b", "a", "n", "big", "e"], "object keys keep their order")
+        check(members[2].value == .number("1.50") && members[3].value == .number("12345678901234567890"), "numbers keep their text: 1.50 stays 1.50, a 20-digit id stays whole")
+    } else {
+        check(false, "an object parses as an object")
+    }
+    check(doc["a"]?.arrayItems == [.bool(true), .null, .string("x")], "values of every type")
+    check((try? JSONValue.parse(Data(#""é\n\"😀\ud800x""#.utf8))) == .string("é\n\"😀\u{FFFD}x"), "string escapes, surrogate pairs, and a lone surrogate")
+    check((try? JSONValue.parse(Data("\u{FEFF}[1, 2 ]\n".utf8))) == .array([.number("1"), .number("2")]), "a byte-order mark and spaces are fine")
+    check(doc.compact == #"{"b":1,"a":[true,null,"x"],"n":1.50,"big":12345678901234567890,"e":""}"#, "compact writes it back as it came")
+    check(try! JSONValue.parse(Data(#"{"a":[1,2],"b":{},"c":[]}"#.utf8)).pretty() == "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {},\n  \"c\": []\n}", "pretty-printing, in order")
+    for bad in [#"{"a":}"#, "[1,2", #"{"a" 1}"#, "{} x", "", "[1,]", #"{"a":1,}"#, #""open"#, "nul", "[1 2]", "01x"] {
+        check((try? JSONValue.parse(Data(bad.utf8))) == nil, "\(bad.debugDescription) is not JSON")
+    }
+    check((try? JSONValue.parse(Data(String(repeating: "[", count: 300).utf8))) == nil, "nesting three hundred deep is refused, not recursed into")
+    check((try? JSONValue.parseDocument(Data("{\"a\":1}\n{\"a\":2}\n\n{\"a\":3}".utf8))) == .array([.object([.init(key: "a", value: .number("1"))]), .object([.init(key: "a", value: .number("2"))]), .object([.init(key: "a", value: .number("3"))])]), "JSON Lines is an array")
+    check((try? JSONValue.parseDocument(Data("{\"a\":1}\nnot json".utf8))) == nil, "unless a line is not JSON")
+    check(JSONValue.object([.init(key: "k", value: .array([.number("1")]))]).cellText == "{\"k\":[1]}" && JSONValue.null.cellText == "" && JSONValue.bool(false).cellText == "false", "what a table cell shows")
+
+    // Records as tables.
+    let api = try! JSONValue.parse(Data(#"{"total":2,"data":[{"id":1,"name":"A","tags":["x"],"owner":{"login":"u"},"img":"https://x.example/a.png"},{"id":2,"name":"B","extra":true}],"other":[1,2,3]}"#.utf8))
+    let found = JSONTabulator.tables(in: api)
+    check(found.count == 1 && found[0].path == "$.data", "the list of records is found one level down; a list of numbers is not records")
+    check(found[0].table.columns == ["id", "name", "tags", "owner.login", "img", "extra"], "columns in order of first appearance, nested objects flattened")
+    check(found[0].table.rows[0].cells == ["1", "A", "[\"x\"]", "u", "https://x.example/a.png", ""] && found[0].table.rows[1].cells == ["2", "B", "", "", "", "true"], "cells, with blanks where a record lacks a field")
+    check(found[0].table.rows[0].url == "https://x.example/a.png" && found[0].table.rows[0].canDownload && found[0].table.rows[1].url == nil, "an address in a record is something to open, and a picture is something to save")
+    check(JSONTabulator.tables(in: try! JSONValue.parse(Data(#"[{"a":1},{"a":2}]"#.utf8))).first?.path == "$", "a root array of records")
+    check(JSONTabulator.tables(in: try! JSONValue.parse(Data("[1,2,3]".utf8))).isEmpty && JSONTabulator.tables(in: .null).isEmpty, "no records, no table")
+
+    // JSONPath.
+    let shop = try! JSONValue.parse(Data(#"{"store":{"book":[{"title":"A","price":8.95,"isbn":"1"},{"title":"B","price":12.99},{"title":"C","price":22.99,"isbn":"3"}],"bicycle":{"color":"red","price":19.95}},"a b":1}"#.utf8))
+    func path(_ expression: String) -> [String] {
+        do { return try JSONPath.parse(expression).evaluate(shop).map { $0.value.cellText } } catch { return ["error: \(error)"] }
+    }
+    check(path("$.store.book[*].title") == ["A", "B", "C"], "every title")
+    check(path("$..price") == ["8.95", "12.99", "22.99", "19.95"], ".. finds a name at any depth, in document order")
+    check(path("$.store.book[-1].title") == ["C"] && path("$.store.book[1].price") == ["12.99"] && path("$.store.book[9]") == [], "an index, from the end if negative, none if out of range")
+    check(path("$.store.book[0,2].title") == ["A", "C"] && path("$.store.book[0:2].title") == ["A", "B"] && path("$.store.book[::2].title") == ["A", "C"] && path("$.store.book[::-1].title") == ["C", "B", "A"] && path("$.store.book[-2:].title") == ["B", "C"], "unions and slices, Python-style")
+    check(path("$.store.book[?(@.price < 10)].title") == ["A"] && path("$.store.book[?(@.price >= 12.99)].title") == ["B", "C"], "a filter on a number")
+    check(path("$.store.book[?(@.isbn)].title") == ["A", "C"] && path("$.store.book[?(!@.isbn)].title") == ["B"], "has it, and doesn't")
+    check(path("$.store.book[?(@.price > 10 && @.isbn)].title") == ["C"] && path("$.store.book[?(@.title == 'A' || @.title == \"B\")].title") == ["A", "B"], "and, or, and strings in either quote")
+    check(path("$.store.book[?(@.isbn != '1')].title") == ["B", "C"], "not-equal also holds where the field is missing")
+    check(path("$['store']['bicycle'].color") == ["red"] && path("store.bicycle.color") == ["red"] && path("$['a b']") == ["1"], "bracket names, a missing $, a name with a space")
+    check(path("$.store.*").count == 2 && path("$.nothing") == [] && path("$").count == 1, "wildcards, nothing, the root")
+    check((try? JSONPath.parse("$.store.book[0]").evaluate(shop).first?.path) == "$.store.book[0]" && (try? JSONPath.parse("$['a b']").evaluate(shop).first?.path) == "$['a b']", "each match says the path that finds it")
+    for bad in ["$.a[", "$[?(@.x >)]", "$[?@.x]", "$..", "$.a[1:2:3:4]", "$[abc]", "$[?(@.x == nope)]"] {
+        check((try? JSONPath.parse(bad)) == nil, "\(bad) is not a JSONPath")
+    }
+
+    // CSV.
+    check(CSVParser.parse("a,b\n1,2\r\n3,4\n\n", separator: ",") == [["a", "b"], ["1", "2"], ["3", "4"]], "rows end at LF or CRLF; a blank line is not a row")
+    check(CSVParser.parse("a,b\n\"x, y\",\"he said \"\"hi\"\"\"\n\"two\nlines\",z", separator: ",") == [["a", "b"], ["x, y", "he said \"hi\""], ["two\nlines", "z"]], "quoted fields hold separators, quotes and line breaks")
+    check(CSVParser.parse("\u{FEFF}a;b\n1;", separator: ";") == [["a", "b"], ["1", ""]], "a byte-order mark, and a trailing empty field")
+    check(CSVParser.detectSeparator(in: "a;b;c\n1;2;3\n4;5;6\n") == ";" && CSVParser.detectSeparator(in: "a\tb\n1\t2\n") == "\t" && CSVParser.detectSeparator(in: "a|b\n1|2\n") == "|", "the separator that every line agrees on")
+    check(CSVParser.detectSeparator(in: "just one line, with a comma") == nil && CSVParser.detectSeparator(in: "a,b\n1,2,3\n") == nil && CSVParser.detectSeparator(in: "plain text\nmore text\n") == nil, "one line, or lines that disagree, or none, are not CSV")
+    let csv = CSVParser.table(from: "name,link\nA,https://x.example/a.pdf\nB\nC,\"q,r\"\n")
+    check(csv?.columns == ["name", "link"] && csv?.rows.map(\.cells) == [["A", "https://x.example/a.pdf"], ["B", ""], ["C", "q,r"]], "a table, short rows padded")
+    check(csv?.rows[0].url == "https://x.example/a.pdf" && csv?.rows[0].canDownload == true && csv?.rows[2].url == nil, "an address in a row is its address")
+    check(CSVParser.table(from: "one,two\n") == nil && CSVParser.table(from: "just text") == nil, "a header and no rows is not a table")
+
+    // XML, feeds, sitemaps.
+    let rss = """
+    <?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>Ledger Weekly</title><link>https://news.example.com/</link>
+    <item><title>First</title><link>/a</link><pubDate>Mon, 03 Jun 2024 09:00:00 GMT</pubDate><dc:creator>Ada</dc:creator><description><![CDATA[<p>Hello <b>world</b></p>]]></description><enclosure url="https://news.example.com/a.mp3" type="audio/mpeg"/></item>
+    <item><title>Second</title><guid>https://news.example.com/b</guid></item></channel></rss>
+    """
+    let rssTree = XMLTree.parse(Data(rss.utf8))!
+    let feed = FeedParser.parse(rssTree)!
+    check(feed.title == "Ledger Weekly" && feed.items.count == 2 && feed.items[0].title == "First" && feed.items[0].author == "Ada" && feed.items[0].summary == "Hello world", "an RSS feed: title, items, author, and a description with its markup removed")
+    check(feed.items[0].enclosureURL == "https://news.example.com/a.mp3" && feed.items[1].link == "https://news.example.com/b", "an enclosure, and a guid standing in for a missing link")
+    let feedTable = FeedParser.table(for: feed, base: URL(string: "https://news.example.com/feed.xml")!)
+    check(feedTable.rows[0].cells[1] == "https://news.example.com/a" && feedTable.rows[0].url == "https://news.example.com/a.mp3" && feedTable.rows[0].canDownload && !feedTable.rows[1].canDownload, "a relative link resolved; an attachment is what can be saved")
+    let atom = XMLTree.parse(Data(#"<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title><link href="https://a.example/" rel="alternate"/><entry><title>E1</title><link href="https://a.example/e1"/><updated>2024-06-01T00:00:00Z</updated><author><name>Zed</name></author><summary>Short</summary></entry></feed>"#.utf8))!
+    check(FeedParser.parse(atom)?.items.first?.link == "https://a.example/e1" && FeedParser.parse(atom)?.items.first?.author == "Zed" && FeedParser.parse(atom)?.link == "https://a.example/", "an Atom feed")
+    check(FeedParser.parse(XMLTree.parse(Data("<data><item>x</item></data>".utf8))!) == nil, "other XML is not a feed")
+    let sitemap = XMLTree.parse(Data(#"<urlset><url><loc>https://a.example/</loc><lastmod>2024-01-01</lastmod><priority>1.0</priority></url><url><loc>https://a.example/x</loc></url></urlset>"#.utf8))!
+    check(SitemapTable.table(from: sitemap)?.rows.map(\.cells) == [["https://a.example/", "2024-01-01", "", "1.0"], ["https://a.example/x", "", "", ""]], "a sitemap, with its dates")
+    check(XMLTree.parse(Data("just text".utf8)) == nil && XMLTree.parse(Data("".utf8)) == nil, "what is not XML at all is nil")
+    check(XMLTree.parseWithStatus(Data("<a><b>x</b></a>".utf8))?.complete == true, "and a whole document says it was whole")
+    let entity = XMLTree.parse(Data("<?xml version=\"1.0\"?><!DOCTYPE d [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><d>[&x;]</d>".utf8))
+    check(entity == nil || !(entity!.collapsedText().contains("root:")), "an external entity is never read — a document cannot make this open a file")
+    func selectIn(_ tree: HTMLNode, _ css: String) -> [HTMLNode] { try! CSSSelector.parse(css).select(in: tree) }
+    check(selectIn(rssTree, "item > title").map { $0.collapsedText() } == ["First", "Second"] && selectIn(rssTree, #"dc\:creator"#).count == 1, "selectors work on XML, with a colon escaped")
+
+    // XPath.
+    let listing = HTMLParser.parse(#"<html><body><div class="item a"><h2>First</h2><a href="/1">one</a></div><div class="item b"><h2>Second</h2><a href="/2" class="x">two</a><a href="/3">three</a></div><ul><li>a</li><li>b</li><li>c</li></ul></body></html>"#)
+    func xpath(_ expression: String) -> [String] {
+        do {
+            return try XPath.parse(expression).evaluate(from: listing).map {
+                switch $0 {
+                case .text(let text): return text
+                case .node(let node): return "<\(node.tag)>" + node.collapsedText()
+                }
+            }
+        } catch { return ["error: \(error)"] }
+    }
+    check(xpath("//h2/text()") == ["First", "Second"] && xpath("//a/@href") == ["/1", "/2", "/3"], "text() and @attribute")
+    check(xpath("//div[@class='item b']/h2") == ["<h2>Second"] && xpath("/html/body/ul/li[1]/text()") == ["a"] && xpath("//body/*").count == 3, "an attribute test, an absolute path, a wildcard")
+    check(xpath("//li[2]") == ["<li>b"] && xpath("//li[last()]") == ["<li>c"] && xpath("//li[position()<3]/text()") == ["a", "b"], "positions")
+    check(xpath("//div[contains(@class,'item')][2]//a[last()]/@href") == ["/3"] && xpath("//a[starts-with(@href,'/2')]/@href") == ["/2"], "chained predicates, contains and starts-with")
+    check(xpath("//a[@class]/@href") == ["/2"] && xpath("//a[not(@class)]/@href") == ["/1", "/3"], "has an attribute, and does not")
+    check(xpath("//a[text()='two']/@href") == ["/2"] && xpath("//a[normalize-space()='three']/@href") == ["/3"] && xpath("//div[h2='Second']/a[1]/@href") == ["/2"], "matching on text, including a child's")
+    check(xpath("//div[@class='item a' or @class='item b']/h2/text()") == ["First", "Second"] && xpath("//a[@href='/3' and not(@class)]/text()") == ["three"], "and, or")
+    check(xpath("//li/..") == ["<ul>abc"] && xpath("//H2/text()") == ["First", "Second"], "the parent, and case does not matter")
+    check(xpath("//nothing") == [] && xpath("//a[@href='/nope']") == [], "nothing found is nothing")
+    check((try? XPath.parse("./a/@href").evaluate(from: listing.descendantElements().first { $0.classNames.contains("b") }!).count) == 2, "a relative path starts at the node it is given")
+    for bad in ["//a[", "//", "a//", "//a[@]", "//a[contains(@href]", "//a[1", "@@x", "//*[foo(]"] {
+        check((try? XPath.parse(bad)) == nil, "\(bad) is not an XPath")
+    }
+
+    // Queries, as the query box runs them.
+    let page = QueryDocument(body: Data(#"<html><body><h2 class="t">First</h2><a href="/1" title="one">one</a><a href="/2.pdf">two</a><p>Born 1990-05-17 and 2001-12-01.</p></body></html>"#.utf8), contentType: "text/html", url: "https://x.example/list/")
+    func run(_ language: QueryLanguage, _ query: String, _ output: QueryOutput = .text, in document: QueryDocument = page) -> [[String]] {
+        do { return try QueryRunner.run(language, query: query, output: output, in: document).table.rows.map(\.cells) } catch { return [["error", "\(error)"]] }
+    }
+    check(run(.css, "h2")[0][1] == "First" && run(.css, "h2")[0][2] == "<h2.t>" && run(.css, "a").count == 2, "CSS: the text of what matched, and what matched")
+    check(run(.css, "a::attr(href)").map { $0[1] } == ["https://x.example/1", "https://x.example/2.pdf"], "::attr(href) comes back resolved against the page")
+    check(run(.css, "a", .attribute("title")).map { $0[1] } == ["one", ""] && run(.css, "h2::html")[0][1] == "<h2 class=\"t\">First</h2>", "attribute and HTML outputs, by choice or by suffix")
+    let outcome = try! QueryRunner.run(.css, query: "a::attr(href)", output: .text, in: page)
+    check(outcome.table.rows[1].url == "https://x.example/2.pdf" && outcome.table.rows[1].canDownload && !outcome.table.rows[0].canDownload, "an address result can be opened, and a file can be saved")
+    check(try! QueryRunner.run(.css, query: "h3", output: .text, in: page).note == "Nothing matched." && (try! QueryRunner.run(.css, query: "h2::attr(nope)", output: .text, in: page).note ?? "").contains("none has a"), "no match, and a match with no such attribute, say so")
+    check(QueryRunner.splitPseudoElement("a.b::attr( 'href' )", default: .text).output == .attribute("href") && QueryRunner.splitPseudoElement("a::text", default: .html).output == .text && QueryRunner.splitPseudoElement("a:first-child", default: .html).output == .html, "pseudo-elements are read off the end")
+    check(run(.xpath, "//a/@href") .map { $0[1] } == ["/1", "/2.pdf"] && run(.xpath, "//h2")[0][1] == "First", "XPath through the runner")
+    let json = QueryDocument(body: Data(#"{"items":[{"name":"a","url":"https://x.example/a.png"},{"name":"b"}]}"#.utf8), contentType: "application/json", url: "https://api.example/v1")
+    check(run(.jsonPath, "$.items[*].name", in: json) == [["$.items[0].name", "a"], ["$.items[1].name", "b"]], "JSONPath: the value, and where it was")
+    check(try! QueryRunner.run(.jsonPath, query: "$..url", output: .text, in: json).table.rows[0].url == "https://x.example/a.png", "an address in JSON is an address")
+    check(run(.jsonPath, "$.x", in: page)[0][0] == "error" && run(.css, "a[", in: page)[0][0] == "error" && run(.regex, "(unclosed", in: page)[0][0] == "error" && run(.xpath, "//a[", in: page)[0][0] == "error" && run(.css, "  ", in: page)[0][0] == "error", "a bad query, empty input, or JSONPath on a page is an error with words")
+    check(run(.regex, #"(\d{4})-(\d{2})-(\d{2})"#) == [["1", "1990-05-17", "1990", "05", "17"], ["2", "2001-12-01", "2001", "12", "01"]], "Regex: each capture group is a column")
+    check(try! QueryRunner.run(.regex, query: #"(\d{4})-(\d{2})"#, output: .text, in: page).table.columns == ["#", "Match", "Group 1", "Group 2"], "and has its own heading")
+    check(run(.regex, "BORN").count == 1 && (try? QueryRunner.run(.regex, query: "BORN", output: .text, ignoreCase: false, in: page).table.rows.count) == 0, "case-insensitive unless asked")
+
+    // Whatever a response is.
+    func extract(_ text: String, _ type: String, _ kind: HTTPContentKind, url: String = "https://x.example/a") -> ResponseExtraction {
+        ResponseExtractor.extract(body: Data(text.utf8), contentType: type, url: url, kind: kind)
+    }
+    let asHTML = extract("<html><body><a href=\"/x\">x</a></body></html>", "text/html", .html)
+    check(asHTML.kindLabel == "HTML page" && asHTML.page?.links.rows.count == 1 && asHTML.languages == [.css, .xpath, .regex], "HTML is a page")
+    let asJSON = extract(#"{"data":[{"id":1,"u":"https://x.example/i.png"}],"next":"https://x.example/page2"}"#, "application/json", .json)
+    check(asJSON.kindLabel == "JSON" && asJSON.tables.count == 1 && asJSON.links.rows.map(\.cells[0]) == ["https://x.example/i.png", "https://x.example/page2"] && asJSON.languages == [.jsonPath, .regex], "JSON: the records, the addresses, JSONPath")
+    check(extract(#"{"a": 1}"#, "application/json", .json).note?.contains("no list of records") == true && extract("{oops", "application/json", .json).kindLabel == "JSON (unreadable)", "JSON with no records, and broken JSON, say so")
+    let asFeed = extract(rss, "application/rss+xml", .xml)
+    check(asFeed.kindLabel == "Feed: Ledger Weekly — 2 entries" && asFeed.tables[0].table.rows.count == 2, "a feed")
+    check(extract(#"<urlset><url><loc>https://a.example/</loc></url></urlset>"#, "application/xml", .xml).kindLabel == "Sitemap — 1 addresses", "a sitemap")
+    check(extract("<a><b>see https://x.example/z.</b></a>", "text/xml", .xml).links.rows.map(\.cells[0]) == ["https://x.example/z"], "other XML: the addresses written in it, without the full stop")
+    check(extract("a,b\n1,2\n3,4\n", "text/csv", .other("text/csv")).tables.first?.table.rows.count == 2 && extract("a,b\n1,2\n3,4\n5,6\n", "text/plain", .plainText).tables.count == 1, "CSV by its type, and CSV that only looks like it")
+    let prose = extract("Read https://x.example/a, then (https://y.example/b). Done.", "text/plain", .plainText)
+    check(prose.tables.isEmpty && prose.links.rows.map(\.cells[0]) == ["https://x.example/a", "https://y.example/b"] && prose.languages == [.regex], "plain text: its addresses")
+    let binary = ResponseExtractor.extract(body: Data([0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 1]), contentType: "image/png", url: "https://x.example/i.png", kind: .binary)
+    check(binary.isEmpty && binary.languages.isEmpty && binary.note?.contains("Save") == true && binary.kindLabel == "Binary data (image/png)", "binary: nothing to take, and what to do instead")
+}
+
+// MARK: Downloads: what a page may make this app fetch
+
+// A page chooses the addresses it lists, and an address is not always on the
+// internet. Everything below is a request a page must not be able to cause.
+do {
+    func refusal(_ address: String, from page: String = "https://news.example.com/a") -> String? {
+        DownloadPolicy.refusal(for: address, from: page)
+    }
+    check(refusal("https://cdn.example.net/a.png") == nil && refusal("https://news.example.com/b.pdf") == nil, "a public https address is fine, on the page's host or another")
+    for local in [
+        "http://127.0.0.1/x", "https://127.0.0.1/x", "https://localhost/x", "https://[::1]/x", "https://10.0.0.5/x", "https://192.168.1.1/admin",
+        "https://172.16.0.1/x", "https://172.31.255.255/x", "https://169.254.169.254/latest/meta-data", "https://0.0.0.0/x", "https://100.64.1.1/x",
+        "https://printer.local/x", "https://nas/x", "https://router.lan/x", "https://svc.internal/x", "https://foo.localhost/x",
+        "https://2130706433/x", "https://0x7f000001/x", "https://0177.0.0.1/x", "https://127.1/x", "https://[fe80::1]/x", "https://[fd12:3456::1]/x",
+        "https://[::ffff:127.0.0.1]/x", "https://[::]/x",
+    ] {
+        check(refusal(local) != nil, "\(local) is on this Mac or its network, so a page from the internet cannot send this app there")
+    }
+    // The same addresses, spelled other ways. A page writes a host however it
+    // likes and the system reads them all the same, so a host is judged by the
+    // address it comes to, never by how it begins.
+    for local in [
+        "https://[0:0:0:0:0:0:0:1]:8443/x", "https://[0::1]/x", "https://[0000:0000:0000:0000:0000:0000:0000:0001]/x", "https://[::0001]/x",
+        "https://[0:0:0:0:0:ffff:127.0.0.1]/x", "https://[::ffff:7f00:1]/x", "https://[::FFFF:127.0.0.1]/x", "https://[::127.0.0.1]/x",
+        "https://[0:0:0:0:0:ffff:a00:1]/x", "https://[::ffff:0:10.0.0.1]/x", "https://[64:ff9b::7f00:1]/x", "https://[2002:7f00:1::]/x",
+        "https://[2002:c0a8:101::1]/x", "https://[febf::1]/x", "https://[fec0::1]/x", "https://[fc00::1]/x", "https://[FD00::1]/x", "https://[ff02::1]/x",
+        "https://localhost./x", "https://foo.localhost./x", "https://printer.local./x", "https://127.0.0.1./x", "https://LOCALHOST/x", "https://Printer.Local/x",
+    ] {
+        check(refusal(local) != nil, "\(local) comes to this Mac or its network however it is spelled")
+    }
+    check(DownloadPolicy.isLocalHost("[fe80::1%en0]") && DownloadPolicy.isLocalHost("fe80::1%en0"), "an interface name after % does not change the address")
+    check(DownloadPolicy.isLocalHost("[1:2:3]") && DownloadPolicy.isLocalHost("[zzz::1]") && DownloadPolicy.isLocalHost("[::1::]") && DownloadPolicy.isLocalHost("[12345::1]"),
+          "text that will not read as an address is refused, not guessed at")
+    // The system maps a host through Unicode normalisation before it connects.
+    check(DownloadPolicy.isLocalHost("ｌｏｃａｌｈｏｓｔ") && DownloadPolicy.isLocalHost("ⓛocalhost") && DownloadPolicy.isLocalHost("127。0。0。1") && DownloadPolicy.isLocalHost("example．com") && DownloadPolicy.isLocalHost("ｅｘａｍｐｌｅ.com"),
+          "a host that normalisation would change is refused: full-width letters and an ideographic full stop read as what they imitate")
+    for outside in ["[2606:4700:4700::1111]", "[2001:db8::1]", "[2002:808:808::]", "[64:ff9b::808:808]", "[::ffff:8.8.8.8]", "[2a00:1450:4001::1]", "example.com.", "münchen.de", "cdn.example.net"] {
+        check(!DownloadPolicy.isLocalHost(outside), "\(outside) is on the internet, and is fetched from")
+    }
+    check(refusal("http://cdn.example.net/a.png")?.contains("plain http") == true, "plain http to a public host is refused, as in the HTTP client")
+    check(refusal("https://172.15.0.1/x") == nil && refusal("https://172.32.0.1/x") == nil && refusal("https://8.8.8.8/x") == nil && refusal("https://100.63.0.1/x") == nil, "the ranges are exact: 172.16–31, not 172.15 or 172.32")
+    check(refusal("ftp://example.com/a") != nil && refusal("file:///etc/passwd") != nil && refusal("not a url") != nil && refusal("https:///nohost") != nil && refusal("javascript:alert(1)") != nil, "other schemes and non-addresses are refused")
+    // A page that is itself local may name local things.
+    check(refusal("http://127.0.0.1:8000/a.png", from: "http://127.0.0.1:8000/") == nil && refusal("https://192.168.1.5/a.png", from: "https://192.168.1.2/") == nil && refusal("https://cdn.example.net/a.png", from: "http://127.0.0.1:8000/") == nil,
+          "a dev server's own pages can reference it, and the internet")
+    check(refusal("http://192.168.1.5/a.png", from: "https://192.168.1.2/")?.contains("plain http") == true, "but plain http is still only for this Mac")
+    check(refusal("https://example.com/a")?.contains("news.example.com") == nil, "a refusal names the places it is about")
+    check(refusal("https://10.0.0.1/", from: "https://news.example.com/")?.contains("news.example.com") == true && refusal("https://10.0.0.1/", from: "https://news.example.com/")?.contains("10.0.0.1") == true, "…and says which is which")
+
+    let plan = DownloadPlan.make(urls: [
+        "https://a.example/img/photo.png", "https://a.example/img/photo.png", "https://b.example/other/photo.png", "https://b.example/PHOTO.PNG",
+        "https://a.example/download", "http://127.0.0.1/secret", "https://a.example/../../etc/passwd",
+    ], pageURL: "https://news.example.com/", taken: ["photo.png"])
+    check(plan.items.map(\.fileName) == ["photo-1.png", "photo-2.png", "PHOTO-3.PNG", "download", "passwd"],
+          "a name already in the folder, or earlier in the batch, gets a number — compared without regard to case, since the usual Mac disk does not tell them apart: \(plan.items.map(\.fileName))")
+    check(plan.items.count == 5 && plan.refused.map(\.url) == ["http://127.0.0.1/secret"], "a repeated address is fetched once; a refused one is listed with its reason")
+    check(plan.hosts == ["a.example", "b.example"], "the hosts, most files first")
+    check(DownloadPlan.make(urls: (0..<600).map { "https://a.example/\($0).png" }, pageURL: "https://x.example/").items.count == DownloadPlan.maxItems
+            && DownloadPlan.make(urls: (0..<600).map { "https://a.example/\($0).png" }, pageURL: "https://x.example/").overLimit == 100, "a batch is capped, and says how many it left out")
+    check(DownloadPolicy.referer(page: "https://a.example/x?token=1#frag", target: "https://a.example/i.png") == "https://a.example/x?token=1", "the same site is told the whole page, minus the fragment")
+    check(DownloadPolicy.referer(page: "https://a.example/x?token=1", target: "https://cdn.example.net/i.png") == "https://a.example/", "another site is told only the site")
+    check(DownloadPolicy.referer(page: "https://u:p@a.example:8443/x#f", target: "https://a.example:8443/i.png") == "https://a.example:8443/x", "credentials never go, and a port is part of the site")
+    check(DownloadPolicy.referer(page: "https://a.example/x", target: "https://a.example:444/i.png") == "https://a.example/", "a different port is a different site")
+    check(DownloadPolicy.referer(page: "https://a.example/x", target: "http://127.0.0.1/i.png") == nil && DownloadPolicy.referer(page: "not a url", target: "https://a.example/") == nil, "nothing from a secure page to an insecure one, or from a page that is not an address")
+}
+
+// MARK: Keyboard shortcuts
+
+// The catalog is only worth showing if it is complete, and it cannot see the
+// menus. So this reads them: every `.keyboardShortcut(` in the app's sources is
+// parsed into a chord, and the catalog has to hold exactly those (the entries
+// marked `.bound`), no more and no fewer. The README's table is held to the
+// same list.
+do {
+    typealias Chord = ShortcutChord
+    let all = ShortcutCatalog.all
+
+    // How a chord prints and reads out.
+    check(Chord("n", [.shift, .command]).display == "⇧⌘N", "shift-command-N prints as ⇧⌘N")
+    check(Chord("w", [.command, .option]).display == "⌥⌘W", "modifiers print in macOS's order, however they were listed")
+    check(Chord("s", [.command, .control]).display == "⌃⌘S", "control comes first")
+    check(Chord("+", .command).display == "⌘+" && Chord("/", .command).display == "⌘/" && Chord(",", .command).display == "⌘,",
+          "punctuation keys print as they are")
+    check(Chord(.return, .command).display == "⌘↩" && Chord(.tab).display == "⇥" && Chord(.escape).display == "esc"
+          && Chord(.up).display == "↑" && Chord(.right).display == "→", "named keys print as their symbols")
+    check(Chord("N", .command) == Chord("n", .command), "a capital is the same key")
+    check(Chord("n", [.shift, .command]).words == ["Shift", "Command", "N"] && Chord(.return, .command).words == ["Command", "Return"]
+          && Chord("-", .command).words == ["Command", "Minus"], "a chord reads out in words")
+    check(Chord("d", [.shift, .command]).symbols == ["⇧", "⌘", "D"], "a chord splits into one cap per key")
+
+    // The list is well formed.
+    let ids = all.map(\.id)
+    check(Set(ids).count == ids.count && !ids.contains(""), "every entry has its own id")
+    check(all.allSatisfy { !$0.title.isEmpty && !$0.chords.isEmpty }, "every entry has a title and at least one chord")
+    check(all.allSatisfy { Set($0.chords).count == $0.chords.count }, "no entry lists the same chord twice")
+    check(ShortcutSection.allCases.allSatisfy { section in all.contains { $0.section == section } }, "every section has something in it")
+    check(ShortcutCatalog.groups(matching: "").map(\.section) == ShortcutSection.allCases, "sections come in their declared order")
+    check(ShortcutCatalog.groups(matching: "").flatMap(\.entries).count == all.count, "an empty query shows everything")
+
+    // What a menu binds wins wherever it is bound, so no two may share a chord,
+    // and a key a view handles for itself must not be one a menu already owns.
+    let windowWide = all.filter { $0.source != .view }
+    let windowChords = windowWide.flatMap(\.chords)
+    check(Set(windowChords).count == windowChords.count,
+          "no two menu or system shortcuts share a chord: \(Dictionary(grouping: windowChords, by: \.display).filter { $0.value.count > 1 }.keys.sorted())")
+    let shadowed = all.filter { $0.source == .view }.flatMap(\.chords).filter { windowChords.contains($0) }
+    check(shadowed.isEmpty, "a view shortcut hides behind a menu's: \(shadowed.map(\.display))")
+
+    // A chord the standard menus already hold cannot be ours. These are the ones
+    // the built app's menu bar listed — the Screenshots workflow logs every key
+    // equivalent AppKit holds — and an item of ours that wants one arrives with
+    // no key at all, so the shortcut silently does nothing. ⌥⌘W was "Close Tab"
+    // for as long as that existed, and File > Close All has it.
+    let standardMenuChords: [Chord] = [
+        Chord(",", .command), Chord("h", .command), Chord("h", [.option, .command]), Chord("q", .command),
+        Chord("w", .command), Chord("w", [.option, .command]), Chord("m", .command),
+        Chord("z", .command), Chord("z", [.shift, .command]), Chord("x", .command), Chord("c", .command),
+        Chord("v", .command), Chord("a", .command),
+    ]
+    let takenByMacOS = all.filter { $0.source == .bound }.flatMap(\.chords).filter { standardMenuChords.contains($0) }
+    check(takenByMacOS.isEmpty,
+          "a shortcut we bind is one a standard macOS menu item holds, so it arrives with no key: \(takenByMacOS.map(\.display))")
+
+    // Search.
+    func found(_ query: String) -> [String] { ShortcutCatalog.groups(matching: query).flatMap(\.entries).map(\.id) }
+    check(found("split") == ["split.right", "split.down", "split.browser"], "a word finds what starts with it")
+    check(found("SPLIT") == found("split") && found("  split  ") == found("split"), "case and surrounding space do not matter")
+    check(found("shift split") == ["split.down", "split.browser"], "every word has to match")
+    check(found("⌘d") == ["split.right", "split.down"] && found("⇧⌘d") == ["split.down"], "printed keys find the chords they are in")
+    check(found("zzz").isEmpty, "nothing matches nonsense")
+    check(found("term").contains("tab.new") && found("term").contains("font.bigger"), "a word finds the section it is in")
+    check(found("enter").contains("composer.run") && found("enter").contains("http.send"), "enter finds Return")
+    check(found("alt") == all.filter { $0.chords.contains { $0.modifiers.contains(.option) } }.map(\.id), "alt finds exactly the ⌥ shortcuts")
+    check(found("ctrl") == all.filter { $0.chords.contains { $0.modifiers.contains(.control) } }.map(\.id), "ctrl finds exactly the ⌃ shortcuts")
+    check(found("w").contains("pane.close") && !found("w").contains("sidebar.toggle"),
+          "a letter finds the key and the words that start with it, not \"show\", which only has it inside")
+
+    // Where the sources are, from this file's own path or the working directory.
+    let fileManager = FileManager.default
+    let marker = "Sources/iTERMiNAL/App/iTERMiNALApp.swift"
+    let fromHere = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let root = [fromHere, URL(fileURLWithPath: fileManager.currentDirectoryPath)]
+        .first { fileManager.fileExists(atPath: $0.appendingPathComponent(marker).path) }
+    check(root != nil, "the app's sources can be found to check the shortcuts against")
+
+    if let root {
+        // Every `.keyboardShortcut(` in the app, as a chord.
+        let namedKeys: [String: Chord.Key] = [
+            "return": .return, "tab": .tab, "escape": .escape,
+            "upArrow": .up, "downArrow": .down, "leftArrow": .left, "rightArrow": .right,
+        ]
+        let modifierNames: [String: Chord.Modifiers] = [
+            "command": .command, "shift": .shift, "option": .option, "control": .control,
+        ]
+        let chordCall = try! NSRegularExpression(
+            pattern: #"\.keyboardShortcut\(\s*(?:"([^"\\])"|\.([A-Za-z]+))\s*,\s*modifiers:\s*(\[[^\]]*\]|\.[A-Za-z]+)\s*\)"#)
+        // `.cancelAction` and `.defaultAction` are Esc and Return for a dialog's
+        // buttons: not a chord anyone needs listed.
+        let dialogCall = try! NSRegularExpression(pattern: #"\.keyboardShortcut\(\s*\.(?:cancelAction|defaultAction)\s*\)"#)
+
+        func chords(inSource source: String) -> (chords: [Chord], calls: Int, understood: Int) {
+            // Comments mention the call without making it.
+            let code = source.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+                if let comment = line.range(of: "//") { return String(line[..<comment.lowerBound]) }
+                return String(line)
+            }.joined(separator: "\n")
+            let text = code as NSString
+            let whole = NSRange(location: 0, length: text.length)
+            var found: [Chord] = []
+            var bad = 0
+            for match in chordCall.matches(in: code, range: whole) {
+                var modifiers: Chord.Modifiers = []
+                let list = text.substring(with: match.range(at: 3))
+                for token in list.split(whereSeparator: { !$0.isLetter }) {
+                    if let known = modifierNames[String(token)] { modifiers.insert(known) } else { bad += 1 }
+                }
+                if match.range(at: 1).location != NSNotFound, let character = text.substring(with: match.range(at: 1)).first {
+                    found.append(Chord(character, modifiers))
+                } else if let key = namedKeys[text.substring(with: match.range(at: 2))] {
+                    found.append(Chord(key, modifiers))
+                } else {
+                    bad += 1
+                }
+            }
+            let calls = code.components(separatedBy: ".keyboardShortcut(").count - 1
+            let understood = bad == 0 ? found.count + dialogCall.numberOfMatches(in: code, range: whole) : -1
+            return (found, calls, understood)
+        }
+
+        var bound: [Chord] = []
+        var misread: [String] = []
+        let sources = root.appendingPathComponent("Sources/iTERMiNAL")
+        if let walker = fileManager.enumerator(at: sources, includingPropertiesForKeys: nil) {
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                guard let source = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                let result = chords(inSource: source)
+                bound.append(contentsOf: result.chords)
+                if result.calls != result.understood { misread.append(file.lastPathComponent) }
+            }
+        }
+        check(misread.isEmpty, "a .keyboardShortcut( call this check cannot read in \(misread.sorted()) — teach the check about it, or list the shortcut by hand")
+        check(!bound.isEmpty, "the app's shortcuts were found")
+
+        let listed = Set(all.filter { $0.source == .bound }.flatMap(\.chords))
+        let inCode = Set(bound)
+        check(inCode.count == bound.count, "the same chord is bound twice in the code: \(Dictionary(grouping: bound, by: \.display).filter { $0.value.count > 1 }.keys.sorted())")
+        check(inCode.subtracting(listed).isEmpty,
+              "bound in the code but missing from ShortcutCatalog: \(inCode.subtracting(listed).map(\.display).sorted())")
+        check(listed.subtracting(inCode).isEmpty,
+              "marked .bound in ShortcutCatalog but not bound in the code: \(listed.subtracting(inCode).map(\.display).sorted())")
+
+        // The README's table says the same.
+        if let readme = try? String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8),
+           let start = readme.range(of: "\n## Keyboard shortcuts\n") {
+            let rest = readme[start.upperBound...]
+            let section = String(rest[..<(rest.range(of: "\n## ")?.lowerBound ?? rest.endIndex)])
+            let known = Set(all.flatMap(\.chords).map(\.display))
+            let printed = try! NSRegularExpression(pattern: #"[⌃⌥⇧⌘]+(?:↩|[A-Za-z0-9+\-/,])"#)
+            let text = section as NSString
+            let mentioned = Set(printed.matches(in: section, range: NSRange(location: 0, length: text.length))
+                .map { text.substring(with: $0.range) })
+            check(Set(all.filter { $0.source == .bound }.flatMap(\.chords).map(\.display)).subtracting(mentioned).isEmpty,
+                  "the README's shortcut table is missing: \(Set(all.filter { $0.source == .bound }.flatMap(\.chords).map(\.display)).subtracting(mentioned).sorted())")
+            check(mentioned.subtracting(known).isEmpty,
+                  "the README's shortcut table lists keys the app does not have: \(mentioned.subtracting(known).sorted())")
+        } else {
+            check(false, "the README has a Keyboard shortcuts section to check")
+        }
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

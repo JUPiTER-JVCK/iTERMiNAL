@@ -16,11 +16,191 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
 > rather than the newest build, [releases/latest](https://github.com/JUPiTER-JVCK/iTERMiNAL/releases/latest).
 > The green **Code** button above gives you the source tree, not the app.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
+</p>
+
+A tour of the app in twenty-seven pictures, in five groups.
+
+### The window
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/split-panes.png" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
+      <br><b>Split panes</b> — terminals and the file browser side by side in one tab. The layout is saved and comes back when you relaunch.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/dock.png" alt="The window with the terminal dock open along the bottom: two tabs, the first showing git status and the last five commits, under the main terminal and the composer.">
+      <br><b>Terminal dock</b> — a row of shells along the bottom, each its own tab, under whatever is open above.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/tasks.png" alt="The task manager listing seven running shells, each with the command it is running, where it lives, how long it has been going, and Go to and Stop buttons.">
+      <br><b>Task manager</b> — every shell the app is running, wherever it lives, with how long it has been going and one click to jump to it or stop it.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/command-palette.png" alt="The command palette: a search box over a list of actions — New Terminal Tab, New Workspace, Split Right, Split Down, Split with Browser, Split with Files — each with its shortcut.">
+      <br><b>Command palette</b> — every action in one searchable list, with its shortcut beside it.
+    </td>
+  </tr>
+</table>
+
+### The terminal
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-context-menu.png" alt="The menu a right-click on a terminal opens: Copy, Paste and Select All, then Find and Clear Scrollback, then Split Right, Split Down and New Tab, each with its shortcut.">
+      <br><b>Right-click menu</b> — Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that is a tab or a pane, the split and new-tab commands. Copy is greyed out until something is selected.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-colors.png" alt="A terminal after ls -AF: folders in bold blue, a symbolic link in bold cyan, a script in bold green, and the other files plain.">
+      <br><b>Colored <code>ls</code></b> — folders, links and programs, in the colors of the terminal theme. Nothing to install: the app sets the variables <code>ls</code> reads. See <a href="#colored-output">Colored output</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-colors-man.png" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
+      <br><b>Colored man pages</b> — headings and options in red, what you fill in in green, from the same environment.
+    </td>
+  </tr>
+</table>
+
+### The composer and the assistant
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/composer-history.png" alt="The composer with “git” typed into it and a list of earlier git commands above, with the keys that work in the list underneath.">
+      <br><b>History search</b> — ⌃R lists earlier commands that match what you have typed; ↑↓ choose, and ↩ puts the choice in the input without running it.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/ai-assistant.png" alt="A reply from the assistant above the composer: a sentence of explanation, two git commands in a block with a warning that they throw away uncommitted changes, Insert and Copy buttons, and a closing tip.">
+      <br><b>Ask the assistant</b> — start a line with <code>@ai</code> and the reply appears above the composer. A command in it can be put in the input or copied; only you pressing ↩ runs anything.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/error-help.png" alt="A failed make command in the terminal and, above the composer, a line reading “That looked like an error” with Explain and Fix it buttons.">
+      <br><b>Explain / Fix it</b> — when a command prints something that reads like an error, the composer offers to explain it or suggest a fix. Nothing is sent until you choose one.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-ai.png" alt="Settings, AI page: the provider preset (Ollama, local), its base URL and model, and the API key, which a local address does not need.">
+      <br><b>AI settings</b> — any OpenAI-compatible endpoint, a model on this Mac included. A local one needs no key; a key, when there is one, is kept in the Keychain.
+    </td>
+  </tr>
+</table>
+
+### Panels and tools
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/http-client.png" alt="The HTTP client panel after a GET request: the method and address, two headers, and the 200 response with its timing, size and pretty-printed JSON body.">
+      <br><b>HTTP client</b> — build a request, send it, and read the status, timing and formatted body.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/site-explorer.png" alt="The site explorer in the HTTP panel: a command-line session that opens a local site, lists its top-level paths with where each was declared, and prints a tree of /docs.">
+      <br><b>Site explorer</b> — walk what a site publishes (its <code>robots.txt</code>, its sitemaps and the links in pages you fetch) like a directory. It never guesses at paths.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images with their descriptions, addresses, sizes and where each came from, three of them ticked, and Filter, All, Download and Export controls beneath.">
+      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images, video and audio, files, tables, text.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-query.png" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
+      <br><b>Query</b> — ask the response a question in CSS selectors, XPath, JSONPath or a regular expression, and take the answers as a list. See <a href="#extract">Extract</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
+      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
+      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
+      <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/files-sftp-denied.png" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
+      <br><b>When a host won't let you in</b> — what went wrong, what to do in order, and a button for the next move. See <a href="#when-a-host-cant-be-reached">When a host can't be reached</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/superfile.png" alt="superfile, the terminal file manager, in a panel: a sidebar of places, the sample project's files with icons, and process, metadata and clipboard panels underneath.">
+      <br><b>superfile</b> — a terminal file manager, built in and wearing the terminal's colours. See <a href="#bundled-tools">Bundled tools</a>.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/btop.png" alt="btop, the resource monitor, in a panel: CPU, memory, disk, network and process boxes in the terminal's colours.">
+      <br><b>btop</b> — a resource monitor, built in the same way.
+    </td>
+  </tr>
+</table>
+
+### Look, keys and settings
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/light-theme.png" alt="The same window in the light theme: sidebar, terminal and composer in light colours, with the same git history.">
+      <br><b>Light theme</b> — the window follows the system's light and dark appearance, or is set to one by hand.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/custom-look.png" alt="The window with the Catppuccin Mocha terminal theme, a purple accent, a rounder frame and a rounded interface typeface.">
+      <br><b>Make it yours</b> — a terminal theme, an accent colour, the frame's tint and corner radius, and the interface typeface.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/keyboard-shortcuts.png" alt="The Keyboard Shortcuts window: a search box over the shortcuts, grouped as General and Tabs and panes, each drawn as key caps.">
+      <br><b>Keyboard shortcuts</b> — every shortcut in one searchable window, opened with ⌘/.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-appearance.png" alt="Settings, Appearance page: theme, accent colours, window opacity, and a preview of the workspace frame.">
+      <br><b>Appearance settings</b> — theme, accent colour, window opacity and the workspace frame.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-security.png" alt="Settings, Security page: the local scripting API switch, off, and a list of how the app handles your data.">
+      <br><b>Security settings</b> — the local scripting API stays off until you turn it on, and the page says how your data is handled.
+    </td>
+  </tr>
+</table>
+
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and an SSH server on localhost that lets no one in — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty-seven into `docs/images/`.</sub>
+
 ## Features
 
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
   support, alternate-screen apps, configurable scrollback and cursor style,
   and an opt-in Metal GPU renderer.
+- **Right-click menu** — right-click a terminal (or the margin around it) for
+  Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that
+  is a tab or a pane, Split Right, Split Down and New Tab. Copy is greyed out
+  until something is selected; Paste goes to the terminal you clicked, even if
+  another one had the keyboard; Clear Scrollback drops only the history above
+  the screen, so it is safe while a program is running. A program that has
+  switched on mouse reporting does not receive the right button (the terminal
+  engine never reported it), so the menu takes nothing from it.
+- **Colored output** — `ls` prints folders, links and programs in color, and
+  `man` pages (and anything read through `less`) get colored headings, options
+  and placeholders, with no shell plugin to install: the app gives each local
+  shell the environment those plugins set. See
+  [Colored output](#colored-output).
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions); a landing screen with quick-start cards and
@@ -77,7 +257,9 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
-  saved host over SFTP, with upload, download, and drag-and-drop.
+  saved host over SFTP, with upload, download, and drag-and-drop. When a host
+  turns the file browser away it says why and what to do about it — see
+  [When a host can't be reached](#when-a-host-cant-be-reached).
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -96,6 +278,13 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   address and walk what the site publishes like a directory, with `ls`, `cd`,
   `tree`, `find`, `get` and Tab completion. See
   [Site explorer](#site-explorer) for what it reads and what it won't.
+- **Extract** — the response area's second tab reads the response in hand into
+  lists you can filter, copy, save and open: a page's links, images, video and
+  audio, files, headings, tables, metadata, structured data and readable text
+  (plain or Markdown), and the rows of JSON, CSV and feeds — with a query box
+  that speaks CSS selectors, XPath, JSONPath and regular expressions. Images,
+  media and files can be downloaded, after a sheet that says from where, into
+  which folder, and what will not be fetched. See [Extract](#extract).
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -230,6 +419,43 @@ if [[ "$TERM_PROGRAM" == "iTERMiNAL" ]]; then
   precmd_functions+=(_iterminal_cwd)
 fi
 ```
+
+## Colored output
+
+Settings → Terminal → **Colored output**, on by default, applies to terminals
+opened after you change it. It does what the zsh plugins
+[zsh-colored-man-pages](https://github.com/ael-code/zsh-colored-man-pages),
+[zsh-colorls](https://github.com/Kallahan23/zsh-colorls) and
+[zpm-zsh/colors](https://github.com/zpm-zsh/colors) do, with nothing to install
+and for whichever shell the terminal starts — bash and fish get it too. It
+wraps and intercepts nothing: it adds a few environment variables, the ones
+those commands already read, to each **local** shell.
+
+| Setting | Variables | What you see |
+|---|---|---|
+| **ls: directories, links and scripts** | `CLICOLOR=1`, `LSCOLORS` | macOS's `ls`: folders in bold blue, symbolic links in bold cyan, programs in bold green, and sockets, pipes, devices, set-id files and writable folders in the usual extra colors. macOS's `ls` colors by kind of file and has no way to color by ending: an archive or a picture is plain there. |
+| | `LS_COLORS` | GNU `ls --color` and eza read this instead, and add archives (red), pictures and video (magenta) and audio (cyan) by their ending. |
+| **man pages and less** | `LESS_TERMCAP_*`, `GROFF_NO_SGR=1` | Headings, command names and option names in bold red; what you fill in (`file`) in green; `less`'s own status line in yellow on blue. These are the choices zsh-colored-man-pages made. |
+
+- **The theme decides how they look.** Every color is an ANSI palette number,
+  never an RGB value, so the output follows a theme change and reads on a light
+  theme and a dark one alike. The terminal draws bold in the bright variant of
+  a color, so "bold blue" is whatever bright blue the theme has.
+- **Anything you set wins.** The variables are set before your shell's startup
+  files run, so a `LSCOLORS` or `LESS_TERMCAP_md` in `.zshrc` replaces ours, and
+  a variable already present in the environment the app was started with is
+  left alone. A non-empty `NO_COLOR` — the convention for "no color, anywhere"
+  — switches the whole thing off.
+- **Local shells only.** SSH and Mosh sessions, superfile and btop are not
+  given any of it.
+- **Some commands only color when asked.** `grep` prints its matches plain
+  unless it is given `--color`, whatever the environment says, and iTERMiNAL
+  does not edit your shell's startup files. Settings → Terminal → *grep, GNU ls
+  and other commands* shows the three aliases to add and has a Copy button.
+- **What it is not.** The terminal never rewrites output after the fact, and
+  nothing here wraps commands in a colorizer the way zpm-zsh/colorize wraps
+  them with `grc`. What you type in the composer is colored separately — see
+  the composer in [Features](#features).
 
 ## Ghostty configuration
 
@@ -401,6 +627,42 @@ certificate needs no pin. The pin is honoured by both the API client and the
 browser panel, because WKWebView runs its own trust evaluation and never
 consults URLSession's delegate.
 
+### When a host can't be reached
+
+The file browser runs `sftp` with no keyboard, so it can fail in ways `sftp`'s
+own one-line message does not explain. The commonest is
+`Permission denied (publickey,password,keyboard-interactive)`: the server
+turned down every key this Mac offered, *and* the file browser has no way to
+answer a password prompt, however right the password. The panel used to show
+that line, cut short, over an "Empty folder". It now reads what `sftp` said and
+shows, in place of the listing:
+
+- the problem in one line, and why it happened;
+- what to do, in order, with the commands to copy;
+- the buttons that go with it — **Try Again**; **Set Up Key…**, which opens a
+  tab on this Mac with the `ssh-copy-id` command typed and *not* run, so you
+  press Return and enter the host's password once, in a real terminal;
+  **Sign In in a Terminal**; **Forget Old Key…** for a changed host key; and
+  **Connection Settings…**;
+- the exact words `sftp` used, folded away under **What sftp said**, never
+  replaced by the summary.
+
+It tells these apart: a refused sign-in (and which methods the server does
+accept), too many keys offered, a changed host key, an identity file that is
+missing or readable by others, a refused connection, no answer, no route, a name
+that doesn't resolve, a connection closed before sign-in, a host with SFTP off
+or a login that prints text, and a folder that is missing or off limits.
+Anything else is shown as `sftp` said it, with a Try Again. A failed upload,
+download or delete leaves the listing alone and shows a one-line strip with
+Details.
+
+**Settings → Connections → Test File Access** signs in the way the file browser
+does and shows the same words, so a host can be checked with its settings in
+front of you. When a key is named for a host, `ssh` is told to offer only that
+one (`IdentitiesOnly=yes`), so a server that allows few attempts doesn't hang
+up before reaching it. A host that accepts only a password can't be browsed
+from here; use a terminal session to it, or install a key.
+
 ## Security model
 
 - **The scripting API is opt-in.** It ships disabled, with separate toggles for
@@ -424,6 +686,12 @@ consults URLSession's delegate.
   loopback. Anything routable still has to be HTTPS — the HTTP client refuses
   a plain `http://` request to any other host outright, rather than letting it
   fail as a confusing network error.
+- **Downloads wait for a yes, and a page can't aim them at your network.**
+  Extract fetches only the files you tick, after a sheet that shows the sites
+  and the folder. A page from the internet can't make the app request this Mac
+  or the network it is on — a redirect included — and requests carry no cookies
+  or credentials. Files are never overwritten and are marked as downloaded from
+  the web. See [Extract](#extract) for the rules and their one stated gap.
 - **Certificate validation is never disabled.** A self-signed Proxmox host is
   reached by pinning the one certificate you confirmed by fingerprint, for that
   host and port alone — the system's own verdict is tried first, so pinning can
@@ -436,30 +704,44 @@ consults URLSession's delegate.
 
 ## Keyboard shortcuts
 
+**Help → Keyboard Shortcuts** (⌘/) lists every shortcut in a window you can
+search, and the same list is under Settings → Shortcuts. The ones the menus
+bind:
+
 | Action | Keys |
 | --- | --- |
-| Command palette | ⌘K |
+| Command palette | ⌘K or ⌘P |
+| Keyboard shortcuts | ⌘/ |
 | New terminal tab | ⌘T |
 | New workspace | ⇧⌘N |
 | Split right / down | ⌘D / ⇧⌘D |
 | Split with browser | ⇧⌘B |
-| Close pane / tab | ⇧⌘W / ⌥⌘W |
+| Close pane / tab | ⇧⌘W / ⌃⌘W |
 | Terminal dock | ⌘J |
 | Show / hide sidebar | ⌃⌘S |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
+| Bigger / smaller text, actual size | ⌘+ / ⌘- / ⌘0 |
 | Focus composer | ⇧⌘R |
 | Minimise / expand composer | ⇧⌘M |
+| Explain the last output / suggest a fix | ⌥⌘E / ⌥⌘X |
 | Task manager | ⌥⌘T |
+| Send the request (HTTP client) | ⌘↩ |
 | Settings | ⌘, |
+
+The composer and the site explorer's prompt have keys of their own — ↑ ↓ for
+earlier commands, ⇥ to complete, ⌃R to search history — described under
+Features and listed in the window above. Some actions (Split with Files, Split
+with HTTP Client) have no shortcut; the command palette finds every action.
 
 ## Architecture
 
 ```
 Sources/
 ├── iTERMiNAL/
-│   ├── App/         entry point, window scene, menu commands
+│   ├── App/         entry point, window scene, menu commands; ScreenshotMode takes the
+│   │                README pictures (compiled in only by the Screenshots workflow)
 │   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
 │   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
@@ -604,6 +886,100 @@ The map lives in memory for the pane and is not saved with a layout or in a
 snapshot. A `get` is recorded in the pane's history and on the `http.sent`
 event like any other request; the requests `open` makes on its own are listed
 in the transcript instead.
+
+## Extract
+
+The HTTP pane's response area has two tabs: **Body**, the response as it came,
+and **Extract**, which reads that one response into lists and tables. It works
+on what is already in hand: opening the tab requests nothing, and nothing in it
+follows a link by itself.
+
+**For a web page**, a row of chips opens each list — only the ones with
+something in them:
+
+| List | Shows |
+|---|---|
+| Overview | Title, description, site, author, date, language, encoding, canonical address, preview image, the feeds the page declares, and a count of everything below |
+| Text | The reading part of the page — `<article>`, else `<main>`, else the biggest block of text — as plain text or Markdown, with Copy and Save… |
+| Links | Every link, with its text, whether it is the same site, its `rel`, and how often it appears. Links to a place further down the same page are counted, not listed; so are images written into the markup as `data:` addresses |
+| Images | `<img>` (including `srcset` and the lazy-load attributes sites use), `<picture>`, video posters, icons, `og:image` and `twitter:image`, with size and where each came from |
+| Video & audio | `<video>`, `<audio>`, `<source>`, caption tracks, `og:video` and `og:audio`, and embedded players. YouTube, Vimeo, Dailymotion, Spotify, SoundCloud and Twitch are named, with their watch page; a player is a page, not a file, so it is listed and not downloadable. A streaming playlist (`.m3u8`) is saved as the playlist, not stitched into a video |
+| Files | Links to documents, archives, spreadsheets and the like, by their ending |
+| Headings, Tables, Meta, Structured data, Scripts & styles, Forms | The outline; each `<table>` as a table; the `<meta>` and `<link>` tags; JSON-LD and microdata; the scripts and stylesheets the page loads; each form's method, action and fields |
+
+**For data**, a JSON array of objects, a CSV or TSV file, an RSS or Atom feed
+and a sitemap each become a table (**Records**), and any other response lists
+the addresses found in it.
+
+**Query** asks the response a question of your own, in the language a scraper
+would use:
+
+- **CSS** — type, `#id`, `.class`, attribute selectors (`[a^=v]`, `[a$=v]`,
+  `[a*=v]` and the rest), the four combinators, `:first-child` and its family,
+  `:nth-…(An+B)`, `:not()`, `:has()`, `:empty`, and `:contains("text")`; end
+  with `::text`, `::html` or `::attr(name)` to say what to take, as in Scrapy.
+- **XPath** — the part of XPath 1.0 that scraping uses: paths, `//`, `@attr`,
+  `text()`, predicates with `contains`, `starts-with`, `not`, `position()` and
+  `last()`. Other axes and unions are not supported.
+- **JSONPath** — `$`, members, `[*]`, `..`, slices, several at once, and
+  `[?(@.price < 10 && @.stock)]` filters.
+- **Regex** — over the response as text; each capture group is a column, and a
+  pattern that takes more than three seconds is stopped.
+
+A query that can't be read says where it went wrong. Examples in the menu are
+questions about the markup in front of you, not addresses.
+
+**Taking things out.** Every list can be filtered; copied or saved as CSV, TSV,
+JSON, a Markdown table or a plain list of addresses (a cell a spreadsheet would
+run as a formula — one that starts with `=`, `@`, or a `+`/`-` that isn't a
+number — gets a leading apostrophe, since a page can put anything in a link's
+text); and each row has a menu: **Copy Address**, **Open in Browser Panel**,
+**Load as Request**, **Fetch (GET)**, **Download…**. Load and Fetch are how you
+get from one page to the next, one click each. **Save…** beside the tabs saves
+the response body itself.
+
+**Downloading.** Tick the rows you want (or use *All*) and choose Download. A
+sheet shows how many files, the sites they come from, the folder, the size
+limit, each file's name and address, and — under *will not be fetched* — every
+address the rules below left out and why. Nothing is requested until you press
+Download.
+
+- Files go in `~/Downloads/iTERMiNAL/<site>/` unless Settings → HTTP Client
+  names another folder, each under the name its address gives it (a name with
+  no ending gets one from the type the server declared), numbered if that name
+  is taken — **nothing is ever overwritten** — and marked as downloaded from
+  the web, so macOS asks before it opens anything that could run. The first
+  download into Downloads makes macOS ask whether iTERMiNAL may use that
+  folder (Desktop and Documents do the same); a folder anywhere else, chosen
+  in Settings, never asks.
+- Three at a time, up to 500 files per batch, and no file larger than the
+  limit in Settings (25 MB, 100 MB, 250 MB or 1 GB; a file is stopped the
+  moment it passes it, before the rest arrives). *Stop* ends the batch.
+- Requests carry no cookies, no credentials and none of the headers the page
+  was fetched with: a file on another site isn't owed the login to this one.
+  The `Referer` is what a browser sends — the page's address to the same site,
+  only the site's own address to another, nothing from a secure page to an
+  insecure one.
+- **A page can't aim this app at your network.** Addresses come from the page
+  you fetched, so an address on this Mac or a network that isn't the internet —
+  loopback, private and link-local ranges, `.local` and one-word names — is
+  refused unless the page itself came from there, in whatever spelling:
+  `localhost.`, `127.1`, `0x7f000001`, `[0::1]` and `[::ffff:7f00:1]` are all
+  this Mac, and an IPv6 address is judged by the address it comes to (an IPv4
+  address inside one by that), not by how it begins. Names are judged as
+  written, not looked up, so a public name that someone has pointed at a
+  private address is not caught. Plain `http://` is used only for this Mac
+  itself, as everywhere in the HTTP client, and a redirect is judged by the
+  same rules as the first address.
+
+**What it never does.** It doesn't crawl: no list follows its links, and
+nothing is fetched except a row you chose to fetch or download. It doesn't
+guess at addresses, run a page's scripts (so what scripts draw isn't there — the
+Overview says so), or log in. The reading is lossy where HTML is: a page that
+puts its content in scripts has little in the response to read.
+
+Nothing here is saved with a layout or in a snapshot, and the download folder
+is a path on this Mac, so it isn't in exported settings either.
 
 ## Backup and restore
 

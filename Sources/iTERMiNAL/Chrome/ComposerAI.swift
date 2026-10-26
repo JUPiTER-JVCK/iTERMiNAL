@@ -22,6 +22,13 @@ final class ComposerAIController: ObservableObject {
     }
 
     @Published var banner: Banner?
+
+    #if SCREENSHOTS
+    init() {
+        ScreenshotMode.composerAssistant = self
+    }
+    #endif
+
     private var task: Task<Void, Never>?
     /// Whether an assistant is set up, remembered briefly. Asking reads the
     /// keychain, and the composer asks on every command it sends.

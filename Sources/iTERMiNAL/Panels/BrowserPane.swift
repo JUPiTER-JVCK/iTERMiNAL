@@ -39,6 +39,12 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
 
     let webView: WKWebView
 
+    /// Follows the page's own title. A page names itself when its `<title>` is
+    /// read, which is not always before the load is reported finished, and a
+    /// script can rename it at any time after — so the tab's title is kept in
+    /// step with it, not read at those two moments only.
+    private var titleObservation: NSKeyValueObservation?
+
     /// Completions waiting for the current navigation to settle.
     private var navigationCompletions: [(Result<String, Error>) -> Void] = []
 
@@ -50,6 +56,13 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         super.init()
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        // A title arriving is news; one going away is left to the navigation
+        // callbacks, so the old title stays in the tab until the new page has
+        // one rather than flashing "New tab" between the two.
+        titleObservation = webView.observe(\.title, options: [.new]) { [weak self] web, _ in
+            guard let title = web.title, !title.isEmpty else { return }
+            DispatchQueue.main.async { self?.pageTitle = title }
+        }
         if autoLoad || initialURL != nil {
             loadCurrentText()
         }
@@ -520,10 +533,6 @@ final class BrowserTabsModel: ObservableObject {
         }
         EventBus.shared.publish(APIEvent("browser.tab.closed", ["tab": id.uuidString]))
     }
-
-    func title(for model: BrowserModel) -> String {
-        model.pageTitle.isEmpty ? "New tab" : model.pageTitle
-    }
 }
 
 /// The right-hand browser panel: a tab strip, a navigation row, and either a
@@ -556,7 +565,6 @@ struct BrowserPanelView: View {
                     ForEach(model.tabs) { tab in
                         BrowserTabChip(
                             tab: tab,
-                            title: model.title(for: tab),
                             isSelected: model.active?.id == tab.id,
                             onSelect: { model.selectedID = tab.id },
                             onClose: { model.closeTab(tab.id) }
@@ -587,13 +595,20 @@ struct BrowserPanelView: View {
 /// One tab chip: favicon-ish glyph, title, and a close button.
 private struct BrowserTabChip: View {
     @ObservedObject var tab: BrowserModel
-    let title: String
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Read here, from the tab this chip observes, and not handed down by the
+    /// panel: the panel does not redraw when a page names itself, so a title it
+    /// passed in would stay what it was when the strip was last drawn — "New
+    /// tab" over a page that has loaded.
+    private var title: String {
+        tab.pageTitle.isEmpty ? "New tab" : tab.pageTitle
+    }
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)

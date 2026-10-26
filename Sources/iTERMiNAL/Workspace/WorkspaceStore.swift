@@ -157,6 +157,10 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var rightPanelExpanded = false
     @Published private(set) var bottomDockOpen = false
     @Published var showCommandPalette = false
+    /// The Keyboard Shortcuts window. Opened with `showShortcuts()`, which
+    /// copes with a sheet that is still on its way out; set directly only to
+    /// close it.
+    @Published var showKeyboardShortcuts = false
     /// How many closed sessions the Recents list keeps. An entry pushed off
     /// the end takes its transcript with it, so anything that rebuilds this
     /// list has to respect the same cap.
@@ -418,6 +422,24 @@ final class WorkspaceStore: ObservableObject {
     }
 
     // MARK: Workspace / tab lifecycle
+
+    /// A new tab on this Mac with `text` typed at its prompt and not run. The
+    /// person reads it, and Return is what runs it — nothing is sent after the
+    /// text, and a line break or any other control character in it becomes a
+    /// space, so what is typed can only ever sit on the line.
+    func newTab(typing text: String) {
+        let line = String(text.map { character -> Character in
+            character.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value != 0x7F } ? character : " "
+        })
+        let tab = newTab()
+        guard let session = tab.root.firstTerminal() else { return }
+        // The shell has to be up and reading. Typed any earlier, the line is
+        // held by the terminal and arrives anyway, but a shell that clears its
+        // input as it starts would lose it, so give it a moment.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak session] in
+            session?.send(text: line)
+        }
+    }
 
     func newWorkspace(named name: String? = nil) {
         let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
@@ -796,6 +818,25 @@ final class WorkspaceStore: ObservableObject {
             focusedSessionID = tab.root.firstTerminal()?.id
         }
         EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
+    }
+
+    /// Opens the Keyboard Shortcuts window.
+    ///
+    /// Two sheets cannot be on one window at once, and a second asked for while
+    /// the first is closing is dropped. So when the command palette is up, or
+    /// something — the palette, a popover — has only just been dismissed to run
+    /// the action that called this (`afterPresentation`), the palette is closed
+    /// and the window follows once that has finished.
+    func showShortcuts(afterPresentation: Bool = false) {
+        let wait = afterPresentation || showCommandPalette
+        showCommandPalette = false
+        guard wait else {
+            showKeyboardShortcuts = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.showKeyboardShortcuts = true
+        }
     }
 
     /// Brings the composer forward and puts the caret in it — un-hiding and

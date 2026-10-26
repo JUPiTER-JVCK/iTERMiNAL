@@ -70,29 +70,56 @@ struct HTTPResponseView: View {
         formatted: HTTPResponseFormatter.FormattedBody,
         theme: Theme
     ) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
                 statusLine(response, theme: theme)
-
-                if !response.headers.isEmpty {
-                    DisclosureGroup("Headers (\(response.headers.count))", isExpanded: $headersExpanded) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(response.headers) { header in
-                                Text("\(header.name): \(header.value)")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(theme.textSecondary)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
+                Picker("Show", selection: $model.responseTab) {
+                    Text("Body").tag(HTTPResponseTab.body)
+                    Text("Extract").tag(HTTPResponseTab.extract)
                 }
-
-                bodyBlock(formatted, theme: theme)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Body: the response as it came · Extract: links, images, media, files, tables, text, and a query box")
+                Button("Save…") { model.extraction.saveBody(response) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                    .help("Save the response body to a file")
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            switch model.responseTab {
+            case .body:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !response.headers.isEmpty {
+                            DisclosureGroup("Headers (\(response.headers.count))", isExpanded: $headersExpanded) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(response.headers) { header in
+                                        Text("\(header.name): \(header.value)")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(theme.textSecondary)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                                .padding(.top, 4)
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                        }
+
+                        bodyBlock(formatted, theme: theme)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                }
+            case .extract:
+                FadedDivider()
+                PageExtractView(extraction: model.extraction, response: response)
+            }
         }
     }
 

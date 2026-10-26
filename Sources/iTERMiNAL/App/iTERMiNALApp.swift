@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
+        // Not in any shipped build: only the Screenshots workflow defines this.
+        #if SCREENSHOTS
+        ScreenshotMode.startIfRequested()
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -104,6 +108,15 @@ struct AppCommands: Commands {
                 withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+        }
+
+        // Replaces "iTERMiNAL Help", which has no help book behind it and only
+        // ever showed an error.
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                WorkspaceStore.shared.showShortcuts()
+            }
+            .keyboardShortcut("/", modifiers: .command)
         }
 
         CommandMenu("Terminal") {
@@ -158,10 +171,13 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
 
+            // Not ⌥⌘W: File > Close All holds that, and an item that asks for a
+            // key the standard menus already have is given none — this one had
+            // no shortcut at all until it moved.
             Button("Close Tab") {
                 WorkspaceStore.shared.closeSelectedTab()
             }
-            .keyboardShortcut("w", modifiers: [.command, .option])
+            .keyboardShortcut("w", modifiers: [.command, .control])
         }
 
         CommandMenu("Panels") {

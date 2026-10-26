@@ -123,6 +123,30 @@ final class TerminalSession: ObservableObject, Identifiable {
             ]))
             WorkspaceStore.shared.openLinkFromTerminal(link)
         }
+        engine.contextMenuActions = { [weak self] in
+            self?.contextMenuActions() ?? []
+        }
+    }
+
+    /// What a right-click here offers beyond copy and paste. Splitting acts on
+    /// the focused pane of the selected tab, which a right-click has just made
+    /// this one — so it only belongs to a terminal that is a pane. A bundled
+    /// tool sits in a side panel and a dock terminal in the dock; "split" there
+    /// would divide something the person was not pointing at.
+    private func contextMenuActions() -> [TerminalMenuAction] {
+        let store = WorkspaceStore.shared
+        guard !kind.isTool, !store.isDockSession(id) else { return [] }
+        return [
+            TerminalMenuAction(title: "Split Right", key: "d") {
+                store.splitFocusedPane(.horizontal, kind: .terminal)
+            },
+            TerminalMenuAction(title: "Split Down", key: "d", modifiers: [.command, .shift]) {
+                store.splitFocusedPane(.vertical, kind: .terminal)
+            },
+            TerminalMenuAction(title: "New Tab", key: "t") {
+                store.newTab()
+            },
+        ]
     }
 
     var isRemote: Bool { kind.isRemote }

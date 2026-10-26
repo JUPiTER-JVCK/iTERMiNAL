@@ -67,6 +67,14 @@ struct PreferencesArchive: Codable {
     var httpFollowRedirects: Bool?
     var httpMaxResponseBytes: Int?
     var httpRecordDiscoveredLinks: Bool?
+    /// The largest file a download takes. The folder they go in is a path on
+    /// one Mac, so it is not carried.
+    var httpMaxDownloadMB: Int?
+    /// Coloured command output. Optional: archives written before it existed
+    /// still decode, and leave the setting as it is.
+    var colorizeOutput: Bool?
+    var colorizeListings: Bool?
+    var colorizeManPages: Bool?
     /// The window frame's look and the interface typeface. Appearance
     /// preferences like `theme` and `accentID`, so they travel; optional
     /// because older archives predate them.
@@ -113,6 +121,10 @@ struct PreferencesArchive: Codable {
         httpFollowRedirects = settings.httpFollowRedirects
         httpMaxResponseBytes = settings.httpMaxResponseBytes
         httpRecordDiscoveredLinks = settings.httpRecordDiscoveredLinks
+        httpMaxDownloadMB = settings.httpMaxDownloadMB
+        colorizeOutput = settings.colorizeOutput
+        colorizeListings = settings.colorizeListings
+        colorizeManPages = settings.colorizeManPages
         sidebarTranslucent = settings.sidebarTranslucent
         frameTintSource = settings.frameTintSource.rawValue
         frameTintStrength = settings.frameTintStrength
@@ -190,6 +202,10 @@ struct PreferencesArchive: Codable {
         if let httpFollowRedirects { settings.httpFollowRedirects = httpFollowRedirects }
         if let httpMaxResponseBytes { settings.httpMaxResponseBytes = httpMaxResponseBytes }
         if let httpRecordDiscoveredLinks { settings.httpRecordDiscoveredLinks = httpRecordDiscoveredLinks }
+        if let httpMaxDownloadMB, [25, 100, 250, 1000].contains(httpMaxDownloadMB) { settings.httpMaxDownloadMB = httpMaxDownloadMB }
+        if let colorizeOutput { settings.colorizeOutput = colorizeOutput }
+        if let colorizeListings { settings.colorizeListings = colorizeListings }
+        if let colorizeManPages { settings.colorizeManPages = colorizeManPages }
         // An archive is a file someone could have edited, so a value is only
         // adopted when it is one the settings screen could have produced:
         // a known name, a color that parses, a number inside its range.

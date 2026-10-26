@@ -171,6 +171,10 @@ struct CommandPaletteView: View {
             PaletteAction(id: "tasks.open", title: "Task Manager", subtitle: "Every shell this app is running", systemImage: "list.bullet.rectangle", shortcut: "⌥⌘T") {
                 store.detailMode = .tasks
             },
+            PaletteAction(id: "shortcuts.open", title: "Keyboard Shortcuts", subtitle: "Every shortcut in the app", systemImage: "keyboard", shortcut: "⌘/") {
+                // The palette is still closing as this runs.
+                store.showShortcuts(afterPresentation: true)
+            },
         ]
 
         for connection in settings.sshConnections {

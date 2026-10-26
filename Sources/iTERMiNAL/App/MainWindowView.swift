@@ -25,6 +25,13 @@ struct MainWindowView: View {
                     contentCard(theme)
                 }
             }
+            // Its own anchor, apart from the palette's below: SwiftUI has not
+            // always honoured two sheets on one view.
+            .sheet(isPresented: $store.showKeyboardShortcuts) {
+                KeyboardShortcutsView()
+                    .environmentObject(store)
+                    .environmentObject(settings)
+            }
         }
         .frame(minWidth: 900, minHeight: 560)
         // The bars run to the top edge; the traffic lights float over the top

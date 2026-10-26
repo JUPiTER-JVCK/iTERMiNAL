@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Settings → HTTP Client: timeout, redirects, the response-size cap the
 /// request executor actually enforces, and what the site explorer may read.
@@ -37,12 +38,49 @@ struct HTTPClientSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Downloads") {
+                HStack {
+                    Text("Save to")
+                    Spacer()
+                    Text((PageExtractionModel.defaultDownloadFolder(preferred: settings.httpDownloadFolder).path as NSString).abbreviatingWithTildeInPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Button("Choose…") { chooseFolder() }
+                    if !settings.httpDownloadFolder.isEmpty {
+                        Button("Reset") { settings.httpDownloadFolder = "" }
+                    }
+                }
+
+                Picker("Largest file", selection: $settings.httpMaxDownloadMB) {
+                    Text("25 MB").tag(25)
+                    Text("100 MB").tag(100)
+                    Text("250 MB").tag(250)
+                    Text("1 GB").tag(1000)
+                }
+
+                Text("Extract → Download saves the images, video, audio and files a page names — only the ones you pick, after showing you which sites and which folder. Files go in a folder per site, never over one that is there, marked as downloaded from the web so macOS asks before opening anything that could run. Requests carry no cookies, no credentials and none of the headers the page was fetched with, and a redirect to somewhere this app would not go is refused. A page from the internet cannot make this app fetch from this Mac or its network.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Privacy") {
-                Text("Requests are sent only when you press Send or ⌘Return, or press Return on an explorer command — never as you type a URL. `open` in the explorer reads a site's robots.txt, the sitemaps it declares, and the page you entered; `get` fetches the one address you give it. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, with values that look like credentials masked (best effort, not a guarantee) before being written to disk, and are left out of exported snapshots.")
+                Text("Requests are sent only when you press Send or ⌘Return, press Return on an explorer command, or choose Fetch on a row of the Extract tab — never as you type a URL. `open` in the explorer reads a site's robots.txt, the sitemaps it declares, and the page you entered; `get` fetches the one address you give it. Extract reads only the response you already have and asks for nothing more; a file is fetched only when you press Download on a list you were shown. A plain `http://` address is refused unless it points at this Mac; everything else goes out over HTTPS with ordinary system certificate trust, the same as the AI assistant's connection. Sent requests are kept as local history, with values that look like credentials masked (best effort, not a guarantee) before being written to disk, and are left out of exported snapshots.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = PageExtractionModel.defaultDownloadFolder(preferred: settings.httpDownloadFolder)
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url { settings.httpDownloadFolder = url.path }
     }
 }

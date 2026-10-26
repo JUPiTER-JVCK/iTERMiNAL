@@ -125,6 +125,11 @@ final class AppSettings: ObservableObject {
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
+    /// Colour for what ordinary commands print — see `OutputColors`. On by
+    /// default: a shell that prints `ls` in one colour is the surprising one.
+    @Published var colorizeOutput: Bool { didSet { defaults.set(colorizeOutput, forKey: "colorizeOutput") } }
+    @Published var colorizeListings: Bool { didSet { defaults.set(colorizeListings, forKey: "colorizeListings") } }
+    @Published var colorizeManPages: Bool { didSet { defaults.set(colorizeManPages, forKey: "colorizeManPages") } }
 
     // MARK: Panels
     @Published var browserHomepage: String { didSet { defaults.set(browserHomepage, forKey: "browserHomepage") } }
@@ -238,6 +243,13 @@ final class AppSettings: ObservableObject {
     /// hand; it never fetches a link. Off leaves the map to robots.txt and the
     /// sitemaps it declares.
     @Published var httpRecordDiscoveredLinks: Bool { didSet { defaults.set(httpRecordDiscoveredLinks, forKey: "httpRecordDiscoveredLinks") } }
+    /// Where files saved from a page go, when it is not the default
+    /// (Downloads/iTERMiNAL). A path on this Mac, so it is left out of exported
+    /// snapshots.
+    @Published var httpDownloadFolder: String { didSet { defaults.set(httpDownloadFolder, forKey: "httpDownloadFolder") } }
+    /// The largest single file a download will take, in megabytes. A file is
+    /// stopped the moment it passes this, before the rest arrives.
+    @Published var httpMaxDownloadMB: Int { didSet { defaults.set(httpMaxDownloadMB, forKey: "httpMaxDownloadMB") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -294,6 +306,9 @@ final class AppSettings: ObservableObject {
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
         useGPURendering = defaults.bool(forKey: "useGPURendering")
+        colorizeOutput = defaults.object(forKey: "colorizeOutput") as? Bool ?? true
+        colorizeListings = defaults.object(forKey: "colorizeListings") as? Bool ?? true
+        colorizeManPages = defaults.object(forKey: "colorizeManPages") as? Bool ?? true
 
         browserHomepage = defaults.string(forKey: "browserHomepage") ?? "https://www.google.com"
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
@@ -337,6 +352,8 @@ final class AppSettings: ObservableObject {
         httpFollowRedirects = defaults.object(forKey: "httpFollowRedirects") as? Bool ?? true
         httpMaxResponseBytes = defaults.object(forKey: "httpMaxResponseBytes") as? Int ?? 10_000_000
         httpRecordDiscoveredLinks = defaults.object(forKey: "httpRecordDiscoveredLinks") as? Bool ?? true
+        httpDownloadFolder = defaults.string(forKey: "httpDownloadFolder") ?? ""
+        httpMaxDownloadMB = defaults.object(forKey: "httpMaxDownloadMB") as? Int ?? 250
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -449,6 +466,13 @@ final class AppSettings: ObservableObject {
         return SymbolsFont.withFallback(font)
     }
 
+    /// What to add to a new shell's environment to colour its output, or nil
+    /// when that is off.
+    var outputColors: OutputColors? {
+        guard colorizeOutput, colorizeListings || colorizeManPages else { return nil }
+        return OutputColors(listings: colorizeListings, manPages: colorizeManPages)
+    }
+
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
         TerminalTheme.theme(id: terminalThemeID, darkMode: darkMode)
     }
@@ -523,6 +547,9 @@ final class AppSettings: ObservableObject {
         scrollbackLines = 10_000
         terminalThemeID = "auto"
         useGPURendering = false
+        colorizeOutput = true
+        colorizeListings = true
+        colorizeManPages = true
         browserHomepage = "https://www.google.com"
         showHiddenFiles = false
         followTerminalDirectory = true
@@ -551,6 +578,8 @@ final class AppSettings: ObservableObject {
         httpFollowRedirects = true
         httpMaxResponseBytes = 10_000_000
         httpRecordDiscoveredLinks = true
+        httpDownloadFolder = ""
+        httpMaxDownloadMB = 250
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

@@ -4,7 +4,8 @@ import SwiftTerm
 /// LocalProcessTerminalView subclass that reports what the app needs to know.
 ///
 /// Only methods SwiftTerm declares `open` are overridden — `send`,
-/// `rangeChanged`, `requestOpenLink`, and `bell`. Other delegate methods on
+/// `rangeChanged`, `requestOpenLink`, and `bell` — plus AppKit's own
+/// `menu(for:)`, which SwiftTerm leaves alone. Other delegate methods on
 /// this class (`sizeChanged`, `setTerminalTitle`, and `becomeFirstResponder`
 /// on the view) are `public` but not `open`, so they cannot be overridden from
 /// outside the module; those signals come through `processDelegate` and a
@@ -18,6 +19,10 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// Reports a finished command line, for naming the tab after what it is
     /// doing rather than after its directory.
     var onCommand: ((String) -> Void)?
+    /// What the app adds to the right-click menu beneath the editing items —
+    /// splitting the pane, opening a tab. Asked each time the menu opens, so it
+    /// can reflect the moment.
+    var contextMenuActions: (() -> [TerminalMenuAction])?
 
     /// What has been typed since the last Enter.
     private var lineBuffer: [UInt8] = []
@@ -91,6 +96,13 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
         } else {
             super.requestOpenLink(source: source, link: link, params: params)
         }
+    }
+
+    /// The right-click menu. `NSView` calls this from its own `rightMouseDown`,
+    /// which is as far as a right-click gets: SwiftTerm does not handle the
+    /// right button at all. See `TerminalContextMenu`.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        TerminalContextMenu.make(for: self, actions: contextMenuActions?() ?? [])
     }
 
     /// BEL — SwiftTerm exposes this as an open TerminalDelegate method.

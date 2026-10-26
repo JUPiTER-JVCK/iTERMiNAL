@@ -12,8 +12,12 @@ the menu bar or the command palette.
 
 - Shortcuts are hardcoded on `AppCommands` in `iTERMiNALApp.swift` via
   `.keyboardShortcut(...)`.
-- Settings → Shortcuts (`ShortcutsSettingsView`) is a **read-only** table of
-  `(action, keys)` pairs that mirrors the README / menu — display only.
+- `ShortcutCatalog` (`Chrome/ShortcutCatalog.swift`) lists every shortcut as
+  display data: stable ids, sections, and a chord model (`ShortcutChord`, a key
+  plus modifier flags). Settings → Shortcuts and the Keyboard Shortcuts window
+  (Help, ⌘/) read it, and the logic check fails if it and the
+  `.keyboardShortcut(` calls in the sources disagree, or if the README's table
+  does. It does **not** drive the menus yet, and has no overrides.
 - Command palette actions carry their own shortcut strings for display and
   invoke the same store methods as the menus.
 - Terminal input still needs first claim on most keystrokes when a pane is
@@ -23,7 +27,8 @@ the menu bar or the command palette.
 
 ### 1. Single source of truth
 
-Introduce a `KeybindingCatalog` (name flexible) that owns:
+Grow `ShortcutCatalog` (see above) into a `KeybindingCatalog` (name flexible)
+that owns:
 
 - Stable action IDs (`newTab`, `splitRight`, `toggleBrowserPanel`, …)
 - Default chord for each action
@@ -31,7 +36,8 @@ Introduce a `KeybindingCatalog` (name flexible) that owns:
 - Resolved chord = override ?? default
 
 Menus (`AppCommands`), Settings, command palette subtitles, and any in-app
-cheat sheet all read from the catalog. Stop maintaining three parallel lists.
+cheat sheet all read from the catalog. Settings and the cheat sheet already do;
+the menus and the palette's hints are the lists left to fold in.
 
 ### 2. Chord model
 

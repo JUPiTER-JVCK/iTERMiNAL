@@ -18,6 +18,11 @@ final class SwiftTermEngine: TerminalEngine {
     var onLinkActivated: ((String) -> Void)?
     /// Called with each command line the shell is given.
     var onCommand: ((String) -> Void)?
+    /// What the app adds to the right-click menu, beneath the editing items.
+    var contextMenuActions: (() -> [TerminalMenuAction])? {
+        get { terminalView.contextMenuActions }
+        set { terminalView.contextMenuActions = newValue }
+    }
 
     private let terminalView: InstrumentedTerminalView
     private var started = false
@@ -44,6 +49,13 @@ final class SwiftTermEngine: TerminalEngine {
             options: options
         )
         terminalView.processDelegate = self
+        // SwiftTerm only calls `rangeChanged` — the one "something was printed"
+        // signal this wrapper has — when this is on, and it is off by default.
+        // Left off, `onActivity` never fired in any build: the sidebar's
+        // "last active" times stood still, `session.activity` was never
+        // published, and the watcher that offers Explain / Fix it after a failed
+        // command never saw the terminal change, so it never offered.
+        terminalView.notifyUpdateChanges = true
 
         terminalView.onInput = { [weak self] in
             self?.onFocusGained?()

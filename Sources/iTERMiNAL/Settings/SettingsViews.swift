@@ -3,9 +3,15 @@ import SwiftUI
 // Section enum: SettingsSection.swift · AI pane: AISettingsView.swift
 
 struct SettingsRootView: View {
-    @State private var selection: SettingsSection = .general
+    @State private var selection: SettingsSection
     @State private var query = ""
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Opens on `initialSection`. The Settings scene never passes one; it is
+    /// here so the README screenshots can show a section without clicking.
+    init(initialSection: SettingsSection = .general) {
+        _selection = State(initialValue: initialSection)
+    }
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -19,6 +25,19 @@ struct SettingsRootView: View {
         // start at the top edge, with the traffic lights floating over the
         // band the rail clears for them.
         .framelessWindow()
+        // Something elsewhere in the app pointed here: a file browser that
+        // could not sign in, sending the person to the host's settings.
+        .onAppear { applyRequestedSection() }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsNavigator.didRequest)) { _ in
+            applyRequestedSection()
+        }
+    }
+
+    private func applyRequestedSection() {
+        if let section = SettingsNavigator.take() {
+            query = ""
+            selection = section
+        }
     }
 
     // MARK: Navigation

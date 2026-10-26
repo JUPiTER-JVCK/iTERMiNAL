@@ -77,6 +77,7 @@ struct TerminalSettingsView: View {
                     }
                 }
             }
+            OutputColorsSettingsSection()
             Section("Font") {
                 Picker("Font", selection: $settings.terminalFontName) {
                     Text("System monospace (SF Mono)").tag("")

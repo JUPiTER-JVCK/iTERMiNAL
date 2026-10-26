@@ -165,8 +165,28 @@ jobs:
             Sources/iTERMiNAL/HTTP/ResponseLinkScanner.swift \
             Sources/iTERMiNAL/HTTP/SitePathTree.swift \
             Sources/iTERMiNAL/HTTP/SiteExplorerCommands.swift \
+            Sources/iTERMiNAL/HTTP/HTMLEntities.swift \
+            Sources/iTERMiNAL/HTTP/HTMLParser.swift \
+            Sources/iTERMiNAL/HTTP/CSSSelector.swift \
+            Sources/iTERMiNAL/HTTP/ResultTable.swift \
+            Sources/iTERMiNAL/HTTP/AssetNaming.swift \
+            Sources/iTERMiNAL/HTTP/PageURLs.swift \
+            Sources/iTERMiNAL/HTTP/ReadableText.swift \
+            Sources/iTERMiNAL/HTTP/PageExtractor.swift \
+            Sources/iTERMiNAL/HTTP/JSONValue.swift \
+            Sources/iTERMiNAL/HTTP/JSONPath.swift \
+            Sources/iTERMiNAL/HTTP/CSVParser.swift \
+            Sources/iTERMiNAL/HTTP/XMLTree.swift \
+            Sources/iTERMiNAL/HTTP/XPathLite.swift \
+            Sources/iTERMiNAL/HTTP/QueryRunner.swift \
+            Sources/iTERMiNAL/HTTP/ResponseExtractor.swift \
+            Sources/iTERMiNAL/HTTP/DownloadPlan.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
+            Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
+            Sources/iTERMiNAL/Files/SSHConnection.swift \
+            Sources/iTERMiNAL/Files/RemoteProblem.swift \
+            Sources/iTERMiNAL/Terminal/OutputColors.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
