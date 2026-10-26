@@ -192,7 +192,7 @@ final class ScreenshotRun {
     /// panel: a command whose lines fit a narrow pane, because lines that wrap
     /// look like a bug.
     private func tidyServer() async {
-        await run("git log --oneline --decorate -n 12", in: server?.primarySession)
+        await run("git log --oneline -n 12", in: server?.primarySession)
         await pause(1.5)
     }
 
@@ -370,8 +370,10 @@ final class ScreenshotRun {
     /// from the shell's history.
     private func landing() async -> Bool {
         await baseline()
-        // Without the sidebar the cards fit on one row, clear of the composer.
+        // Without the sidebar the cards fit on one row, and with the composer
+        // put down to its pill none of them is behind it.
         settings.railPanelOpen = false
+        settings.composerCollapsed = true
         store.selectedTabID = nil
         await pause(1.8)
         guard store.selectedTab == nil else {
@@ -380,6 +382,7 @@ final class ScreenshotRun {
         }
         let taken = capture("landing")
         store.selectedTabID = server?.id
+        settings.composerCollapsed = false
         return taken
     }
 
@@ -396,7 +399,7 @@ final class ScreenshotRun {
         await pause(2.5)
         await run(fixtureLog.map { "tail -n 12 -f '\($0)'" } ?? "ls -F", in: second)
         await pause(2.5)
-        ScreenshotMode.describeTerminals(in: window, label: "dock")
+        ScreenshotMode.describeTerminals(in: window, label: "dock", picturesIn: directory)
         say("dock: the new tab holds \(second.captureVisibleText().count) characters")
         let taken = capture("dock")
         // The first tab again, for comparison.
@@ -433,10 +436,14 @@ final class ScreenshotRun {
         tabs.newTab(url: Self.site + "/docs/")
         tabs.newTab(url: Self.site + "/changelog")
         tabs.selectedID = first.id
-        let loaded = await ScreenshotMode.until(timeout: 25) {
-            tabs.tabs.allSatisfy { $0.hasNavigated && !$0.isLoading && !$0.pageTitle.isEmpty }
-        }
-        say("browser: pages loaded: \(loaded) — \(tabs.tabs.map { "\($0.pageTitle.isEmpty ? "(no title)" : $0.pageTitle), loading \($0.isLoading)" })")
+        await pause(3.0)
+        // A tab learns its page's title when a load starts or finishes, and
+        // on a runner the title can arrive after the load has finished: so
+        // each is loaded once more, when the one it already has is there to
+        // be read.
+        for tab in tabs.tabs { tab.reload() }
+        await pause(3.0)
+        say("browser: \(tabs.tabs.map { "\($0.pageTitle.isEmpty ? "(no title)" : $0.pageTitle), loading \($0.isLoading)" })")
         await tidyServer()
         await pause(1.0)
         guard let web = tabs.active?.webView, let image = await ScreenshotMode.snapshot(of: web) else {
@@ -608,14 +615,24 @@ final class ScreenshotRun {
     /// An `@ai` question, answered by the sample server standing in for a model.
     private func assistantReply() async -> Bool {
         await baseline()
+        // The reply floats over whatever the terminal shows, so it is given a
+        // clear screen to float over.
+        server?.primarySession?.send(text: "clear\n")
+        await pause(1.0)
         _ = ScreenshotMode.focusComposer(in: window)
         compose("@ai how do I discard my local changes and match origin/main?")
         await pause(0.8)
         ScreenshotMode.pressReturn(in: window)
         await pause(4.5)
         if let field = ScreenshotMode.composerField(in: window) {
-            say("ai-assistant: the input holds \(field.string.debugDescription), marked text \(field.hasMarkedText())")
+            say("ai-assistant: the input holds \(field.string.debugDescription), marked text \(field.hasMarkedText()), "
+                + "\(field.textStorage?.length ?? -1) characters stored, \(field.layoutManager?.numberOfGlyphs ?? -1) glyphs laid out")
+            // A letter was left in it in the first pictures, from what had
+            // been typed there: have it drawn again.
+            field.needsDisplay = true
+            field.displayIfNeeded()
         }
+        await pause(0.6)
         let taken = capture("ai-assistant")
         await sendFromComposer("clear")
         return taken
@@ -628,8 +645,21 @@ final class ScreenshotRun {
         _ = ScreenshotMode.focusComposer(in: window)
         compose("make build")
         await pause(0.8)
+        // A watcher of this scene's own, beside the composer's: if it sees the
+        // failure and the composer's does not, it is the composer that is not
+        // asking.
+        let target = store.composerDestinationSession
+        let before = target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? ""
+        let mine = CommandOutcomeWatcher()
+        var seen = "nothing"
+        if let target {
+            mine.start(session: target, command: "make build", baseline: before) { offer in seen = offer.reason }
+        }
         ScreenshotMode.pressReturn(in: window)
-        await pause(6.0)
+        await pause(7.0)
+        mine.stop()
+        say("error-help: the composer ran it in the server tab: \(target?.id == server?.primarySession?.id); "
+            + "a watcher of this scene's own saw: \(seen)")
         // What the watcher that makes the offer would have read.
         let text = server?.primarySession?.captureScrollback(maxBytes: 8_192) ?? ""
         let fresh = OutputDiff.newLines(baseline: "", current: text)

@@ -1,5 +1,6 @@
 #if SCREENSHOTS
 import AppKit
+import SwiftTerm
 
 /// The keyboard and the view tree, as a person would meet them. See
 /// ScreenshotMode.swift.
@@ -113,16 +114,33 @@ extension ScreenshotMode {
     // MARK: Views
 
     /// Where each terminal in the window is and how big, for when the picture
-    /// of one comes out empty.
+    /// of one comes out empty — and, given a directory, a picture of each
+    /// terminal drawn on its own, which says whether it is the terminal that
+    /// draws nothing or the window that leaves it out.
     @MainActor
-    static func describeTerminals(in window: NSWindow, label: String) {
+    static func describeTerminals(in window: NSWindow, label: String, picturesIn directory: URL? = nil) {
         guard let root = window.contentView else { return }
         for (index, container) in allViews(of: TerminalContainerView.self, in: root).enumerated() {
             let inWindow = container.convert(container.bounds, to: nil)
             let terminal = container.terminal
-            say("\(label): terminal \(index): container \(inWindow), terminal frame \(terminal.frame), "
+            var grid = ""
+            if let view = terminal as? TerminalView {
+                let state = view.getTerminal()
+                grid = ", \(state.cols)x\(state.rows) cells"
+            }
+            var hiddenAbove: [String] = []
+            var ancestor: NSView? = container.superview
+            while let view = ancestor {
+                if view.isHidden || view.alphaValue < 1 { hiddenAbove.append("\(type(of: view)) hidden \(view.isHidden) alpha \(view.alphaValue)") }
+                ancestor = view.superview
+            }
+            say("\(label): terminal \(index): container \(inWindow), terminal frame \(terminal.frame)\(grid), "
                 + "hidden \(terminal.isHidden || container.isHidden), alpha \(terminal.alphaValue), "
-                + "in a window \(terminal.window != nil)")
+                + "in a window \(terminal.window != nil), can draw \(terminal.canDraw), "
+                + "hidden or faded above: \(hiddenAbove)")
+            if let directory {
+                _ = write(terminal, "debug-\(label)-\(index)", in: directory, scale: 2, trimmingBottom: 0, overlays: [])
+            }
         }
     }
 
