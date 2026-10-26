@@ -6,8 +6,11 @@ name: Screenshots
 # build defines it), launched against a sample project, a small local web
 # server and a stand-in for an AI model, and writes PNGs of its own windows
 # (Sources/iTERMiNAL/App/Screenshot*.swift). They are uploaded as an artifact;
-# nothing here publishes anything. To update the README, copy them from the
-# artifact into docs/images/ — each file is named for what it shows.
+# nothing here publishes anything. To update the README, download the artifact,
+# unpack it, and run scripts/screenshots/publish.py on the folder: it writes the
+# twenty pictures the README shows into docs/images/. The artifact holds more
+# than that — each file is named for what it shows, and app.log says what the
+# app saw while it took them.
 on:
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
@@ -16,14 +19,6 @@ on:
   # pull request that causes it. The normal build cannot see one: the capture
   # code is compiled out of it.
   pull_request:
-    paths:
-      - .github/workflows/screenshots.yml
-      - scripts/screenshots/**
-      - Sources/iTERMiNAL/App/Screenshot*.swift
-  # While the pictures are being worked on: a push to this branch that touches
-  # the capture. Taken out again when the work is done.
-  push:
-    branches: [claude/macos-terminal-design-planning-rwuvtw]
     paths:
       - .github/workflows/screenshots.yml
       - scripts/screenshots/**
