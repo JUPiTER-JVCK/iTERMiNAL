@@ -64,9 +64,21 @@ enum DownloadPolicy {
     /// loopback, private, link-local and unspecified addresses, and names that
     /// only mean something locally.
     static func isLocalHost(_ rawHost: String) -> Bool {
-        var host = rawHost.lowercased()
+        var host = rawHost
         if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
         guard !host.isEmpty else { return false }
+
+        // The system reads a host through Unicode normalisation: a full-width
+        // letter is a letter, an ideographic full stop is a dot. A host that
+        // normalisation changes could be read as something other than what it
+        // looks like here, and nothing honest is written that way, so it is
+        // refused rather than guessed at.
+        guard host.precomposedStringWithCompatibilityMapping == host else { return true }
+        host = host.lowercased()
+
+        // `localhost.` is `localhost`: a trailing dot only makes a name absolute.
+        while host.hasSuffix(".") { host.removeLast() }
+        guard !host.isEmpty else { return true }
 
         if host.contains(":") { return isLocalIPv6(host) }
 
@@ -103,16 +115,31 @@ enum DownloadPolicy {
         }
     }
 
+    /// An IPv6 address is the same address however it is spelled — `::1`,
+    /// `0::1`, `0:0:0:0:0:0:0:1` and `::0001` are one — so it is read into its
+    /// sixteen bytes and judged by those, never by how it starts. Anything that
+    /// will not read as an address is refused: it is not something to fetch from.
     private static func isLocalIPv6(_ host: String) -> Bool {
-        let address = host.split(separator: "%").first.map(String.init) ?? host   // a zone id
-        if address == "::" || address == "::1" { return true }
-        if address.hasPrefix("fe8") || address.hasPrefix("fe9") || address.hasPrefix("fea") || address.hasPrefix("feb") { return true }
-        if address.hasPrefix("fc") || address.hasPrefix("fd") { return true }
-        // `::ffff:127.0.0.1` is IPv4 in IPv6 clothes.
-        if address.hasPrefix("::ffff:") {
-            let tail = String(address.dropFirst("::ffff:".count))
-            return tail.contains(".") ? isLocalHost(tail) : true
-        }
+        // A zone id (`fe80::1%en0`) says which interface, not which address.
+        let address = host.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? host
+        var parsed = in6_addr()
+        guard inet_pton(AF_INET6, address, &parsed) == 1 else { return true }
+        let bytes = withUnsafeBytes(of: &parsed) { Array($0) }
+        guard bytes.count == 16 else { return true }
+        func zeros(_ range: Range<Int>) -> Bool { bytes[range].allSatisfy { $0 == 0 } }
+        func embedded(_ range: Range<Int>) -> Bool { isLocalIPv4(bytes[range].map { Int($0) }) }
+
+        // ::, ::1, and ::a.b.c.d (the old IPv4-compatible form): this Mac, or nothing.
+        if zeros(0..<12) { return true }
+        // IPv4 in IPv6 clothes, in each of the forms that carry one: the address inside is what counts.
+        if zeros(0..<10), bytes[10] == 0xff, bytes[11] == 0xff { return embedded(12..<16) }                          // ::ffff:a.b.c.d
+        if zeros(0..<8), bytes[8] == 0xff, bytes[9] == 0xff, bytes[10] == 0, bytes[11] == 0 { return embedded(12..<16) }  // ::ffff:0:a.b.c.d
+        if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b, zeros(4..<12) { return embedded(12..<16) }  // 64:ff9b::/96, NAT64
+        if bytes[0] == 0x20, bytes[1] == 0x02 { return embedded(2..<6) }                                              // 2002::/16, 6to4
+        if bytes[0] == 0xfe, bytes[1] & 0xc0 == 0x80 { return true }   // fe80::/10, link-local
+        if bytes[0] == 0xfe, bytes[1] & 0xc0 == 0xc0 { return true }   // fec0::/10, site-local, deprecated and still routed on some networks
+        if bytes[0] & 0xfe == 0xfc { return true }                     // fc00::/7, unique local
+        if bytes[0] == 0xff { return true }                            // multicast
         return false
     }
 }

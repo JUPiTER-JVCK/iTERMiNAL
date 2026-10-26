@@ -2752,6 +2752,27 @@ do {
     ] {
         check(refusal(local) != nil, "\(local) is on this Mac or its network, so a page from the internet cannot send this app there")
     }
+    // The same addresses, spelled other ways. A page writes a host however it
+    // likes and the system reads them all the same, so a host is judged by the
+    // address it comes to, never by how it begins.
+    for local in [
+        "https://[0:0:0:0:0:0:0:1]:8443/x", "https://[0::1]/x", "https://[0000:0000:0000:0000:0000:0000:0000:0001]/x", "https://[::0001]/x",
+        "https://[0:0:0:0:0:ffff:127.0.0.1]/x", "https://[::ffff:7f00:1]/x", "https://[::FFFF:127.0.0.1]/x", "https://[::127.0.0.1]/x",
+        "https://[0:0:0:0:0:ffff:a00:1]/x", "https://[::ffff:0:10.0.0.1]/x", "https://[64:ff9b::7f00:1]/x", "https://[2002:7f00:1::]/x",
+        "https://[2002:c0a8:101::1]/x", "https://[febf::1]/x", "https://[fec0::1]/x", "https://[fc00::1]/x", "https://[FD00::1]/x", "https://[ff02::1]/x",
+        "https://localhost./x", "https://foo.localhost./x", "https://printer.local./x", "https://127.0.0.1./x", "https://LOCALHOST/x", "https://Printer.Local/x",
+    ] {
+        check(refusal(local) != nil, "\(local) comes to this Mac or its network however it is spelled")
+    }
+    check(DownloadPolicy.isLocalHost("[fe80::1%en0]") && DownloadPolicy.isLocalHost("fe80::1%en0"), "an interface name after % does not change the address")
+    check(DownloadPolicy.isLocalHost("[1:2:3]") && DownloadPolicy.isLocalHost("[zzz::1]") && DownloadPolicy.isLocalHost("[::1::]") && DownloadPolicy.isLocalHost("[12345::1]"),
+          "text that will not read as an address is refused, not guessed at")
+    // The system maps a host through Unicode normalisation before it connects.
+    check(DownloadPolicy.isLocalHost("ｌｏｃａｌｈｏｓｔ") && DownloadPolicy.isLocalHost("ⓛocalhost") && DownloadPolicy.isLocalHost("127。0。0。1") && DownloadPolicy.isLocalHost("example．com") && DownloadPolicy.isLocalHost("ｅｘａｍｐｌｅ.com"),
+          "a host that normalisation would change is refused: full-width letters and an ideographic full stop read as what they imitate")
+    for outside in ["[2606:4700:4700::1111]", "[2001:db8::1]", "[2002:808:808::]", "[64:ff9b::808:808]", "[::ffff:8.8.8.8]", "[2a00:1450:4001::1]", "example.com.", "münchen.de", "cdn.example.net"] {
+        check(!DownloadPolicy.isLocalHost(outside), "\(outside) is on the internet, and is fetched from")
+    }
     check(refusal("http://cdn.example.net/a.png")?.contains("plain http") == true, "plain http to a public host is refused, as in the HTTP client")
     check(refusal("https://172.15.0.1/x") == nil && refusal("https://172.32.0.1/x") == nil && refusal("https://8.8.8.8/x") == nil && refusal("https://100.63.0.1/x") == nil, "the ranges are exact: 172.16–31, not 172.15 or 172.32")
     check(refusal("ftp://example.com/a") != nil && refusal("file:///etc/passwd") != nil && refusal("not a url") != nil && refusal("https:///nohost") != nil && refusal("javascript:alert(1)") != nil, "other schemes and non-addresses are refused")
