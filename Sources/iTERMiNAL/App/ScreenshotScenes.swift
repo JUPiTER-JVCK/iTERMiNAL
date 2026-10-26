@@ -100,6 +100,7 @@ final class ScreenshotRun {
         await scene("composer-ghost") { await self.composerGhost() }
         await scene("composer-history") { await self.composerHistory() }
         await scene("composer-completion") { await self.composerCompletion() }
+        await probeActivity("after the composer pictures")
 
         await scene("http-client") { await self.httpRequest() }
         await scene("site-explorer") { await self.siteExplorer() }
@@ -108,21 +109,26 @@ final class ScreenshotRun {
         await scene("landing") { await self.landing() }
         await scene("dock") { await self.dock() }
         await scene("tasks") { await self.tasks() }
+        await probeActivity("after the dock and the task manager")
 
         await scene("browser") { await self.browser() }
         await scene("files") { await self.files() }
         await scene("notes") { await self.notesPanel() }
+        await probeActivity("after the browser, files and notes panels")
         await scene("superfile") { await self.tool(.superfile, panel: .superfile, name: "superfile", settle: 3) }
         await scene("btop") {
             self.speedUpBtop()
             return await self.tool(.btop, panel: .btop, name: "btop", settle: 24)
         }
+        await probeActivity("after superfile and btop, which each took the whole content area")
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
+        await probeActivity("after the two sheets")
 
         await scene("light-theme") { await self.lightTheme() }
         await scene("custom-look") { await self.customLook() }
+        await probeActivity("after the themes")
 
         await scene("ai-assistant") { await self.assistantReply() }
         await scene("error-help") { await self.errorHelp() }
@@ -394,23 +400,30 @@ final class ScreenshotRun {
         await pause(2.5)
         guard let first = store.dockSessions.first else { return false }
         await run("git status -sb; git log --oneline -n 5", in: first)
-        // The newest tab is the one shown: put back, an older one has come up
-        // empty in a picture before.
+        // A second tab, running something that goes on running: the task
+        // manager lists it, and the strip shows there is more than one.
         let second = store.newDockSession(directory: demo.map { $0 + "/docs" })
         await pause(2.5)
         await run(fixtureLog.map { "tail -n 12 -f '\($0)'" } ?? "ls -F", in: second)
         await pause(2.5)
-        ScreenshotMode.describeTerminals(in: window, label: "dock", picturesIn: directory)
-        say("dock: the new tab holds \(second.captureVisibleText().count) characters")
-        let taken = capture("dock")
-        // The first tab again, for comparison.
+        // The first in front: its output is the fuller picture.
         store.selectedDockSessionID = first.id
         await pause(2.5)
-        ScreenshotMode.describeTerminals(in: window, label: "dock, first tab")
-        say("dock: the first tab holds \(first.captureVisibleText().count) characters")
-        _ = capture("dock-first")
+        let taken = capture("dock")
         store.closeBottomDock()
         return taken
+    }
+
+    /// Whether the server tab's terminal still reports activity at this point
+    /// in the run. The error offer waits on it, and so do the ages beside the
+    /// tabs in the sidebar; it stopped, somewhere, in the last run. A bare
+    /// Return makes the shell print a new prompt, which is output.
+    private func probeActivity(_ label: String) async {
+        guard let session = server?.primarySession else { return }
+        let before = session.lastActivityAt
+        session.send(text: "\n")
+        await pause(1.5)
+        say("activity probe, \(label): the server terminal's activity \(session.lastActivityAt > before ? "moved" : "did not move")")
     }
 
     private func tasks() async -> Bool {
