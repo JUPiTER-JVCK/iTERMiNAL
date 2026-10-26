@@ -113,6 +113,7 @@ struct DownloadConfirmSheet: View {
         }
         .padding(16)
         .frame(width: 480)
+        .tint(settings.accentColor)
     }
 
     private func labelled(_ name: String, _ value: String) -> some View {
@@ -133,6 +134,8 @@ struct DownloadProgressSheet: View {
     @ObservedObject var downloader: AssetDownloader
     @ObservedObject var extraction: PageExtractionModel
 
+    @EnvironmentObject private var settings: AppSettings
+
     var body: some View {
         let summary = downloader.summary
         VStack(alignment: .leading, spacing: 10) {
@@ -148,17 +151,24 @@ struct DownloadProgressSheet: View {
                     .help(folder.path)
             }
 
-            List(downloader.entries) { entry in
-                HStack(spacing: 8) {
-                    Text(entry.item.fileName)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 6)
-                    status(entry.state)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(downloader.entries) { entry in
+                        HStack(spacing: 8) {
+                            Text(entry.item.fileName)
+                                .font(.system(size: 12))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 6)
+                            status(entry.state)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                    }
                 }
             }
             .frame(minHeight: 160, maxHeight: 280)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
 
             Text(summaryLine(summary))
                 .font(.system(size: 11))
@@ -184,6 +194,7 @@ struct DownloadProgressSheet: View {
         }
         .padding(16)
         .frame(width: 520)
+        .tint(settings.accentColor)
     }
 
     @ViewBuilder

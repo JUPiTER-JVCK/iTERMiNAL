@@ -48,6 +48,9 @@ enum TerminalContextMenu {
     @MainActor
     static func make(for terminal: InstrumentedTerminalView, actions: [TerminalMenuAction]) -> NSMenu {
         let menu = NSMenu(title: "Terminal")
+        // What other apps' context-menu plug-ins would add has no meaning in a
+        // terminal.
+        menu.allowsContextMenuPlugIns = false
 
         // The editing items are SwiftTerm's own, aimed at the terminal itself
         // rather than "whatever is first responder": a right-click does not

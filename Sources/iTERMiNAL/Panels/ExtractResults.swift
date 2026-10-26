@@ -167,39 +167,49 @@ struct ExtractResults: View {
 
     private func grid(_ rows: [ResultTable.Row]) -> some View {
         let widths = widths(for: rows)
-        return ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                Section {
-                    ForEach(rows) { row in
-                        HStack(alignment: .top, spacing: 0) {
-                            ForEach(table.columns.indices, id: \.self) { column in
-                                Text(row.cells[column])
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(theme.textPrimary)
-                                    .lineLimit(3)
-                                    .textSelection(.enabled)
-                                    .frame(width: widths[column], alignment: .leading)
-                                    .padding(.vertical, 3)
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .contentShape(Rectangle())
-                        .contextMenu { rowMenu(row) }
-                    }
-                } header: {
-                    HStack(spacing: 0) {
+        // A scroll view that goes both ways centers what is smaller than it, so
+        // a short table floated in the middle of the pane. Held at least as big
+        // as the pane and pinned to its top left, it starts where a table does.
+        return GeometryReader { pane in
+            ScrollView([.horizontal, .vertical]) {
+                gridBody(rows, widths: widths)
+                    .frame(minWidth: pane.size.width, minHeight: pane.size.height, alignment: .topLeading)
+            }
+        }
+    }
+
+    private func gridBody(_ rows: [ResultTable.Row], widths: [CGFloat]) -> some View {
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+            Section {
+                ForEach(rows) { row in
+                    HStack(alignment: .top, spacing: 0) {
                         ForEach(table.columns.indices, id: \.self) { column in
-                            Text(table.columns[column])
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(theme.textSecondary)
+                            Text(row.cells[column])
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.textPrimary)
+                                .lineLimit(3)
+                                .textSelection(.enabled)
                                 .frame(width: widths[column], alignment: .leading)
-                                .padding(.vertical, 4)
+                                .padding(.vertical, 3)
                         }
                     }
                     .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(theme.background)
+                    .contentShape(Rectangle())
+                    .contextMenu { rowMenu(row) }
                 }
+            } header: {
+                HStack(spacing: 0) {
+                    ForEach(table.columns.indices, id: \.self) { column in
+                        Text(table.columns[column])
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: widths[column], alignment: .leading)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.background)
             }
         }
     }
@@ -283,7 +293,9 @@ struct ExtractResults: View {
                         )
                     }
                 } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
+                    // What pressing it will take, once something is picked.
+                    let picked = selected.filter { $0.canDownload && $0.url != nil }.count
+                    Label(picked > 0 ? "Download \(picked)" : "Download", systemImage: "arrow.down.circle")
                         .font(.system(size: 11, weight: .medium))
                 }
                 .menuStyle(.borderlessButton)
