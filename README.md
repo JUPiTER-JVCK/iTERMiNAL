@@ -22,6 +22,60 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
+A tour of the app in twenty pictures, in four groups.
+
+### The window
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/split-panes.png" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
+      <br><b>Split panes</b> — terminals and the file browser side by side in one tab. The layout is saved and comes back when you relaunch.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/dock.png" alt="The window with the terminal dock open along the bottom: two tabs, the first showing git status and the last five commits, under the main terminal and the composer.">
+      <br><b>Terminal dock</b> — a row of shells along the bottom, each its own tab, under whatever is open above.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/tasks.png" alt="The task manager listing seven running shells, each with the command it is running, where it lives, how long it has been going, and Go to and Stop buttons.">
+      <br><b>Task manager</b> — every shell the app is running, wherever it lives, with how long it has been going and one click to jump to it or stop it.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/command-palette.png" alt="The command palette: a search box over a list of actions — New Terminal Tab, New Workspace, Split Right, Split Down, Split with Browser, Split with Files — each with its shortcut.">
+      <br><b>Command palette</b> — every action in one searchable list, with its shortcut beside it.
+    </td>
+  </tr>
+</table>
+
+### The composer and the assistant
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/composer-history.png" alt="The composer with “git” typed into it and a list of earlier git commands above, with the keys that work in the list underneath.">
+      <br><b>History search</b> — ⌃R lists earlier commands that match what you have typed; ↑↓ choose, and ↩ puts the choice in the input without running it.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/ai-assistant.png" alt="A reply from the assistant above the composer: a sentence of explanation, two git commands in a block with a warning that they throw away uncommitted changes, Insert and Copy buttons, and a closing tip.">
+      <br><b>Ask the assistant</b> — start a line with <code>@ai</code> and the reply appears above the composer. A command in it can be put in the input or copied; only you pressing ↩ runs anything.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/error-help.png" alt="A failed make command in the terminal and, above the composer, a line reading “That looked like an error” with Explain and Fix it buttons.">
+      <br><b>Explain / Fix it</b> — when a command prints something that reads like an error, the composer offers to explain it or suggest a fix. Nothing is sent until you choose one.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-ai.png" alt="Settings, AI page: the provider preset (Ollama, local), its base URL and model, and the API key, which a local address does not need.">
+      <br><b>AI settings</b> — any OpenAI-compatible endpoint, a model on this Mac included. A local one needs no key; a key, when there is one, is kept in the Keychain.
+    </td>
+  </tr>
+</table>
+
+### Panels and tools
+
 <table>
   <tr>
     <td width="50%" valign="top">
@@ -35,17 +89,58 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/split-panes.png" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
-      <br><b>Split panes</b> — terminals and the file browser side by side in one tab.
+      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
+      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/appearance.png" alt="Settings, Appearance page: theme, accent colours, window opacity, and a preview of the workspace frame.">
-      <br><b>Appearance</b> — theme, accent colour, window opacity and the workspace frame.
+      <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
+      <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/superfile.png" alt="superfile, the terminal file manager, in a panel: a sidebar of places, the sample project's files with icons, and process, metadata and clipboard panels underneath.">
+      <br><b>superfile</b> — a terminal file manager, built in and wearing the terminal's colours. See <a href="#bundled-tools">Bundled tools</a>.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/btop.png" alt="btop, the resource monitor, in a panel: CPU, memory, disk, network and process boxes in the terminal's colours.">
+      <br><b>btop</b> — a resource monitor, built in the same way.
     </td>
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), against a made-up sample project and a local test server, so nothing in them is real data. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow) and copy the PNGs from its artifact into `docs/images/`.</sub>
+### Look, keys and settings
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/light-theme.png" alt="The same window in the light theme: sidebar, terminal and composer in light colours, with the same git history.">
+      <br><b>Light theme</b> — the window follows the system's light and dark appearance, or is set to one by hand.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/custom-look.png" alt="The window with the Catppuccin Mocha terminal theme, a purple accent, a rounder frame and a rounded interface typeface.">
+      <br><b>Make it yours</b> — a terminal theme, an accent colour, the frame's tint and corner radius, and the interface typeface.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/keyboard-shortcuts.png" alt="The Keyboard Shortcuts window: a search box over the shortcuts, grouped as General and Tabs and panes, each drawn as key caps.">
+      <br><b>Keyboard shortcuts</b> — every shortcut in one searchable window, opened with ⌘/.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-appearance.png" alt="Settings, Appearance page: theme, accent colours, window opacity, and a preview of the workspace frame.">
+      <br><b>Appearance settings</b> — theme, accent colour, window opacity and the workspace frame.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/settings-security.png" alt="Settings, Security page: the local scripting API switch, off, and a list of how the app handles your data.">
+      <br><b>Security settings</b> — the local scripting API stays off until you turn it on, and the page says how your data is handled.
+    </td>
+  </tr>
+</table>
+
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost and a stand-in for an AI model on localhost — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty into `docs/images/`.</sub>
 
 ## Features
 
