@@ -111,6 +111,30 @@ extension ScreenshotMode {
         say("response: divider moved, split is \(Int(split.bounds.height)) high")
     }
 
+    /// The history column and the request and response sit side by side in a
+    /// split view, and the column takes more of a panel than a list of columns
+    /// can spare. Its divider is moved left, the way a person would drag it.
+    @MainActor
+    static func giveResponseWidth(in window: NSWindow, sidebar: CGFloat = 190) {
+        guard let root = window.contentView,
+              let stacked = allViews(of: NSSplitView.self, in: root).first(where: { !$0.isVertical && $0.arrangedSubviews.count == 2 })
+        else {
+            say("response: no pane to widen")
+            return
+        }
+        var ancestor: NSView? = stacked.superview
+        while let view = ancestor {
+            if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count == 2 {
+                split.setPosition(sidebar, ofDividerAt: 0)
+                split.layoutSubtreeIfNeeded()
+                say("response: history column narrowed to \(Int(sidebar)), split is \(Int(split.bounds.width)) wide")
+                return
+            }
+            ancestor = view.superview
+        }
+        say("response: no side-by-side split view above the response")
+    }
+
     // MARK: Views
 
     /// Where each terminal in the window is and how big, for when the picture

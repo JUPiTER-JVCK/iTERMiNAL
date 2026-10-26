@@ -4,15 +4,25 @@ import Combine
 import SwiftUI
 import WebKit
 
+/// The menu a right-click opened, handed from the notification that says it
+/// began to the timer that closes it.
+private final class MenuWatch: @unchecked Sendable {
+    var menu: NSMenu?
+}
+
 /// What each picture is of, and how the app is put into it. See
 /// ScreenshotMode.swift.
 ///
 /// The scenes share one running app, so each starts from `baseline()` and
 /// leaves the app as it found it — or as near as the next one needs. The order
-/// matters in three places: the HTTP scenes come before the ones that show the
-/// sample site's request log, the assistant scenes come last because what they
-/// send stays in the composer's history, and the Settings windows come after
-/// everything that needs the main window to be the one in front.
+/// matters in five places: the first HTTP scenes come before the ones that show
+/// the sample site's request log, and the ones that read the sample site again
+/// (the Extract tab, which downloads from it) come after them, so the log those
+/// pictures show is the same as ever; the assistant scenes come late because
+/// what they send stays in the composer's history; the Settings windows come
+/// after everything that needs the main window to be the one in front; and the
+/// right-click scene is last of all, because a menu runs an event loop of its
+/// own until something closes it.
 ///
 /// A scene that cannot run (a tool this build does not have, a window that did
 /// not come up) says so in the log and writes nothing; the rest carry on.
@@ -122,6 +132,11 @@ final class ScreenshotRun {
         }
         await probeActivity("after superfile and btop, which each took the whole content area")
 
+        await scene("terminal-colors") { await self.terminalColors() }
+        await scene("extract") { await self.pageExtraction() }
+        await scene("extract-feed") { await self.feedExtraction() }
+        await scene("sftp-problems") { await self.remoteProblems() }
+
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
         await probeActivity("after the two sheets")
@@ -134,6 +149,8 @@ final class ScreenshotRun {
         await scene("error-help") { await self.errorHelp() }
 
         await settingsWindows()
+
+        await scene("terminal-context-menu") { await self.contextMenu() }
     }
 
     private func scene(_ name: String, _ body: @MainActor () async -> Bool) async {
@@ -345,6 +362,374 @@ final class ScreenshotRun {
         await pause(0.5)
     }
 
+    // MARK: The Extract tab
+
+    /// The sample site's article, read into lists. One request, sent the way a
+    /// person sends one; everything after it is read from that response, and
+    /// the only requests that follow are the downloads, which wait for a yes.
+    private func pageExtraction() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.method = .get
+        model.urlText = "\(Self.site)/blog/ledger-notes"
+        model.headerFields = [HTTPHeaderField(name: "Accept", value: "text/html")]
+        model.responseTab = .extract
+        model.send(settings: settings)
+        let sent = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+        let read = await ScreenshotMode.until(timeout: 20) {
+            extraction.extraction != nil && extraction.pageURL.hasSuffix("/blog/ledger-notes")
+        }
+        say("extract: request finished \(sent), response read \(read)")
+        guard read, let result = extraction.extraction, let page = result.page else { return false }
+        say("extract: \(result.kindLabel), \(result.byteCount) bytes: "
+            + extraction.chips(for: result).map { "\($0.title) \($0.count.map(String.init) ?? "")" }.joined(separator: ", "))
+
+        // The response is the point of these pictures, so it gets the room: the
+        // request above it is put down to its address, and the history beside
+        // it is narrowed — both are dividers a person drags.
+        ScreenshotMode.giveResponseRoom(in: window)
+        ScreenshotMode.giveResponseWidth(in: window)
+        await pause(1.2)
+        var everything = capture("extract-overview")
+
+        for (section, name) in [
+            (ExtractSection.links, "extract-links"), (.media, "extract-media"),
+            (.files, "extract-files"), (.tables, "extract-tables"),
+        ] {
+            extraction.select(section)
+            await pause(0.8)
+            everything = capture(name) && everything
+        }
+
+        // Pictures, three of them picked the way a person would: a click each.
+        extraction.select(.images)
+        let content = page.images.rows.filter { $0.canDownload && $0.url != nil && $0.cells[3] != "icon" && !($0.url ?? "").hasPrefix("http://cdn.") }
+        extraction.selection = Set(content.prefix(3).map(\.id))
+        await pause(0.8)
+        everything = capture("extract-images") && everything
+
+        // The reading part, as Markdown.
+        extraction.select(.text)
+        extraction.textMode = .markdown
+        await pause(0.8)
+        everything = capture("extract-text") && everything
+        extraction.textMode = .reading
+
+        // A question of its own, in the language a scraper would use.
+        extraction.select(.query)
+        await pause(0.6)
+        for (language, text, output) in [
+            (QueryLanguage.xpath, "//h2/text()", PageExtractionModel.OutputChoice.text),
+            (.regex, #"\d+%"#, .text),
+            (.css, "img::attr(src)", .text),
+        ] {
+            extraction.queryLanguage = language
+            extraction.queryText = text
+            extraction.queryOutput = output
+            extraction.runQuery()
+            _ = await ScreenshotMode.until(timeout: 10) { extraction.queryResult != nil || extraction.queryError != nil }
+            say("extract: \(language.rawValue) \(text): \(extraction.queryError ?? "\(extraction.queryResult?.table.rows.count ?? -1) rows")"
+                + " \(extraction.queryResult?.table.rows.prefix(3).map { $0.cells.joined(separator: " | ") } ?? [])")
+        }
+        await pause(0.8)
+        everything = capture("extract-query") && everything
+
+        let downloaded = await downloadFromExtraction(extraction, page: page)
+        closePanels()
+        return everything && downloaded
+    }
+
+    /// Download is asked about before anything is fetched, and then it is the
+    /// real thing, from the sample site into a folder of this run's own.
+    private func downloadFromExtraction(_ extraction: PageExtractionModel, page: ExtractedPage) async -> Bool {
+        // Under the projects folder, not Downloads: macOS asks before an app
+        // reads Downloads, and a runner has no one to say yes. The sheet shows
+        // it with ~, as it does for anyone.
+        let base = demo.map { URL(fileURLWithPath: $0, isDirectory: true).deletingLastPathComponent() }
+            ?? FileManager.default.temporaryDirectory
+        let folder = base.appendingPathComponent("downloads", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        let savedFolder = settings.httpDownloadFolder
+        settings.httpDownloadFolder = folder.path
+        defer {
+            settings.httpDownloadFolder = savedFolder
+            try? FileManager.default.removeItem(at: folder)
+        }
+
+        // Three pictures and the one the page names over plain http, which the
+        // plan leaves out and says why.
+        extraction.select(.images)
+        let wanted = page.images.rows.filter { $0.canDownload && $0.url != nil && $0.cells[3] != "icon" }
+        extraction.selection = Set(wanted.map(\.id))
+        extraction.prepareDownload(urls: ResultTable.downloadURLs(in: wanted), title: "Images", settings: settings)
+        await pause(1.5)
+        guard let pending = extraction.pendingDownload else {
+            say("extract: no download was planned")
+            return false
+        }
+        say("extract: planned \(pending.plan.items.map(\.fileName)) from \(pending.plan.hosts) into a folder of this run's; "
+            + "left out: \(pending.plan.refused.map { "\($0.url) (\($0.reason))" })")
+        var taken = false
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-download-confirm", in: directory)
+        } else {
+            say("extract: the confirmation sheet did not appear")
+        }
+
+        extraction.confirmDownload(settings: settings)
+        let finished = await ScreenshotMode.until(timeout: 40) {
+            !extraction.downloader.isRunning && !extraction.downloader.entries.isEmpty
+        }
+        await pause(1.0)
+        say("extract: download finished \(finished); \(extraction.downloader.summary)")
+        for entry in extraction.downloader.entries {
+            if case .saved(let path, let bytes) = entry.state {
+                let marked = getxattr(path, "com.apple.quarantine", nil, 0, 0, 0)
+                say("extract: saved \(URL(fileURLWithPath: path).lastPathComponent), \(bytes) bytes, "
+                    + "marked as downloaded from the web: \(marked >= 0)")
+            } else {
+                say("extract: \(entry.item.fileName): \(entry.state)")
+            }
+        }
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-download-done", in: directory) && taken
+        } else {
+            say("extract: the progress sheet did not appear")
+            taken = false
+        }
+        extraction.showingDownloadProgress = false
+        extraction.downloader.reset()
+        await pause(0.8)
+        return taken
+    }
+
+    /// A feed, a CSV file and some JSON, read into tables.
+    private func feedExtraction() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.responseTab = .extract
+        var feedTaken = false
+        for (path, accept, name) in [
+            ("/feed.xml", "application/rss+xml, application/xml", "extract-feed"),
+            ("/files/ledger-data.csv", "text/csv", "extract-csv"),
+            ("/api/users", "application/json", "extract-json"),
+        ] {
+            model.method = .get
+            model.urlText = "\(Self.site)\(path)"
+            model.headerFields = [HTTPHeaderField(name: "Accept", value: accept)]
+            model.send(settings: settings)
+            _ = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+            let read = await ScreenshotMode.until(timeout: 20) {
+                extraction.extraction != nil && extraction.pageURL.hasSuffix(path)
+            }
+            guard read, let result = extraction.extraction else {
+                say("extract: \(path) was not read")
+                continue
+            }
+            say("extract: \(path): \(result.kindLabel); "
+                + extraction.chips(for: result).map { "\($0.title) \($0.count.map(String.init) ?? "")" }.joined(separator: ", "))
+            ScreenshotMode.giveResponseRoom(in: window)
+            ScreenshotMode.giveResponseWidth(in: window)
+            await pause(1.0)
+            let taken = capture(name)
+            if path == "/feed.xml" { feedTaken = taken }
+        }
+        closePanels()
+        return feedTaken
+    }
+
+    // MARK: Colored output
+
+    /// `ls` and a man page in the server tab's own shell, which the app started
+    /// with the environment it gives every local shell. The sample project's
+    /// startup file sets `CLICOLOR` and nothing else: the colors are the app's.
+    private func terminalColors() async -> Bool {
+        guard let demo, let session = server?.primarySession else { return false }
+        await baseline()
+
+        // One of each kind of thing, made here and removed after, so the sample
+        // project is left as it was found.
+        let manager = FileManager.default
+        let folder = URL(fileURLWithPath: demo, isDirectory: true).appendingPathComponent("listing", isDirectory: true)
+        try? manager.removeItem(at: folder)
+        defer { try? manager.removeItem(at: folder) }
+        do {
+            for name in ["assets", "logs"] {
+                try manager.createDirectory(at: folder.appendingPathComponent(name), withIntermediateDirectories: true)
+            }
+            for name in ["notes.txt", "photo.png", "backup.tar.gz", "README.md"] {
+                try Data("sample\n".utf8).write(to: folder.appendingPathComponent(name))
+            }
+            let script = folder.appendingPathComponent("deploy.sh")
+            try Data("#!/bin/sh\necho deployed\n".utf8).write(to: script)
+            try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+            try manager.createSymbolicLink(atPath: folder.appendingPathComponent("current").path, withDestinationPath: "deploy.sh")
+        } catch {
+            say("colors: could not make the sample folder: \(error.localizedDescription)")
+            return false
+        }
+
+        // What the shell was given, as the shell sees it.
+        await run(#"echo "CLICOLOR=$CLICOLOR NO_COLOR=${NO_COLOR-unset} GROFF_NO_SGR=$GROFF_NO_SGR"; echo "LSCOLORS=$LSCOLORS"; echo "bold in less: ${LESS_TERMCAP_md:+set}""#, in: session)
+        await pause(1.5)
+        for line in session.captureVisibleText().split(separator: "\n").suffix(5) {
+            say("colors: the shell says: \(line)")
+        }
+
+        await run("(cd listing && ls -AF)", in: session)
+        await pause(1.8)
+        var taken = capture("terminal-colors")
+
+        await run("man ls", in: session)
+        await pause(3.0)
+        taken = capture("terminal-colors-man") && taken
+        // Out of the pager, back to the prompt.
+        session.send(text: "q")
+        await pause(1.0)
+        session.send(text: "clear\n")
+        await pause(0.8)
+        return taken
+    }
+
+    // MARK: Remote problems
+
+    /// What the file browser says when a host turns it away, from the real
+    /// `sftp`, run the way the app runs it. The first host is the throwaway SSH
+    /// server the workflow starts on this machine, which lets no one in; the
+    /// others are a port with nothing on it and a name that does not exist.
+    private func remoteProblems() async -> Bool {
+        let hosts = [
+            SSHConnection(name: "staging-vm", host: "127.0.0.1", port: 2299, username: "deploy"),
+            SSHConnection(name: "old-nas", host: "127.0.0.1", port: 2298, username: "admin"),
+            SSHConnection(name: "lab-box", host: "lab-box.example.invalid", username: "pi"),
+        ]
+        let saved = settings.sshConnections
+        settings.sshConnections = saved + hosts
+        defer { settings.sshConnections = saved }
+
+        await baseline()
+        settings.railPanelOpen = false
+        settings.rightPanelWidth = 460
+        store.openPanel(.files)
+        await pause(2.0)
+        let model = store.panelFiles
+        var first = false
+        for (index, host) in hosts.enumerated() {
+            model.switchTo(connectionID: host.id.uuidString)
+            _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+            await pause(1.0)
+            if let problem = model.listingProblem {
+                say("sftp: \(host.name): \(problem.title) — \(problem.explanation) "
+                    + "[\(problem.kind); \(problem.steps.count) steps; actions \(problem.actions.map(\.title))]")
+                say("sftp: \(host.name): sftp said: \(problem.output.debugDescription)")
+            } else {
+                say("sftp: \(host.name): no problem was reported; error \(model.errorMessage.debugDescription), \(model.items.count) items")
+            }
+            if index == 0 { await tidyServer() }
+            let taken = capture(["files-sftp-denied", "files-sftp-refused", "files-sftp-unknown-host"][index])
+            if index == 0 { first = taken }
+        }
+        model.switchTo(connectionID: nil)
+        closePanels()
+        return first
+    }
+
+    // MARK: The right-click menu
+
+    /// A right-click on the server's terminal, sent the way the system sends
+    /// one, and what it opens: the menu, its items, and what a few of them do.
+    /// Last of all, because a menu runs an event loop of its own until
+    /// something closes it.
+    private func contextMenu() async -> Bool {
+        await baseline()
+        await showHistory()
+        guard let root = window.contentView,
+              let terminal = ScreenshotMode.firstView(ofType: InstrumentedTerminalView.self, in: root) else {
+            say("right-click: no terminal in the window")
+            return false
+        }
+        let point = terminal.convert(NSPoint(x: terminal.bounds.midX, y: terminal.bounds.midY), to: nil)
+        let make = { () -> NSEvent? in
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: self.window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            )
+        }
+        guard let event = make() else {
+            say("right-click: no event could be made")
+            return false
+        }
+
+        // What the terminal offers, and what its editing items do.
+        guard let menu = terminal.menu(for: event) else {
+            say("right-click: the terminal offers no menu")
+            return false
+        }
+        func describe(_ menu: NSMenu) -> String {
+            menu.update()
+            return menu.items.map { $0.isSeparatorItem ? "—" : "\($0.title)\($0.isEnabled ? "" : " (off)")\($0.keyEquivalent.isEmpty ? "" : " ⌘\($0.keyEquivalent.uppercased())")" }
+                .joined(separator: " | ")
+        }
+        say("right-click: no selection: \(describe(menu))")
+        if let index = menu.items.firstIndex(where: { $0.title == "Select All" }) { menu.performActionForItem(at: index) }
+        await pause(0.6)
+        say("right-click: after Select All: \(describe(menu))")
+        NSPasteboard.general.clearContents()
+        if let index = menu.items.firstIndex(where: { $0.title == "Copy" }) { menu.performActionForItem(at: index) }
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+        say("right-click: Copy put \(copied.count) characters on the pasteboard, starting \(copied.prefix(40).debugDescription)")
+
+        // The real event, through the window: the view under the pointer gets
+        // it and opens its menu. `sendEvent` comes back when the menu closes,
+        // so something has to close it; and something has to give up if that
+        // never happens, so a menu that will not close ends this scene, not the
+        // run.
+        let watch = MenuWatch()
+        let begin = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { note in
+            watch.menu = note.object as? NSMenu
+        }
+        defer { NotificationCenter.default.removeObserver(begin) }
+        let giveUp = DispatchWorkItem {
+            ScreenshotMode.say("right-click: the menu did not close; giving up on it")
+            exit(3)
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 40, execute: giveUp)
+        let directory = directory
+        let timer = Timer(timeInterval: 1.5, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                let titles = watch.menu?.items.map { $0.isSeparatorItem ? "—" : $0.title } ?? []
+                ScreenshotMode.say("right-click: while the menu is open it holds: \(titles)")
+                for popup in NSApp.windows {
+                    ScreenshotMode.say("right-click: window \(type(of: popup)) at \(popup.frame), visible \(popup.isVisible)")
+                    if String(describing: type(of: popup)).contains("Menu") {
+                        _ = ScreenshotMode.capture(popup, "terminal-context-menu", in: directory)
+                    }
+                }
+                watch.menu?.cancelTracking()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        guard let click = make() else {
+            giveUp.cancel()
+            return false
+        }
+        NSApp.sendEvent(click)
+        giveUp.cancel()
+        say("right-click: the menu closed; it had \(watch.menu?.numberOfItems ?? -1) items")
+        return watch.menu != nil
+    }
+
     // MARK: Layout
 
     private func splitPanes() async -> Bool {
@@ -416,8 +801,9 @@ final class ScreenshotRun {
 
     /// Whether the server tab's terminal still reports activity at this point
     /// in the run. The error offer waits on it, and so do the ages beside the
-    /// tabs in the sidebar; it stopped, somewhere, in the last run. A bare
-    /// Return makes the shell print a new prompt, which is output.
+    /// tabs in the sidebar. It never reported any until SwiftTerm was asked to
+    /// (`notifyUpdateChanges`), so a "did not move" here is that coming back. A
+    /// bare Return makes the shell print a new prompt, which is output.
     private func probeActivity(_ label: String) async {
         guard let session = server?.primarySession else { return }
         let before = session.lastActivityAt
@@ -695,54 +1081,32 @@ final class ScreenshotRun {
 
     /// A command that fails, and the offer to explain it that appears. Nothing
     /// is sent anywhere until it is chosen.
+    ///
+    /// The offer is made by the composer's own watcher, which wakes on the
+    /// terminal's activity. That signal was dead in every build until SwiftTerm
+    /// was asked to report updates, so an earlier version of this scene made the
+    /// offer itself when none came. It no longer does: if the composer does not
+    /// make it, there is no picture, and the log says why.
     private func errorHelp() async -> Bool {
         await baseline()
         _ = ScreenshotMode.focusComposer(in: window)
         compose("make build")
         await pause(0.8)
-        // A watcher of this scene's own, beside the composer's, and a record of
-        // the terminal's activity — what both of them wait on. If the activity
-        // never changes, nothing was going to wake either.
         let target = store.composerDestinationSession
         let before = target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? ""
-        let mine = CommandOutcomeWatcher()
-        var seen = "nothing"
-        var activity: [String] = []
-        let started = Date()
-        var listening: AnyCancellable?
-        if let target {
-            listening = target.$lastActivityAt.dropFirst().sink { _ in
-                activity.append(String(format: "%.1fs", Date().timeIntervalSince(started)))
-            }
-            mine.start(session: target, command: "make build", baseline: before) { offer in seen = offer.reason }
-        }
         ScreenshotMode.pressReturn(in: window)
         await pause(7.0)
-        listening?.cancel()
-        mine.stop()
-        say("error-help: the composer ran it in the server tab: \(target?.id == server?.primarySession?.id); "
-            + "a watcher of this scene's own saw: \(seen); the terminal's activity changed \(activity.count) time(s), at \(activity)")
-        // What the watchers read: the terminal now, against the terminal before.
+        var offered = false
+        if case .offer? = ScreenshotMode.composerAssistant?.banner { offered = true }
+        // What the watcher read: the terminal now, against the terminal before.
         let after = target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? ""
         let fresh = OutputDiff.newLines(baseline: before, current: after)
         let match = FailureSignature.firstMatch(in: fresh, excludingCommand: "make build")
-        say("error-help: new since the command was sent: \(fresh.suffix(4)); signature \(String(describing: match)); "
-            + "assistant set up \(AssistantServiceProvider.current.isConfigured); offers on \(settings.assistantOfferErrorHelp)")
-        // Whether the composer made the offer. If the terminal's activity never
-        // changed on this runner, nothing woke its watcher and it did not; the
-        // offer is then made from here, out of what the terminal printed, by
-        // the same call the watcher makes. What the picture shows is the app's
-        // own offer either way. Only what asked for it differs, and the log
-        // says which.
-        var offered = false
-        if case .offer? = ScreenshotMode.composerAssistant?.banner { offered = true }
-        say("error-help: the composer's own watcher made the offer: \(offered)")
-        if !offered, let match, let assistant = ScreenshotMode.composerAssistant {
-            assistant.offer(ErrorOffer(command: "make build", output: fresh.joined(separator: "\n"), reason: match.reason))
-            await pause(0.8)
-            say("error-help: the offer was made by this scene instead")
-        }
-        let taken = capture("error-help")
+        say("error-help: the composer ran it in the server tab: \(target?.id == server?.primarySession?.id); "
+            + "new since the command was sent: \(fresh.suffix(4)); signature \(String(describing: match)); "
+            + "assistant set up \(AssistantServiceProvider.current.isConfigured); offers on \(settings.assistantOfferErrorHelp); "
+            + "the composer's own watcher made the offer: \(offered)")
+        let taken = offered && capture("error-help")
         await sendFromComposer("clear")
         return taken
     }
@@ -763,24 +1127,35 @@ final class ScreenshotRun {
     /// this machine; and not Connections, whose page lists whatever Bonjour
     /// finds on the network — on a runner, that is the runner's own name.
     private func settingsWindows() async {
-        let pages: [(SettingsSection, String)] = [
-            (.terminal, "settings-terminal"),
-            (.composer, "settings-composer"),
-            (.panels, "settings-panels"),
-            (.security, "settings-security"),
-            (.ai, "settings-ai"),
-            (.http, "settings-http"),
-            (.advanced, "settings-advanced"),
+        // Taller where a page has more on it than the usual window shows.
+        let pages: [(SettingsSection, String, CGFloat)] = [
+            (.terminal, "settings-terminal", 640),
+            (.composer, "settings-composer", 640),
+            (.panels, "settings-panels", 640),
+            (.security, "settings-security", 640),
+            (.ai, "settings-ai", 640),
+            (.http, "settings-http", 860),
+            (.advanced, "settings-advanced", 640),
         ]
-        for (section, name) in pages {
+        for (section, name, height) in pages {
             await scene(name) {
                 await ScreenshotMode.host(
                     SettingsRootView(initialSection: section),
-                    size: NSSize(width: 940, height: 640),
+                    size: NSSize(width: 940, height: height),
                     name: name,
                     in: self.directory
                 )
             }
+        }
+        // The Terminal page again, tall enough to show all of it: the colors sit
+        // below what the usual window shows.
+        await scene("settings-terminal-colors") {
+            await ScreenshotMode.host(
+                SettingsRootView(initialSection: .terminal),
+                size: NSSize(width: 940, height: 1100),
+                name: "settings-terminal-colors",
+                in: self.directory
+            )
         }
 
         // The default directory is a field, and shows what it holds: written

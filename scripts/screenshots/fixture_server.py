@@ -18,9 +18,11 @@ import argparse
 import json
 import socket
 import socketserver
+import struct
 import sys
 import time
 import uuid
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -190,6 +192,131 @@ def plain_page(path):
     return page("{} · hello-api".format(title), body, active=path)
 
 
+# --- A page with things on it: the HTTP client's Extract tab reads this one. ---
+#
+# Pictures, a video, a podcast, files to save and a feed, all made up here: the
+# pictures are drawn below, and the rest are the right kind of file with next to
+# nothing in them. None of the addresses on the page leave this machine except
+# the two that name other sites, which are listed and never requested.
+
+def png(width, height, pixel):
+    """A PNG, 8-bit RGB, from a function (x, y) -> (r, g, b). Standard library only."""
+    rows = b"".join(
+        b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(width)) for y in range(height)
+    )
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
+
+
+def cover_pixel(x, y):
+    # A soft diagonal wash, green to blue.
+    t = (x / 320 + y / 180) / 2
+    return (int(16 + 20 * t), int(163 - 70 * t), int(127 + 90 * t))
+
+
+def chart_pixel(x, y):
+    # Four bars on a pale ground.
+    bars = [(30, 70, 80), (100, 140, 120), (170, 210, 60), (240, 280, 100)]
+    for left, right, top in bars:
+        if left <= x < right and y >= 180 - top - 20:
+            return (16, 163, 127)
+    return (245, 245, 247)
+
+
+def avatar_pixel(x, y):
+    dx, dy = x - 40, y - 40
+    return (193, 98, 222) if dx * dx + dy * dy < 34 * 34 else (230, 230, 235)
+
+
+MEDIA = {
+    "/media/cover.png": ("image/png", lambda: png(320, 180, cover_pixel)),
+    "/media/cover-640.png": ("image/png", lambda: png(640, 360, lambda x, y: cover_pixel(x // 2, y // 2))),
+    "/media/chart.png": ("image/png", lambda: png(320, 180, chart_pixel)),
+    "/media/avatar.png": ("image/png", lambda: png(80, 80, avatar_pixel)),
+    "/media/favicon.png": ("image/png", lambda: png(32, 32, lambda x, y: (16, 163, 127))),
+    # The right first bytes for the type, and not a playable file.
+    "/media/demo.mp4": ("video/mp4", lambda: b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 2048),
+    "/media/demo.webm": ("video/webm", lambda: b"\x1aE\xdf\xa3" + b"\x00" * 2048),
+    "/media/demo.en.vtt": ("text/vtt", lambda: b"WEBVTT\n\n00:00.000 --> 00:02.000\nThe quarter, in one minute.\n"),
+    "/media/episode.mp3": ("audio/mpeg", lambda: b"ID3\x03\x00\x00\x00\x00\x00\x00" + b"\x00" * 4096),
+    "/files/ledger-q2.pdf": ("application/pdf", lambda: b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"),
+    "/files/ledger-data.csv": ("text/csv", lambda: b"region,revenue,costs\nNorth,12,7\nSouth,8,5\nEast,15,9\nWest,10,6\n"),
+    "/files/ledger-archive.zip": ("application/zip", lambda: b"PK\x05\x06" + b"\x00" * 18),
+}
+
+
+def article_page(origin):
+    body = (
+        '<article>\n<h1 id="top">The Ledger Report: a quarter in numbers</h1>\n'
+        '<p class="lead"><img src="/media/avatar.png" alt="Ada Byron" width="40" height="40" style="vertical-align:middle;border-radius:50%"> '
+        'By <a href="/about" rel="author">Ada Byron</a> · 1 June 2025 · 6 minute read</p>\n'
+        '<figure><img src="/media/cover.png" srcset="/media/cover.png 320w, /media/cover-640.png 640w" '
+        'alt="A green and blue wash" width="320" height="180"><figcaption>The quarter, in one picture.</figcaption></figure>\n'
+        "<p>The quarter closed with <a href=\"/changelog\">strong gains</a>, according to "
+        '<a href="https://example.org/report" rel="nofollow">the analysts</a>, who expected less; the figures, '
+        "revised twice, show growth in every region we cover, and the costs stayed flat.</p>\n"
+        "<h2>Highlights</h2>\n<ul><li>Revenue up 12%</li><li>Costs flat</li><li>Two new regions</li></ul>\n"
+        '<img src="/media/chart.png" alt="Revenue by region" width="320" height="180">\n'
+        # An old page's picture, from a host that serves it over plain http: the
+        # download plan leaves it out and says why. Never requested by anything.
+        '<img src="http://cdn.example.net/banner.png" alt="Sponsor banner" width="320" height="40">\n'
+        "<h2>Numbers by region</h2>\n"
+        "<table><caption>Q2, in millions</caption><thead><tr><th>Region</th><th>Revenue</th><th>Costs</th></tr></thead>"
+        "<tbody><tr><td>North</td><td>12</td><td>7</td></tr><tr><td>South</td><td>8</td><td>5</td></tr>"
+        "<tr><td>East</td><td>15</td><td>9</td></tr><tr><td>West</td><td>10</td><td>6</td></tr></tbody></table>\n"
+        "<h2>Watch and listen</h2>\n"
+        '<video controls poster="/media/cover.png" width="320"><source src="/media/demo.mp4" type="video/mp4">'
+        '<source src="/media/demo.webm" type="video/webm"><track kind="captions" src="/media/demo.en.vtt" srclang="en" label="English"></video>\n'
+        '<audio controls src="/media/episode.mp3"></audio>\n'
+        '<iframe width="320" height="180" src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ" title="The quarter, explained"></iframe>\n'
+        "<h2>Take it with you</h2>\n"
+        '<p><a class="btn" href="/files/ledger-q2.pdf">The full report (PDF)</a> '
+        '<a class="btn alt" href="/files/ledger-data.csv">The data (CSV)</a> '
+        '<a href="/files/ledger-archive.zip" download>Everything, zipped</a></p>\n'
+        '<p>Questions? <a href="mailto:desk@example.com">Write to the desk</a>. <a href="#top">Back to the top</a>.</p>\n'
+        "</article>"
+    )
+    head = (
+        '<link rel="canonical" href="{origin}/blog/ledger-notes">'
+        '<link rel="icon" href="/media/favicon.png" sizes="32x32">'
+        '<link rel="alternate" type="application/rss+xml" title="hello-api blog" href="/feed.xml">'
+        '<meta name="description" content="Revenue up 12% on flat costs: the quarter, region by region.">'
+        '<meta name="author" content="Ada Byron">'
+        '<meta property="og:title" content="The Ledger Report">'
+        '<meta property="og:site_name" content="hello-api blog">'
+        '<meta property="og:image" content="{origin}/media/cover-640.png">'
+        '<meta property="article:published_time" content="2025-06-01T09:00:00Z">'
+        '<meta name="twitter:card" content="summary_large_image">'
+        '<script type="application/ld+json">{{"@context":"https://schema.org","@type":"NewsArticle",'
+        '"headline":"The Ledger Report","url":"{origin}/blog/ledger-notes","datePublished":"2025-06-01",'
+        '"author":{{"@type":"Person","name":"Ada Byron"}}}}</script>'
+    ).format(origin=origin)
+    html = page("The Ledger Report · hello-api", body, active="")
+    return html.replace("</head>", head + "</head>", 1)
+
+
+def feed(origin):
+    items = "".join(
+        "<item><title>{}</title><link>{}{}</link><pubDate>{}</pubDate><description>{}</description></item>\n".format(
+            title, origin, path, date, summary
+        )
+        for title, path, date, summary in [
+            ("The Ledger Report", "/blog/ledger-notes", "Sun, 01 Jun 2025 09:00:00 GMT", "A quarter in numbers."),
+            ("Scaling the API", "/blog/scaling-the-api", "Wed, 09 Apr 2025 08:00:00 GMT", "What changed to keep up."),
+            ("Launch notes", "/blog/launch-notes", "Tue, 04 Mar 2025 08:00:00 GMT", "Version 0.2, and what is next."),
+        ]
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>hello-api blog</title>'
+        "<link>{0}/</link><description>News from the made-up API.</description>\n{1}</channel></rss>\n"
+    ).format(origin, items)
+
+
 def route(path, origin):
     """(status, content type, body text) for a path."""
     if path == "/robots.txt":
@@ -203,6 +330,13 @@ def route(path, origin):
         return 200, "application/json; charset=utf-8", json.dumps({"orders": ORDERS}, indent=2) + "\n"
     if path == "/api/health":
         return 200, "application/json; charset=utf-8", json.dumps({"status": "ok", "version": "0.3.0"}) + "\n"
+    if path == "/blog/ledger-notes":
+        return 200, "text/html; charset=utf-8", article_page(origin)
+    if path == "/feed.xml":
+        return 200, "application/rss+xml; charset=utf-8", feed(origin)
+    if path in MEDIA:
+        content_type, make = MEDIA[path]
+        return 200, content_type, make()
     if path == "/":
         return 200, "text/html; charset=utf-8", home_page(origin)
     if path == "/docs/":
@@ -292,8 +426,9 @@ def make_handler(origin, log_path):
 
         def respond(self, send_body):
             path = urlsplit(self.path).path
-            status, content_type, text = route(path, origin)
-            data = text.encode("utf-8")
+            status, content_type, body = route(path, origin)
+            # Pages are text; the pictures and files the sample page links to are bytes.
+            data = body if isinstance(body, bytes) else body.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
