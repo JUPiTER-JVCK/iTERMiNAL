@@ -107,6 +107,7 @@ struct DownloadConfirmSheet: View {
                 Button("Cancel") { extraction.pendingDownload = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("Download") { extraction.confirmDownload(settings: settings) }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(plan.items.isEmpty)
             }
@@ -188,6 +189,7 @@ struct DownloadProgressSheet: View {
                     extraction.showingDownloadProgress = false
                     downloader.reset()
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(downloader.isRunning)
             }

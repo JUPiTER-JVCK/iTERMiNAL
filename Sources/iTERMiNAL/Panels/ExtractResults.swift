@@ -168,12 +168,17 @@ struct ExtractResults: View {
     private func grid(_ rows: [ResultTable.Row]) -> some View {
         let widths = widths(for: rows)
         // A scroll view that goes both ways centers what is smaller than it, so
-        // a short table floated in the middle of the pane. Held at least as big
-        // as the pane and pinned to its top left, it starts where a table does.
+        // a short table floated in the middle of the pane. Held nearly as big as
+        // the pane and pinned to its top left, it starts where a table does. A
+        // little short of it, because a scroller takes room from the content and
+        // a table exactly the pane's size would then have something to scroll.
         return GeometryReader { pane in
             ScrollView([.horizontal, .vertical]) {
                 gridBody(rows, widths: widths)
-                    .frame(minWidth: pane.size.width, minHeight: pane.size.height, alignment: .topLeading)
+                    .frame(
+                        minWidth: max(0, pane.size.width - 20), minHeight: max(0, pane.size.height - 20),
+                        alignment: .topLeading
+                    )
             }
         }
     }
