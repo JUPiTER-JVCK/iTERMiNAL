@@ -45,6 +45,11 @@ enum AssetNaming {
         for scalar in lastPart.unicodeScalars {
             if scalar.value < 0x20 || scalar.value == 0x7F || ":*?\"<>|".unicodeScalars.contains(scalar) {
                 scalars.append("_")
+            } else if isBidirectionalControl(scalar) {
+                // Gone, not replaced: a name that reads right to left shows its
+                // end where its start is, so `\u{202E}gnp.exe` is listed as
+                // `exe.png` — and is a program.
+                continue
             } else {
                 scalars.append(scalar)
             }
@@ -54,6 +59,16 @@ enum AssetNaming {
         while clean.hasPrefix(".") { clean.removeFirst() }
         clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
         return limited(clean, reserving: 0)
+    }
+
+    /// The marks that change which way text runs, which a file name has no use
+    /// for and a spoofed one does: embeddings, overrides and isolates, and the
+    /// left-to-right, right-to-left and Arabic letter marks.
+    private static func isBidirectionalControl(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x061C, 0x200E, 0x200F, 0x202A...0x202E, 0x2066...0x2069: return true
+        default: return false
+        }
     }
 
     /// Cuts a name to a length every file system takes, keeping the extension.

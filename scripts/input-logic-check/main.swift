@@ -2398,6 +2398,13 @@ do {
         }
         check(made != "" && made != "." && made != "..", "\(hostile.debugDescription) still gets a name")
     }
+    // A name that reads right to left shows its end where its start is: U+202E
+    // before `gnp.exe` is listed as `exe.png`, and is a program.
+    check(AssetNaming.sanitize("\u{202E}gnp.exe") == "gnp.exe" && AssetNaming.fileName(for: "https://example.com/%E2%80%AEgnp.exe") == "gnp.exe",
+          "a right-to-left override is removed from a name, so it is listed as the program it is")
+    check(AssetNaming.sanitize("a\u{202A}b\u{202B}c\u{202C}d\u{202D}e\u{2066}f\u{2067}g\u{2068}h\u{2069}i\u{200E}j\u{200F}k\u{061C}l.png") == "abcdefghijkl.png",
+          "so are the embeddings, isolates and direction marks")
+    check(AssetNaming.sanitize("café 😀 日本語.png") == "café 😀 日本語.png", "and ordinary names in other scripts are left alone")
     check(AssetNaming.sanitize("%2e%2e%2fx") == "%2e%2e%2fx", "sanitising does not decode (names come decoded already), and a literal % is harmless")
     check(AssetNaming.fileName(for: "https://example.com/%2e%2e%2f%2e%2e%2fetc%2fpasswd") == "passwd", "an encoded traversal in the path is decoded and then stripped to its last part")
     let long = String(repeating: "é", count: 400) + ".jpeg"
