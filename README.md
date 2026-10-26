@@ -22,7 +22,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
-A tour of the app in twenty pictures, in four groups.
+A tour of the app in twenty-seven pictures, in five groups.
 
 ### The window
 
@@ -45,6 +45,27 @@ A tour of the app in twenty pictures, in four groups.
     <td width="50%" valign="top">
       <img src="docs/images/command-palette.png" alt="The command palette: a search box over a list of actions — New Terminal Tab, New Workspace, Split Right, Split Down, Split with Browser, Split with Files — each with its shortcut.">
       <br><b>Command palette</b> — every action in one searchable list, with its shortcut beside it.
+    </td>
+  </tr>
+</table>
+
+### The terminal
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-context-menu.png" alt="The menu a right-click on a terminal opens: Copy, Paste and Select All, then Find and Clear Scrollback, then Split Right, Split Down and New Tab, each with its shortcut.">
+      <br><b>Right-click menu</b> — Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that is a tab or a pane, the split and new-tab commands. Copy is greyed out until something is selected.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-colors.png" alt="A terminal after ls -AF: folders in bold blue, a symbolic link in bold cyan, a script in bold green, and the other files plain.">
+      <br><b>Colored <code>ls</code></b> — folders, links and programs, in the colors of the terminal theme. Nothing to install: the app sets the variables <code>ls</code> reads. See <a href="#colored-output">Colored output</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-colors-man.png" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
+      <br><b>Colored man pages</b> — headings and options in red, what you fill in in green, from the same environment.
     </td>
   </tr>
 </table>
@@ -89,12 +110,32 @@ A tour of the app in twenty pictures, in four groups.
   </tr>
   <tr>
     <td width="50%" valign="top">
+      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images with their descriptions, addresses, sizes and where each came from, three of them ticked, and Filter, All, Download and Export controls beneath.">
+      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images, video and audio, files, tables, text.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-query.png" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
+      <br><b>Query</b> — ask the response a question in CSS selectors, XPath, JSONPath or a regular expression, and take the answers as a list. See <a href="#extract">Extract</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
+      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+    </td>
+    <td width="50%" valign="top">
       <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
       <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
     </td>
+  </tr>
+  <tr>
     <td width="50%" valign="top">
       <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
       <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/files-sftp-denied.png" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
+      <br><b>When a host won't let you in</b> — what went wrong, what to do in order, and a button for the next move. See <a href="#when-a-host-cant-be-reached">When a host can't be reached</a>.
     </td>
   </tr>
   <tr>
@@ -140,7 +181,7 @@ A tour of the app in twenty pictures, in four groups.
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost and a stand-in for an AI model on localhost — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty into `docs/images/`.</sub>
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and an SSH server on localhost that lets no one in — so nothing in them is real data, and the assistant's reply is a canned one, not a model's answer. The superfile and btop pictures show the runner's own files and processes, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these twenty-seven into `docs/images/`.</sub>
 
 ## Features
 
