@@ -12,6 +12,12 @@ name: Screenshots
 # than that — each file is named for what it shows, and app.log says what the
 # app saw while it took them.
 on:
+  # TEMPORARY, to be removed before this merges: build and run the app on
+  # pushes to this branch, which has no pull request to do it.
+  push:
+    branches: [claude/macos-terminal-design-planning-rwuvtw]
+    paths:
+      - .github/workflows/screenshots.yml
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
   workflow_dispatch:
