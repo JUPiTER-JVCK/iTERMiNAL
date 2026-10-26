@@ -132,6 +132,12 @@ final class TerminalContainerView: NSView {
     /// here, covering both.
     override var mouseDownCanMoveWindow: Bool { false }
 
+    /// A right-click in the padding around the terminal gets the terminal's
+    /// menu, not nothing: from the person's side the padding is part of it.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        terminal.menu(for: event)
+    }
+
     override func layout() {
         super.layout()
         // A terminal that has never been sized is sized now, drag or not: it
