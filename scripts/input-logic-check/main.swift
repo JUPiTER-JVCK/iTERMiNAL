@@ -2012,6 +2012,146 @@ do {
     check(complete("cd \"bl") == nil, "a quoted word is left alone")
 }
 
+// MARK: Remote problems (SFTP)
+
+// What `sftp` says when it cannot do its job, said so that a person can act on
+// it. The strings are what OpenSSH prints; the first is the one that started
+// this: a Mac that offers a key, a password and keyboard-interactive, and a
+// file browser that can only use the first.
+do {
+    let host = SSHConnection(name: "Studio", host: "192.168.1.148", username: "mb_pro")
+    func kind(_ output: String, _ connection: SSHConnection = host) -> RemoteProblem.Kind {
+        RemoteProblem.classify(output: output, connection: connection).kind
+    }
+
+    // A sign-in that was turned away.
+    let refused = "mb_pro@192.168.1.148: Permission denied (publickey,password,keyboard-interactive).\nConnection closed"
+    check(kind(refused) == .signInRefused(methods: ["publickey", "password", "keyboard-interactive"]),
+          "a refused sign-in names the methods the server offered")
+    let problem = RemoteProblem.classify(output: refused, connection: host)
+    check(problem.title == "Couldn't sign in to mb_pro@192.168.1.148", "and the title says who it was for")
+    check(problem.explanation.contains("can only sign in with a key") && problem.explanation.contains("never handles one"),
+          "the explanation says what the file browser can do, and that no password goes through this app")
+    check(problem.explanation.contains("also allows a password or a keyboard-interactive prompt"),
+          "and which of the server's other methods it cannot use")
+    check(problem.output == refused, "what sftp said is kept exactly")
+    check(problem.actions == [
+        .tryAgain, .runInLocalTerminal(label: "Set Up Key…", command: "ssh-copy-id mb_pro@192.168.1.148"),
+        .signInInTerminal, .editConnection,
+    ], "a refused key offers to try again, to set one up, to sign in in a terminal, and to edit the host")
+    check(problem.steps.first?.command == "ssh-copy-id mb_pro@192.168.1.148", "the first step is the command that fixes it")
+    check(kind("mb_pro@192.168.1.148: Permission denied (publickey).") == .signInRefused(methods: ["publickey"]),
+          "one method is one method")
+    check(kind("Warning: Permanently added '192.168.1.148' (ED25519) to the list of known hosts.\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .signInRefused(methods: ["publickey"]), "a first-connection warning above it changes nothing")
+    check(kind("mb_pro@192.168.1.148's password: \nPermission denied, please try again.") == .signInRefused(methods: []),
+          "the older wording is still a refused sign-in")
+
+    // A server that takes no keys at all cannot be used from here.
+    let passwordOnly = RemoteProblem.classify(output: "mb_pro@192.168.1.148: Permission denied (password,keyboard-interactive).", connection: host)
+    check(passwordOnly.explanation.contains("only accepts a password or a keyboard-interactive prompt"),
+          "a host without key sign-in is described as such")
+    check(passwordOnly.steps.first?.command == nil && passwordOnly.steps.first?.text.contains("terminal session") == true,
+          "and the way forward is a terminal session, not a key")
+    check(!passwordOnly.actions.contains { if case .runInLocalTerminal = $0 { return true } else { return false } },
+          "it is not offered a key to install, since the host would not take it")
+
+    // Keys that cannot be offered.
+    check(kind("Received disconnect from 192.168.1.148 port 22:2: Too many authentication failures\nDisconnected from 192.168.1.148 port 22")
+            == .tooManyAuthFailures, "too many keys offered is its own problem")
+    check(kind("Permissions 0644 for '/Users/me/.ssh/id_rsa' are too open.\nIt is required that your private key files are NOT accessible by others.\nThis private key will be ignored.\nLoad key \"/Users/me/.ssh/id_rsa\": bad permissions\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .identityFile(path: "/Users/me/.ssh/id_rsa", reason: "too open"), "a key others can read is named, not lost in a refusal")
+    check(RemoteProblem.classify(output: "Permissions 0644 for '/Users/me/.ssh/my key' are too open.", connection: host).steps.first?.command
+            == "chmod 600 '/Users/me/.ssh/my key'", "and the fix is quoted for a path with a space")
+    check(kind("Warning: Identity file /Users/me/.ssh/nope not accessible: No such file or directory.\nmb_pro@192.168.1.148: Permission denied (publickey).")
+            == .identityFile(path: "/Users/me/.ssh/nope", reason: "missing"), "a named key that is not there is named")
+    check(kind("Load key \"/Users/me/.ssh/id\": invalid format") == .identityFile(path: "/Users/me/.ssh/id", reason: "invalid format"),
+          "a key that will not load says why")
+
+    // The host's own key.
+    let changed = """
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+    Offending ED25519 key in /Users/me/.ssh/known_hosts:12
+    Host key verification failed.
+    Connection closed
+    """
+    check(kind(changed) == .hostKeyChanged(offending: "/Users/me/.ssh/known_hosts:12"), "a changed host key points at the line in known_hosts")
+    check(kind("Host key verification failed.") == .hostKeyChanged(offending: nil), "and without the banner it is still that")
+    check(RemoteProblem.classify(output: changed, connection: host).explanation.contains("intercepted"),
+          "the explanation does not pretend a changed key is harmless")
+    check(RemoteProblem.forgetHostKeyCommand(for: host) == "ssh-keygen -R 192.168.1.148", "forgetting a host on the usual port")
+    let elsewhere = SSHConnection(name: "x", host: "192.168.1.148", port: 2222, username: "mb_pro")
+    check(RemoteProblem.forgetHostKeyCommand(for: elsewhere) == "ssh-keygen -R '[192.168.1.148]:2222'",
+          "and on another port, where known_hosts writes it as [host]:port and the shell needs it quoted")
+    check(RemoteProblem.classify(output: changed, connection: host).actions.contains(
+        .runInLocalTerminal(label: "Forget Old Key…", command: "ssh-keygen -R 192.168.1.148")), "the old key can be forgotten from a button")
+
+    // Not reached at all.
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Connection refused\nConnection closed") == .connectionRefused, "refused")
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Operation timed out") == .timedOut, "timed out, as macOS says it")
+    check(kind("ssh: connect to host 192.168.1.148 port 22: Connection timed out") == .timedOut, "and as Linux does")
+    check(kind("ssh: connect to host 10.0.0.9 port 22: No route to host") == .unreachable, "no route")
+    check(kind("ssh: connect to host 10.0.0.9 port 22: Network is unreachable") == .unreachable, "no network")
+    check(RemoteProblem.classify(output: "ssh: connect to host 10.0.0.9 port 22: No route to host", connection: host).explanation.contains("local network"),
+          "a missing route also names the macOS local-network permission, which blocks exactly this")
+    check(kind("ssh: Could not resolve hostname nas.local: nodename nor servname provided, or not known") == .hostNotFound, "a name that does not resolve, on macOS")
+    check(kind("ssh: Could not resolve hostname nas: Name or service not known") == .hostNotFound, "and on Linux")
+    check(kind("Connection closed by 192.168.1.148 port 22") == .connectionDropped, "closed by the host")
+    check(kind("kex_exchange_identification: read: Connection reset by peer") == .connectionDropped, "reset before the handshake")
+    check(kind("Connection closed") == .connectionDropped, "a bare 'Connection closed' is the fallback, not a diagnosis")
+    check(kind("subsystem request failed on channel 0\nConnection closed") == .noSFTP, "SFTP switched off, whatever line follows")
+    check(kind("Received message too long 1953724755") == .noSFTP, "a login that prints text breaks the protocol")
+    check(RemoteProblem.timedOut(connection: host).kind == .timedOut && RemoteProblem.timedOut(connection: host).steps.last?.command == "nc -vz 192.168.1.148 22",
+          "our own watchdog is a timeout, with a way to test the port")
+
+    // After signing in, about a path.
+    check(kind("Couldn't canonicalize: No such file or directory") == .pathNotFound, "a start directory that is not there")
+    check(kind("Can't ls: \"/nope\" not found") == .pathNotFound, "a folder that is not found")
+    check(kind("remote readdir(\"/root\"): Permission denied") == .pathDenied, "a folder the account may not open is not a failed sign-in")
+    check(kind("Couldn't remove file: Permission denied") == .pathDenied, "nor is a file it may not remove")
+
+    // Nothing recognised keeps the words it was given.
+    let odd = RemoteProblem.classify(output: "something unexpected\nConnection closed", connection: host)
+    check(odd.kind == .other && odd.explanation == "something unexpected", "an unknown failure is shown as it was said")
+    check(RemoteProblem.classify(output: "", connection: host).explanation == "sftp stopped without saying why.", "and silence is said as silence")
+
+    // Wording helpers.
+    check(RemoteProblem.describe(["publickey"]) == "a key", "one method")
+    check(RemoteProblem.describe(["publickey", "password"]) == "a key or a password", "two")
+    check(RemoteProblem.describe(["publickey", "password", "keyboard-interactive"]) == "a key, a password or a keyboard-interactive prompt", "three")
+
+    // Commands: right for this host, and never able to run on their own.
+    check(RemoteProblem.keySetupCommand(for: host) == "ssh-copy-id mb_pro@192.168.1.148", "the usual key setup")
+    let configured = SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519")
+    check(RemoteProblem.keySetupCommand(for: configured) == "ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
+          "with the port and the key it was set up with, the ~ left to the shell")
+    let spaced = SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id")
+    check(RemoteProblem.keySetupCommand(for: spaced) == "ssh-copy-id -i ~/'My Keys/id' u@h", "a key path with a space is quoted after the ~")
+    let hostile = SSHConnection(name: "b", host: "h; rm -rf ~", username: "it's")
+    check(RemoteProblem.keySetupCommand(for: hostile) == "ssh-copy-id 'it'\\''s@h; rm -rf ~'", "nothing in a saved host can end the command early")
+    check(RemoteProblem.shellQuoted("plain-1.2/x") == "plain-1.2/x" && RemoteProblem.shellQuoted("a b") == "'a b'"
+            && RemoteProblem.shellQuoted("") == "''" && RemoteProblem.shellQuoted("[h]:1") == "'[h]:1'", "quoting only when something needs it")
+
+    var everyProblem: [RemoteProblem] = []
+    for output in [refused, changed, "ssh: connect to host h port 22: Connection refused", "subsystem request failed on channel 0",
+                   "Too many authentication failures", "Couldn't canonicalize: No such file or directory", "", "xyz"] {
+        for connection in [host, configured, spaced, hostile] {
+            everyProblem.append(RemoteProblem.classify(output: output, connection: connection))
+        }
+    }
+    check(everyProblem.allSatisfy { !$0.title.isEmpty && !$0.explanation.isEmpty }, "every problem has a title and an explanation")
+    var commands: [String] = []
+    for problem in everyProblem {
+        commands += problem.steps.compactMap(\.command)
+        for case .runInLocalTerminal(_, let command) in problem.actions { commands.append(command) }
+    }
+    check(!commands.isEmpty && commands.allSatisfy { !$0.contains("\n") && !$0.contains("\r") },
+          "no command offered contains a line break, so typing one into a terminal cannot run it")
+}
+
 // MARK: Keyboard shortcuts
 
 // The catalog is only worth showing if it is complete, and it cannot see the

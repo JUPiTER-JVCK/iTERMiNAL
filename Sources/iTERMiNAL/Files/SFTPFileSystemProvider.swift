@@ -7,7 +7,8 @@ import Foundation
 /// agent, and keys — which is both less code and a smaller attack surface than
 /// handling credentials ourselves. `BatchMode=yes` guarantees sftp never waits
 /// on an interactive password prompt (there is no TTY here), so key-based auth
-/// is required.
+/// is required. When that is what stopped it, `RemoteProblem` says so, and
+/// what to do — the raw `Permission denied (publickey,password,…)` does not.
 final class SFTPFileSystemProvider: FileSystemProvider {
     let connection: SSHConnection
 
@@ -109,6 +110,10 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         }
         if let identity = connection.identityFile?.trimmingCharacters(in: .whitespaces), !identity.isEmpty {
             args.append(contentsOf: ["-i", (identity as NSString).expandingTildeInPath])
+            // A key named here is the key to use. Without this, ssh offers
+            // every key in the agent first, and a host that allows only a few
+            // attempts hangs up before reaching the one that was chosen.
+            args.append(contentsOf: ["-o", "IdentitiesOnly=yes"])
         }
         args.append(connection.destination)
         return args
@@ -120,6 +125,7 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         let args = arguments()
+        let connection = connection
         let script = (commands + ["bye"]).joined(separator: "\n") + "\n"
 
         queue.async {
@@ -179,11 +185,12 @@ final class SFTPFileSystemProvider: FileSystemProvider {
             if process.terminationStatus == 0 {
                 finish(.success(stdoutText))
             } else if process.terminationReason == .uncaughtSignal {
-                finish(.failure(FileProviderError.timedOut))
+                finish(.failure(FileProviderError.remote(.timedOut(connection: connection))))
             } else {
-                let message = stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
-                finish(.failure(FileProviderError.commandFailed(
-                    message.isEmpty ? "sftp exited with status \(process.terminationStatus)" : message
+                // Read here, where the host and the port are known, so what
+                // the person sees is about *this* connection.
+                finish(.failure(FileProviderError.remote(
+                    RemoteProblem.classify(output: stderrText, connection: connection)
                 )))
             }
         }

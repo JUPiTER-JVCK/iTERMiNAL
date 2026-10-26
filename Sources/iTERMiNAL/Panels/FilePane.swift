@@ -14,6 +14,13 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     @Published private(set) var items: [FileItem] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    /// The folder could not be listed on a remote host. Read from `sftp`'s own
+    /// words into what happened and what to do, and shown in place of the
+    /// listing — an empty folder would say the wrong thing.
+    @Published private(set) var listingProblem: RemoteProblem?
+    /// A transfer or a change on a remote host failed. The listing is fine, so
+    /// this is a strip below it.
+    @Published private(set) var operationProblem: RemoteProblem?
     @Published var selection: String?
     @Published private(set) var transferNote: String?
 
@@ -43,6 +50,8 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     func reload() {
         isLoading = true
         errorMessage = nil
+        listingProblem = nil
+        operationProblem = nil
         let target = directory
         provider.list(target, showHidden: AppSettings.shared.showHiddenFiles) { [weak self] result in
             guard let self, self.directory == target else { return }
@@ -53,7 +62,11 @@ final class FileBrowserModel: ObservableObject, Identifiable {
                 self.items = listing.items
             case .failure(let error):
                 self.items = []
-                self.errorMessage = error.localizedDescription
+                if case FileProviderError.remote(let problem) = error {
+                    self.listingProblem = problem
+                } else {
+                    self.errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -90,6 +103,8 @@ final class FileBrowserModel: ObservableObject, Identifiable {
         directory = provider.defaultPath()
         selection = nil
         items = []
+        listingProblem = nil
+        operationProblem = nil
         reload()
         WorkspaceStore.shared.scheduleSave()
     }
@@ -124,7 +139,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             case .failure(let error):
                 self?.transferNote = nil
-                self?.errorMessage = error.localizedDescription
+                self?.fail(error)
             }
         }
     }
@@ -148,7 +163,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             provider.upload(url, toDirectory: directory) { [weak self] result in
                 remaining -= 1
                 if case .failure(let error) = result {
-                    self?.errorMessage = error.localizedDescription
+                    self?.fail(error)
                 }
                 if remaining == 0 {
                     self?.transferNote = nil
@@ -164,7 +179,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             case .success:
                 self?.reload()
             case .failure(let error):
-                self?.errorMessage = error.localizedDescription
+                self?.fail(error)
             }
         }
     }
@@ -200,8 +215,45 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             case .success(let url):
                 completion(url)
             case .failure(let error):
-                self?.errorMessage = error.localizedDescription
+                self?.fail(error)
             }
+        }
+    }
+
+    /// A transfer or change that failed. A remote host's failure arrives
+    /// already read, and is shown with what to do about it; anything else is
+    /// just its message.
+    private func fail(_ error: Error) {
+        if case FileProviderError.remote(let problem) = error {
+            operationProblem = problem
+        } else {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissError() {
+        errorMessage = nil
+        operationProblem = nil
+    }
+
+    /// The connection a remote problem is about.
+    var remoteConnection: SSHConnection? {
+        (provider as? SFTPFileSystemProvider)?.connection
+    }
+
+    /// What a button on a remote problem does. Editing the connection is the
+    /// one thing the view does for itself: it needs the Settings window.
+    func perform(_ action: RemoteAction) {
+        switch action {
+        case .tryAgain:
+            reload()
+        case .signInInTerminal:
+            guard let connection = remoteConnection else { return }
+            WorkspaceStore.shared.newTab(kind: .remote(connection.id))
+        case .runInLocalTerminal(_, let command):
+            WorkspaceStore.shared.newTab(typing: command)
+        case .editConnection:
+            break
         }
     }
 
@@ -221,6 +273,8 @@ struct FilePaneView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
+    @State private var showingProblemDetails = false
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -237,6 +291,8 @@ struct FilePaneView: View {
             content(theme: theme)
             if let note = model.transferNote {
                 statusStrip(text: note, theme: theme, isError: false)
+            } else if let problem = model.operationProblem {
+                problemStrip(problem, theme: theme)
             } else if let error = model.errorMessage {
                 statusStrip(text: error, theme: theme, isError: true)
             }
@@ -346,7 +402,10 @@ struct FilePaneView: View {
 
     @ViewBuilder
     private func content(theme: Theme) -> some View {
-        if model.items.isEmpty {
+        if let problem = model.listingProblem, !model.isLoading {
+            // Not "Empty folder": the folder was never read.
+            RemoteProblemView(problem: problem, theme: theme, perform: perform)
+        } else if model.items.isEmpty {
             VStack {
                 Spacer()
                 Text(model.isLoading ? "Loading…" : "Empty folder")
@@ -400,7 +459,7 @@ struct FilePaneView: View {
                 .lineLimit(2)
             Spacer()
             if isError {
-                Button("Dismiss") { model.errorMessage = nil }
+                Button("Dismiss") { model.dismissError() }
                     .buttonStyle(.plain)
                     .font(.system(size: 11))
             }
@@ -409,6 +468,46 @@ struct FilePaneView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(theme.surface)
+    }
+
+    /// A remote transfer or change that failed: the one line, and the rest —
+    /// what happened, what to do, what `sftp` said — a click away. The line
+    /// used to be `sftp`'s own text cut off after two rows.
+    private func problemStrip(_ problem: RemoteProblem, theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 10))
+            Text(problem.title)
+                .font(.system(size: 11))
+                .lineLimit(2)
+            Spacer()
+            Button("Details") { showingProblemDetails = true }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .popover(isPresented: $showingProblemDetails, arrowEdge: .top) {
+                    RemoteProblemView(problem: problem, theme: theme) { action in
+                        showingProblemDetails = false
+                        perform(action)
+                    }
+                    .frame(width: 380, height: 440)
+                }
+            Button("Dismiss") { model.dismissError() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+        }
+        .foregroundStyle(Color.red)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surface)
+    }
+
+    private func perform(_ action: RemoteAction) {
+        if action == .editConnection {
+            SettingsNavigator.request(.connections)
+            openSettings()
+        } else {
+            model.perform(action)
+        }
     }
 
     private func loadDroppedFiles(_ providers: [NSItemProvider]) {

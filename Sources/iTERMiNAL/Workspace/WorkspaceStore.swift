@@ -423,6 +423,24 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Workspace / tab lifecycle
 
+    /// A new tab on this Mac with `text` typed at its prompt and not run. The
+    /// person reads it, and Return is what runs it — nothing is sent after the
+    /// text, and a line break or any other control character in it becomes a
+    /// space, so what is typed can only ever sit on the line.
+    func newTab(typing text: String) {
+        let line = String(text.map { character -> Character in
+            character.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value != 0x7F } ? character : " "
+        })
+        let tab = newTab()
+        guard let session = tab.root.firstTerminal() else { return }
+        // The shell has to be up and reading. Typed any earlier, the line is
+        // held by the terminal and arrives anyway, but a shell that clears its
+        // input as it starts would lose it, so give it a moment.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak session] in
+            session?.send(text: line)
+        }
+    }
+
     func newWorkspace(named name: String? = nil) {
         let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
         let workspace = Workspace(name: resolved)

@@ -24,6 +24,10 @@ enum FileProviderError: LocalizedError {
     case commandFailed(String)
     case timedOut
     case notSupported(String)
+    /// A remote host could not be used, with what to do about it. The file
+    /// browser shows this in full; anything that only wants a sentence gets
+    /// its title.
+    case remote(RemoteProblem)
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +35,7 @@ enum FileProviderError: LocalizedError {
         case .commandFailed(let message): return message
         case .timedOut: return "The remote server did not respond in time."
         case .notSupported(let what): return "\(what) isn't supported here."
+        case .remote(let problem): return problem.title
         }
     }
 }

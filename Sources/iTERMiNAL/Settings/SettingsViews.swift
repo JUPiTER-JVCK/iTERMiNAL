@@ -25,6 +25,19 @@ struct SettingsRootView: View {
         // start at the top edge, with the traffic lights floating over the
         // band the rail clears for them.
         .framelessWindow()
+        // Something elsewhere in the app pointed here: a file browser that
+        // could not sign in, sending the person to the host's settings.
+        .onAppear { applyRequestedSection() }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsNavigator.didRequest)) { _ in
+            applyRequestedSection()
+        }
+    }
+
+    private func applyRequestedSection() {
+        if let section = SettingsNavigator.take() {
+            query = ""
+            selection = section
+        }
     }
 
     // MARK: Navigation
