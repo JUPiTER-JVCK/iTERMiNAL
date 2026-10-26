@@ -182,6 +182,9 @@ jobs:
             Sources/iTERMiNAL/HTTP/ResponseExtractor.swift \
             Sources/iTERMiNAL/HTTP/DownloadPlan.swift \
             Sources/iTERMiNAL/HTTP/ImagePreviewPolicy.swift \
+            Sources/iTERMiNAL/HTTP/RobotsRules.swift \
+            Sources/iTERMiNAL/HTTP/CrawlFrontier.swift \
+            Sources/iTERMiNAL/HTTP/CrawlResults.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
             Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \

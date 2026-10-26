@@ -3015,6 +3015,187 @@ do {
           "a picture with no size is not one")
 }
 
+// MARK: Crawl: robots.txt, the frontier and the results
+
+// A crawl follows the links a page declares, on one site, a page at a time, as
+// politely as the site's robots.txt asks. Each rule that keeps it to that is
+// checked here: which pages robots.txt rules out (RFC 9309's examples), which
+// addresses join the queue, how far it goes, and what it keeps.
+do {
+    func rules(_ text: String, agent: String = "iTERMiNAL") -> RobotsRules { RobotsRules.parse(text, agent: agent) }
+    func allowed(_ rules: RobotsRules, _ path: String) -> Bool { rules.allows(path: path) }
+
+    // The documented examples of patterns.
+    let fish = rules("User-agent: *\nDisallow: /fish\n")
+    check(!allowed(fish, "/fish") && !allowed(fish, "/fish.html") && !allowed(fish, "/fish/salmon.html") && !allowed(fish, "/fishheads"),
+          "Disallow: /fish rules out everything that starts with it")
+    check(allowed(fish, "/Fish.asp") && allowed(fish, "/catfish") && allowed(fish, "/"), "case matters, and it is only a prefix")
+    let fishStar = rules("User-agent: *\nDisallow: /fish*\n")
+    check(!allowed(fishStar, "/fish") && !allowed(fishStar, "/fishheads/yummy.html") && allowed(fishStar, "/catfish"), "a trailing * changes nothing")
+    let folder = rules("User-agent: *\nDisallow: /fish/\n")
+    check(!allowed(folder, "/fish/") && !allowed(folder, "/fish/?id=anything") && !allowed(folder, "/fish/salmon.htm"), "a trailing slash is the folder")
+    check(allowed(folder, "/fish") && allowed(folder, "/fish.html") && allowed(folder, "/Fish/Salmon.asp"), "and not a file with that name")
+    let php = rules("User-agent: *\nDisallow: /*.php\n")
+    check(!allowed(php, "/index.php") && !allowed(php, "/folder/filename.php?parameters") && !allowed(php, "/folder/any.php.file.html"), "* is anything")
+    check(allowed(php, "/") && allowed(php, "/windows.PHP"), "and the rest has to match exactly")
+    let phpEnd = rules("User-agent: *\nDisallow: /*.php$\n")
+    check(!allowed(phpEnd, "/filename.php") && !allowed(phpEnd, "/folder/filename.php"), "$ ends the pattern")
+    check(allowed(phpEnd, "/filename.php?parameters") && allowed(phpEnd, "/filename.php/") && allowed(phpEnd, "/filename.php5"),
+          "so anything longer is let through")
+    let middle = rules("User-agent: *\nDisallow: /fish*.php\n")
+    check(!allowed(middle, "/fish.php") && !allowed(middle, "/fishheads/catfish.php?parameters") && allowed(middle, "/Fish.PHP"), "a * in the middle")
+    let query = rules("User-agent: *\nDisallow: /a?b=c\n")
+    check(allowed(query, "/a") && !allowed(query, "/a?b=c&d=e"), "a pattern can name a query")
+
+    // The most specific rule decides.
+    let nested = rules("User-agent: *\nDisallow: /\nAllow: /public/\n")
+    check(allowed(nested, "/public/page") && !allowed(nested, "/private") && !allowed(nested, "/"), "the longer rule wins")
+    let rootOnly = rules("User-agent: *\nAllow: /$\nDisallow: /\n")
+    check(allowed(rootOnly, "/") && !allowed(rootOnly, "/anything") && !allowed(rootOnly, "/?x=1"), "Allow: /$ lets in the front page and nothing under it")
+    check(allowed(rules("User-agent: *\nDisallow: /page\nAllow: /page\n"), "/page") && allowed(rules("User-agent: *\nAllow: /page\nDisallow: /page\n"), "/page"),
+          "an allow and a disallow of the same length: the allow, whichever is written first")
+    check(!allowed(rules("User-agent: *\nAllow: /page\nDisallow: /*.htm\n"), "/page.htm"), "the longer pattern wins even when it is the disallow")
+
+    // Which group applies.
+    let groups = "User-agent: *\nDisallow: /everyone\n\nUser-agent: iterminal\nDisallow: /us\n"
+    check(!allowed(rules(groups), "/us") && allowed(rules(groups), "/everyone"),
+          "the group that names this crawler, in any case, counts instead of everyone's")
+    check(!allowed(rules(groups, agent: "other"), "/everyone") && allowed(rules(groups, agent: "other"), "/us"), "another crawler gets everyone's")
+    check(!allowed(rules("User-agent: other\nUser-agent: iTERMiNAL\nDisallow: /both\n"), "/both"), "user-agent lines in a row share the rules after them")
+    let split = rules("User-agent: iTERMiNAL\nDisallow: /a\n\nUser-agent: iTERMiNAL\nDisallow: /b\n")
+    check(!allowed(split, "/a") && !allowed(split, "/b"), "two groups for the same crawler add up")
+    check(allowed(rules("User-agent: other\nDisallow: /\n"), "/x"), "a file with no group for this crawler or for everyone asks nothing")
+    check(allowed(rules("Disallow: /\n"), "/x"), "a rule before any user-agent belongs to no group")
+
+    // Reading the file.
+    check(allowed(rules("User-agent: *\nDisallow:\n"), "/anything"), "an empty Disallow disallows nothing")
+    check(!allowed(rules("USER-AGENT: *\r\nDISALLOW: /a # a comment\r\n"), "/a"), "field names in any case, comments, and Windows line ends")
+    check(!allowed(rules("\u{FEFF}User-agent: *\nDisallow: /a\n"), "/a"), "a byte order mark is skipped")
+    check(allowed(rules("<html><body>not robots.txt</body></html>"), "/a"), "a page that is not a robots.txt asks nothing")
+    check(allowed(rules("User-agent: *\nDisallow: /robots.txt\n"), "/robots.txt"), "robots.txt itself is always fetchable")
+    check(allowed(rules("User-agent: *\nDisallow: /a\n"), "a") == false, "a path without its slash is read as having one")
+    let huge = "User-agent: *\n" + String(repeating: "Disallow: /x\n", count: 100_000) + "Disallow: /late\n"
+    check(huge.utf8.count > RobotsRules.maxBytes && !allowed(rules(huge), "/x") && allowed(rules(huge), "/late"), "only the first half-megabyte is read")
+    check(rules("User-agent: *\nCrawl-delay: 10\n").crawlDelay == 10 && rules("User-agent: *\nCrawl-delay: 0.5\n").crawlDelay == 0.5, "a Crawl-delay is read")
+    check(rules("User-agent: *\nCrawl-delay: soon\n").crawlDelay == nil && rules("User-agent: *\nCrawl-delay: -4\n").crawlDelay == nil, "and one that is not a delay is not")
+    check(rules("User-agent: other\nCrawl-delay: 99\n\nUser-agent: *\nCrawl-delay: 3\n").crawlDelay == 3, "the delay is the applying group's")
+    check(RobotsRules.requestPath(of: "https://example.org/a/b?c=d#frag") == "/a/b?c=d" && RobotsRules.requestPath(of: "https://example.org") == "/",
+          "the path and query a request names")
+    check(RobotsRules.allowAll.allows(path: "/anything") && RobotsRules.allowAll.crawlDelay == nil, "no robots.txt asks nothing")
+
+    // The queue.
+    let page = "https://example.org/blog/post"
+    func frontier(_ start: String = page, _ limits: CrawlLimits = CrawlLimits()) -> CrawlFrontier { CrawlFrontier(start: start, limits: limits)! }
+    check(CrawlFrontier.normalize("HTTPS://Example.ORG:443/a#frag") == "https://example.org/a", "scheme and host in lower case, no default port, no fragment")
+    check(CrawlFrontier.normalize("http://example.org:80") == "http://example.org/", "an empty path is /")
+    check(CrawlFrontier.normalize("https://example.org:8443/a")?.contains(":8443") == true, "another port is kept")
+    check(CrawlFrontier.normalize("https://user:pw@example.org/a") == nil, "an address carrying a password is not followed")
+    check(["mailto:a@example.org", "javascript:void(0)", "ftp://example.org/", "/relative", "#top", "data:text/html,x", ""].allSatisfy { CrawlFrontier.normalize($0) == nil },
+          "only absolute http and https addresses")
+    check(CrawlFrontier.normalize("https://example.org/" + String(repeating: "a", count: 2_100)) == nil, "and not absurdly long ones")
+    check(CrawlFrontier(start: "mailto:x@y.z", limits: CrawlLimits()) == nil && CrawlFrontier(start: "not an address", limits: CrawlLimits()) == nil,
+          "a crawl cannot begin from anything else")
+
+    var queue = frontier()
+    queue.offer(["https://example.org/a", "https://example.org/b#top", "https://example.org/a", "https://EXAMPLE.org/a", page, page + "#x"], foundOn: page, depth: 0)
+    check(queue.pendingCount == 2, "each address once however it is spelled, and not the page it began with: \(queue.pendingCount)")
+    check(queue.next() == CrawlFrontier.Entry(url: "https://example.org/a", depth: 1, foundOn: page), "first in, first out, with the depth and where it was found")
+    queue.offer(["https://example.org/c"], foundOn: "https://example.org/a", depth: 1)
+    check(queue.next()?.url == "https://example.org/b" && queue.next()?.url == "https://example.org/c" && queue.next() == nil, "nearer pages come first, and then there is no more")
+
+    var sites = frontier()
+    sites.offer(["https://www.example.org/a", "https://sub.example.org/a", "https://example.com/a", "http://example.org/a",
+                 "https://example.org:8443/a", "https://example.org./a", "https://example.org/ok"], foundOn: page, depth: 0)
+    check(sites.pendingCount == 1 && sites.next()?.url == "https://example.org/ok",
+          "another host, a subdomain, the www host, another scheme or port is another site: only this exact one is followed")
+
+    var scoped = frontier("https://example.org/docs/intro", CrawlLimits(maxPages: 25, maxDepth: 2, delay: 1, stayUnder: "/docs/"))
+    scoped.offer(["https://example.org/docs/a", "https://example.org/blog/a", "https://example.org/docs", "https://example.org/"], foundOn: page, depth: 0)
+    check(scoped.pendingCount == 1 && scoped.next()?.url == "https://example.org/docs/a", "inside a scope, only addresses under it")
+
+    var endings = frontier()
+    endings.offer(["https://example.org/photo.JPG", "https://example.org/a.pdf", "https://example.org/data.csv", "https://example.org/app.js",
+                   "https://example.org/a.tar.gz", "https://example.org/feed.xml", "https://example.org/page.html", "https://example.org/page.php?x=1",
+                   "https://example.org/.well-known", "https://example.org/v1.2/page", "https://example.org/dir/"], foundOn: page, depth: 0)
+    check(endings.pendingCount == 5, "files are not queued to be downloaded and thrown away; pages are: \(endings.pendingCount)")
+
+    var deep = frontier("https://example.org/", CrawlLimits(maxPages: 25, maxDepth: 2, delay: 1))
+    deep.offer(["https://example.org/a"], foundOn: "s", depth: 0)
+    deep.offer(["https://example.org/b"], foundOn: "https://example.org/a", depth: 1)
+    deep.offer(["https://example.org/c"], foundOn: "https://example.org/b", depth: 2)
+    check(deep.pendingCount == 2, "links on pages at the depth limit are not followed")
+
+    var budget = frontier("https://example.org/", CrawlLimits(maxPages: 3, maxDepth: 2, delay: 1))
+    budget.offer(["https://example.org/a", "https://example.org/b", "https://example.org/c", "https://example.org/d"], foundOn: "s", depth: 0)
+    check(budget.budgetLeft == 2 && budget.next()?.url == "https://example.org/a" && budget.next()?.url == "https://example.org/b" && budget.next() == nil && budget.budgetLeft == 0,
+          "the page the crawl began with counts as the first of the limit")
+    budget.refund()
+    check(budget.budgetLeft == 1 && budget.next()?.url == "https://example.org/c", "a page that was not fetched gives its place back")
+    budget.markSeen("https://example.org/z#frag")
+    check(budget.hasSeen("https://example.org/z") && !budget.hasSeen("https://example.org/y"), "where a redirect ended is remembered")
+    budget.offer(["https://example.org/z"], foundOn: "s", depth: 0)
+    check(budget.pendingCount == 1, "and is not queued again")
+
+    var many = frontier("https://example.org/", CrawlLimits(maxPages: 200, maxDepth: 4, delay: 1))
+    many.offer((0..<6_000).map { "https://example.org/p\($0)" }, foundOn: "s", depth: 0)
+    check(many.pendingCount == CrawlFrontier.maxDiscovered - 1, "the queue stops growing at a fixed size: \(many.pendingCount)")
+
+    // The limits.
+    let clamped = CrawlLimits(maxPages: 100_000, maxDepth: 99, delay: 0, stayUnder: "docs").clamped()
+    check(clamped == CrawlLimits(maxPages: 200, maxDepth: 4, delay: 0.5, stayUnder: "/docs"), "nothing a setting says gets past the ceilings: \(clamped)")
+    check(CrawlLimits(maxPages: -5, maxDepth: 0, delay: .nan, stayUnder: "  ").clamped() == CrawlLimits(maxPages: 1, maxDepth: 1, delay: 1, stayUnder: nil),
+          "or under the floor")
+    check(CrawlLimits(maxPages: 5, maxDepth: 1, delay: 1, stayUnder: "/").clamped().stayUnder == nil, "the whole site is no scope")
+    check(CrawlLimits(delay: 1).wait(siteDelay: nil) == 1 && CrawlLimits(delay: 1).wait(siteDelay: 10) == 10 && CrawlLimits(delay: 1).wait(siteDelay: 0.1) == 1,
+          "the wait is the longer of the person's and the site's")
+    check(CrawlLimits(delay: 1).wait(siteDelay: 600) == CrawlLimits.longestSiteDelay && CrawlLimits(delay: 5).wait(siteDelay: 2) == 5
+            && CrawlLimits(delay: 1).wait(siteDelay: .infinity) == 1, "up to a point, and never forever")
+    check(CrawlFrontier.directory(of: "https://example.org/blog/post") == "/blog/" && CrawlFrontier.directory(of: "https://example.org/docs/") == "/docs/"
+            && CrawlFrontier.directory(of: "https://example.org") == "/" && CrawlFrontier.directory(of: "https://example.org/x") == "/",
+          "the section a page is in")
+
+    // What is sent and taken.
+    check(CrawlPolicy.isPage(contentType: "text/html; charset=utf-8") && CrawlPolicy.isPage(contentType: "application/xhtml+xml") && CrawlPolicy.isPage(contentType: nil)
+            && CrawlPolicy.isPage(contentType: ""), "web pages, and what does not say, are read")
+    check(!CrawlPolicy.isPage(contentType: "image/png") && !CrawlPolicy.isPage(contentType: "application/pdf") && !CrawlPolicy.isPage(contentType: "text/plain")
+            && !CrawlPolicy.isPage(contentType: "application/json"), "nothing else is")
+    check(CrawlPolicy.robotsProblem(status: 200) == nil && CrawlPolicy.robotsProblem(status: 404) == nil && CrawlPolicy.robotsProblem(status: 403) == nil,
+          "robots.txt that is there is read, and one that is not asks nothing")
+    check(CrawlPolicy.robotsProblem(status: 500)?.contains("500") == true && CrawlPolicy.robotsProblem(status: 503) != nil && CrawlPolicy.robotsProblem(status: 301) != nil,
+          "a server that cannot answer is not asked for more")
+    check(CrawlPolicy.userAgent(version: "4.1.1").hasPrefix("iTERMiNAL/4.1.1 (+https://") && CrawlPolicy.agentToken == "iTERMiNAL", "who is asking")
+
+    // What it keeps.
+    let first = PageExtractor.extract(html: "<title>One</title><a href='/a'>A</a><a href='/b'>B</a><img src='/i.png' alt='logo'><a href='/f.pdf'>report</a>", pageURL: "https://example.org/")
+    let second = PageExtractor.extract(html: "<title>Two</title><a href='/a'>A again</a><a href='/c'>C</a><img src='/i.png'><img src='/j.png'>", pageURL: "https://example.org/two")
+    var results = CrawlResults()
+    results.record(url: "https://example.org/", status: 200, note: "", depth: 0, foundOn: "", bytes: 1_200, milliseconds: 10, extracted: first)
+    results.record(url: "https://example.org/two", status: 200, note: "", depth: 1, foundOn: "https://example.org/", bytes: 900, milliseconds: 12, extracted: second)
+    results.record(url: "https://example.org/admin/", status: 0, note: "robots.txt asks that it is left alone", depth: 1, foundOn: "https://example.org/", bytes: 0, milliseconds: 0, extracted: nil)
+    results.record(url: "https://example.org/err", status: 500, note: "", depth: 1, foundOn: "https://example.org/", bytes: 0, milliseconds: 5, extracted: nil)
+    check(results.pages.count == 4 && results.fetchedCount == 3 && results.skippedCount == 1, "pages fetched, and pages left alone")
+    check(results.links.rows.map(\.url) == ["https://example.org/a", "https://example.org/b", "https://example.org/f.pdf", "https://example.org/c"],
+          "every link once, in the order found: \(results.links.rows.map(\.url))")
+    check(results.links.rows.first?.cells[4] == "2" && results.links.rows.first?.cells.last == "https://example.org/",
+          "with how often it came up across pages, and the first page it was found on: \(String(describing: results.links.rows.first?.cells))")
+    check(results.images.rows.map(\.url) == ["https://example.org/i.png", "https://example.org/j.png"] && results.images.rows.last?.cells.last == "https://example.org/two",
+          "images once, and where")
+    check(results.files.rows.map(\.url) == ["https://example.org/f.pdf"] && results.files.rows.allSatisfy { $0.canDownload }, "files, still downloadable")
+    check(results.links.columns.last == "Found on" && results.images.columns.last == "Found on" && results.links.rows.allSatisfy { $0.cells.count == results.links.columns.count },
+          "each list says where each address was found, in a column of its own")
+    let table = results.pagesTable()
+    check(table.columns == CrawlResults.pageColumns && table.rows.count == 4 && table.rows.allSatisfy { !$0.canDownload }, "the pages as a table, none of them downloads")
+    check(table.rows[0].cells[0] == "https://example.org/" && table.rows[0].cells[1] == "200" && table.rows[0].cells[2] == "One" && table.rows[0].cells[3] == "0"
+            && table.rows[0].cells[4] == "3" && table.rows[0].cells[5] == "1", "a page: address, status, title, depth, links, images: \(table.rows[0].cells)")
+    check(table.rows[2].cells[1] == "robots.txt asks that it is left alone" && table.rows[3].cells[1] == "500", "a page left alone says why, and an error says its status")
+    check(table.rows[1].cells[7] == "https://example.org/" && table.rows[0].cells[7] == "", "and where it was found")
+
+    var capped = CrawlResults()
+    let crowd = PageExtractor.extract(html: (0..<60).map { "<a href='/p\($0)'>x</a>" }.joined(), pageURL: "https://example.org/")
+    capped.record(url: "https://example.org/", status: 200, note: "", depth: 0, foundOn: "", bytes: 1, milliseconds: 1, extracted: crowd)
+    check(capped.links.rows.count == 60 && !capped.links.truncated, "a short list is kept whole")
+}
+
 // MARK: Keyboard shortcuts
 
 // The catalog is only worth showing if it is complete, and it cannot see the

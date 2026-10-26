@@ -135,6 +135,7 @@ final class ScreenshotRun {
         await scene("terminal-colors") { await self.terminalColors() }
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
+        await scene("extract-crawl") { await self.siteCrawl() }
         await scene("sftp-problems") { await self.remoteProblems() }
         await scene("sftp-shared") { await self.sharedSignIn() }
 
@@ -569,6 +570,90 @@ final class ScreenshotRun {
         }
         closePanels()
         return feedTaken
+    }
+
+    // MARK: The crawl
+
+    /// Lines in the sample site's request log, for what a stretch of the run
+    /// asked of it.
+    private func requestLog() -> [String] {
+        guard let fixtureLog, let text = try? String(contentsOfFile: fixtureLog, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    /// A crawl of the sample site from its article, with the limits the sheet
+    /// starts from. The pictures matter less than what the site saw: robots.txt
+    /// asked for before any page, the one page it asks crawlers to leave alone
+    /// never requested, and the pages one at a time.
+    private func siteCrawl() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.method = .get
+        model.urlText = "\(Self.site)/blog/ledger-notes"
+        model.headerFields = [HTTPHeaderField(name: "Accept", value: "text/html")]
+        model.responseTab = .extract
+        model.send(settings: settings)
+        _ = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+        let read = await ScreenshotMode.until(timeout: 20) {
+            extraction.extraction?.page != nil && extraction.pageURL.hasSuffix("/blog/ledger-notes")
+        }
+        guard read else {
+            say("crawl: the page was not read")
+            closePanels()
+            return false
+        }
+        ScreenshotMode.giveResponseRoom(in: window)
+        ScreenshotMode.giveResponseWidth(in: window)
+        await pause(1.0)
+
+        // The sheet first: what the crawl will do, before it has done anything.
+        let before = requestLog().count
+        extraction.proposeCrawl(settings: settings)
+        await pause(1.5)
+        guard let proposal = extraction.crawlProposal else {
+            say("crawl: no proposal was made")
+            closePanels()
+            return false
+        }
+        say("crawl: proposal for \(proposal.host): \(proposal.candidates) addresses on the page would be queued; "
+            + "up to \(proposal.limits.maxPages) pages, \(proposal.limits.maxDepth) deep, \(proposal.limits.delay) s apart; "
+            + "stays under \(proposal.directory) if asked; refusal \(proposal.refusal.debugDescription)")
+        say("crawl: requests the site saw while the sheet was open: \(requestLog().count - before)")
+        var taken = false
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-crawl-confirm", in: directory)
+        } else {
+            say("crawl: the sheet did not appear")
+        }
+
+        let crawler = extraction.crawler
+        let started = requestLog().count
+        extraction.confirmCrawl(limits: proposal.limits, settings: settings)
+        let finished = await ScreenshotMode.until(timeout: 120) { !crawler.isActive && !crawler.isIdle }
+        say("crawl: finished \(finished): \(crawler.phase)")
+        say("crawl: \(crawler.robotsNote)")
+        for page in crawler.results.pages {
+            say("crawl: page \(page.id) depth \(page.depth) status \(page.status) \(page.url)"
+                + (page.note.isEmpty ? "" : " — \(page.note)") + (page.foundOn.isEmpty ? "" : " (found on \(page.foundOn))"))
+        }
+        say("crawl: kept \(crawler.results.links.rows.count) links, \(crawler.results.images.rows.count) images, "
+            + "\(crawler.results.media.rows.count) media, \(crawler.results.files.rows.count) files")
+        let seen = requestLog().dropFirst(started)
+        say("crawl: the site saw \(seen.count) requests: \(seen.map { $0.split(separator: " ").dropFirst().prefix(2).joined(separator: " ") })")
+        await pause(1.0)
+        taken = capture("extract-crawl") && taken
+
+        crawler.list = .links
+        extraction.selection = []
+        await pause(0.8)
+        taken = capture("extract-crawl-links") && taken
+        closePanels()
+        return taken
     }
 
     // MARK: Colored output

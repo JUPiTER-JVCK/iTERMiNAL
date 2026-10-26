@@ -164,7 +164,8 @@ jobs:
           # and — the same server on the port Ollama uses — the stand-in for a
           # model that the assistant is pointed at.
           python3 scripts/screenshots/fixture_server.py \
-            --port 8765 --log "$requests" > "$RUNNER_TEMP/fixture.out" 2>&1 &
+            --port 8765 --log "$requests" --detail-log "$RUNNER_TEMP/requests-detail.log" \
+            > "$RUNNER_TEMP/fixture.out" 2>&1 &
           fixture=$!
           python3 scripts/screenshots/fixture_server.py \
             --port 11434 > "$RUNNER_TEMP/assistant.out" 2>&1 &
@@ -296,6 +297,7 @@ jobs:
 
           cp "$log" "$shots/app.log"
           cp "$requests" "$shots/requests.log"
+          cp "$RUNNER_TEMP/requests-detail.log" "$shots/requests-detail.log" || true
           echo "---- app log"
           cat "$log"
           if ! grep -q 'finished' "$log"; then

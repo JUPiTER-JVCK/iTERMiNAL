@@ -71,6 +71,9 @@ struct PreferencesArchive: Codable {
     /// one Mac, so it is not carried.
     var httpMaxDownloadMB: Int?
     var httpImagePreviews: Bool?
+    var httpCrawlPages: Int?
+    var httpCrawlDepth: Int?
+    var httpCrawlDelay: Double?
     /// Coloured command output. Optional: archives written before it existed
     /// still decode, and leave the setting as it is.
     var colorizeOutput: Bool?
@@ -124,6 +127,9 @@ struct PreferencesArchive: Codable {
         httpRecordDiscoveredLinks = settings.httpRecordDiscoveredLinks
         httpMaxDownloadMB = settings.httpMaxDownloadMB
         httpImagePreviews = settings.httpImagePreviews
+        httpCrawlPages = settings.httpCrawlPages
+        httpCrawlDepth = settings.httpCrawlDepth
+        httpCrawlDelay = settings.httpCrawlDelay
         colorizeOutput = settings.colorizeOutput
         colorizeListings = settings.colorizeListings
         colorizeManPages = settings.colorizeManPages
@@ -206,6 +212,9 @@ struct PreferencesArchive: Codable {
         if let httpRecordDiscoveredLinks { settings.httpRecordDiscoveredLinks = httpRecordDiscoveredLinks }
         if let httpMaxDownloadMB, [25, 100, 250, 1000].contains(httpMaxDownloadMB) { settings.httpMaxDownloadMB = httpMaxDownloadMB }
         if let httpImagePreviews { settings.httpImagePreviews = httpImagePreviews }
+        if let httpCrawlPages, CrawlLimits.pageChoices.contains(httpCrawlPages) { settings.httpCrawlPages = httpCrawlPages }
+        if let httpCrawlDepth, CrawlLimits.depthChoices.contains(httpCrawlDepth) { settings.httpCrawlDepth = httpCrawlDepth }
+        if let httpCrawlDelay, CrawlLimits.delayChoices.contains(httpCrawlDelay) { settings.httpCrawlDelay = httpCrawlDelay }
         if let colorizeOutput { settings.colorizeOutput = colorizeOutput }
         if let colorizeListings { settings.colorizeListings = colorizeListings }
         if let colorizeManPages { settings.colorizeManPages = colorizeManPages }

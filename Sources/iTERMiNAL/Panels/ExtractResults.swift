@@ -52,6 +52,8 @@ struct ExtractResults: View {
             }
         case .links:
             parts.append("Every link on the page. The ones that point to files can be saved, and are in Files too.")
+        case .crawledPages:
+            parts.append("The pages the crawl came to, in the order it reached them. One that robots.txt asks to be left alone is listed and was not fetched.")
         default:
             break
         }
@@ -66,7 +68,18 @@ struct ExtractResults: View {
         var badges: [String]
     }
 
+    /// A crawl's lists end in the page each address was found on; it is said in
+    /// a badge, as a path.
     private func summary(for row: ResultTable.Row) -> RowSummary {
+        var result = baseSummary(for: row)
+        if table.columns.last == "Found on", let foundOn = row.cells.last, !foundOn.isEmpty {
+            let path = URLComponents(string: foundOn).map { $0.percentEncodedPath.isEmpty ? "/" : $0.percentEncodedPath } ?? foundOn
+            result.badges.append("on " + path)
+        }
+        return result
+    }
+
+    private func baseSummary(for row: ResultTable.Row) -> RowSummary {
         let cells = row.cells
         func cell(_ index: Int) -> String { index < cells.count ? cells[index] : "" }
         func fileName(_ url: String) -> String {

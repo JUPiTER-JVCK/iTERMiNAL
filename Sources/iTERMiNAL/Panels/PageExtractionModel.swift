@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import UniformTypeIdentifiers
 
 /// Which list the extract view is showing.
@@ -10,6 +11,10 @@ enum ExtractSection: Hashable, Identifiable {
     /// The addresses found in a response that is not a page.
     case addresses
     case query
+    /// What a crawl of the site found, with its own lists inside.
+    case crawl
+    /// The pages a crawl came to, listed as the grid they are.
+    case crawledPages
 
     var id: String {
         switch self {
@@ -35,6 +40,8 @@ enum ExtractSection: Hashable, Identifiable {
         case .records: return "Records"
         case .addresses: return "Addresses"
         case .query: return "Query"
+        case .crawl: return "Crawl"
+        case .crawledPages: return "Crawled pages"
         }
     }
 
@@ -109,6 +116,17 @@ final class PageExtractionModel: ObservableObject {
     /// Small pictures for the Images list, when the person has turned them on.
     let previews = ImagePreviewLoader()
 
+    // Crawling.
+    let crawler = SiteCrawler()
+    @Published var crawlProposal: CrawlProposal?
+    private var crawlWatch: AnyCancellable?
+
+    init() {
+        // The crawl changes as it goes — a page at a time — and the chips and
+        // lists that show it are drawn from this model.
+        crawlWatch = crawler.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
     /// Set by the model that owns this one: open an address in the app's own
     /// browser panel, and put one in the request builder (and send it).
     var openInBrowser: ((String) -> Void)?
@@ -139,6 +157,7 @@ final class PageExtractionModel: ObservableObject {
         generation += 1
         phase = .idle
         previews.reset()
+        crawler.reset(keepingSite: URL(string: response.finalURL)?.host)
         selection = []
         filter = ""
         tableIndex = 0
@@ -204,6 +223,7 @@ final class PageExtractionModel: ObservableObject {
             if !result.links.isEmpty { chips.append(Chip(section: .addresses, title: "Addresses", count: result.links.rows.count)) }
         }
         if !result.languages.isEmpty { chips.append(Chip(section: .query, title: "Query", count: nil)) }
+        if !crawler.isIdle { chips.append(Chip(section: .crawl, title: "Crawl", count: crawler.results.pages.count)) }
         return chips
     }
 
@@ -381,6 +401,44 @@ final class PageExtractionModel: ObservableObject {
             maxBytes: Int64(settings.httpMaxDownloadMB) * 1_000_000, timeout: settings.httpRequestTimeout
         )
         showingDownloadProgress = true
+    }
+
+    // MARK: Crawling
+
+    /// Asks what a crawl from this page would do. Nothing is requested until the
+    /// person has seen it and said yes.
+    func proposeCrawl(settings: AppSettings) {
+        guard let page = extraction?.page, !crawler.isActive else { return }
+        let limits = CrawlLimits(
+            maxPages: settings.httpCrawlPages, maxDepth: settings.httpCrawlDepth, delay: settings.httpCrawlDelay
+        ).clamped()
+        guard var frontier = CrawlFrontier(start: pageURL, limits: limits) else {
+            crawlProposal = CrawlProposal(
+                startURL: pageURL, host: URL(string: pageURL)?.host ?? "", limits: limits, directory: "/", candidates: 0,
+                refusal: "This page's address can't be crawled from."
+            )
+            return
+        }
+        frontier.offer(page.links.rows.compactMap(\.url), foundOn: frontier.start, depth: 0)
+        crawlProposal = CrawlProposal(
+            startURL: frontier.start, host: URL(string: frontier.start)?.host ?? "", limits: limits,
+            directory: CrawlFrontier.directory(of: frontier.start), candidates: frontier.pendingCount,
+            refusal: DownloadPolicy.refusal(for: frontier.start, from: frontier.start)
+        )
+    }
+
+    func confirmCrawl(limits: CrawlLimits, settings: AppSettings) {
+        guard let page = extraction?.page, let response else { return }
+        crawlProposal = nil
+        let chosen = limits.clamped()
+        settings.httpCrawlPages = chosen.maxPages
+        settings.httpCrawlDepth = chosen.maxDepth
+        settings.httpCrawlDelay = chosen.delay
+        crawler.start(
+            page: page, pageURL: pageURL, status: response.statusCode, bytes: response.body.count,
+            milliseconds: Int(response.duration * 1_000), limits: chosen, settings: settings
+        )
+        select(.crawl)
     }
 
     // MARK: Saving the response itself

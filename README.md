@@ -921,7 +921,10 @@ in the transcript instead.
 The HTTP pane's response area has two tabs: **Body**, the response as it came,
 and **Extract**, which reads that one response into lists and tables. It works
 on what is already in hand: opening the tab requests nothing, and nothing in it
-follows a link by itself.
+follows a link by itself. What does reach out is something you ask for by name —
+**Fetch** on a row, **Download**, **Previews**, **Crawl…** — and each of them says
+what it will ask of whom before it does, or, for a preview, is off until you
+turn it on.
 
 **For a web page**, a row of chips opens each list — only the ones with
 something in them:
@@ -1011,11 +1014,53 @@ downloads' rules — no cookies or credentials, a `Referer` like a browser's,
 nothing aimed at your network, a redirect judged again — and a row that isn't
 fetched says why when you point at its frame.
 
-**What it never does.** It doesn't crawl: no list follows its links, and
-nothing is fetched except a row you chose to fetch or download. It doesn't
-guess at addresses, run a page's scripts (so what scripts draw isn't there — the
-Overview says so), or log in. The reading is lossy where HTML is: a page that
-puts its content in scripts has little in the response to read.
+**Crawling.** **Crawl…**, at the top right of the Extract tab for a web page,
+follows the page's links to the other pages of the same site and gathers what
+they hold into the lists above. A sheet comes first, and nothing is requested
+until you press Start: the site; how many pages (10 to 200, the one in hand
+counted); how deep (1 to 4 links from here); how long to wait between requests
+(half a second to five); and, if you like, to stay under the page's own folder.
+
+- **robots.txt comes first, and is obeyed.** It is read the way RFC 9309 says: the
+  group that names iTERMiNAL, or failing that the one for everyone; the longest
+  matching rule wins, and an allow beats a disallow of the same length; `*` and a
+  closing `$` work in patterns. A page it asks crawlers to leave alone is listed,
+  marked as left alone, and not fetched — and doesn't use up a place in the page
+  limit. A `Crawl-delay` longer than your wait is waited out, up to 30 seconds. A
+  robots.txt the server can't deliver (a 5xx, or a redirect off the site) stops the
+  crawl before it begins; one that isn't there (any 4xx) asks nothing, as the RFC
+  says.
+- **Only what the pages declare, on one site.** A link is followed only if it is
+  an address the page names, with the same scheme, host and port as the page the
+  crawl began on — exactly, so `www.` is another site — and inside the folder if
+  you chose that. A link to another site is listed and not followed. Nothing is
+  guessed, and no common path is tried.
+- **One page at a time**, with the wait between, so it never asks more of a site
+  than a person clicking quickly would. Nothing in it goes past the ceilings: 200
+  pages, 4 deep, half a second apart, and a queue of at most 5,000 addresses.
+- **Web pages only.** An address that ends like a picture, an archive, a document
+  or a script isn't requested, and any other whose response says it isn't a web
+  page is stopped at the headers, before its body is taken. No page is read past
+  2 MB, and a redirect within the site is followed while one that leaves it is
+  noted and not followed.
+- **It says who is asking**: `User-Agent: iTERMiNAL/<version>
+  (+https://github.com/JUPiTER-JVCK/iTERMiNAL)`. Each request stands alone — no
+  cookies, no credentials, nothing carried from one to the next — and the
+  headers the page was first fetched with are not sent.
+- **What it found** is the crawl's own tab: the pages (address, status, title,
+  depth, how many links and images, size, and the page that linked to it), and
+  the links, images, video and audio, and files found on any of them, each once
+  with the first page it was found on, in the same lists as above — so Filter,
+  Export and Download work on them. **Stop** ends it after the request in flight,
+  and what was found stays. A crawl is kept while you look at other pages of the
+  same site and dropped when you fetch a page of another, and it is not saved
+  with a layout or in a snapshot.
+
+**What it never does.** Nothing is fetched except a row you chose to fetch or
+download, a preview you turned on, or a crawl you started from its sheet. It
+doesn't guess at addresses, run a page's scripts (so what scripts draw isn't
+there — the Overview says so), or log in. The reading is lossy where HTML is: a
+page that puts its content in scripts has little in the response to read.
 
 Nothing here is saved with a layout or in a snapshot, and the download folder
 is a path on this Mac, so it isn't in exported settings either.
