@@ -962,12 +962,15 @@ Download.
   insecure one.
 - **A page can't aim this app at your network.** Addresses come from the page
   you fetched, so an address on this Mac or a network that isn't the internet —
-  loopback, private and link-local ranges, `.local` and one-word names, and
-  unusual spellings of an IP address — is refused unless the page itself came
-  from there. Names are judged as written, not looked up, so a public name
-  that someone has pointed at a private address is not caught. Plain `http://`
-  is used only for this Mac itself, as everywhere in the HTTP client, and a
-  redirect is judged by the same rules as the first address.
+  loopback, private and link-local ranges, `.local` and one-word names — is
+  refused unless the page itself came from there, in whatever spelling:
+  `localhost.`, `127.1`, `0x7f000001`, `[0::1]` and `[::ffff:7f00:1]` are all
+  this Mac, and an IPv6 address is judged by the address it comes to (an IPv4
+  address inside one by that), not by how it begins. Names are judged as
+  written, not looked up, so a public name that someone has pointed at a
+  private address is not caught. Plain `http://` is used only for this Mac
+  itself, as everywhere in the HTTP client, and a redirect is judged by the
+  same rules as the first address.
 
 **What it never does.** It doesn't crawl: no list follows its links, and
 nothing is fetched except a row you chose to fetch or download. It doesn't
