@@ -2315,6 +2315,30 @@ do {
     check(fails("a:hover")?.contains(":hover") == true, "and a state that needs a browser says so")
     check(fails("a::text")?.contains("belong at the end") == true, "a pseudo-element in a selector points at where it goes")
     check(fails("a b )") != nil && fails("a,") != nil, "dangling pieces")
+
+    // A typed selector against a page built to be slow: every way of choosing
+    // the ancestors is tried. The step budget ends it, and says it did. (A
+    // small budget here: the real one is a few seconds of release-build work,
+    // which a build without optimisation takes far longer over.)
+    let smallBudget = 300_000
+    let towerDepth = 300
+    let hostileTree = HTMLParser.parse(String(repeating: "<div>", count: towerDepth) + "x" + String(repeating: "</div>", count: towerDepth))
+    let slowSelector = try! CSSSelector.parse(".absent div div div div div div div div", stepLimit: smallBudget)
+    let slowFound = slowSelector.select(in: hostileTree)
+    check(slowFound.isEmpty && slowSelector.exhausted, "a selector that would try every combination stops at its budget and says so")
+    let quickSelector = try! CSSSelector.parse("div > div > div", stepLimit: smallBudget)
+    check(quickSelector.select(in: hostileTree).count == towerDepth - 2 && !quickSelector.exhausted, "an ordinary selector on the same page finishes, and does not trip it")
+    let wideList = HTMLParser.parse("<ul>" + String(repeating: "<li>x</li>", count: 3_000) + "</ul>")
+    let siblingSelector = try! CSSSelector.parse(".absent ~ li ~ li ~ li ~ li ~ li ~ li ~ li ~ li", stepLimit: smallBudget)
+    check(siblingSelector.select(in: wideList).isEmpty && siblingSelector.exhausted, "sibling combinators over a wide list are counted as well")
+    check(try! CSSSelector.parse("li:nth-child(2)", stepLimit: smallBudget).select(in: wideList).count == 1, "and a wide list is no trouble for what people write")
+    let savedLimit = QueryRunner.cssStepLimit
+    QueryRunner.cssStepLimit = smallBudget
+    let hostileDocument = QueryDocument(body: Data((String(repeating: "<div>", count: towerDepth) + "x").utf8), contentType: "text/html", url: "https://example.com/")
+    var runnerMessage: String?
+    do { _ = try QueryRunner.run(.css, query: ".absent div div div div div div div div", output: .text, in: hostileDocument) } catch { runnerMessage = (error as? QueryError)?.message }
+    QueryRunner.cssStepLimit = savedLimit
+    check(runnerMessage?.contains("takes too long") == true, "the query box reports it as an error, in words")
 }
 
 // MARK: Results: export and file names

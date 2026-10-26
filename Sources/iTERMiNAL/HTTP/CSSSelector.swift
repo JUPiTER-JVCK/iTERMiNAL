@@ -27,24 +27,49 @@ struct CSSSelectorError: LocalizedError, Equatable {
 struct CSSSelector {
     fileprivate let groups: [Complex]
 
-    static func parse(_ text: String) throws -> CSSSelector {
+    /// A selector can be written, or a page built, so that matching takes longer
+    /// than anyone will wait: `.x div div div div div div div div` on a page
+    /// nested a few hundred deep tries every way of choosing the ancestors, and
+    /// a typed selector is never the page's to choose, but the page is. Matching
+    /// counts its steps and gives up past `stepLimit`; what it found by then is
+    /// not the answer, and `exhausted` says so. A few seconds of work in a
+    /// release build, and far more than anything people write needs.
+    static let defaultStepLimit = 20_000_000
+
+    let stepLimit: Int
+
+    private final class Budget {
+        var steps = 0
+        var exhausted = false
+    }
+
+    private let budget = Budget()
+
+    /// Whether the last `select` stopped for lack of steps rather than because
+    /// it had looked everywhere.
+    var exhausted: Bool { budget.exhausted }
+
+    static func parse(_ text: String, stepLimit: Int = defaultStepLimit) throws -> CSSSelector {
         var parser = SelectorParser(Array(text))
         let groups = try parser.parseList(topLevel: true)
-        return CSSSelector(groups: groups)
+        return CSSSelector(groups: groups, stepLimit: stepLimit)
     }
 
     /// Whether `node` is matched by any of the selector's comma-separated parts.
     func matches(_ node: HTMLNode) -> Bool {
         guard node.kind == .element else { return false }
-        return groups.contains { Self.match(node, $0, $0.parts.count - 1) }
+        return groups.contains { match(node, $0, $0.parts.count - 1) }
     }
 
     /// Every element under `root` (not `root` itself) that matches, in document
     /// order, up to `limit`.
     func select(in root: HTMLNode, limit: Int = Int.max) -> [HTMLNode] {
+        budget.steps = 0
+        budget.exhausted = false
         var found: [HTMLNode] = []
         var stack: [HTMLNode] = root.children.reversed()
         while let node = stack.popLast() {
+            if budget.exhausted { break }
             guard node.kind == .element else { continue }
             if matches(node) {
                 found.append(node)
@@ -120,7 +145,10 @@ struct CSSSelector {
 
     // MARK: Matching
 
-    private static func match(_ node: HTMLNode, _ complex: Complex, _ index: Int) -> Bool {
+    private func match(_ node: HTMLNode, _ complex: Complex, _ index: Int) -> Bool {
+        budget.steps += 1
+        if budget.steps > stepLimit { budget.exhausted = true }
+        if budget.exhausted { return false }
         let part = complex.parts[index]
         guard matches(node, part.compound) else { return false }
         guard index > 0 else { return true }
@@ -148,8 +176,10 @@ struct CSSSelector {
         }
     }
 
-    private static func previousElement(of node: HTMLNode) -> HTMLNode? {
+    private func previousElement(of node: HTMLNode) -> HTMLNode? {
         guard let parent = node.parent else { return nil }
+        // Finding it walks the siblings, and `a ~ a ~ a` walks them over and over.
+        budget.steps += parent.children.count
         var previous: HTMLNode?
         for child in parent.children {
             if child === node { return previous }
@@ -158,7 +188,7 @@ struct CSSSelector {
         return nil
     }
 
-    private static func matches(_ node: HTMLNode, _ compound: Compound) -> Bool {
+    private func matches(_ node: HTMLNode, _ compound: Compound) -> Bool {
         if let tag = compound.tag, tag != node.tag { return false }
         if let id = compound.id, node.attribute("id") != id { return false }
         if !compound.classes.isEmpty {
@@ -171,7 +201,7 @@ struct CSSSelector {
         return true
     }
 
-    private static func matches(_ node: HTMLNode, _ condition: AttributeCondition) -> Bool {
+    private func matches(_ node: HTMLNode, _ condition: AttributeCondition) -> Bool {
         guard var actual = node.attribute(condition.name) else { return false }
         var expected = condition.value
         if condition.op == .exists { return true }
@@ -192,12 +222,13 @@ struct CSSSelector {
         }
     }
 
-    private static func siblings(of node: HTMLNode, sameType: Bool) -> [HTMLNode] {
+    private func siblings(of node: HTMLNode, sameType: Bool) -> [HTMLNode] {
         guard let parent = node.parent else { return [node] }
+        budget.steps += parent.children.count
         return parent.children.filter { $0.kind == .element && (!sameType || $0.tag == node.tag) }
     }
 
-    private static func matches(_ node: HTMLNode, _ pseudo: Pseudo) -> Bool {
+    private func matches(_ node: HTMLNode, _ pseudo: Pseudo) -> Bool {
         switch pseudo {
         case .firstChild: return siblings(of: node, sameType: false).first === node
         case .lastChild: return siblings(of: node, sameType: false).last === node
@@ -228,7 +259,10 @@ struct CSSSelector {
         case .not(let compounds):
             return !compounds.contains { matches(node, $0) }
         case .has(let complexes):
-            return node.descendantElements().contains { candidate in
+            let below = node.descendantElements()
+            // Looking at each of them is work too, and `:has` inside `:has` multiplies it.
+            budget.steps += below.count
+            return below.contains { candidate in
                 complexes.contains { match(candidate, $0, $0.parts.count - 1) }
             }
         case .contains(let needle):
@@ -236,7 +270,7 @@ struct CSSSelector {
         }
     }
 
-    private static func position(of node: HTMLNode, in list: [HTMLNode], fromEnd: Bool) -> Int? {
+    private func position(of node: HTMLNode, in list: [HTMLNode], fromEnd: Bool) -> Int? {
         guard let index = list.firstIndex(where: { $0 === node }) else { return nil }
         return fromEnd ? list.count - index : index + 1
     }

@@ -90,6 +90,10 @@ struct QueryOutcome: Equatable {
 }
 
 enum QueryRunner {
+    /// How many steps a CSS selector may take over a page before the query is
+    /// given up. A variable only so the logic check can make it small.
+    static var cssStepLimit = CSSSelector.defaultStepLimit
+
     static let maxRows = 5_000
     /// Cells hold at most this much. The row still says it found more.
     static let maxCell = 20_000
@@ -132,8 +136,11 @@ enum QueryRunner {
     private static func runCSS(_ query: String, output: QueryOutput, in document: QueryDocument) throws -> QueryOutcome {
         let (selectorText, effective) = splitPseudoElement(query, default: output)
         let selector: CSSSelector
-        do { selector = try CSSSelector.parse(selectorText) } catch { throw QueryError(message: "Selector: \(error.localizedDescription)") }
+        do { selector = try CSSSelector.parse(selectorText, stepLimit: cssStepLimit) } catch { throw QueryError(message: "Selector: \(error.localizedDescription)") }
         let nodes = selector.select(in: document.tree, limit: maxRows + 1)
+        if selector.exhausted {
+            throw QueryError(message: "That selector takes too long on this page: it is trying every way of choosing the elements between its parts. Use fewer parts, or `>` between them.")
+        }
         return nodeTable(nodes.map { XPathValue.node($0) }, output: effective, document: document)
     }
 
