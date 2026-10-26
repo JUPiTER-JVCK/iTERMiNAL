@@ -71,6 +71,13 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // Only in the build the Screenshots workflow makes: the folders start
+        // shut, and the capture cannot click them open.
+        #if SCREENSHOTS
+        .onReceive(NotificationCenter.default.publisher(for: .screenshotsExpandSidebar)) { _ in
+            expandedWorkspaces = Set(store.workspaces.map(\.id))
+        }
+        #endif
     }
 
     // MARK: Header

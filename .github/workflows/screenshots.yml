@@ -3,13 +3,11 @@ name: Screenshots
 # The README's pictures, taken from the real app rather than drawn.
 #
 # The app is built with its capture mode compiled in (SCREENSHOTS — no shipped
-# build defines it), launched against a sample project and a small local web
-# server, and writes PNGs of its own windows (Sources/iTERMiNAL/App/
-# ScreenshotMode.swift). They are uploaded as an artifact; nothing here
-# publishes anything. To update the README, copy them from the artifact into
-# docs/images/ (workspace, http-client, site-explorer, split-panes and
-# appearance come from main, http-request, http-explore, splits and
-# settings-appearance).
+# build defines it), launched against a sample project, a small local web
+# server and a stand-in for an AI model, and writes PNGs of its own windows
+# (Sources/iTERMiNAL/App/Screenshot*.swift). They are uploaded as an artifact;
+# nothing here publishes anything. To update the README, copy them from the
+# artifact into docs/images/ — each file is named for what it shows.
 on:
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
@@ -21,7 +19,15 @@ on:
     paths:
       - .github/workflows/screenshots.yml
       - scripts/screenshots/**
-      - Sources/iTERMiNAL/App/ScreenshotMode.swift
+      - Sources/iTERMiNAL/App/Screenshot*.swift
+  # While the pictures are being worked on: a push to this branch that touches
+  # the capture. Taken out again when the work is done.
+  push:
+    branches: [claude/macos-terminal-design-planning-rwuvtw]
+    paths:
+      - .github/workflows/screenshots.yml
+      - scripts/screenshots/**
+      - Sources/iTERMiNAL/App/Screenshot*.swift
 
 permissions:
   contents: read
@@ -30,7 +36,10 @@ jobs:
   screenshots:
     name: Screenshots (macOS)
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 50
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
       - uses: actions/checkout@v5
 
@@ -56,12 +65,73 @@ jobs:
           echo "$(dirname "$binary")" >> "$GITHUB_PATH"
           "$binary" --version
 
+      # superfile and btop are in the pictures, and so are the icons superfile
+      # draws, which is what the symbols font is for. They are the same ones
+      # the shipped app bundles, from the same scripts and pins. btop is built
+      # from source, which is slow, so it is cached on the same key build.yml
+      # uses: a run on a branch that has not built it yet restores main's.
+      - name: Derive the btop cache key
+        id: pins
+        run: |
+          set -euo pipefail
+          . scripts/tools.env
+          script_hash=$(shasum -a 256 scripts/build-btop.sh | cut -c1-12)
+          echo "key=btop-${BTOP_VERSION}-${BTOP_COMMIT}-arm64-gcc15-${script_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore built btop
+        id: btop-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: btop-out
+          key: ${{ steps.pins.outputs.key }}
+
+      # A btop that will not build costs that picture, not the others: the
+      # app skips what it cannot run, and the log says so.
+      - name: Build btop
+        id: btop-build
+        if: steps.btop-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          brew install gcc@15 make
+          scripts/build-btop.sh btop-out
+
+      - name: Save built btop
+        if: steps.btop-cache.outputs.cache-hit != 'true' && steps.btop-build.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: btop-out
+          key: ${{ steps.pins.outputs.key }}
+
+      - name: Bundle the tools and the symbols font
+        run: |
+          set -euo pipefail
+          . scripts/tools.env
+          tools=Vendor/Tools
+          mkdir -p "$tools/licenses"
+
+          scripts/fetch-superfile.sh "$tools"
+          manifest="\"superfile\":\"$SUPERFILE_VERSION\""
+          if [ -x btop-out/btop ]; then
+            cp btop-out/btop "$tools/btop"
+            codesign --force --sign - "$tools/btop"
+            chmod 755 "$tools/btop"
+            cp btop-out/licenses/btop-LICENSE.txt "$tools/licenses/btop-LICENSE.txt"
+            manifest="\"btop\":\"$BTOP_VERSION\",$manifest"
+          else
+            echo "::warning::no btop in this run, so there is no btop picture"
+          fi
+          printf '{%s}\n' "$manifest" > "$tools/manifest.json"
+          cat "$tools/manifest.json"
+          ls -la "$tools"
+
+          scripts/fetch-symbols-font.sh Vendor/Fonts
+          ls -la Vendor/Fonts
+
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # No bundled btop, superfile or fonts: the app builds and runs without
-      # them (its copy phase says so and carries on), and none of the pictures
-      # are of those. This arch only — the runner's own — to keep it quick.
+      # This arch only — the runner's own — to keep it quick.
       - name: Build with capture mode
         run: |
           set -euo pipefail
@@ -78,7 +148,7 @@ jobs:
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) SCREENSHOTS' \
             build
 
-      # One step, so the site and the app live and die together. The app's exit
+      # One step, so the sites and the app live and die together. The app's exit
       # status is reported, not fatal, so its log is always printed and whatever
       # pictures it got to are always uploaded. Actions starts bash with -e, so
       # that has to be switched off here — `set -uo pipefail` alone leaves it on,
@@ -95,39 +165,48 @@ jobs:
           mkdir -p "$shots"
           scripts/screenshots/prepare-demo.sh "$projects" "$zdot"
 
+          # The sample site, whose requests are logged for a terminal to show,
+          # and — the same server on the port Ollama uses — the stand-in for a
+          # model that the assistant is pointed at.
           python3 scripts/screenshots/fixture_server.py \
             --port 8765 --log "$requests" > "$RUNNER_TEMP/fixture.out" 2>&1 &
           fixture=$!
-          trap 'kill "$fixture" 2>/dev/null || true' EXIT
-          ready=0
-          for _ in $(seq 1 30); do
-            if curl -fsS -o /dev/null http://localhost:8765/robots.txt; then
-              ready=1
-              break
+          python3 scripts/screenshots/fixture_server.py \
+            --port 11434 > "$RUNNER_TEMP/assistant.out" 2>&1 &
+          assistant=$!
+          trap 'kill "$fixture" "$assistant" 2>/dev/null || true' EXIT
+          for port in 8765 11434; do
+            ready=0
+            for _ in $(seq 1 30); do
+              if curl -fsS -o /dev/null "http://localhost:$port/robots.txt"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" != 1 ]; then
+              echo "::error::the sample server on port $port did not start"
+              cat "$RUNNER_TEMP/fixture.out" "$RUNNER_TEMP/assistant.out"
+              exit 1
             fi
-            sleep 1
           done
-          if [ "$ready" != 1 ]; then
-            echo "::error::the sample site did not start"
-            cat "$RUNNER_TEMP/fixture.out"
-            exit 1
-          fi
 
           # New terminals start in the sample project. The request log starts
           # empty, so the terminal that shows it shows only this run.
           defaults write com.jupiterjvck.iterminal defaultDirectory "$projects/hello-api"
           : > "$requests"
           # A sleeping display draws nothing.
-          caffeinate -dimsu -t 900 &
+          caffeinate -dimsu -t 1200 &
           # What the app is about to run on, for when a picture comes out wrong.
           sw_vers
           system_profiler SPDisplaysDataType 2>/dev/null | head -30
 
           # Run by its path, not with `open`: the environment below reaches the
           # app and, through it, the shells it starts. It still comes to the
-          # front, which is what makes its window key.
+          # front, which is what makes its window key. HISTFILE is what the
+          # app reads the history it suggests from; the shells set their own.
           app="$PWD/build/Build/Products/Release/iTERMiNAL.app/Contents/MacOS/iTERMiNAL"
-          env SHELL=/bin/zsh ZDOTDIR="$zdot" \
+          env SHELL=/bin/zsh ZDOTDIR="$zdot" HISTFILE="$zdot/sample_history" \
             ITERMINAL_SCREENSHOT_DIR="$shots" \
             ITERMINAL_DEMO_DIR="$projects/hello-api" \
             ITERMINAL_FIXTURE_LOG="$requests" \
@@ -135,7 +214,7 @@ jobs:
           pid=$!
 
           status=timeout
-          for _ in $(seq 1 300); do
+          for _ in $(seq 1 900); do
             if ! kill -0 "$pid" 2>/dev/null; then
               wait "$pid"
               status=$?

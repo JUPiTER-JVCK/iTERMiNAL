@@ -45,6 +45,28 @@ unsetopt BEEP
 HISTFILE=/dev/null
 EOF
 
+# What the composer suggests from, and the landing screen lists as recent: the
+# app reads the file HISTFILE names, which the workflow points here, so none of
+# it is whatever history the machine has. Oldest first, as a history file is.
+cat > "$zdotdir/sample_history" <<'EOF'
+git status
+git pull --rebase
+git checkout -b feature/pagination
+git add -A
+git commit -m "Paginate /api/users"
+git push -u origin feature/pagination
+git checkout main
+git merge --no-ff feature/pagination
+git tag -a v0.3.0 -m "v0.3.0"
+docker build -t hello-api:0.3.0 deploy
+docker compose up -d
+kubectl get pods -n hello-api
+curl -i localhost:8765/api/health
+git log --oneline --graph --decorate -n 15
+curl -s localhost:8765/api/users | python3 -m json.tool
+make test
+EOF
+
 # ---- the project ------------------------------------------------------------
 
 cd "$repo"
