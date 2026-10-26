@@ -138,7 +138,7 @@ enum SessionLaunch {
                 SSHControlSocket.removeStale(controlPath)
                 args.append(contentsOf: SSHControlSocket.masterArguments(path: controlPath))
             }
-            if let remoteCommand = startupCommand(for: connection) {
+            if let remoteCommand = connection.startupCommand {
                 // -t forces a TTY so the login shell behaves interactively.
                 args.append("-t")
                 args.append(connection.destination)
@@ -177,18 +177,6 @@ enum SessionLaunch {
             environment: environment(),
             initialDirectory: NSHomeDirectory()
         ))
-    }
-
-    /// `cd <path> && exec $SHELL -l` when the connection names a start
-    /// directory, so the remote session opens where the user expects.
-    private static func startupCommand(for connection: SSHConnection) -> String? {
-        guard let path = connection.initialPath?.trimmingCharacters(in: .whitespaces),
-              !path.isEmpty else { return nil }
-        return "cd \(singleQuoted(path)) && exec \\$SHELL -l"
-    }
-
-    private static func singleQuoted(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private static func substitutePlaceholders(_ command: String, _ connection: SSHConnection) -> String {

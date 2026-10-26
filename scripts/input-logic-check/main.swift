@@ -2161,6 +2161,28 @@ do {
           "no command offered contains a line break, so typing one into a terminal cannot run it")
 }
 
+// MARK: Remote start directory
+
+// A saved host's start directory is how a terminal to it opens somewhere other
+// than the home folder. The command is run by the host's shell, with nothing of
+// this Mac's in between: the first version had a backslash before $SHELL, and
+// the host was asked to run a program called "$SHELL".
+do {
+    func command(_ path: String?) -> String? {
+        SSHConnection(name: "h", host: "h.example.com", username: "u", initialPath: path).startupCommand
+    }
+    check(command(nil) == nil && command("") == nil && command("   ") == nil, "no start directory, no command")
+    check(command("/srv/app") == "cd '/srv/app' && exec $SHELL -l", "a start directory: \(String(describing: command("/srv/app")))")
+    check(command("/srv/app")?.contains("\\") == false, "and nothing in it is escaped for a shell that is not there")
+    check(command(" /srv/app ") == "cd '/srv/app' && exec $SHELL -l", "surrounding spaces are not part of the path")
+    check(command("~/code/my app") == "cd ~/'code/my app' && exec $SHELL -l", "a path under the home folder keeps its ~ outside the quotes")
+    check(command("~") == "cd ~ && exec $SHELL -l", "and so does the home folder itself")
+    check(command("~other/x") == "cd '~other/x' && exec $SHELL -l", "another account's home is not expanded: it is just a name")
+    check(command("/a'b") == "cd '/a'\\''b' && exec $SHELL -l", "a quote in the path is closed, escaped and opened again")
+    check(command("/x'; rm -rf ~; echo '") == "cd '/x'\\''; rm -rf ~; echo '\\''' && exec $SHELL -l",
+          "nothing in a start directory can end the command and begin another")
+}
+
 // MARK: Shared sign-in (SSH control socket)
 
 // A host that wants a password is browsed through the connection a terminal tab
