@@ -106,6 +106,9 @@ final class PageExtractionModel: ObservableObject {
     @Published var showingDownloadProgress = false
     let downloader = AssetDownloader()
 
+    /// Small pictures for the Images list, when the person has turned them on.
+    let previews = ImagePreviewLoader()
+
     /// Set by the model that owns this one: open an address in the app's own
     /// browser panel, and put one in the request builder (and send it).
     var openInBrowser: ((String) -> Void)?
@@ -135,6 +138,7 @@ final class PageExtractionModel: ObservableObject {
         document = nil
         generation += 1
         phase = .idle
+        previews.reset()
         selection = []
         filter = ""
         tableIndex = 0

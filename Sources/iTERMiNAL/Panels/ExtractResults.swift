@@ -22,6 +22,9 @@ struct ExtractResults: View {
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if section == .images, settings.httpImagePreviews {
+                ImagePreviewNote(loader: extraction.previews, theme: theme)
+            }
             if rows.isEmpty {
                 Text(table.rows.isEmpty ? "Nothing here." : "Nothing matches the filter.")
                     .font(.system(size: 12))
@@ -114,6 +117,10 @@ struct ExtractResults: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isSelected ? "Deselect" : "Select")
+            }
+            if section == .images, settings.httpImagePreviews, row.canDownload, let address = row.url {
+                ImagePreviewThumb(loader: extraction.previews, address: address, theme: theme)
+                    .onAppear { extraction.previews.request(address, pageURL: extraction.pageURL) }
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(text.title)
@@ -269,6 +276,16 @@ struct ExtractResults: View {
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary)
                 .monospacedDigit()
+
+            if section == .images {
+                Toggle(isOn: $settings.httpImagePreviews) {
+                    Label("Previews", systemImage: "photo")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .help("Show a small picture beside each image. Each one is fetched from the site that hosts it, so this is off until you turn it on.")
+            }
 
             Spacer(minLength: 0)
 

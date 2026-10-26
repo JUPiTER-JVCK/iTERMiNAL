@@ -2940,6 +2940,59 @@ do {
     check(DownloadPolicy.referer(page: "https://a.example/x", target: "http://127.0.0.1/i.png") == nil && DownloadPolicy.referer(page: "not a url", target: "https://a.example/") == nil, "nothing from a secure page to an insecure one, or from a page that is not an address")
 }
 
+// MARK: Extract: image previews
+
+// A preview is a request to the site that hosts the picture, made because a
+// page named it. It follows the download rules, is capped, and refuses what it
+// would only waste time on.
+do {
+    let internet = "https://news.example.org/post/1"
+    let local = "http://localhost:3000/post/1"
+    func decide(_ address: String, page: String = internet, requested: Int = 0) -> ImagePreviewPolicy.Decision {
+        ImagePreviewPolicy.decide(address: address, pageURL: page, alreadyRequested: requested)
+    }
+    func skipped(_ decision: ImagePreviewPolicy.Decision) -> String? {
+        if case .skip(let reason) = decision { return reason }
+        return nil
+    }
+
+    check(decide("https://cdn.example.org/a.png") == .fetch, "a picture on the internet is fetched for a preview")
+    check(skipped(decide("http://127.0.0.1:8080/a.png"))?.contains("can't make this app fetch") == true,
+          "a page from the internet cannot aim a preview at this Mac")
+    check(skipped(decide("https://192.168.1.1/a.png")) != nil && skipped(decide("https://printer.local/a.png")) != nil,
+          "nor at the network it is on")
+    check(skipped(decide("https://[::ffff:127.0.0.1]/a.png")) != nil && skipped(decide("https://2130706433/a.png")) != nil,
+          "in any spelling of an address")
+    check(skipped(decide("http://cdn.example.net/a.png"))?.contains("plain http") == true, "plain http is only for this Mac")
+    check(decide("http://localhost:3000/img/a.png", page: local) == .fetch, "a local page's own pictures are fetched")
+    check(decide("https://192.168.1.20/a.png", page: local) == .fetch, "a local page may name others on its network, over https")
+    check(skipped(decide("ftp://example.org/a.png")) != nil && skipped(decide("data:image/png;base64,AAAA")) != nil
+            && skipped(decide("not an address")) != nil, "only http and https addresses")
+    check(decide("https://cdn.example.org/a.png", requested: ImagePreviewPolicy.perResponse - 1) == .fetch, "the last one that fits is fetched")
+    check(skipped(decide("https://cdn.example.org/a.png", requested: ImagePreviewPolicy.perResponse))?.contains("first \(ImagePreviewPolicy.perResponse)") == true,
+          "and past the cap, none is, and the reason says why")
+    check(ImagePreviewPolicy.perResponse <= 100 && ImagePreviewPolicy.concurrency <= 3 && ImagePreviewPolicy.maxBytes <= 10_000_000,
+          "the caps are small")
+
+    func refused(_ type: String?) -> String? { ImagePreviewPolicy.refusal(contentType: type) }
+    for fine in ["image/png", "IMAGE/JPEG", "image/webp; charset=binary", " image/gif ", "application/octet-stream", "binary/octet-stream", nil, ""] {
+        check(refused(fine) == nil, "a response typed \(fine.debugDescription) may be a picture")
+    }
+    check(refused("image/svg+xml") == "SVG isn't previewed" && refused("image/svg+xml; charset=utf-8") == "SVG isn't previewed",
+          "SVG is a document, and is not drawn")
+    check(refused("text/html; charset=utf-8")?.contains("text/html") == true, "a page of text is not a picture")
+    check(refused("application/json") != nil && refused("video/mp4") != nil, "nor is anything else")
+
+    check(ImagePreviewPolicy.withinPixelLimit(width: 4000, height: 3000), "twelve megapixels is decoded")
+    check(ImagePreviewPolicy.withinPixelLimit(width: 8000, height: 5000), "and so is exactly forty")
+    check(!ImagePreviewPolicy.withinPixelLimit(width: 8001, height: 5000), "one pixel more is not")
+    check(!ImagePreviewPolicy.withinPixelLimit(width: 40_000, height: 40_000), "a bitmap of gigabytes is not")
+    check(!ImagePreviewPolicy.withinPixelLimit(width: Int.max, height: Int.max) && !ImagePreviewPolicy.withinPixelLimit(width: Int.max, height: 2),
+          "and the sides cannot be made to overflow")
+    check(!ImagePreviewPolicy.withinPixelLimit(width: 0, height: 10) && !ImagePreviewPolicy.withinPixelLimit(width: 10, height: -1),
+          "a picture with no size is not one")
+}
+
 // MARK: Keyboard shortcuts
 
 // The catalog is only worth showing if it is complete, and it cannot see the

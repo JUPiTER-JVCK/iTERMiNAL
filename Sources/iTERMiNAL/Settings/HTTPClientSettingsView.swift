@@ -60,6 +60,11 @@ struct HTTPClientSettingsView: View {
                     Text("1 GB").tag(1000)
                 }
 
+                Toggle("Show image previews in Extract", isOn: $settings.httpImagePreviews)
+                Text("Previews put a small picture beside each address in the Images list. Each is a request to the site that hosts the image, made as you scroll to its row — at most \(ImagePreviewPolicy.perResponse) for a page, a few at a time, and none larger than \(ImagePreviewPolicy.maxBytes / 1_000_000) MB. They follow the same rules as downloads below, and are decoded by the system's image code, so they start off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text("Extract → Download saves the images, video, audio and files a page names — only the ones you pick, after showing you which sites and which folder. Files go in a folder per site, never over one that is there, marked as downloaded from the web so macOS asks before opening anything that could run. Requests carry no cookies, no credentials and none of the headers the page was fetched with, and a redirect to somewhere this app would not go is refused. A page from the internet cannot make this app fetch from this Mac or its network.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

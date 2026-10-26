@@ -1001,6 +1001,16 @@ Download.
   itself, as everywhere in the HTTP client, and a redirect is judged by the
   same rules as the first address.
 
+**Previews.** The Images list can show a small picture beside each address —
+the **Previews** button beside the filter, or Settings → HTTP Client. They start
+off: a picture is a request to the site that hosts it, which you didn't type,
+and it is decoded by the system's image code, as Quick Look would. Turned on, a
+picture is fetched as you scroll to its row, three at a time, for at most 60
+pictures a page, none over 5 MB or 40 megapixels, and not SVG. The rules are
+downloads' rules — no cookies or credentials, a `Referer` like a browser's,
+nothing aimed at your network, a redirect judged again — and a row that isn't
+fetched says why when you point at its frame.
+
 **What it never does.** It doesn't crawl: no list follows its links, and
 nothing is fetched except a row you chose to fetch or download. It doesn't
 guess at addresses, run a page's scripts (so what scripts draw isn't there — the

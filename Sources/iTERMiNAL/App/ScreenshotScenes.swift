@@ -412,7 +412,26 @@ final class ScreenshotRun {
         let content = page.images.rows.filter { $0.canDownload && $0.url != nil && $0.cells[3] != "icon" && !($0.url ?? "").hasPrefix("http://cdn.") }
         extraction.selection = Set(content.prefix(3).map(\.id))
         await pause(0.8)
+
+        // Previews start off, and are asked for with the footer's toggle. The
+        // sample site's pictures are real ones; the banner it names over plain
+        // http is not fetched, and the log says why.
+        say("extract: previews are off to begin with: \(!settings.httpImagePreviews), \(extraction.previews.thumbnails.count) requested")
+        settings.httpImagePreviews = true
+        _ = await ScreenshotMode.until(timeout: 30) {
+            let states = extraction.previews.thumbnails.values
+            return !states.isEmpty && !states.contains { if case .loading = $0 { return true } else { return false } }
+        }
+        await pause(0.8)
+        for (address, thumbnail) in extraction.previews.thumbnails.sorted(by: { $0.key < $1.key }) {
+            switch thumbnail {
+            case .ready(let image): say("extract: preview \(address): ready, \(Int(image.size.width)) × \(Int(image.size.height))")
+            case .failed(let reason): say("extract: preview \(address): \(reason)")
+            case .loading: say("extract: preview \(address): still loading")
+            }
+        }
         everything = capture("extract-images") && everything
+        settings.httpImagePreviews = false
 
         // The reading part, as Markdown.
         extraction.select(.text)

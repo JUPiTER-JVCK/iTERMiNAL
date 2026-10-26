@@ -250,6 +250,9 @@ final class AppSettings: ObservableObject {
     /// The largest single file a download will take, in megabytes. A file is
     /// stopped the moment it passes this, before the rest arrives.
     @Published var httpMaxDownloadMB: Int { didSet { defaults.set(httpMaxDownloadMB, forKey: "httpMaxDownloadMB") } }
+    /// Whether Extract's Images list shows a small picture beside each address.
+    /// Each is fetched from the site that hosts it, so it starts off.
+    @Published var httpImagePreviews: Bool { didSet { defaults.set(httpImagePreviews, forKey: "httpImagePreviews") } }
 
     // MARK: Connections (SSH/SFTP)
     @Published var sshConnections: [SSHConnection] {
@@ -354,6 +357,7 @@ final class AppSettings: ObservableObject {
         httpRecordDiscoveredLinks = defaults.object(forKey: "httpRecordDiscoveredLinks") as? Bool ?? true
         httpDownloadFolder = defaults.string(forKey: "httpDownloadFolder") ?? ""
         httpMaxDownloadMB = defaults.object(forKey: "httpMaxDownloadMB") as? Int ?? 250
+        httpImagePreviews = defaults.object(forKey: "httpImagePreviews") as? Bool ?? false
 
         if let data = defaults.data(forKey: "sshConnections"),
            let decoded = try? JSONDecoder().decode([SSHConnection].self, from: data) {
@@ -580,6 +584,7 @@ final class AppSettings: ObservableObject {
         httpRecordDiscoveredLinks = true
         httpDownloadFolder = ""
         httpMaxDownloadMB = 250
+        httpImagePreviews = false
         localAPIEnabled = false
         apiAllowBrowserControl = true
         apiAllowTerminalInput = true

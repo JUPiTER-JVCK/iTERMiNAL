@@ -181,6 +181,7 @@ jobs:
             Sources/iTERMiNAL/HTTP/QueryRunner.swift \
             Sources/iTERMiNAL/HTTP/ResponseExtractor.swift \
             Sources/iTERMiNAL/HTTP/DownloadPlan.swift \
+            Sources/iTERMiNAL/HTTP/ImagePreviewPolicy.swift \
             Sources/iTERMiNAL/Chrome/RailModel.swift \
             Sources/iTERMiNAL/Chrome/FrameStyle.swift \
             Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
