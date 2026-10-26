@@ -1,5 +1,6 @@
 #if SCREENSHOTS
 import AppKit
+import Combine
 import SwiftUI
 import WebKit
 
@@ -437,13 +438,16 @@ final class ScreenshotRun {
         tabs.newTab(url: Self.site + "/changelog")
         tabs.selectedID = first.id
         await pause(3.0)
-        // A tab learns its page's title when a load starts or finishes, and
-        // on a runner the title can arrive after the load has finished: so
-        // each is loaded once more, when the one it already has is there to
-        // be read.
-        for tab in tabs.tabs { tab.reload() }
-        await pause(3.0)
-        say("browser: \(tabs.tabs.map { "\($0.pageTitle.isEmpty ? "(no title)" : $0.pageTitle), loading \($0.isLoading)" })")
+        // A tab used to learn its page's title only when a load started or
+        // finished, and on a runner the title arrives after the load has
+        // finished, so every tab said "New tab". The tab now follows the
+        // title, and this says what each one has: the tab's, what WebKit says
+        // it is, and what the page itself says.
+        for tab in tabs.tabs {
+            let page = await pageSays(tab)
+            say("browser: \(tab.urlText): the tab says \(tab.pageTitle.debugDescription), WebKit says "
+                + "\(tab.webView.title.debugDescription), the page says \(page); loading \(tab.isLoading)")
+        }
         await tidyServer()
         await pause(1.0)
         guard let web = tabs.active?.webView, let image = await ScreenshotMode.snapshot(of: web) else {
@@ -452,6 +456,18 @@ final class ScreenshotRun {
         }
         say("browser: snapshot \(Int(image.size.width))x\(Int(image.size.height)) of a \(Int(web.bounds.width))x\(Int(web.bounds.height)) view")
         return capture("browser", overlays: [ScreenshotMode.Overlay(view: web, image: image)])
+    }
+
+    /// What the page in a tab says its title is, asked of the page itself.
+    private func pageSays(_ tab: BrowserModel) async -> String {
+        await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            tab.evaluate("document.title") { result in
+                switch result {
+                case .success(let title): continuation.resume(returning: title.debugDescription)
+                case .failure(let error): continuation.resume(returning: "an error (\(error.localizedDescription))")
+                }
+            }
+        }
     }
 
     private func files() async -> Bool {
@@ -488,10 +504,28 @@ final class ScreenshotRun {
         settings.railPanelOpen = false
         store.openPanelExpanded(panel)
         await pause(2.5 + settle)
+        if tool == .superfile, let session = store.toolSessions[.superfile] {
+            await dismissSuperfileWelcome(session)
+        }
         ScreenshotMode.describeTerminals(in: window, label: name)
         let taken = capture(name)
         closePanels()
         return taken
+    }
+
+    /// superfile greets a launch it has not seen before with a page of its
+    /// own, over the file manager — and on a runner every launch is the first.
+    /// It goes away at a key; which key is its business, so each is tried in
+    /// turn until the page is gone.
+    private func dismissSuperfileWelcome(_ session: TerminalSession) async {
+        let greeting = "Thanks for using superfile"
+        for key in ["\u{1B}", "\r", " "] {
+            guard session.captureVisibleText().contains(greeting) else { return }
+            say("superfile: its welcome page is up; pressing \(key.debugDescription)")
+            session.send(text: key)
+            await pause(1.5)
+        }
+        say("superfile: the welcome page is \(session.captureVisibleText().contains(greeting) ? "still" : "no longer") up")
     }
 
     /// btop draws one more column of each graph per update, and its default is
@@ -627,8 +661,16 @@ final class ScreenshotRun {
         if let field = ScreenshotMode.composerField(in: window) {
             say("ai-assistant: the input holds \(field.string.debugDescription), marked text \(field.hasMarkedText()), "
                 + "\(field.textStorage?.length ?? -1) characters stored, \(field.layoutManager?.numberOfGlyphs ?? -1) glyphs laid out")
-            // A letter was left in it in the first pictures, from what had
-            // been typed there: have it drawn again.
+            // The first pictures had one letter in the empty input, at its left
+            // edge, where the placeholder should have been. It is the last
+            // letter of the placeholder: the input had been scrolled sideways
+            // while the card was still changing width, and an empty field has
+            // nothing to scroll it back. Put back where it starts.
+            if let scroller = field.enclosingScrollView {
+                say("ai-assistant: the input is scrolled to \(scroller.contentView.bounds.origin); its text view is \(field.frame)")
+                scroller.contentView.scroll(to: .zero)
+                scroller.reflectScrolledClipView(scroller.contentView)
+            }
             field.needsDisplay = true
             field.displayIfNeeded()
         }
@@ -645,27 +687,48 @@ final class ScreenshotRun {
         _ = ScreenshotMode.focusComposer(in: window)
         compose("make build")
         await pause(0.8)
-        // A watcher of this scene's own, beside the composer's: if it sees the
-        // failure and the composer's does not, it is the composer that is not
-        // asking.
+        // A watcher of this scene's own, beside the composer's, and a record of
+        // the terminal's activity — what both of them wait on. If the activity
+        // never changes, nothing was going to wake either.
         let target = store.composerDestinationSession
         let before = target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? ""
         let mine = CommandOutcomeWatcher()
         var seen = "nothing"
+        var activity: [String] = []
+        let started = Date()
+        var listening: AnyCancellable?
         if let target {
+            listening = target.$lastActivityAt.dropFirst().sink { _ in
+                activity.append(String(format: "%.1fs", Date().timeIntervalSince(started)))
+            }
             mine.start(session: target, command: "make build", baseline: before) { offer in seen = offer.reason }
         }
         ScreenshotMode.pressReturn(in: window)
         await pause(7.0)
+        listening?.cancel()
         mine.stop()
         say("error-help: the composer ran it in the server tab: \(target?.id == server?.primarySession?.id); "
-            + "a watcher of this scene's own saw: \(seen)")
-        // What the watcher that makes the offer would have read.
-        let text = server?.primarySession?.captureScrollback(maxBytes: 8_192) ?? ""
-        let fresh = OutputDiff.newLines(baseline: "", current: text)
-        say("error-help: the terminal ends \(fresh.suffix(4))")
-        say("error-help: signature \(String(describing: FailureSignature.firstMatch(in: fresh, excludingCommand: "make build"))); "
+            + "a watcher of this scene's own saw: \(seen); the terminal's activity changed \(activity.count) time(s), at \(activity)")
+        // What the watchers read: the terminal now, against the terminal before.
+        let after = target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? ""
+        let fresh = OutputDiff.newLines(baseline: before, current: after)
+        let match = FailureSignature.firstMatch(in: fresh, excludingCommand: "make build")
+        say("error-help: new since the command was sent: \(fresh.suffix(4)); signature \(String(describing: match)); "
             + "assistant set up \(AssistantServiceProvider.current.isConfigured); offers on \(settings.assistantOfferErrorHelp)")
+        // Whether the composer made the offer. If the terminal's activity never
+        // changed on this runner, nothing woke its watcher and it did not; the
+        // offer is then made from here, out of what the terminal printed, by
+        // the same call the watcher makes. What the picture shows is the app's
+        // own offer either way. Only what asked for it differs, and the log
+        // says which.
+        var offered = false
+        if case .offer? = ScreenshotMode.composerAssistant?.banner { offered = true }
+        say("error-help: the composer's own watcher made the offer: \(offered)")
+        if !offered, let match, let assistant = ScreenshotMode.composerAssistant {
+            assistant.offer(ErrorOffer(command: "make build", output: fresh.joined(separator: "\n"), reason: match.reason))
+            await pause(0.8)
+            say("error-help: the offer was made by this scene instead")
+        }
         let taken = capture("error-help")
         await sendFromComposer("clear")
         return taken

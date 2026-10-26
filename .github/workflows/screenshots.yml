@@ -128,31 +128,6 @@ jobs:
           scripts/fetch-symbols-font.sh Vendor/Fonts
           ls -la Vendor/Fonts
 
-      # Temporary, while the btop picture is looked into: does the bundled btop
-      # read the configuration the app points it at? The update interval it
-      # shows says so — 777 if the file is read, 2000 if it is not — with the
-      # file as the app writes it and with the header btop writes itself.
-      - name: Check btop reads its configuration
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          . scripts/tools.env
-          btop="$PWD/Vendor/Tools/btop"
-          [ -x "$btop" ] || { echo "no btop in this run"; exit 0; }
-          "$btop" --help 2>&1 | head -30
-          check() {
-            label="$1"; header="$2"
-            dir="$RUNNER_TEMP/btop-check-$label"
-            mkdir -p "$dir/themes"
-            { [ -n "$header" ] && printf '%s\n' "$header"; printf 'update_ms = 777\n'; } > "$dir/btop.conf"
-            script -q /dev/null sh -c 'stty cols 160 rows 50; exec perl -e "alarm 4; exec @ARGV" "$@"' sh \
-              "$btop" --config "$dir/btop.conf" --themes-dir "$dir/themes" > "$dir/out.txt" 2>&1
-            echo "$label: intervals shown: $(grep -a -o '[0-9][0-9]*ms' "$dir/out.txt" | sort -u | tr '\n' ' ')"
-          }
-          check bare ""
-          check app-header "#? btop configuration for the copy bundled with iTERMiNAL. iTERMiNAL"
-          check btop-header "#? Config file for btop v.$BTOP_VERSION"
-
       - name: Generate Xcode project
         run: xcodegen generate
 

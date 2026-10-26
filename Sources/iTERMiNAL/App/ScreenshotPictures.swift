@@ -182,6 +182,62 @@ extension ScreenshotMode {
         return converted
     }
 
+    /// The terminals the window's picture has no text for, each as a picture of
+    /// its own.
+    ///
+    /// The window is drawn in one pass, and the terminal in the dock came out of
+    /// it with its background and nothing else, while the same terminal drawn by
+    /// itself shows all its text. So each terminal is drawn by itself as well,
+    /// and where most of what it shows is missing from the window's picture,
+    /// its own is laid under that one — under, so that whatever the window
+    /// draws over a terminal still covers it.
+    @MainActor
+    static func terminalsLeftOut(
+        of picture: NSBitmapImageRep,
+        in root: NSView,
+        scale: CGFloat,
+        name: String
+    ) -> [(rect: NSRect, image: CGImage)] {
+        var found: [(rect: NSRect, image: CGImage)] = []
+        for container in allViews(of: TerminalContainerView.self, in: root) {
+            let terminal = container.terminal
+            guard !container.visibleRect.isEmpty, terminal.bounds.width > 0, terminal.bounds.height > 0 else { continue }
+            let width = Int((terminal.bounds.width * scale).rounded())
+            let height = Int((terminal.bounds.height * scale).rounded())
+            guard let alone = bitmap(width: width, height: height) else { continue }
+            alone.size = terminal.bounds.size
+            terminal.cacheDisplay(in: terminal.bounds, to: alone)
+
+            // Every other pixel of the terminal's own picture that has text in
+            // it, and whether the window's has anything at that place.
+            let place = rectangle(of: terminal.bounds, in: terminal, relativeTo: root)
+            let left = Int((place.minX * scale).rounded())
+            let top = Int(((root.bounds.height - place.maxY) * scale).rounded())
+            var inked = 0
+            var missing = 0
+            for y in stride(from: 0, to: height, by: 2) {
+                for x in stride(from: 0, to: width, by: 2) where alpha(of: alone, x: x, y: y) > 32 {
+                    inked += 1
+                    let across = left + x
+                    let down = top + y
+                    let inside = across >= 0 && down >= 0 && across < picture.pixelsWide && down < picture.pixelsHigh
+                    if !inside || alpha(of: picture, x: across, y: down) < 32 { missing += 1 }
+                }
+            }
+            say("\(name): a terminal at \(place): \(inked) sample(s) of text of its own, \(missing) not in the window's picture")
+            if inked > 0, missing * 2 > inked, let image = alone.cgImage {
+                found.append((rect: place, image: image))
+            }
+        }
+        return found
+    }
+
+    /// The alpha of one pixel of an 8-bit RGBA bitmap, 0 where there is none.
+    private static func alpha(of picture: NSBitmapImageRep, x: Int, y: Int) -> UInt8 {
+        guard let data = picture.bitmapData else { return 0 }
+        return data[y * picture.bytesPerRow + x * picture.samplesPerPixel + 3]
+    }
+
     @MainActor
     static func write(
         _ view: NSView,
@@ -210,6 +266,7 @@ extension ScreenshotMode {
 
         let backgrounds = terminalBackgrounds(in: view)
         say("\(name): \(backgrounds.count) terminal background(s) put back")
+        let drawnAlone = terminalsLeftOut(of: plain, in: view, scale: scale, name: name)
 
         var laidOver: [(rect: NSRect, image: CGImage)] = []
         for overlay in overlays {
@@ -234,6 +291,7 @@ extension ScreenshotMode {
             plain,
             trimmingBottom: trim,
             under: backgrounds,
+            beneath: drawnAlone,
             over: laidOver,
             edge: edge,
             cornerRadius: 11,
@@ -294,6 +352,8 @@ extension ScreenshotMode {
     /// macOS screenshot — and
     /// `backgrounds` filled in beneath it: the picture is transparent where a
     /// terminal should be, so they show through there and nowhere else.
+    /// `beneath` is laid between the two, under the picture and over the
+    /// backgrounds — a terminal the window's own pass left without its text.
     /// `over` is laid on top of it instead, for what the picture has a hole in
     /// that is not transparent — the page in a web view, under the bare
     /// background the panel paints behind it.
@@ -310,6 +370,7 @@ extension ScreenshotMode {
         _ picture: NSBitmapImageRep,
         trimmingBottom trim: CGFloat,
         under backgrounds: [(rect: NSRect, color: NSColor)],
+        beneath: [(rect: NSRect, image: CGImage)],
         over overlays: [(rect: NSRect, image: CGImage)],
         edge: NSColor,
         cornerRadius: CGFloat,
@@ -362,6 +423,14 @@ extension ScreenshotMode {
                 width: background.rect.width * scale,
                 height: background.rect.height * scale
             )).fill()
+        }
+        for terminal in beneath {
+            context.cgContext.draw(terminal.image, in: CGRect(
+                x: pad + terminal.rect.minX * scale,
+                y: pad + (terminal.rect.minY - trim) * scale,
+                width: terminal.rect.width * scale,
+                height: terminal.rect.height * scale
+            ))
         }
         context.cgContext.draw(image, in: rect)
         for overlay in overlays {

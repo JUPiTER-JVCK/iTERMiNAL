@@ -37,6 +37,11 @@ enum ScreenshotMode {
     /// How long the whole run may take before it is given up on.
     static let giveUpAfter: TimeInterval = 840
 
+    /// The composer's assistant, which the composer owns and nothing else can
+    /// reach: set when it is made, so a scene can see what it is showing and,
+    /// when the app would have made an offer a run on a runner did not, make it.
+    @MainActor static weak var composerAssistant: ComposerAIController?
+
     /// Called once the app has launched.
     static func startIfRequested() {
         guard let path = ProcessInfo.processInfo.environment[directoryVariable], !path.isEmpty else { return }
