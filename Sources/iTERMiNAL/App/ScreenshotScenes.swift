@@ -136,6 +136,7 @@ final class ScreenshotRun {
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
         await scene("extract-crawl") { await self.siteCrawl() }
+        await scene("extract-ask") { await self.askAboutPage() }
         await scene("sftp-problems") { await self.remoteProblems() }
         await scene("sftp-shared") { await self.sharedSignIn() }
 
@@ -652,6 +653,87 @@ final class ScreenshotRun {
         extraction.selection = []
         await pause(0.8)
         taken = capture("extract-crawl-links") && taken
+        closePanels()
+        return taken
+    }
+
+    // MARK: Asking the assistant about a page
+
+    /// The sample article read into rows by the stand-in for a model the
+    /// assistant is pointed at. What the sheet would send is logged whole, and so
+    /// is what each cell of the answer would be allowed to do.
+    private func askAboutPage() async -> Bool {
+        await baseline()
+        settings.railPanelOpen = false
+        store.openPanelExpanded(.http)
+        await pause(1.5)
+        let model = store.panelHTTPClient
+        let extraction = model.extraction
+        model.mode = .request
+        model.method = .get
+        model.urlText = "\(Self.site)/blog/ledger-notes"
+        model.headerFields = [HTTPHeaderField(name: "Accept", value: "text/html")]
+        model.responseTab = .extract
+        model.send(settings: settings)
+        _ = await ScreenshotMode.until(timeout: 20) { !model.isSending }
+        let read = await ScreenshotMode.until(timeout: 20) {
+            extraction.extraction?.page != nil && extraction.pageURL.hasSuffix("/blog/ledger-notes")
+        }
+        guard read else {
+            say("ask: the page was not read")
+            closePanels()
+            return false
+        }
+        ScreenshotMode.giveResponseRoom(in: window)
+        ScreenshotMode.giveResponseWidth(in: window)
+        await pause(1.0)
+
+        let question = "The revenue and costs for each region"
+        say("ask: the assistant is set up: \(AssistantServiceProvider.current.isConfigured); it goes to \(AssistantDestination.describe(baseURL: settings.assistantBaseURL))")
+        extraction.proposeAsk(settings: settings, question: question)
+        await pause(1.5)
+        guard let proposal = extraction.askProposal else {
+            say("ask: no sheet was opened")
+            closePanels()
+            return false
+        }
+        if let request = AIExtractionRequest.make(question: proposal.question, page: proposal.page, baseURL: settings.assistantBaseURL) {
+            say("ask: consent: \(request.consentMessage)")
+            say("ask: the page text is \(request.coverage); the whole payload is \(request.preview.count) characters")
+            say("ask: what would be sent begins: \(String(request.preview.prefix(900)).debugDescription)")
+        } else {
+            say("ask: no request could be made")
+        }
+        var taken = false
+        if let sheet = window.attachedSheet {
+            taken = ScreenshotMode.capture(sheet, "extract-ask-confirm", in: directory)
+        } else {
+            say("ask: the sheet did not appear")
+        }
+
+        let assistant = extraction.assistant
+        extraction.confirmAsk(question: question)
+        _ = await ScreenshotMode.until(timeout: 30) { assistant.phase != .asking }
+        say("ask: \(assistant.phase); outcome \(String(describing: assistant.outcome).prefix(240))")
+        if let table = assistant.table {
+            say("ask: columns \(table.columns); \(table.rows.count) rows: \(table.rows.map(\.cells))")
+        }
+        await pause(1.0)
+        taken = capture("extract-ask") && taken
+
+        // An answer that names an address of its own: only one the page named
+        // is something to act on.
+        extraction.proposeAsk(settings: settings, question: "The author and a link to their profile")
+        await pause(0.6)
+        extraction.confirmAsk(question: "The author and a link to their profile")
+        _ = await ScreenshotMode.until(timeout: 30) { assistant.phase != .asking }
+        if let table = assistant.table {
+            for row in table.rows {
+                say("ask: \(row.cells) — address to act on: \(row.url.debugDescription); can be downloaded: \(row.canDownload)")
+            }
+        } else {
+            say("ask: the second question gave no table: \(assistant.phase)")
+        }
         closePanels()
         return taken
     }

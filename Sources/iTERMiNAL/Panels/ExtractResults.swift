@@ -8,6 +8,9 @@ struct ExtractResults: View {
     let table: ResultTable
     let section: ExtractSection
     let theme: Theme
+    /// What to say above the list in place of what the section would say: a
+    /// crawl's lists are of many pages, not of the one in hand.
+    var noteOverride: String?
 
     @EnvironmentObject private var settings: AppSettings
 
@@ -45,6 +48,10 @@ struct ExtractResults: View {
     private var noteLine: String? {
         var parts: [String] = []
         if table.truncated { parts.append("More was found than is listed.") }
+        if let noteOverride {
+            parts.append(noteOverride)
+            return parts.joined(separator: " ")
+        }
         switch section {
         case .media:
             if table.rows.contains(where: { !$0.canDownload }) {
@@ -54,6 +61,8 @@ struct ExtractResults: View {
             parts.append("Every link on the page. The ones that point to files can be saved, and are in Files too.")
         case .crawledPages:
             parts.append("The pages the crawl came to, in the order it reached them. One that robots.txt asks to be left alone is listed and was not fetched.")
+        case .askAnswer:
+            parts.append("Written by the assistant from the page's text, and only text: check what matters against the page itself.")
         default:
             break
         }

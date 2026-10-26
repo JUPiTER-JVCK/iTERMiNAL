@@ -15,6 +15,10 @@ enum ExtractSection: Hashable, Identifiable {
     case crawl
     /// The pages a crawl came to, listed as the grid they are.
     case crawledPages
+    /// The assistant's answer about the page, with the table inside.
+    case ask
+    /// The rows of that answer, listed as the grid they are.
+    case askAnswer
 
     var id: String {
         switch self {
@@ -42,6 +46,7 @@ enum ExtractSection: Hashable, Identifiable {
         case .query: return "Query"
         case .crawl: return "Crawl"
         case .crawledPages: return "Crawled pages"
+        case .ask, .askAnswer: return "Answer"
         }
     }
 
@@ -121,10 +126,16 @@ final class PageExtractionModel: ObservableObject {
     @Published var crawlProposal: CrawlProposal?
     private var crawlWatch: AnyCancellable?
 
+    // Asking the assistant about the page.
+    let assistant = PageAssistant()
+    @Published var askProposal: AskProposal?
+    private var assistantWatch: AnyCancellable?
+
     init() {
         // The crawl changes as it goes — a page at a time — and the chips and
         // lists that show it are drawn from this model.
         crawlWatch = crawler.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        assistantWatch = assistant.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     /// Set by the model that owns this one: open an address in the app's own
@@ -158,6 +169,8 @@ final class PageExtractionModel: ObservableObject {
         phase = .idle
         previews.reset()
         crawler.reset(keepingSite: URL(string: response.finalURL)?.host)
+        // An answer is about the page it was asked of.
+        assistant.reset()
         selection = []
         filter = ""
         tableIndex = 0
@@ -224,6 +237,7 @@ final class PageExtractionModel: ObservableObject {
         }
         if !result.languages.isEmpty { chips.append(Chip(section: .query, title: "Query", count: nil)) }
         if !crawler.isIdle { chips.append(Chip(section: .crawl, title: "Crawl", count: crawler.results.pages.count)) }
+        if !assistant.isIdle { chips.append(Chip(section: .ask, title: "Answer", count: assistant.table?.rows.count)) }
         return chips
     }
 
@@ -439,6 +453,32 @@ final class PageExtractionModel: ObservableObject {
             milliseconds: Int(response.duration * 1_000), limits: chosen, settings: settings
         )
         select(.crawl)
+    }
+
+    // MARK: Asking the assistant
+
+    /// Opens the sheet that says what would be sent and where. Nothing is sent
+    /// until the person presses Ask there.
+    func proposeAsk(settings: AppSettings, question: String? = nil) {
+        guard let page = extraction?.page, assistant.phase != .asking else { return }
+        // The addresses the page itself names: an answer's cells are addresses to
+        // act on only if they are among these.
+        var known = Set<String>()
+        for table in [page.links, page.images, page.media, page.files, page.feeds, page.resources] {
+            for row in table.rows { if let url = row.url { known.insert(url) } }
+        }
+        askProposal = AskProposal(page: page, known: known, question: question ?? assistant.asked)
+    }
+
+    /// Sends what the sheet showed: built again here from the same page and the
+    /// same settings, so it is the same text.
+    func confirmAsk(question: String) {
+        guard let proposal = askProposal,
+              let request = AIExtractionRequest.make(question: question, page: proposal.page, baseURL: AppSettings.shared.assistantBaseURL)
+        else { return }
+        askProposal = nil
+        assistant.ask(request, known: proposal.known)
+        select(.ask)
     }
 
     // MARK: Saving the response itself

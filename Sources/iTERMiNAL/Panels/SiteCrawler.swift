@@ -216,7 +216,7 @@ final class SiteCrawler: ObservableObject {
                     blockedRows += 1
                     await publish(generation: mine) { crawler in
                         crawler.results.record(
-                            url: entry.url, status: 0, note: "robots.txt asks that it is left alone", depth: entry.depth,
+                            url: entry.url, status: 0, note: "left alone: robots.txt", depth: entry.depth,
                             foundOn: entry.foundOn, bytes: 0, milliseconds: 0, extracted: nil
                         )
                     }

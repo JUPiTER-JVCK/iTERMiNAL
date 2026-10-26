@@ -167,7 +167,8 @@ struct CrawlView: View {
             FadedDivider()
             listRow
             ExtractResults(
-                extraction: extraction, table: crawler.table(for: crawler.list), section: crawler.list.section, theme: theme
+                extraction: extraction, table: crawler.table(for: crawler.list), section: crawler.list.section, theme: theme,
+                noteOverride: note(for: crawler.list)
             )
             .id(crawler.list)
         }
@@ -233,6 +234,21 @@ struct CrawlView: View {
     }
 
     // MARK: The lists
+
+    /// What a list of the crawl says about itself; nil for the ones whose usual
+    /// note is right.
+    private func note(for list: CrawlList) -> String? {
+        switch list {
+        case .pages, .media:
+            return nil
+        case .links:
+            return "Every link on the crawled pages, each once, with the first page it was found on and how often it came up. The ones that point to files can be saved, and are in Files too."
+        case .images:
+            return "Every image on the crawled pages, each once, with the first page it was found on."
+        case .files:
+            return "The files the crawled pages link to, each once, with the first page it was found on."
+        }
+    }
 
     private var listRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {

@@ -922,9 +922,9 @@ The HTTP pane's response area has two tabs: **Body**, the response as it came,
 and **Extract**, which reads that one response into lists and tables. It works
 on what is already in hand: opening the tab requests nothing, and nothing in it
 follows a link by itself. What does reach out is something you ask for by name —
-**Fetch** on a row, **Download**, **Previews**, **Crawl…** — and each of them says
-what it will ask of whom before it does, or, for a preview, is off until you
-turn it on.
+**Fetch** on a row, **Download**, **Previews**, **Crawl…**, **Ask…** — and each of
+them says what it will ask of whom before it does, or, for a preview, is off
+until you turn it on.
 
 **For a web page**, a row of chips opens each list — only the ones with
 something in them:
@@ -1056,11 +1056,39 @@ counted); how deep (1 to 4 links from here); how long to wait between requests
   same site and dropped when you fetch a page of another, and it is not saved
   with a layout or in a snapshot.
 
+**Asking the assistant.** **Ask…**, beside Crawl…, has the AI assistant you set up
+in Settings → AI read the page's text into rows. Say what you want — "every
+product with its price" — and a sheet shows where it would go (the assistant on
+this Mac, which stays there, or the named host) and, one click away, every
+character of what would be sent. Nothing is sent until you press Ask.
+
+- **What goes** is the page's reading as Markdown, its address and title, and your
+  request, under a system prompt the sheet shows too. Anything that looks like a
+  key or a password is masked first — best effort, and nothing else is, so don't
+  ask about a private page — the text is cut at 12,000 characters at the end of a
+  whole line, and the sheet says how much of the page that is.
+- **The model is told the page is data**, not instructions (a page can try to be
+  the second), to answer only from the text, not to invent values or addresses,
+  and to reply with a JSON array of objects. The request goes with temperature 0.
+- **What comes back is only ever shown.** A JSON array of objects — also inside a
+  code fence, with words around it, or as an object holding the list — becomes a
+  table, its keys in order as columns, at most 500 rows, 20 columns and 300
+  characters a cell; anything else is shown as the text it is. Nothing in an
+  answer is run, opened or fetched. A cell is an address you can open or fetch
+  only if the page itself named that address, so one the model made up is just
+  text; nothing in an answer can be downloaded; and an export puts an apostrophe
+  before a cell a spreadsheet would run.
+- It uses the endpoint, key and context settings of Settings → AI, and an answer
+  is of the page it was asked of: fetching another page clears it. It was written
+  by a model, so it can be wrong — the list says so above the rows.
+
 **What it never does.** Nothing is fetched except a row you chose to fetch or
-download, a preview you turned on, or a crawl you started from its sheet. It
-doesn't guess at addresses, run a page's scripts (so what scripts draw isn't
-there — the Overview says so), or log in. The reading is lossy where HTML is: a
-page that puts its content in scripts has little in the response to read.
+download, a preview you turned on, or a crawl you started from its sheet; the
+one thing that is sent anywhere else is the page's text to your assistant, after
+its own sheet. It doesn't guess at addresses, run a page's scripts (so what
+scripts draw isn't there — the Overview says so), or log in. The reading is lossy
+where HTML is: a page that puts its content in scripts has little in the
+response to read.
 
 Nothing here is saved with a layout or in a snapshot, and the download folder
 is a path on this Mac, so it isn't in exported settings either.
