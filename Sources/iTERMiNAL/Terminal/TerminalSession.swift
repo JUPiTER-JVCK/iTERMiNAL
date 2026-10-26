@@ -64,16 +64,22 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// on whatever the user configured.
     private let shellOverride: String?
 
+    /// Where this session's `ssh` listens, when it is the sign-in the file
+    /// browser shares. Held so a reconnect makes the same offer.
+    private let controlPath: String?
+
     init(
         id: UUID = UUID(),
         kind: SessionKind = .localShell,
         initialDirectory: String? = nil,
-        shellOverride: String? = nil
+        shellOverride: String? = nil,
+        controlPath: String? = nil
     ) {
         let settings = AppSettings.shared
         self.id = id
         self.kind = kind
         self.shellOverride = shellOverride
+        self.controlPath = controlPath
         self.currentDirectory = initialDirectory ?? settings.resolvedInitialDirectory
 
         let options = TerminalOptions(
@@ -221,7 +227,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             for: kind,
             settings: settings,
             directory: isRemote ? nil : currentDirectory,
-            shellOverride: shellOverride
+            shellOverride: shellOverride,
+            controlPath: controlPath
         ) {
         case .success(let configuration):
             launchError = nil

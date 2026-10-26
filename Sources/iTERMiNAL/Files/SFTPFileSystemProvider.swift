@@ -6,15 +6,26 @@ import Foundation
 /// batch mode. That reuses the user's existing `~/.ssh/config`, known_hosts,
 /// agent, and keys — which is both less code and a smaller attack surface than
 /// handling credentials ourselves. `BatchMode=yes` guarantees sftp never waits
-/// on an interactive password prompt (there is no TTY here), so key-based auth
-/// is required. When that is what stopped it, `RemoteProblem` says so, and
-/// what to do — the raw `Permission denied (publickey,password,…)` does not.
+/// on an interactive password prompt (there is no TTY here), so it signs in
+/// with a key — or rides on a connection a terminal tab has already signed in
+/// and left open (`SSHControlSocket`), which is how a host that wants a
+/// password is browsed without this app ever being given one. When neither is
+/// available, `RemoteProblem` says so, and what to do — the raw
+/// `Permission denied (publickey,password,…)` does not.
 final class SFTPFileSystemProvider: FileSystemProvider {
     let connection: SSHConnection
 
     var displayName: String { connection.name.isEmpty ? connection.destination : connection.name }
     var isRemote: Bool { true }
     var identifier: String { connection.id.uuidString }
+
+    /// Whether a terminal tab's sign-in to this host is open, and is what the
+    /// next command will go through.
+    var usesSharedSignIn: Bool { sharedSocket != nil }
+
+    private var sharedSocket: String? {
+        SSHControlSocket.liveSocket(for: connection, base: NSTemporaryDirectory())
+    }
 
     private let queue: DispatchQueue
 
@@ -107,6 +118,11 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         ]
         if connection.port != 22 {
             args.append(contentsOf: ["-P", String(connection.port)])
+        }
+        // Looked for each time: the tab that made it can be closed, and one
+        // can be opened, between one listing and the next.
+        if let shared = sharedSocket {
+            args.append(contentsOf: SSHControlSocket.clientArguments(path: shared))
         }
         if let identity = connection.identityFile?.trimmingCharacters(in: .whitespaces), !identity.isEmpty {
             args.append(contentsOf: ["-i", (identity as NSString).expandingTildeInPath])

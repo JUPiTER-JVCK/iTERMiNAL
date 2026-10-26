@@ -572,7 +572,8 @@ Both features run the system's own clients, reusing your `~/.ssh/config`,
 `known_hosts`, agent, and keys — this app never stores, prompts for, or
 transmits an SSH password. A terminal session has a real TTY, so `ssh` can ask
 you for a password or 2FA code itself; the file browser runs `sftp`
-non-interactively and therefore **requires key-based authentication**.
+non-interactively, so it signs in **with a key, or through a terminal tab you
+have signed in to** ([below](#a-host-that-wants-a-password)).
 
 ### Screen sharing, and what the network is advertising
 
@@ -642,7 +643,8 @@ shows, in place of the listing:
 - the buttons that go with it — **Try Again**; **Set Up Key…**, which opens a
   tab on this Mac with the `ssh-copy-id` command typed and *not* run, so you
   press Return and enter the host's password once, in a real terminal;
-  **Sign In in a Terminal**; **Forget Old Key…** for a changed host key; and
+  **Sign In in a Terminal**, which opens an `ssh` tab the file browser can then
+  use; **Forget Old Key…** for a changed host key; and
   **Connection Settings…**;
 - the exact words `sftp` used, folded away under **What sftp said**, never
   replaced by the summary.
@@ -660,8 +662,35 @@ Details.
 does and shows the same words, so a host can be checked with its settings in
 front of you. When a key is named for a host, `ssh` is told to offer only that
 one (`IdentitiesOnly=yes`), so a server that allows few attempts doesn't hang
-up before reaching it. A host that accepts only a password can't be browsed
-from here; use a terminal session to it, or install a key.
+up before reaching it.
+
+### A host that wants a password
+
+The file browser has no keyboard, and iTERMiNAL never handles a password, so it
+can't sign in to a host that takes only a password — or a code from a phone — by
+itself. It doesn't have to. Press **Sign In in a Terminal** on the message, enter
+the password in the tab that opens (to `ssh`, in a real terminal, as for any
+session), and press **Try Again**. That tab's `ssh` was started with
+`ControlMaster=yes`, so it keeps its connection open for others, and the file
+browser's `sftp` joins it (`ControlMaster=no`) instead of signing in again. A
+small link icon in the file browser's toolbar says it is doing that.
+
+- **The connection is the tab's.** Closing the tab, or `exit`, ends it, and the
+  file browser is back to the message until you sign in again. Nothing is left
+  running behind it — there is no `ControlPersist`.
+- **The socket is yours alone.** It lives in a folder of its own in your
+  temporary folder, named for the host, port and user, so a connection is only
+  ever shared with its own destination. It is used only if that folder is a real
+  folder (not a link) owned by you and closed to everyone else, and only if the
+  socket in it is one you made: a socket anyone else could have put there would
+  be handed every file that went through it. A socket left behind by an `ssh`
+  that was killed is cleared away before a new sign-in listens.
+- **It works whatever the saved transport is**: the tab it opens is `ssh`. When
+  the transport is `ssh`, the connection's extra arguments go along (so
+  `-J bastion` carries the file browser through the jump host too), and a
+  `ControlPath` you gave there stays yours — which leaves the file browser no
+  socket of the app's to join.
+- **A key is still better** where you can have one: nothing needs to stay open.
 
 ## Security model
 

@@ -31,7 +31,8 @@ enum SSHTransport: String, Codable, CaseIterable, Identifiable {
 /// sessions.
 ///
 /// It deliberately holds no secret. Authentication is delegated to the system:
-/// SFTP runs non-interactively and therefore needs keys/agent, while a terminal
+/// SFTP runs non-interactively and therefore needs keys/agent — or the
+/// connection a terminal tab has signed in and left open — while a terminal
 /// session has a real TTY, so ssh can prompt for a password or 2FA itself and
 /// this app still never sees, stores, or transmits one.
 struct SSHConnection: Codable, Identifiable, Hashable {

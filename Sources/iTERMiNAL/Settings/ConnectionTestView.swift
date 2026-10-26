@@ -13,9 +13,11 @@ struct ConnectionTestRow: View {
     @Environment(\.openWindow) private var openWindow
     @State private var isTesting = false
     @State private var result: Outcome?
+    /// What a sign-in tab that could not be shared has to say.
+    @State private var signInNote: String?
 
     private enum Outcome {
-        case signedIn(path: String, count: Int)
+        case signedIn(path: String, count: Int, shared: Bool)
         case problem(RemoteProblem)
         case other(String)
     }
@@ -32,10 +34,13 @@ struct ConnectionTestRow: View {
             }
 
             switch result {
-            case .signedIn(let path, let count)?:
-                Label("Signed in. \(count) item\(count == 1 ? "" : "s") in \(path).", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+            case .signedIn(let path, let count, let shared)?:
+                Label(
+                    "Signed in\(shared ? ", through a terminal tab" : ""). \(count) item\(count == 1 ? "" : "s") in \(path).",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.green)
             case .problem(let problem)?:
                 RemoteProblemView(problem: problem, theme: theme, perform: perform)
                     .frame(height: 300)
@@ -48,9 +53,16 @@ struct ConnectionTestRow: View {
                     .foregroundStyle(.orange)
                     .textSelection(.enabled)
             case nil:
-                Text("Signs in the way the Files panel does: with a key, since a file browser has nowhere to type a password.")
+                Text("Signs in the way the Files panel does: with a key, or through a terminal tab you have signed in to, since a file browser has nowhere to type a password.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if let signInNote {
+                Label(signInNote, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         // A different host is a different test.
@@ -60,12 +72,13 @@ struct ConnectionTestRow: View {
     private func runTest() {
         isTesting = true
         result = nil
+        signInNote = nil
         let provider = SFTPFileSystemProvider(connection: connection)
         provider.list(provider.defaultPath(), showHidden: false) { outcome in
             isTesting = false
             switch outcome {
             case .success(let listing):
-                result = .signedIn(path: listing.path, count: listing.items.count)
+                result = .signedIn(path: listing.path, count: listing.items.count, shared: provider.usesSharedSignIn)
             case .failure(let error):
                 if case FileProviderError.remote(let problem) = error {
                     result = .problem(problem)
@@ -83,7 +96,7 @@ struct ConnectionTestRow: View {
         case .tryAgain:
             runTest()
         case .signInInTerminal:
-            WorkspaceStore.shared.newTab(kind: .remote(connection.id))
+            signInNote = WorkspaceStore.shared.newSharedSignIn(for: connection)
             openWindow(id: "main")
         case .runInLocalTerminal(_, let command):
             WorkspaceStore.shared.newTab(typing: command)

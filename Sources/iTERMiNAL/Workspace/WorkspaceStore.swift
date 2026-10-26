@@ -441,6 +441,26 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// A tab signed in to `connection` whose sign-in the file browser can use,
+    /// for a host that wants a password. The tab is the same ssh a connection
+    /// opens anywhere else, told to keep its connection open to others; the
+    /// password is typed to it, as ever. Returns what to tell the person when
+    /// it could not be set up to share — the tab opens either way.
+    @discardableResult
+    func newSharedSignIn(for connection: SSHConnection) -> String? {
+        switch SSHControlSocket.prepare(for: connection, base: NSTemporaryDirectory()) {
+        case .master(let path):
+            newTab(kind: .remote(connection.id), controlPath: path)
+            return nil
+        case .open:
+            newTab(kind: .remote(connection.id))
+            return "\(connection.name.isEmpty ? connection.host : connection.name) is already signed in through another tab. Press Try Again."
+        case .unavailable(let reason):
+            newTab(kind: .remote(connection.id))
+            return "This sign-in can't be shared with the file browser: \(reason). The tab works as usual."
+        }
+    }
+
     func newWorkspace(named name: String? = nil) {
         let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
         let workspace = Workspace(name: resolved)
@@ -456,7 +476,8 @@ final class WorkspaceStore: ObservableObject {
     func newTab(
         in workspace: Workspace? = nil,
         directory: String? = nil,
-        kind: SessionKind = .localShell
+        kind: SessionKind = .localShell,
+        controlPath: String? = nil
     ) -> WorkspaceTab {
         let target: Workspace
         if let workspace {
@@ -469,7 +490,7 @@ final class WorkspaceStore: ObservableObject {
             target = created
         }
 
-        let session = TerminalSession(kind: kind, initialDirectory: directory)
+        let session = TerminalSession(kind: kind, initialDirectory: directory, controlPath: controlPath)
         session.startIfNeeded()
         let tab = WorkspaceTab(root: PaneNode(content: .terminal(session)))
         target.tabs.append(tab)

@@ -136,6 +136,7 @@ final class ScreenshotRun {
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
         await scene("sftp-problems") { await self.remoteProblems() }
+        await scene("sftp-shared") { await self.sharedSignIn() }
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
@@ -650,6 +651,105 @@ final class ScreenshotRun {
         model.switchTo(connectionID: nil)
         closePanels()
         return first
+    }
+
+    // MARK: A sign-in the file browser shares
+
+    /// A host the file browser cannot sign in to by itself, reached through a
+    /// terminal tab's sign-in. The workflow starts a second throwaway SSH server
+    /// on this machine, which takes one key. The key goes to the *terminal's*
+    /// ssh, in the connection's extra arguments, which the file browser never
+    /// reads — so the browser's own sign-in is refused, as it is for a host that
+    /// wants a password, until the tab has signed in. The key stands in for the
+    /// password; what is shown is that the browser rides on a connection it did
+    /// not make, and that closing the tab ends it.
+    private func sharedSignIn() async -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["ITERMINAL_SSH_SHARED_PORT"], let port = Int(portText),
+              let key = environment["ITERMINAL_SSH_SHARED_KEY"] else {
+            say("shared sign-in: the workflow did not start a server for it")
+            return false
+        }
+        let knownHosts = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iterminal-known-hosts-\(UUID().uuidString.prefix(8))").path
+        let host = SSHConnection(
+            name: "build-vm", host: "127.0.0.1", port: port, username: NSUserName(), initialPath: demo,
+            extraArguments: "-i \(key) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=\(knownHosts)"
+        )
+        let saved = settings.sshConnections
+        settings.sshConnections = saved + [host]
+        defer {
+            settings.sshConnections = saved
+            try? FileManager.default.removeItem(atPath: knownHosts)
+        }
+
+        await baseline()
+        settings.railPanelOpen = false
+        settings.rightPanelWidth = 460
+        store.openPanel(.files)
+        await pause(2.0)
+        let model = store.panelFiles
+        let socketBase = NSTemporaryDirectory()
+        func isOpen() -> Bool { SSHControlSocket.liveSocket(for: host, base: socketBase) != nil }
+
+        // On its own, the browser has no way in.
+        model.switchTo(connectionID: host.id.uuidString)
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(0.8)
+        if let problem = model.listingProblem {
+            say("shared: before: \(problem.title) [\(problem.kind)]; actions \(problem.actions.map(\.title))")
+            say("shared: before: sftp said: \(problem.output.debugDescription)")
+        } else {
+            say("shared: before: no problem was reported; \(model.items.count) items — the server let the browser in on its own")
+        }
+        say("shared: before: a connection is open: \(isOpen())")
+
+        // The button: a tab signed in to the host, listening for the browser.
+        model.perform(.signInInTerminal)
+        say("shared: the sign-in note: \(model.errorMessage.debugDescription)")
+        guard let tab = store.selectedTab else {
+            say("shared: no tab opened")
+            return false
+        }
+        let up = await ScreenshotMode.until(timeout: 40) { isOpen() }
+        say("shared: the tab's connection is open: \(up); the socket path is \(SSHControlSocket.path(for: host, base: socketBase)?.count ?? -1) characters")
+        guard up else {
+            for line in (tab.primarySession?.captureVisibleText() ?? "").split(separator: "\n").suffix(8) {
+                say("shared: the tab says: \(line)")
+            }
+            store.closeTab(tab)
+            model.switchTo(connectionID: nil)
+            closePanels()
+            return false
+        }
+
+        // Back to the server tab for the picture; the sign-in tab stays open.
+        if let server {
+            store.selectedTabID = server.id
+            store.focusedSessionID = server.primarySession?.id
+        }
+        await tidyServer()
+        model.reload()
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(1.0)
+        say("shared: after: \(model.items.count) items in \(model.directory); through a tab: \(model.usesSharedSignIn); "
+            + "problem: \(model.listingProblem?.title ?? "none")")
+        say("shared: after: the first items: \(model.items.prefix(6).map(\.name))")
+        let taken = capture("files-sftp-shared")
+
+        // Closing the tab's session ends the connection, and the browser says so.
+        tab.primarySession?.send(text: "exit\n")
+        let closed = await ScreenshotMode.until(timeout: 30) { !isOpen() }
+        say("shared: after the tab's shell exited the connection is closed: \(closed)")
+        model.reload()
+        _ = await ScreenshotMode.until(timeout: 45) { !model.isLoading }
+        await pause(0.8)
+        say("shared: afterwards: \(model.listingProblem?.title ?? "no problem"); \(model.items.count) items; through a tab: \(model.usesSharedSignIn)")
+
+        store.closeTab(tab)
+        model.switchTo(connectionID: nil)
+        closePanels()
+        return taken
     }
 
     // MARK: The right-click menu

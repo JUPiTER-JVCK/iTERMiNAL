@@ -193,7 +193,6 @@ jobs:
           EOF
           /usr/sbin/sshd -D -e -f "$sshd_dir/sshd_config" > "$sshd_dir/sshd.log" 2>&1 &
           sshd=$!
-          trap 'kill "$fixture" "$assistant" ${sshd:+"$sshd"} 2>/dev/null || true' EXIT
           for _ in $(seq 1 10); do
             nc -z 127.0.0.1 2299 2>/dev/null && break
             sleep 1
@@ -203,6 +202,43 @@ jobs:
           else
             echo "::warning::the refusing server did not start"
             cat "$sshd_dir/sshd.log"
+          fi
+
+          # And one that takes a single key, made just now, for the file
+          # browser's use of a terminal tab's sign-in. The key is given to the
+          # terminal's ssh only; the file browser has none, so on its own it is
+          # refused like a host that wants a password. A key stands in for the
+          # password because nothing in a job can type one, and what is being
+          # shown does not depend on how the tab signed in.
+          ssh-keygen -q -t ed25519 -N '' -f "$sshd_dir/shared_key"
+          cp "$sshd_dir/shared_key.pub" "$sshd_dir/authorized_keys"
+          chmod 600 "$sshd_dir/authorized_keys" "$sshd_dir/shared_key"
+          cat > "$sshd_dir/sshd_shared_config" <<EOF
+          ListenAddress 127.0.0.1
+          Port 2297
+          HostKey $sshd_dir/host_key
+          PidFile $sshd_dir/sshd_shared.pid
+          UsePAM no
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          AuthorizedKeysFile $sshd_dir/authorized_keys
+          StrictModes no
+          Subsystem sftp /usr/libexec/sftp-server
+          LogLevel ERROR
+          EOF
+          /usr/sbin/sshd -D -e -f "$sshd_dir/sshd_shared_config" > "$sshd_dir/sshd_shared.log" 2>&1 &
+          sshd_shared=$!
+          trap 'kill "$fixture" "$assistant" ${sshd:+"$sshd"} ${sshd_shared:+"$sshd_shared"} 2>/dev/null || true' EXIT
+          for _ in $(seq 1 10); do
+            nc -z 127.0.0.1 2297 2>/dev/null && break
+            sleep 1
+          done
+          if nc -z 127.0.0.1 2297 2>/dev/null; then
+            echo "the one-key server is listening on 127.0.0.1:2297"
+          else
+            echo "::warning::the one-key server did not start"
+            cat "$sshd_dir/sshd_shared.log"
           fi
           for port in 8765 11434; do
             ready=0
@@ -239,6 +275,8 @@ jobs:
             ITERMINAL_SCREENSHOT_DIR="$shots" \
             ITERMINAL_DEMO_DIR="$projects/hello-api" \
             ITERMINAL_FIXTURE_LOG="$requests" \
+            ITERMINAL_SSH_SHARED_PORT=2297 \
+            ITERMINAL_SSH_SHARED_KEY="$sshd_dir/shared_key" \
             "$app" > "$log" 2>&1 &
           pid=$!
 

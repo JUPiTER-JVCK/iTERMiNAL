@@ -18,6 +18,9 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     /// words into what happened and what to do, and shown in place of the
     /// listing — an empty folder would say the wrong thing.
     @Published private(set) var listingProblem: RemoteProblem?
+    /// The listing came through a terminal tab's sign-in, which closing that
+    /// tab ends. Read with each listing.
+    @Published private(set) var usesSharedSignIn = false
     /// A transfer or a change on a remote host failed. The listing is fine, so
     /// this is a strip below it.
     @Published private(set) var operationProblem: RemoteProblem?
@@ -60,8 +63,10 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             case .success(let listing):
                 self.directory = listing.path
                 self.items = listing.items
+                self.usesSharedSignIn = (self.provider as? SFTPFileSystemProvider)?.usesSharedSignIn ?? false
             case .failure(let error):
                 self.items = []
+                self.usesSharedSignIn = false
                 if case FileProviderError.remote(let problem) = error {
                     self.listingProblem = problem
                 } else {
@@ -103,6 +108,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
         directory = provider.defaultPath()
         selection = nil
         items = []
+        usesSharedSignIn = false
         listingProblem = nil
         operationProblem = nil
         reload()
@@ -249,7 +255,11 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             reload()
         case .signInInTerminal:
             guard let connection = remoteConnection else { return }
-            WorkspaceStore.shared.newTab(kind: .remote(connection.id))
+            // A tab whose sign-in this browser then uses; it says so when it
+            // could not be set up that way.
+            if let note = WorkspaceStore.shared.newSharedSignIn(for: connection) {
+                errorMessage = note
+            }
         case .runInLocalTerminal(_, let command):
             WorkspaceStore.shared.newTab(typing: command)
         case .editConnection:
@@ -350,6 +360,12 @@ struct FilePaneView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
                 .foregroundStyle(theme.textPrimary)
+
+            if model.isRemote, model.usesSharedSignIn {
+                Image(systemName: "link")
+                    .font(.system(size: 10))
+                    .help("Signed in through a terminal tab. Closing that tab closes this connection.")
+            }
 
             Spacer(minLength: 8)
 

@@ -2030,10 +2030,14 @@ do {
           "a refused sign-in names the methods the server offered")
     let problem = RemoteProblem.classify(output: refused, connection: host)
     check(problem.title == "Couldn't sign in to mb_pro@192.168.1.148", "and the title says who it was for")
-    check(problem.explanation.contains("can only sign in with a key") && problem.explanation.contains("never handles one"),
+    check(problem.explanation.contains("can't type a password") && problem.explanation.contains("never handles one")
+            && problem.explanation.contains("through a terminal tab you have signed in to"),
           "the explanation says what the file browser can do, and that no password goes through this app")
     check(problem.explanation.contains("also allows a password or a keyboard-interactive prompt"),
-          "and which of the server's other methods it cannot use")
+          "and which of the server's other methods it cannot ask for")
+    check(problem.steps.contains { $0.text.contains("Sign In in a Terminal") && $0.text.contains("stays open") },
+          "a host that takes keys can also be reached by signing in in a terminal, and the tab has to stay open")
+    check(problem.steps.last?.text == "Then press Try Again.", "and the last step is to try again")
     check(problem.output == refused, "what sftp said is kept exactly")
     check(problem.actions == [
         .tryAgain, .runInLocalTerminal(label: "Set Up Key…", command: "ssh-copy-id mb_pro@192.168.1.148"),
@@ -2051,8 +2055,13 @@ do {
     let passwordOnly = RemoteProblem.classify(output: "mb_pro@192.168.1.148: Permission denied (password,keyboard-interactive).", connection: host)
     check(passwordOnly.explanation.contains("only accepts a password or a keyboard-interactive prompt"),
           "a host without key sign-in is described as such")
-    check(passwordOnly.steps.first?.command == nil && passwordOnly.steps.first?.text.contains("terminal session") == true,
-          "and the way forward is a terminal session, not a key")
+    check(passwordOnly.steps.first?.command == nil && passwordOnly.steps.first?.text.contains("Sign In in a Terminal") == true
+            && passwordOnly.steps.first?.text.contains("never to iTERMiNAL") == true,
+          "and the way forward is to sign in in a terminal, with the password going to ssh and not to this app")
+    check(passwordOnly.steps.map(\.text).contains { $0.contains("Keep the tab open") },
+          "and that the tab is what the file browser is using, so it has to stay")
+    check(passwordOnly.actions == [.tryAgain, .signInInTerminal, .editConnection],
+          "a host that takes no key is offered the sign-in in a terminal, not a key to install")
     check(!passwordOnly.actions.contains { if case .runInLocalTerminal = $0 { return true } else { return false } },
           "it is not offered a key to install, since the host would not take it")
 
@@ -2150,6 +2159,130 @@ do {
     }
     check(!commands.isEmpty && commands.allSatisfy { !$0.contains("\n") && !$0.contains("\r") },
           "no command offered contains a line break, so typing one into a terminal cannot run it")
+}
+
+// MARK: Shared sign-in (SSH control socket)
+
+// A host that wants a password is browsed through the connection a terminal tab
+// has signed in and left open. What is checked here is the part that can go
+// wrong without a server: that a connection is only offered the socket of its
+// own destination, that the folder it sits in is this account's alone (a socket
+// anyone else could have put there would be handed every file), that a socket
+// nobody is listening on is not mistaken for an open one, and what ssh is told.
+do {
+    let fm = FileManager.default
+    let host = SSHConnection(name: "Files", host: "Files.Example.com", username: "deploy")
+    let name = SSHControlSocket.name(for: host)
+    check(name.count == 16 && name.allSatisfy { $0.isHexDigit }, "a name is sixteen hex digits: \(name)")
+    check(name == SSHControlSocket.name(for: SSHConnection(name: "another label", host: "files.example.com", username: "deploy")),
+          "the same destination is the same name, whatever it is called and however the host is capitalised")
+    check(name != SSHControlSocket.name(for: SSHConnection(name: "Files", host: "files.example.com", username: "root")), "another user, another name")
+    check(name != SSHControlSocket.name(for: SSHConnection(name: "Files", host: "files.example.org", username: "deploy")), "another host, another name")
+    check(name != SSHControlSocket.name(for: SSHConnection(name: "Files", host: "files.example.com", port: 2222, username: "deploy")),
+          "another port, another name")
+
+    // Where it goes: a typical macOS temporary folder leaves room, and a path
+    // ssh would read as something else, or that cannot be bound, is refused.
+    let macTemp = "/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/"
+    let socketPath = SSHControlSocket.path(for: host, base: macTemp)
+    check(socketPath == macTemp + "it-ssh/" + name, "under the temporary folder, in a folder of its own: \(String(describing: socketPath))")
+    check((socketPath?.utf8.count ?? 999) + 17 <= 103, "with room for the 17 characters ssh adds while it binds")
+    check(SSHControlSocket.path(for: host, base: String(macTemp.dropLast())) == socketPath, "with the slash or without it")
+    check(SSHControlSocket.path(for: host, base: "/tmp/" + String(repeating: "x", count: 80) + "/") == nil, "too long to bind is refused")
+    for odd in ["/tmp/100%/", "/tmp/$HOME/", "~/tmp/", "/tmp/a b/", "/tmp/é/"] {
+        check(SSHControlSocket.path(for: host, base: odd) == nil, "a path ssh could read as something else is refused: \(odd)")
+    }
+    check(SSHControlSocket.masterArguments(path: "/p") == ["-o", "ControlMaster=yes", "-o", "ControlPath=/p"],
+          "the sign-in listens at the path")
+    check(SSHControlSocket.clientArguments(path: "/p") == ["-o", "ControlMaster=no", "-o", "ControlPath=/p"],
+          "and sftp joins what is there, and signs in the ordinary way when nothing is")
+
+    #if os(Linux)
+    let stream = Int32(SOCK_STREAM.rawValue)
+    #else
+    let stream = SOCK_STREAM
+    #endif
+    func makeListener(at path: String) -> Int32? {
+        let descriptor = socket(AF_UNIX, stream, 0)
+        guard descriptor >= 0 else { return nil }
+        let bound = SSHControlSocket.withAddress(of: path) { address, length in
+            bind(descriptor, address, length) == 0 && listen(descriptor, 4) == 0
+        } ?? false
+        if !bound {
+            close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+    func isUnavailable(_ preparation: SSHControlSocket.Preparation) -> Bool {
+        if case .unavailable = preparation { return true }
+        return false
+    }
+    func permissions(of path: String) -> mode_t {
+        var info = stat()
+        return lstat(path, &info) == 0 ? info.st_mode & 0o777 : 0
+    }
+
+    // With the real thing: a folder, a listener, and what each leaves behind.
+    let base = "/tmp/itc-" + String(UUID().uuidString.prefix(8)).lowercased() + "/"
+    try? fm.createDirectory(atPath: base, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: base) }
+    let directory = SSHControlSocket.directory(under: base)
+    let path = SSHControlSocket.path(for: host, base: base) ?? ""
+    check(!path.isEmpty, "a path under a short temporary folder")
+
+    check(SSHControlSocket.prepare(for: host, base: base) == .master(path), "with nothing open, the sign-in is the one that listens")
+    check(permissions(of: directory) == 0o700 && SSHControlSocket.isPrivateDirectory(directory), "in a folder only this account can enter")
+    check(SSHControlSocket.liveSocket(for: host, base: base) == nil, "and with nothing listening, nothing is offered to sftp")
+
+    let listener = makeListener(at: path)
+    check(listener != nil, "a socket can be made at the path")
+    check(SSHControlSocket.isLive(path), "a socket someone is listening on is open")
+    check(SSHControlSocket.liveSocket(for: host, base: base) == path, "and is what sftp is offered")
+    check(SSHControlSocket.prepare(for: host, base: base) == .open(path), "a second sign-in does not try to listen on top of it")
+    let someoneElse = SSHConnection(name: "Files", host: "files.example.com", username: "root")
+    check(SSHControlSocket.liveSocket(for: someoneElse, base: base) == nil, "another user on the same host has no socket here, so is offered none")
+
+    // The ssh that made it is gone; the file it left is not a connection.
+    if let listener { close(listener) }
+    check(fm.fileExists(atPath: path), "a socket file outlives the listener that died")
+    check(!SSHControlSocket.isLive(path), "but no one is listening on it")
+    check(SSHControlSocket.liveSocket(for: host, base: base) == nil, "so sftp is not pointed at it")
+    check(SSHControlSocket.prepare(for: host, base: base) == .master(path) && !fm.fileExists(atPath: path),
+          "and it is cleared away, so the next ssh can listen where it was")
+
+    // Something that is not a socket is not removed, and is not used.
+    _ = fm.createFile(atPath: path, contents: Data("not a socket".utf8))
+    check(isUnavailable(SSHControlSocket.prepare(for: host, base: base)) && fm.fileExists(atPath: path),
+          "a file in the way is left alone, and sharing is said to be unavailable")
+    check(!SSHControlSocket.isLive(path) && SSHControlSocket.liveSocket(for: host, base: base) == nil, "and is not taken for a connection")
+    try? fm.removeItem(atPath: path)
+
+    // A folder that others can open is closed again by this account, but a
+    // listing never trusts one that is open.
+    try? fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory)
+    check(!SSHControlSocket.isPrivateDirectory(directory), "a folder open to others is not private")
+    let planted = makeListener(at: path)
+    check(planted != nil && SSHControlSocket.liveSocket(for: host, base: base) == nil,
+          "a socket in a folder open to others is not offered to sftp")
+    if let planted { close(planted) }
+    try? fm.removeItem(atPath: path)
+    check(SSHControlSocket.prepare(for: host, base: base) == .master(path) && permissions(of: directory) == 0o700,
+          "preparing the folder closes it")
+
+    // A link where the folder should be is never followed.
+    try? fm.removeItem(atPath: directory)
+    let elsewhere = base + "elsewhere"
+    try? fm.createDirectory(atPath: elsewhere, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try? fm.createSymbolicLink(atPath: directory, withDestinationPath: elsewhere)
+    check(!SSHControlSocket.isPrivateDirectory(directory), "a link to a folder is not the folder")
+    check(isUnavailable(SSHControlSocket.prepare(for: host, base: base)), "sharing is unavailable when a link is in its place")
+    let behindLink = makeListener(at: elsewhere + "/" + name)
+    check(behindLink != nil && SSHControlSocket.liveSocket(for: host, base: base) == nil, "a socket reached through a link is not used")
+    if let behindLink { close(behindLink) }
+
+    // A path that is too long for a socket is not an open one.
+    check(!SSHControlSocket.isLive("/tmp/" + String(repeating: "x", count: 200)), "an address that cannot be a socket is not live")
 }
 
 // MARK: Coloured command output
