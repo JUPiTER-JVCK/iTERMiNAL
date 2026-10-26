@@ -698,6 +698,30 @@ final class ScreenshotRun {
         let copied = NSPasteboard.general.string(forType: .string) ?? ""
         say("right-click: Copy put \(copied.count) characters on the pasteboard, starting \(copied.prefix(40).debugDescription)")
 
+        // Paste lands at the prompt of the terminal that was clicked, whoever has
+        // the keyboard (here, the composer has it).
+        if let session = server?.primarySession {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("echo pasted-by-the-menu", forType: .string)
+            if let index = menu.items.firstIndex(where: { $0.title == "Paste" }) { menu.performActionForItem(at: index) }
+            await pause(1.2)
+            say("right-click: Paste put its text at the prompt: \(session.captureVisibleText().contains("pasted-by-the-menu"))")
+            // Control-U: the line, unsent.
+            session.send(text: "\u{15}")
+            await pause(0.5)
+        }
+
+        // Find… opens the terminal's own find bar.
+        if let index = menu.items.firstIndex(where: { $0.title == "Find…" }) { menu.performActionForItem(at: index) }
+        await pause(1.0)
+        let bar = terminal.subviews.first { String(describing: type(of: $0)).contains("FindBar") }
+        say("right-click: Find… \(bar.map { "showed a find bar, hidden \($0.isHidden)" } ?? "showed no find bar")")
+        _ = capture("terminal-find")
+        let hide = NSMenuItem(title: "Hide", action: nil, keyEquivalent: "")
+        hide.tag = NSTextFinder.Action.hideFindInterface.rawValue
+        terminal.performTextFinderAction(hide)
+        await pause(0.6)
+
         // The real event, through the window: the view under the pointer gets
         // it and opens its menu. `sendEvent` comes back when the menu closes,
         // so something has to close it; and something has to give up if that
