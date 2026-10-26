@@ -112,6 +112,20 @@ extension ScreenshotMode {
 
     // MARK: Views
 
+    /// Where each terminal in the window is and how big, for when the picture
+    /// of one comes out empty.
+    @MainActor
+    static func describeTerminals(in window: NSWindow, label: String) {
+        guard let root = window.contentView else { return }
+        for (index, container) in allViews(of: TerminalContainerView.self, in: root).enumerated() {
+            let inWindow = container.convert(container.bounds, to: nil)
+            let terminal = container.terminal
+            say("\(label): terminal \(index): container \(inWindow), terminal frame \(terminal.frame), "
+                + "hidden \(terminal.isHidden || container.isHidden), alpha \(terminal.alphaValue), "
+                + "in a window \(terminal.window != nil)")
+        }
+    }
+
     @MainActor
     static func allViews<V: NSView>(of type: V.Type, in root: NSView) -> [V] {
         var found: [V] = []

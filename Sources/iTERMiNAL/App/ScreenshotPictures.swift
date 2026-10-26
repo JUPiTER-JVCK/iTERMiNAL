@@ -218,9 +218,13 @@ extension ScreenshotMode {
                 say("\(name): a snapshot could not be read as an image")
                 continue
             }
-            let visible = overlay.view.visibleRect
-            guard !visible.isEmpty else { continue }
-            laidOver.append((rect: rectangle(of: visible, in: overlay.view, relativeTo: view), image: image))
+            // The view's whole bounds: what it is on screen, clipped or not, is
+            // what its picture was taken of.
+            let place = rectangle(of: overlay.view.bounds, in: overlay.view, relativeTo: view)
+            say("\(name): snapshot of \(Int(overlay.view.bounds.width))x\(Int(overlay.view.bounds.height)) "
+                + "(frame \(overlay.view.frame), visible \(overlay.view.visibleRect)) laid at \(place)")
+            guard !place.isEmpty else { continue }
+            laidOver.append((rect: place, image: image))
         }
         if !overlays.isEmpty { say("\(name): \(laidOver.count) snapshot(s) laid over") }
 

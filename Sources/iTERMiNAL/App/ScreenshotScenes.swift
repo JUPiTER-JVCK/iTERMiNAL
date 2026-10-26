@@ -30,9 +30,9 @@ final class ScreenshotRun {
     private var docs: WorkspaceTab?
 
     private static let site = "http://localhost:8765"
-    /// Where the assistant is pointed: the address Ollama uses, answered by the
-    /// same sample server the workflow starts on that port.
-    private static let assistant = "http://localhost:11434/v1"
+    /// Where the assistant is pointed: the address Ollama's preset uses,
+    /// answered by the same sample server the workflow starts on that port.
+    private static let assistant = "http://127.0.0.1:11434/v1"
 
     /// What the composer shows in the hero picture: a command word, flags, a
     /// string, a pipe and a redirect, to show the input's colouring.
@@ -81,7 +81,13 @@ final class ScreenshotRun {
         settings.railPanelOpen = true
         settings.railPanelPinned = true
         settings.showSystemMetrics = false
+        settings.composerCollapsed = false
         settings.sshConnections = Self.hosts
+        // Set up before anything has asked whether an assistant is: the
+        // composer remembers the answer for half a minute, and a "no" from
+        // before this would still be in force when the offer scene runs.
+        settings.assistantBaseURL = Self.assistant
+        settings.assistantModel = "llama3.2"
 
         await ScreenshotMode.bringToFront(window)
         ScreenshotMode.fit(window)
@@ -105,8 +111,11 @@ final class ScreenshotRun {
         await scene("browser") { await self.browser() }
         await scene("files") { await self.files() }
         await scene("notes") { await self.notesPanel() }
-        await scene("superfile") { await self.tool(.superfile, panel: .superfile, name: "superfile", settle: 4) }
-        await scene("btop") { await self.tool(.btop, panel: .btop, name: "btop", settle: 7) }
+        await scene("superfile") { await self.tool(.superfile, panel: .superfile, name: "superfile", settle: 3) }
+        await scene("btop") {
+            self.speedUpBtop()
+            return await self.tool(.btop, panel: .btop, name: "btop", settle: 24)
+        }
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
@@ -147,13 +156,16 @@ final class ScreenshotRun {
         store.showCommandPalette = false
         store.showKeyboardShortcuts = false
         settings.railPanelOpen = true
+        settings.composerCollapsed = false
         if let server {
             store.selectedTabID = server.id
             store.focusedSessionID = server.primarySession?.id
         }
-        compose("")
         await ScreenshotMode.bringToFront(window)
-        await pause(0.6)
+        // Not before the window has put the composer back: after a panel that
+        // covered the whole surface, there is nothing to clear until it has.
+        await pause(0.8)
+        compose("")
         // The sidebar starts with its folders shut, and is built afresh each
         // time it is brought back.
         NotificationCenter.default.post(name: .screenshotsExpandSidebar, object: nil)
@@ -165,11 +177,29 @@ final class ScreenshotRun {
         store.closeRightRegion()
     }
 
-    /// Prints into the server tab, which is the terminal most pictures have
-    /// beside whatever they are of. A command that fits a narrow pane, because
-    /// the panels take half the width and lines that wrap look like a bug.
+    /// Runs `command` in `session` the way a person would: the screen cleared,
+    /// then the command as a line of its own. Typed as one line, `clear; git
+    /// log` would name the tab "clear; git" in the sidebar and the task list,
+    /// which name a tab by the first words of what it was last given.
+    private func run(_ command: String, in session: TerminalSession?) async {
+        guard let session else { return }
+        session.send(text: "clear\n")
+        await pause(0.4)
+        session.send(text: command + "\n")
+    }
+
+    /// The server tab's terminal, for the pictures where it sits beside a
+    /// panel: a command whose lines fit a narrow pane, because lines that wrap
+    /// look like a bug.
     private func tidyServer() async {
-        server?.primarySession?.send(text: "clear; git status -sb; git diff --stat\n")
+        await run("git log --oneline --decorate -n 12", in: server?.primarySession)
+        await pause(1.5)
+    }
+
+    /// The server tab's terminal with the whole picture of the history in it,
+    /// for the pictures where the window is what is being looked at.
+    private func showHistory() async {
+        await run("git log --oneline --graph --decorate -n 14; echo; ls -F", in: server?.primarySession)
         await pause(1.5)
     }
 
@@ -190,18 +220,20 @@ final class ScreenshotRun {
         docs?.customName = "docs"
         if let server { store.togglePin(server) }
 
-        // A tab opened and shut again, so Recents has something in it.
+        // A tab opened and shut again, so Recents has something in it — and
+        // open, so the sidebar shows it.
         let logs = store.newTab(in: hello, directory: demo)
         logs.customName = "logs"
+        settings.recentsExpanded = true
 
         // The tabs nobody is looking at get their output now; the one in the
         // picture is shown first, so it is sized to its window before anything
         // is printed into it.
         await pause(2.0)
-        tests.primarySession?.send(text: "clear; git status -sb; git diff --stat\n")
-        infra?.tabs.first?.primarySession?.send(text: "clear; ls -F\n")
-        docs?.primarySession?.send(text: "clear; ls -F\n")
-        logs.primarySession?.send(text: "clear; git log --oneline -n 3\n")
+        await run("git status -sb; git diff --stat", in: tests.primarySession)
+        await run("ls -F", in: infra?.tabs.first?.primarySession)
+        await run("ls -F", in: docs?.primarySession)
+        await run("git log --oneline -n 3", in: logs.primarySession)
         await pause(1.5)
         store.closeTab(logs)
 
@@ -209,7 +241,7 @@ final class ScreenshotRun {
         store.selectedTabID = shown.id
         store.focusedSessionID = session.id
         await pause(2.0)
-        session.send(text: "clear; git log --oneline --graph --decorate -n 14; echo; ls -F\n")
+        await run("git log --oneline --graph --decorate -n 14; echo; ls -F", in: session)
         await pause(2.5)
         NotificationCenter.default.post(name: .screenshotsExpandSidebar, object: nil)
         say("composer: \(ScreenshotMode.typeIntoComposer(Self.composerSample, in: window) ? "typed" : "no input field found")")
@@ -314,27 +346,32 @@ final class ScreenshotRun {
         store.selectedTabID = tab.id
         store.focusedSessionID = first.id
         // The sidebar gives its width to the panes, which are what this
-        // picture is of; lines that wrap in a narrow pane look like a bug.
+        // picture is of; lines that wrap in a narrow pane look like a bug. The
+        // composer is put down to its pill, which covers none of them.
         settings.railPanelOpen = false
+        settings.composerCollapsed = true
         await pause(2.0)
         _ = store.splitFocusedPane(.horizontal, kind: .terminal)
         _ = store.splitFocusedPane(.vertical, kind: .files)
         await pause(2.5)
 
         let sessions = tab.root.allSessions()
-        sessions.first?.send(text: "clear; git log --oneline -n 14\n")
+        await run("git log --oneline -n 14", in: sessions.first)
         if sessions.count > 1 {
-            let command = fixtureLog.map { "clear; tail -n 14 '\($0)'\n" } ?? "clear; ls -F\n"
-            sessions[1].send(text: command)
+            await run(fixtureLog.map { "tail -n 14 '\($0)'" } ?? "ls -F", in: sessions[1])
         }
         await pause(2.5)
-        return capture("split-panes")
+        let taken = capture("split-panes")
+        settings.composerCollapsed = false
+        return taken
     }
 
     /// What shows when no tab is open: the quick-start cards, and the commands
     /// from the shell's history.
     private func landing() async -> Bool {
         await baseline()
+        // Without the sidebar the cards fit on one row, clear of the composer.
+        settings.railPanelOpen = false
         store.selectedTabID = nil
         await pause(1.8)
         guard store.selectedTab == nil else {
@@ -352,14 +389,22 @@ final class ScreenshotRun {
         store.toggleBottomDock()
         await pause(2.5)
         guard let first = store.dockSessions.first else { return false }
-        let logCommand = fixtureLog.map { "clear; tail -n 12 '\($0)'\n" } ?? "clear; ls -F\n"
-        first.send(text: logCommand)
+        await run("git status -sb; git log --oneline -n 5", in: first)
+        // The newest tab is the one shown: put back, an older one has come up
+        // empty in a picture before.
         let second = store.newDockSession(directory: demo.map { $0 + "/docs" })
-        await pause(2.0)
-        second.send(text: "clear; git status -sb; ls -F\n")
-        store.selectedDockSessionID = first.id
-        await pause(2.0)
+        await pause(2.5)
+        await run(fixtureLog.map { "tail -n 12 -f '\($0)'" } ?? "ls -F", in: second)
+        await pause(2.5)
+        ScreenshotMode.describeTerminals(in: window, label: "dock")
+        say("dock: the new tab holds \(second.captureVisibleText().count) characters")
         let taken = capture("dock")
+        // The first tab again, for comparison.
+        store.selectedDockSessionID = first.id
+        await pause(2.5)
+        ScreenshotMode.describeTerminals(in: window, label: "dock, first tab")
+        say("dock: the first tab holds \(first.captureVisibleText().count) characters")
+        _ = capture("dock-first")
         store.closeBottomDock()
         return taken
     }
@@ -391,7 +436,7 @@ final class ScreenshotRun {
         let loaded = await ScreenshotMode.until(timeout: 25) {
             tabs.tabs.allSatisfy { $0.hasNavigated && !$0.isLoading && !$0.pageTitle.isEmpty }
         }
-        say("browser: pages loaded: \(loaded)")
+        say("browser: pages loaded: \(loaded) — \(tabs.tabs.map { "\($0.pageTitle.isEmpty ? "(no title)" : $0.pageTitle), loading \($0.isLoading)" })")
         await tidyServer()
         await pause(1.0)
         guard let web = tabs.active?.webView, let image = await ScreenshotMode.snapshot(of: web) else {
@@ -435,13 +480,28 @@ final class ScreenshotRun {
         await baseline()
         settings.railPanelOpen = false
         store.openPanelExpanded(panel)
-        await pause(2.5)
-        // What it looked like on the way up, for when it never settles.
-        _ = capture("\(name)-early")
-        await pause(settle)
+        await pause(2.5 + settle)
+        ScreenshotMode.describeTerminals(in: window, label: name)
         let taken = capture(name)
         closePanels()
         return taken
+    }
+
+    /// btop draws one more column of each graph per update, and its default is
+    /// one every two seconds: a picture taken in the first minute is of graphs
+    /// that are mostly empty. Asked for ten a second, they fill in twenty.
+    /// Written ahead of the launch, which keeps every setting it finds in the
+    /// file and sets only the colour theme.
+    private func speedUpBtop() {
+        let url = ToolTheming.btopConfigURL
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let updated = ToolTheming.settingKeys([("update_ms", "100")], in: existing)
+            try updated.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            say("btop: could not set its update interval: \(error.localizedDescription)")
+        }
     }
 
     // MARK: Sheets
@@ -455,6 +515,15 @@ final class ScreenshotRun {
         var saved = false
         if let sheet = window.attachedSheet {
             saved = ScreenshotMode.capture(sheet, "command-palette", in: directory)
+            // The search field has the focus when the sheet opens.
+            if let editor = sheet.firstResponder as? NSTextView {
+                let whole = NSRange(location: 0, length: (editor.string as NSString).length)
+                editor.insertText("panel", replacementRange: whole)
+                await pause(1.0)
+                _ = ScreenshotMode.capture(sheet, "command-palette-search", in: directory)
+            } else {
+                say("palette: the search field does not have the focus")
+            }
         } else {
             say("palette: no sheet is attached")
         }
@@ -493,6 +562,7 @@ final class ScreenshotRun {
 
     private func lightTheme() async -> Bool {
         await baseline()
+        await showHistory()
         settings.theme = .light
         await pause(2.5)
         compose(Self.composerSample)
@@ -507,6 +577,7 @@ final class ScreenshotRun {
     /// that sets them, which is what that picture is of.
     private func customLook() async -> Bool {
         await baseline()
+        await showHistory()
         settings.terminalThemeID = "catppuccin-mocha"
         settings.accentID = "purple"
         settings.frameTintSource = .accent
@@ -537,13 +608,14 @@ final class ScreenshotRun {
     /// An `@ai` question, answered by the sample server standing in for a model.
     private func assistantReply() async -> Bool {
         await baseline()
-        settings.assistantBaseURL = Self.assistant
-        settings.assistantModel = "llama3.2"
         _ = ScreenshotMode.focusComposer(in: window)
         compose("@ai how do I discard my local changes and match origin/main?")
         await pause(0.8)
         ScreenshotMode.pressReturn(in: window)
         await pause(4.5)
+        if let field = ScreenshotMode.composerField(in: window) {
+            say("ai-assistant: the input holds \(field.string.debugDescription), marked text \(field.hasMarkedText())")
+        }
         let taken = capture("ai-assistant")
         await sendFromComposer("clear")
         return taken
@@ -558,6 +630,12 @@ final class ScreenshotRun {
         await pause(0.8)
         ScreenshotMode.pressReturn(in: window)
         await pause(6.0)
+        // What the watcher that makes the offer would have read.
+        let text = server?.primarySession?.captureScrollback(maxBytes: 8_192) ?? ""
+        let fresh = OutputDiff.newLines(baseline: "", current: text)
+        say("error-help: the terminal ends \(fresh.suffix(4))")
+        say("error-help: signature \(String(describing: FailureSignature.firstMatch(in: fresh, excludingCommand: "make build"))); "
+            + "assistant set up \(AssistantServiceProvider.current.isConfigured); offers on \(settings.assistantOfferErrorHelp)")
         let taken = capture("error-help")
         await sendFromComposer("clear")
         return taken
@@ -576,13 +654,13 @@ final class ScreenshotRun {
 
     /// The Settings window, which does not exist until someone asks for it, one
     /// page at a time. Not Backup, whose page prints where the state file is on
-    /// this machine.
+    /// this machine; and not Connections, whose page lists whatever Bonjour
+    /// finds on the network — on a runner, that is the runner's own name.
     private func settingsWindows() async {
         let pages: [(SettingsSection, String)] = [
             (.terminal, "settings-terminal"),
             (.composer, "settings-composer"),
             (.panels, "settings-panels"),
-            (.connections, "settings-connections"),
             (.security, "settings-security"),
             (.ai, "settings-ai"),
             (.http, "settings-http"),
