@@ -40,10 +40,11 @@ investigation:
 - **XcodeGen install** — installed from its own GitHub release, deliberately
   not `brew` (the runner image ships an untrusted `aws/tap` whose warning is
   noise). A failure here is usually the release asset layout changing.
-- **Actions major versions do not move together.** `checkout@v5`,
-  `upload-artifact@v6`, `download-artifact@v7` are each on a different major.
-  Never assume one version bump applies to the others — read each action's
-  `action.yml` before claiming a version is right.
+- **Actions major versions do not move together.** `checkout`,
+  `upload-artifact`, `download-artifact` and `cache` are versioned separately
+  (see the `uses:` lines in `.github/workflows/`; two sharing a number is a
+  coincidence). Never assume one version bump applies to the others — read each
+  action's `action.yml` before claiming a version is right.
 
 ## What to return
 
