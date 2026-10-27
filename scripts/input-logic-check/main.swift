@@ -3717,5 +3717,39 @@ do {
     }
 }
 
+// MARK: Background opacity
+
+do {
+    let floor = BackgroundOpacity.range.lowerBound
+    check(floor > 0 && floor < 1 && BackgroundOpacity.range.upperBound == 1,
+          "the slider runs from a floor above zero up to a solid background")
+    check(BackgroundOpacity.clamped(1.0) == 1.0, "a solid background stays solid")
+    check(BackgroundOpacity.clamped(0.7) == 0.7, "a value in range is kept as it is")
+    check(BackgroundOpacity.clamped(floor) == floor, "the floor itself is allowed")
+    check(BackgroundOpacity.clamped(0.05) == floor, "below the floor is raised to it")
+    check(BackgroundOpacity.clamped(-3) == floor, "a negative value is raised to the floor")
+    check(BackgroundOpacity.clamped(3) == 1.0, "above 100% is 100%")
+    check(BackgroundOpacity.clamped(.nan) == 1.0, "not a number reads as a solid background")
+    check(BackgroundOpacity.clamped(.infinity) == 1.0, "infinity reads as a solid background")
+    check(BackgroundOpacity.clamped(-.infinity) == 1.0, "minus infinity reads as a solid background, not as invisible")
+
+    check(!BackgroundOpacity.isTranslucent(1.0), "100% is not see-through, so no backdrop is built")
+    check(!BackgroundOpacity.isTranslucent(7.0), "a value above range is clamped to solid first")
+    check(!BackgroundOpacity.isTranslucent(.nan), "a damaged preference is not see-through")
+    check(BackgroundOpacity.isTranslucent(0.99), "99% is see-through")
+    check(BackgroundOpacity.isTranslucent(0.0), "zero is raised to the floor, which is see-through")
+
+    check(BackgroundOpacity.percentText(0.704) == "70%", "the slider reads whole percent")
+    check(BackgroundOpacity.percentText(1.0) == "100%", "a solid background reads 100%")
+    check(BackgroundOpacity.percentText(0.0) == "\(Int((floor * 100).rounded()))%", "the reading never goes below the floor")
+
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x000000), "black wants the dark frost")
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x1E1E2E), "a typical dark theme wants the dark frost")
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x002B36), "solarized dark wants the dark frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xFFFFFF), "white wants the light frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xFDF6E3), "solarized light wants the light frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xEFF1F5), "a typical light theme wants the light frost")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

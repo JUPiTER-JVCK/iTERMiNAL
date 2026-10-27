@@ -193,6 +193,7 @@ jobs:
             Sources/iTERMiNAL/Files/SSHControlSocket.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
+            Sources/iTERMiNAL/Terminal/BackgroundOpacity.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

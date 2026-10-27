@@ -131,8 +131,13 @@ final class SwiftTermEngine: TerminalEngine {
         lastAppearance = appearance
         terminalView.font = appearance.font
         terminalView.nativeForegroundColor = appearance.foreground
-        let alpha = max(0.5, min(1.0, appearance.backgroundAlpha))
-        terminalView.nativeBackgroundColor = appearance.background.withAlphaComponent(alpha)
+        // The colour, then the opacity, and the opacity through SwiftTerm's own
+        // property rather than as the colour's alpha: that property is what
+        // also tells its GPU renderer's layer to composite instead of painting
+        // opaque, and it redraws. Text, the cursor and cells with a colour of
+        // their own stay solid whatever it is.
+        terminalView.nativeBackgroundColor = appearance.background
+        terminalView.backgroundOpacity = CGFloat(BackgroundOpacity.clamped(Double(appearance.backgroundAlpha)))
         terminalView.caretColor = appearance.foreground
     }
 

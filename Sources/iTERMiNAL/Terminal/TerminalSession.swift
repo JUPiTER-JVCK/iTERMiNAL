@@ -272,6 +272,14 @@ final class TerminalSession: ObservableObject, Identifiable {
         engine.display(text: "\r\n\u{1B}[2m— end of restored session —\u{1B}[0m\r\n")
     }
 
+    /// How see-through this terminal's background is. A bundled tool is always
+    /// solid: it sits in a side panel that paints an opaque surface of its own,
+    /// so a translucent terminal there would only tint that surface — and
+    /// btop and superfile are drawn for a background of a known colour.
+    private func effectiveBackgroundOpacity(_ settings: AppSettings) -> Double {
+        kind.isTool ? 1 : BackgroundOpacity.clamped(settings.backgroundOpacity)
+    }
+
     /// Pushes font, colors, ANSI palette, and the GPU renderer preference
     /// into the engine. Safe to call on every SwiftUI update — the engine
     /// ignores values that haven't changed.
@@ -290,7 +298,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             darkMode: darkMode,
             fontName: settings.terminalFontName,
             fontSize: settings.terminalFontSize,
-            backgroundOpacity: settings.backgroundOpacity,
+            backgroundOpacity: effectiveBackgroundOpacity(settings),
             gpuRequested: settings.useGPURendering
         )
         guard inputs != appliedStyling else { return }
@@ -302,7 +310,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             font: settings.resolvedTerminalFont(),
             background: theme.backgroundColor,
             foreground: theme.foregroundColor,
-            backgroundAlpha: CGFloat(settings.backgroundOpacity)
+            backgroundAlpha: CGFloat(inputs.backgroundOpacity)
         ))
         let active = engine.setGPUAcceleration(settings.useGPURendering)
         if isGPUAccelerated != active {

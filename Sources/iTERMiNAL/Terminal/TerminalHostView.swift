@@ -97,6 +97,10 @@ final class TerminalContainerView: NSView {
 
     private var dragEndObserver: NSObjectProtocol?
 
+    /// The frost under a see-through terminal. Nil while the background is
+    /// solid, so a terminal at 100% costs nothing extra.
+    private var backdrop: NSVisualEffectView?
+
     init(terminal: NSView) {
         self.terminal = terminal
         super.init(frame: .zero)
@@ -178,11 +182,63 @@ final class TerminalContainerView: NSView {
         applyTerminalFrame()
     }
 
-    /// Matches the padding to whatever the terminal is currently painting.
+    /// Matches the padding to whatever the terminal is currently painting, and
+    /// puts a frosted copy of the desktop under it while it is see-through.
     func syncBackground() {
         hideScroller()
         guard let terminalView = terminal as? TerminalView else { return }
         layer?.backgroundColor = terminalView.nativeBackgroundColor.cgColor
+        syncBackdrop(
+            translucent: BackgroundOpacity.isTranslucent(Double(terminalView.backgroundOpacity)),
+            background: terminalView.nativeBackgroundColor
+        )
+    }
+
+    /// What a see-through terminal shows through to.
+    ///
+    /// SwiftTerm paints the terminal's background at the opacity it is given,
+    /// but the app's own surfaces sit beneath this view — the content card, the
+    /// panel behind it — and every one of them is opaque, so on its own a lower
+    /// opacity only mixed the terminal's colour with the app's. A
+    /// behind-window effect view does not blend with what is under it in the
+    /// window: it shows the desktop behind the window, blurred, in its own
+    /// rectangle — which is this one, so only the terminals become see-through
+    /// and the bars, panels and sheets stay solid.
+    private func syncBackdrop(translucent: Bool, background: NSColor) {
+        guard translucent else {
+            backdrop?.removeFromSuperview()
+            backdrop = nil
+            return
+        }
+        let view: NSVisualEffectView
+        if let existing = backdrop {
+            view = existing
+        } else {
+            view = BackdropView(frame: bounds)
+            view.autoresizingMask = [.width, .height]
+            view.blendingMode = .behindWindow
+            // Always drawn: the default dims it with the window, and a terminal
+            // that changes look when you click another window is not the point.
+            view.state = .active
+            view.material = .underWindowBackground
+            addSubview(view, positioned: .below, relativeTo: terminal)
+            backdrop = view
+        }
+        let dark = BackgroundOpacity.prefersDarkBackdrop(background: Self.rgb(of: background))
+        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        if view.appearance != appearance {
+            view.appearance = appearance
+        }
+    }
+
+    /// `color` as 0xRRGGBB in sRGB. A colour that has no sRGB form reads as
+    /// black, which is what an unreadable terminal background is best taken as.
+    private static func rgb(of color: NSColor) -> UInt32 {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return 0 }
+        func byte(_ component: CGFloat) -> UInt32 {
+            UInt32((min(max(component, 0), 1) * 255).rounded())
+        }
+        return (byte(srgb.redComponent) << 16) | (byte(srgb.greenComponent) << 8) | byte(srgb.blueComponent)
     }
 
     private func hideScroller() {
@@ -190,4 +246,12 @@ final class TerminalContainerView: NSView {
             scroller.isHidden = true
         }
     }
+}
+
+/// The effect view under a see-through terminal. Takes no clicks: the padding
+/// ring it sits behind has to answer them — its right-click menu, and a mouse
+/// down that must not drag the window — and an `NSVisualEffectView` would
+/// otherwise answer first, with its own idea of both.
+private final class BackdropView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

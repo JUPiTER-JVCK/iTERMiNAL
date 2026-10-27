@@ -96,12 +96,13 @@ struct AppearanceSettingsView: View {
             }
             Section("Window") {
                 HStack {
-                    Slider(value: $settings.backgroundOpacity, in: 0.5...1.0)
-                    Text("\(Int(settings.backgroundOpacity * 100))%")
+                    Text("Terminal opacity")
+                    Slider(value: $settings.backgroundOpacity, in: BackgroundOpacity.range)
+                    Text(BackgroundOpacity.percentText(settings.backgroundOpacity))
                         .monospacedDigit()
                         .frame(width: 42, alignment: .trailing)
                 }
-                Text("Terminal background opacity.")
+                Text("Lets the desktop show through a terminal's background, softly blurred. Text and the cursor stay solid. btop and superfile keep a solid background.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

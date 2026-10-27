@@ -15,12 +15,16 @@ struct SettingsRootView: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
+        // One surface from edge to edge: the rail, the heading and the page are
+        // all `theme.background`, with no divider between them, so nothing in
+        // the window reads as a seam. What separates a row from the next is its
+        // own highlight, not a change of ground.
         HStack(spacing: 0) {
             navigationRail(theme: theme)
-            FadedDivider(axis: .vertical)
             contentColumn(theme: theme)
         }
         .frame(width: 940, height: 640)
+        .background(theme.background)
         // No title bar above the rail: the search field and the section icons
         // start at the top edge, with the traffic lights floating over the
         // band the rail clears for them.
@@ -91,7 +95,7 @@ struct SettingsRootView: View {
             }
         }
         .frame(width: 232)
-        .background(theme.sidebar)
+        .background(theme.background)
     }
 
     /// Filters the rail as you type, matching a section's title or subtitle.
@@ -141,6 +145,9 @@ struct SettingsRootView: View {
                 case .advanced: AdvancedSettingsView()
                 }
             }
+            // The grouped forms paint a ground of their own, a shade off the
+            // heading above them. Hidden, the page shows the window's surface.
+            .scrollContentBackground(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
