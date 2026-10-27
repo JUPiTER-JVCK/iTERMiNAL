@@ -158,6 +158,7 @@ final class ScreenshotRun {
 
         await settingsWindows()
 
+        await scene("cursor-animation") { await self.cursorAnimation() }
         await scene("terminal-link-menu") { await self.linkMenu() }
         await scene("terminal-context-menu") { await self.contextMenu() }
     }
@@ -1233,6 +1234,53 @@ final class ScreenshotRun {
         await pause(1.5)
         store.closeTab(tab)
         return taken
+    }
+
+    // MARK: Cursor animation
+
+    /// Each cursor animation, on the cursor of the real terminal in the front
+    /// window with the keys going to it: whether the animation is on the
+    /// cursor's layer, and whether the opacity the screen shows is moving. A
+    /// still picture cannot tell a breathing cursor from a steady one.
+    private func cursorAnimation() async -> Bool {
+        await baseline()
+        guard let root = window.contentView,
+              let terminal = ScreenshotMode.firstView(ofType: InstrumentedTerminalView.self, in: root) else {
+            say("cursor: no terminal in the window")
+            return false
+        }
+        let before = settings.cursorAnimationTag
+        defer { settings.cursorAnimationTag = before }
+        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering)")
+        window.makeFirstResponder(terminal)
+        await pause(0.6)
+        say("cursor: the terminal has the keys: \(window.firstResponder === terminal)")
+
+        func caret() -> CALayer? {
+            terminal.subviews.first { NSStringFromClass(type(of: $0)).hasSuffix(".CaretView") }?.layer
+        }
+        var moving = 0
+        for animation in CursorAnimation.allCases where animation != .none {
+            settings.cursorAnimationTag = animation.rawValue
+            await pause(1.3)
+            guard let layer = caret() else {
+                say("cursor: \(animation.label): no caret view among \(terminal.subviews.map { NSStringFromClass(type(of: $0)) })")
+                continue
+            }
+            var seen: [Float] = []
+            for _ in 0..<14 {
+                seen.append(layer.presentation()?.opacity ?? -1)
+                await pause(0.2)
+            }
+            let low = seen.min() ?? -1, high = seen.max() ?? -1
+            say("cursor: \(animation.label): animation keys \(layer.animationKeys() ?? []); opacity seen from \(low) to \(high) in \(seen.count) looks over \(Int(Double(seen.count) * 0.2)) s")
+            if high - low > 0.15 { moving += 1 }
+        }
+        settings.cursorAnimationTag = CursorAnimation.none.rawValue
+        await pause(1.3)
+        say("cursor: back to none: animation keys \(caret()?.animationKeys() ?? [])")
+        say("cursor: \(moving) of \(CursorAnimation.allCases.count - 1) animations were moving")
+        return moving == CursorAnimation.allCases.count - 1
     }
 
     // MARK: A link under the pointer
