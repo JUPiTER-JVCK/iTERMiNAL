@@ -918,8 +918,11 @@ final class ScreenshotRun {
             say("tools: the shell says: \(line)")
         }
 
-        // bat is told not to page: the scene must not be left in a pager.
-        await run("(cd tools-demo && imgcat -W 24 logo.png && bat --paging=never main.rs && rg -n hello)", in: session)
+        // In the folder, so that what is typed fits a line. bat is told not to
+        // page (-P): the scene must not be left in a pager.
+        await run("cd tools-demo", in: session)
+        await pause(0.8)
+        await run("imgcat -W 24 logo.png && bat -P main.rs && rg -n hello", in: session)
         await pause(3.5)
         for line in session.captureVisibleText().split(separator: "\n").suffix(10) {
             say("tools: on the screen: \(line)")
@@ -933,10 +936,12 @@ final class ScreenshotRun {
         } catch {
             say("tools: could not write the Kitty probe: \(error.localizedDescription)")
         }
-        await run("(cd tools-demo && sh kitty-probe.sh)", in: session)
+        await run("sh kitty-probe.sh", in: session)
         await pause(3.0)
         _ = capture("terminal-tools-kitty")
 
+        await run("cd ..", in: session)
+        await pause(0.8)
         session.send(text: "clear\n")
         await pause(0.8)
         return taken
