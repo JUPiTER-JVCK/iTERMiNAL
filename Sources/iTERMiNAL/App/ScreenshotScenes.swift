@@ -1256,8 +1256,10 @@ final class ScreenshotRun {
         defer {
             settings.cursorAnimationTag = before
             CursorAnimator.assumeTypedInto = false
+            CursorAnimator.reduceMotionOverride = nil
         }
-        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering); Reduce Motion is on: \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)")
+        let systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering); the system's Reduce Motion is on: \(systemReduceMotion)")
         window.makeFirstResponder(terminal)
         await pause(0.6)
         say("cursor: the terminal has the keys: \(window.firstResponder === terminal)")
@@ -1265,28 +1267,41 @@ final class ScreenshotRun {
         func caret() -> CALayer? {
             terminal.subviews.first { NSStringFromClass(type(of: $0)).hasSuffix(".CaretView") }?.layer
         }
-        var moving = 0
-        for animation in CursorAnimation.allCases where animation != .none {
+        func look(_ animation: CursorAnimation) async -> (keys: [String], low: Float, high: Float)? {
             settings.cursorAnimationTag = animation.rawValue
             await pause(1.3)
             guard let layer = caret() else {
                 say("cursor: \(animation.label): no caret view among \(terminal.subviews.map { NSStringFromClass(type(of: $0)) })")
-                continue
+                return nil
             }
             var seen: [Float] = []
             for _ in 0..<14 {
                 seen.append(layer.presentation()?.opacity ?? -1)
                 await pause(0.2)
             }
-            let low = seen.min() ?? -1, high = seen.max() ?? -1
-            say("cursor: \(animation.label): animation keys \(layer.animationKeys() ?? []); opacity seen from \(low) to \(high) in \(seen.count) looks over \(Int(Double(seen.count) * 0.2)) s")
-            if high - low > 0.15 { moving += 1 }
+            return (layer.animationKeys() ?? [], seen.min() ?? -1, seen.max() ?? -1)
+        }
+
+        // As the system has it: where Reduce Motion is on, nothing may move.
+        var respected = true
+        if systemReduceMotion, let result = await look(.breathing) {
+            respected = result.keys.isEmpty && result.high - result.low < 0.05
+            say("cursor: with the system's Reduce Motion on, Breathing has animation keys \(result.keys) and the opacity seen is \(result.low) to \(result.high): respected \(respected)")
+        }
+
+        // With it off, each animation has to be on the cursor and moving.
+        CursorAnimator.reduceMotionOverride = false
+        var moving = 0
+        for animation in CursorAnimation.allCases where animation != .none {
+            guard let result = await look(animation) else { continue }
+            say("cursor: \(animation.label): animation keys \(result.keys); opacity seen from \(result.low) to \(result.high) over 14 looks, 2 s")
+            if result.high - result.low > 0.15 { moving += 1 }
         }
         settings.cursorAnimationTag = CursorAnimation.none.rawValue
         await pause(1.3)
         say("cursor: back to none: animation keys \(caret()?.animationKeys() ?? [])")
         say("cursor: \(moving) of \(CursorAnimation.allCases.count - 1) animations were moving")
-        return moving == CursorAnimation.allCases.count - 1
+        return respected && moving == CursorAnimation.allCases.count - 1
     }
 
     // MARK: A link under the pointer

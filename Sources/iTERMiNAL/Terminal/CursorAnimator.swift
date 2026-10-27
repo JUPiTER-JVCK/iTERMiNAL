@@ -59,7 +59,7 @@ final class CursorAnimator {
     /// Motion is off; plain otherwise.
     func refresh() {
         guard let layer = caretLayer() else { return }
-        guard let loop = animation.loop, isTypedInto, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+        guard let loop = animation.loop, isTypedInto, !reduceMotion else {
             layer.removeAnimation(forKey: Self.animationKey)
             return
         }
@@ -78,7 +78,19 @@ final class CursorAnimator {
     /// never active there — so a scene that wants to see an animation run says
     /// so here. Compiled out of every shipped build.
     static var assumeTypedInto = false
+
+    /// And it has Reduce Motion on, which an animation has to respect; a scene
+    /// that wants to see one run says it is off here, and leaves this nil to see
+    /// it refused.
+    static var reduceMotionOverride: Bool?
     #endif
+
+    private var reduceMotion: Bool {
+        #if SCREENSHOTS
+        if let forced = Self.reduceMotionOverride { return forced }
+        #endif
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
 
     /// Whether the terminal is the one receiving the keys: in the front window,
     /// and its first responder.
