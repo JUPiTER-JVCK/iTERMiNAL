@@ -188,12 +188,15 @@ final class PageExtractionModel: ObservableObject {
             let kind = HTTPResponseFormatter.classify(contentTypeHeader: contentType, sampleBytes: response.body.prefix(256))
             let document = QueryDocument(body: response.body, contentType: contentType, url: response.finalURL)
             let result = ResponseExtractor.extract(body: response.body, contentType: contentType, url: response.finalURL, kind: kind)
+            // A `let` for the hop to the main thread: a weak capture is a `var`,
+            // and a closure that runs concurrently may not read one.
+            guard let model = self else { return }
             await MainActor.run {
-                guard let self, self.generation == mine else { return }
-                self.document = document
-                self.phase = .ready(result)
-                self.section = Self.firstSection(for: result)
-                if let language = result.languages.first { self.queryLanguage = language }
+                guard model.generation == mine else { return }
+                model.document = document
+                model.phase = .ready(result)
+                model.section = Self.firstSection(for: result)
+                if let language = result.languages.first { model.queryLanguage = language }
             }
         }
     }
@@ -316,7 +319,21 @@ final class PageExtractionModel: ObservableObject {
         if let type = UTType(filenameExtension: (suggestedName as NSString).pathExtension) { panel.allowedContentTypes = [type] }
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            Self.presentSaveFailure(error, file: url)
+        }
+    }
+
+    /// Says so when a save did not happen. One that quietly does nothing looks
+    /// like one that worked, and the list or page it was of is still on screen.
+    private static func presentSaveFailure(_ error: Error, file: URL) {
+        let alert = NSAlert()
+        alert.messageText = "\u{201C}\(file.lastPathComponent)\u{201D} could not be saved"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     // MARK: Query
@@ -345,16 +362,17 @@ final class PageExtractionModel: ObservableObject {
             let outcome: Result<QueryOutcome, Error> = Result {
                 try QueryRunner.run(language, query: text, output: output, ignoreCase: ignoreCase, in: document)
             }
+            guard let model = self else { return }
             await MainActor.run {
-                guard let self, self.generation == mine else { return }
-                self.isQuerying = false
+                guard model.generation == mine else { return }
+                model.isQuerying = false
                 switch outcome {
                 case .success(let value):
-                    self.queryResult = value
-                    self.queryError = nil
+                    model.queryResult = value
+                    model.queryError = nil
                 case .failure(let error):
-                    self.queryResult = nil
-                    self.queryError = error.localizedDescription
+                    model.queryResult = nil
+                    model.queryError = error.localizedDescription
                 }
             }
         }
@@ -490,6 +508,10 @@ final class PageExtractionModel: ObservableObject {
         panel.nameFieldStringValue = AssetNaming.fileName(for: response.finalURL, contentType: contentType, contentDisposition: disposition)
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? response.body.write(to: url, options: .atomic)
+        do {
+            try response.body.write(to: url, options: .atomic)
+        } catch {
+            Self.presentSaveFailure(error, file: url)
+        }
     }
 }

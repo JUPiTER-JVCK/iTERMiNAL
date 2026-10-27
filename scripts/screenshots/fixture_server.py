@@ -290,8 +290,9 @@ def article_page(origin):
         '<a class="btn alt" href="/files/ledger-data.csv">The data (CSV)</a> '
         '<a href="/files/ledger-archive.zip" download>Everything, zipped</a></p>\n'
         '<p>Questions? <a href="mailto:desk@example.com">Write to the desk</a>. <a href="#top">Back to the top</a>. '
-        # The one link on the page that robots.txt asks crawlers to leave alone.
-        '<a href="/admin/">Staff area</a>.</p>\n'
+        # The one link on the page that robots.txt asks crawlers to leave alone, and one
+        # that is allowed but redirects into it: a crawl must not follow it there.
+        '<a href="/admin/">Staff area</a>. <a href="/old-news">Older news</a>.</p>\n'
         "</article>"
     )
     head = (
@@ -328,6 +329,10 @@ def feed(origin):
         '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>hello-api blog</title>'
         "<link>{0}/</link><description>News from the made-up API.</description>\n{1}</channel></rss>\n"
     ).format(origin, items)
+
+
+# Allowed addresses that send the visitor somewhere else on the site.
+REDIRECTS = {"/old-news": "/admin/news-archive"}
 
 
 def route(path, origin):
@@ -472,6 +477,13 @@ def make_handler(origin, log_path, detail_path=""):
 
         def respond(self, send_body):
             path = urlsplit(self.path).path
+            if path in REDIRECTS:
+                self.send_response(302)
+                self.send_header("Location", origin + REDIRECTS[path])
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
             status, content_type, body = route(path, origin)
             # Pages are text; the pictures and files the sample page links to are bytes.
             data = body if isinstance(body, bytes) else body.encode("utf-8")

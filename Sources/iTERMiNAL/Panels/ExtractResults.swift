@@ -43,6 +43,11 @@ struct ExtractResults: View {
             FadedDivider()
             footer(rows)
         }
+        // Off means off: no more requests to the hosts of the pictures, including
+        // the ones already waiting their turn.
+        .onChange(of: settings.httpImagePreviews) { _, on in
+            if !on { extraction.previews.reset() }
+        }
     }
 
     private var noteLine: String? {

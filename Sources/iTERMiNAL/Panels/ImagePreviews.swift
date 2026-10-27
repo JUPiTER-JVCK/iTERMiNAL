@@ -70,12 +70,15 @@ final class ImagePreviewLoader: ObservableObject {
             let mine = generation
             tasks[next.address] = Task { [weak self] in
                 let result = await Self.fetch(next.address, pageURL: next.pageURL)
+                // A `let` for the hop to the main thread: a weak capture is a
+                // `var`, and a closure that runs concurrently may not read one.
+                guard let loader = self else { return }
                 await MainActor.run {
-                    guard let self, self.generation == mine else { return }
-                    self.inFlight -= 1
-                    self.tasks[next.address] = nil
-                    self.thumbnails[next.address] = result
-                    self.pump()
+                    guard loader.generation == mine else { return }
+                    loader.inFlight -= 1
+                    loader.tasks[next.address] = nil
+                    loader.thumbnails[next.address] = result
+                    loader.pump()
                 }
             }
         }

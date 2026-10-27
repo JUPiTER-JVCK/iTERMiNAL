@@ -281,6 +281,14 @@ struct CSSSelector {
 private struct SelectorParser {
     private let c: [Character]
     private var i = 0
+    /// How many `:has(` and `:not(` are open. Each is a call deeper, and a
+    /// selector pasted from somewhere can open thousands: the thread this runs on
+    /// has half a megabyte of stack.
+    private var nesting = 0
+    private static let maxNesting = 24
+    /// Matching a part is a call too, as deep as the selector is long. No page
+    /// needs a selector of more than a handful.
+    private static let maxParts = 64
 
     init(_ characters: [Character]) { c = characters }
 
@@ -327,6 +335,7 @@ private struct SelectorParser {
                 throw error(atEnd ? "The selector ends where something was expected" : "Expected a selector but found \"\(c[i])\"")
             }
             parts.append(CSSSelector.Part(combinator: combinator, compound: compound))
+            guard parts.count <= Self.maxParts else { throw error("More than \(Self.maxParts) parts in one selector") }
 
             // Between parts: whitespace is a combinator, and so is `>`, `+`, `~`.
             let before = i
@@ -491,6 +500,8 @@ private struct SelectorParser {
         case "nth-last-of-type": return .nthLastOfType(try parseNth())
         case "not":
             try expect("(")
+            try enter()
+            defer { nesting -= 1 }
             var compounds: [CSSSelector.Compound] = []
             while true {
                 skipSpace()
@@ -505,6 +516,8 @@ private struct SelectorParser {
             return .not(compounds)
         case "has":
             try expect("(")
+            try enter()
+            defer { nesting -= 1 }
             let list = try parseList(topLevel: false)
             skipSpace()
             try expect(")")
@@ -518,6 +531,15 @@ private struct SelectorParser {
             return .contains(text)
         default:
             throw error("\":\(name)\" isn't supported")
+        }
+    }
+
+    /// Counts one more open `:has(` or `:not(`, or refuses it.
+    private mutating func enter() throws {
+        nesting += 1
+        guard nesting <= Self.maxNesting else {
+            nesting -= 1
+            throw error("Nested more than \(Self.maxNesting) deep")
         }
     }
 

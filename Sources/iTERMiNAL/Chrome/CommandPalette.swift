@@ -33,6 +33,7 @@ struct CommandPaletteView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
 
     @State private var query = ""
     @State private var selectedIndex = 0
@@ -121,6 +122,64 @@ struct CommandPaletteView: View {
         return true
     }
 
+    /// The rest of what the menus can do, so that the palette finds every one of
+    /// them — a check in scripts/input-logic-check compares the two, and the keys
+    /// printed here with the shortcut list.
+    private func moreMenuActions() -> [PaletteAction] {
+        var actions: [PaletteAction] = []
+        actions.append(PaletteAction(id: "tab.close", title: "Close Tab", systemImage: "xmark", shortcut: "⌃⌘W") {
+            store.closeSelectedTab()
+        })
+        actions.append(PaletteAction(id: "panel.notes", title: "Toggle Notes Panel", systemImage: "sidebar.right", shortcut: "⌥⌘N") {
+            store.togglePanel(.notes)
+        })
+        actions.append(PaletteAction(id: "tool.superfile", title: "Toggle superfile", subtitle: "A terminal file manager", systemImage: "sidebar.right", shortcut: "⌥⌘S") {
+            store.togglePanel(.superfile)
+        })
+        actions.append(PaletteAction(id: "tool.btop", title: "Toggle btop", subtitle: "A resource monitor", systemImage: "sidebar.right", shortcut: "⌥⌘P") {
+            store.togglePanel(.btop)
+        })
+
+        actions.append(PaletteAction(
+            id: "composer.collapse",
+            title: settings.composerCollapsed ? "Expand Composer" : "Minimise Composer",
+            subtitle: settings.composerCollapsed ? "Bring the command box back" : "Shrink the command box to a pill",
+            systemImage: "rectangle.compress.vertical",
+            shortcut: "⇧⌘M"
+        ) {
+            withAnimation(Motion.panel) { settings.composerCollapsed.toggle() }
+        })
+        actions.append(PaletteAction(
+            id: "composer.explain", title: "Explain Last Output",
+            subtitle: "Ask the assistant about what the composer's terminal printed",
+            systemImage: "questionmark.bubble", shortcut: "⌥⌘E"
+        ) {
+            store.requestComposerHelp(.explain)
+        })
+        actions.append(PaletteAction(
+            id: "composer.fix", title: "Suggest a Fix", subtitle: "For an error; it is shown, never run",
+            systemImage: "wrench.and.screwdriver", shortcut: "⌥⌘X"
+        ) {
+            store.requestComposerHelp(.fix)
+        })
+
+        // The same range the Appearance slider and the Terminal menu use.
+        actions.append(PaletteAction(id: "font.bigger", title: "Bigger Text", subtitle: "Terminal text, a point larger", systemImage: "plus.magnifyingglass", shortcut: "⌘+") {
+            settings.terminalFontSize = min(24, settings.terminalFontSize + 1)
+        })
+        actions.append(PaletteAction(id: "font.smaller", title: "Smaller Text", subtitle: "Terminal text, a point smaller", systemImage: "minus.magnifyingglass", shortcut: "⌘-") {
+            settings.terminalFontSize = max(9, settings.terminalFontSize - 1)
+        })
+        actions.append(PaletteAction(id: "font.reset", title: "Actual Size", subtitle: "Terminal text at 13 pt", systemImage: "1.magnifyingglass", shortcut: "⌘0") {
+            settings.terminalFontSize = 13
+        })
+
+        actions.append(PaletteAction(id: "settings.open", title: "Settings…", subtitle: "Preferences", systemImage: "gearshape", shortcut: "⌘,") {
+            openSettings()
+        })
+        return actions
+    }
+
     private func allActions() -> [PaletteAction] {
         var actions: [PaletteAction] = [
             PaletteAction(id: "tab.new", title: "New Terminal Tab", subtitle: "Open a shell", systemImage: "plus.square", shortcut: "⌘T") {
@@ -176,6 +235,8 @@ struct CommandPaletteView: View {
                 store.showShortcuts(afterPresentation: true)
             },
         ]
+
+        actions.append(contentsOf: moreMenuActions())
 
         for connection in settings.sshConnections {
             actions.append(PaletteAction(

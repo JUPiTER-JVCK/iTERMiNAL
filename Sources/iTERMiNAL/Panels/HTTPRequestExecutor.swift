@@ -57,12 +57,18 @@ final class HTTPRequestExecutor {
     /// of the body is taken: saying no ends the request there, and what comes
     /// back is the headers with an empty body — a crawl uses it to not download
     /// a picture it was never going to read.
+    ///
+    /// `followRedirectTo` is asked about where each redirect points before it is
+    /// followed. Saying no hands the 3xx back, as `sameOriginRedirectsOnly` does
+    /// — a crawl uses it to not go where robots.txt asks it not to, however it
+    /// was sent there.
     func execute(
         _ spec: HTTPRequestSpec,
         settings: AppSettings,
         sameOriginRedirectsOnly: Bool = false,
         maxResponseBytes: Int? = nil,
-        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil
+        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil,
+        followRedirectTo: ((URL) -> Bool)? = nil
     ) async throws -> HTTPResponseSummary {
         guard let url = HTTPMessage.normalizedURL(from: spec.url), let host = url.host, !host.isEmpty else {
             throw HTTPClientError.invalidURL(spec.url)
@@ -94,7 +100,8 @@ final class HTTPRequestExecutor {
             followRedirects: settings.httpFollowRedirects,
             sameOriginRedirectsOnly: sameOriginRedirectsOnly,
             maxResponseBytes: min(maxResponseBytes ?? Int.max, settings.httpMaxResponseBytes),
-            acceptResponse: acceptResponse
+            acceptResponse: acceptResponse,
+            followRedirectTo: followRedirectTo
         )
         let (data, http) = try await runner.run(request, timeout: settings.httpRequestTimeout)
         let duration = Date().timeIntervalSince(startedAt)
@@ -134,6 +141,7 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
     private let sameOriginRedirectsOnly: Bool
     private let maxResponseBytes: Int
     private let acceptResponse: ((HTTPURLResponse) -> Bool)?
+    private let followRedirectTo: ((URL) -> Bool)?
     private var accumulated = Data()
     private var exceededLimit = false
     private var stoppedAtHeaders = false
@@ -141,12 +149,14 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
 
     init(
         followRedirects: Bool, sameOriginRedirectsOnly: Bool, maxResponseBytes: Int,
-        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil
+        acceptResponse: ((HTTPURLResponse) -> Bool)? = nil,
+        followRedirectTo: ((URL) -> Bool)? = nil
     ) {
         self.followRedirects = followRedirects
         self.sameOriginRedirectsOnly = sameOriginRedirectsOnly
         self.maxResponseBytes = maxResponseBytes
         self.acceptResponse = acceptResponse
+        self.followRedirectTo = followRedirectTo
     }
 
     func run(_ request: URLRequest, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
@@ -246,6 +256,10 @@ private final class SizeLimitingRedirectRunner: NSObject, URLSessionDataDelegate
            let original = task.originalRequest?.url, let target = request.url,
            !isSameOrigin(original, target) {
             // `nil` hands the 3xx itself back as the response.
+            completionHandler(nil)
+            return
+        }
+        if let followRedirectTo, let target = request.url, !followRedirectTo(target) {
             completionHandler(nil)
             return
         }

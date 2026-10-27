@@ -62,7 +62,7 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Derive cache key
         id: pins
@@ -89,7 +89,7 @@ jobs:
           scripts/build-btop.sh btop-out
 
       - name: Upload slice
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: btop-${{ matrix.arch }}
           path: btop-out/
@@ -103,7 +103,7 @@ jobs:
       # fetch-depth: 0 because CFBundleVersion below is the commit count, and
       # the default depth-1 checkout would make that 1 — every build claiming
       # to be the first. The repository is small enough that the cost is noise.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -226,7 +226,7 @@ jobs:
           "$binary" --version
 
       # Each slice lands in its own btop-slices/btop-<arch>/ directory.
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: btop-*
           path: btop-slices
@@ -443,7 +443,7 @@ jobs:
       # Kept alongside the release below: this is how a PR branch that hasn't
       # merged gets tested, and releases are only cut from pushes.
       - name: Upload app
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: iTERMiNAL-app
           path: iTERMiNAL.zip
@@ -467,13 +467,13 @@ jobs:
       # Full history, because the v* arm below picks the previous version tag
       # out of the tag list and the default depth-1 checkout fetches no tags
       # at all. The repository is small enough that the cost is noise.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       # Extracts iTERMiNAL.zip (the packaged bundle) into the working directory.
       - name: Download the built app
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: iTERMiNAL-app
 

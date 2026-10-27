@@ -70,7 +70,7 @@ struct RobotsRules: Equatable {
                 listingAgents = false
                 // An empty Disallow disallows nothing; an empty Allow says nothing.
                 guard !value.isEmpty else { continue }
-                current?.rules.append(Rule(allow: field == "allow", pattern: value))
+                current?.rules.append(Rule(allow: field == "allow", pattern: canonicalSpelling(value)))
             case "crawl-delay":
                 guard current != nil else { continue }
                 listingAgents = false
@@ -99,7 +99,7 @@ struct RobotsRules: Equatable {
     /// where an allow and a disallow match equally the allow wins; nothing
     /// matching means allowed. `/robots.txt` itself is always fetchable.
     func allows(path rawPath: String) -> Bool {
-        let path = rawPath.hasPrefix("/") ? rawPath : "/" + rawPath
+        let path = Self.canonicalSpelling(rawPath.hasPrefix("/") ? rawPath : "/" + rawPath)
         if path == "/robots.txt" { return true }
         var best: Rule?
         for rule in rules where Self.matches(pattern: rule.pattern, path: path) {
@@ -112,6 +112,61 @@ struct RobotsRules: Equatable {
             if length > heldLength || (length == heldLength && rule.allow && !held.allow) { best = rule }
         }
         return best?.allow ?? true
+    }
+
+    /// A path, or a rule's pattern, in the one spelling RFC 9309 has them compared
+    /// in: every byte outside ASCII percent-encoded, the escape of a character
+    /// that needs none (`%7E` for `~`) written as the character, and the hex digits
+    /// of every other escape in capitals. Without it a rule written in UTF-8
+    /// (`Disallow: /café/`) would never match the address a link spells
+    /// `/caf%C3%A9/`, and a page the site asked crawlers to leave alone would be
+    /// fetched. `*` and `$` are left alone: in a pattern they are the wildcard and
+    /// the end of the path, and an escaped one (`%2A`) stays an escape, a plain
+    /// character.
+    static func canonicalSpelling(_ text: String) -> String {
+        let capitals = Array("0123456789ABCDEF".utf8)
+        let bytes = Array(text.utf8)
+        var spelled: [UInt8] = []
+        spelled.reserveCapacity(bytes.count)
+
+        func digit(_ byte: UInt8) -> UInt8? {
+            switch byte {
+            case UInt8(ascii: "0")...UInt8(ascii: "9"): return byte - UInt8(ascii: "0")
+            case UInt8(ascii: "a")...UInt8(ascii: "f"): return byte - UInt8(ascii: "a") + 10
+            case UInt8(ascii: "A")...UInt8(ascii: "F"): return byte - UInt8(ascii: "A") + 10
+            default: return nil
+            }
+        }
+        func needsNoEscape(_ byte: UInt8) -> Bool {
+            switch byte {
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "A")...UInt8(ascii: "Z"), UInt8(ascii: "0")...UInt8(ascii: "9"),
+                 UInt8(ascii: "-"), UInt8(ascii: "."), UInt8(ascii: "_"), UInt8(ascii: "~"):
+                return true
+            default:
+                return false
+            }
+        }
+
+        var index = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == UInt8(ascii: "%"), bytes.count - index >= 3, let high = digit(bytes[index + 1]), let low = digit(bytes[index + 2]) {
+                let value = high << 4 | low
+                if needsNoEscape(value) {
+                    spelled.append(value)
+                } else {
+                    spelled.append(contentsOf: [UInt8(ascii: "%"), capitals[Int(high)], capitals[Int(low)]])
+                }
+                index += 3
+            } else if byte >= 0x80 {
+                spelled.append(contentsOf: [UInt8(ascii: "%"), capitals[Int(byte >> 4)], capitals[Int(byte & 0x0F)]])
+                index += 1
+            } else {
+                spelled.append(byte)
+                index += 1
+            }
+        }
+        return String(decoding: spelled, as: UTF8.self)
     }
 
     /// The path and query of `address`, the way a request names them.
