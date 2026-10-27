@@ -73,9 +73,19 @@ final class CursorAnimator {
         layer.add(keyframes, forKey: Self.animationKey)
     }
 
+    #if SCREENSHOTS
+    /// The capture mode's runner has no window that is ever key — the app is
+    /// never active there — so a scene that wants to see an animation run says
+    /// so here. Compiled out of every shipped build.
+    static var assumeTypedInto = false
+    #endif
+
     /// Whether the terminal is the one receiving the keys: in the front window,
     /// and its first responder.
     private var isTypedInto: Bool {
+        #if SCREENSHOTS
+        if Self.assumeTypedInto { return host?.window != nil }
+        #endif
         guard let host, let window = host.window else { return false }
         return window.isKeyWindow && window.firstResponder === host
     }

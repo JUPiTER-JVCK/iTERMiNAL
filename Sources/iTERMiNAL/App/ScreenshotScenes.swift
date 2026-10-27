@@ -1250,8 +1250,14 @@ final class ScreenshotRun {
             return false
         }
         let before = settings.cursorAnimationTag
-        defer { settings.cursorAnimationTag = before }
-        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering)")
+        // The runner's app is never active, so no window of it is key, which is
+        // what an animated cursor waits for; see `CursorAnimator.assumeTypedInto`.
+        CursorAnimator.assumeTypedInto = true
+        defer {
+            settings.cursorAnimationTag = before
+            CursorAnimator.assumeTypedInto = false
+        }
+        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering); Reduce Motion is on: \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)")
         window.makeFirstResponder(terminal)
         await pause(0.6)
         say("cursor: the terminal has the keys: \(window.firstResponder === terminal)")
