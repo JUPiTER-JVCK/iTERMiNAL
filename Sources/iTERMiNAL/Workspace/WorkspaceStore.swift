@@ -445,7 +445,9 @@ final class WorkspaceStore: ObservableObject {
     /// for a host that wants a password. The tab is the same ssh a connection
     /// opens anywhere else, told to keep its connection open to others; the
     /// password is typed to it, as ever. Returns what to tell the person when
-    /// it could not be set up to share — the tab opens either way.
+    /// it could not be set up to share. A tab opens either way, except when one
+    /// is signed in and open already: a second would only ask for the password
+    /// again.
     @discardableResult
     func newSharedSignIn(for connection: SSHConnection) -> String? {
         switch SSHControlSocket.prepare(for: connection, base: NSTemporaryDirectory()) {
@@ -453,7 +455,6 @@ final class WorkspaceStore: ObservableObject {
             newTab(kind: .remote(connection.id), controlPath: path)
             return nil
         case .open:
-            newTab(kind: .remote(connection.id))
             return "\(connection.name.isEmpty ? connection.host : connection.name) is already signed in through another tab. Press Try Again."
         case .unavailable(let reason):
             newTab(kind: .remote(connection.id))

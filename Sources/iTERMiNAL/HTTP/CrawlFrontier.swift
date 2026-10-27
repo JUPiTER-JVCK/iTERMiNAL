@@ -200,6 +200,19 @@ struct CrawlFrontier {
     }
 }
 
+extension CrawlFrontier {
+    /// Whether a redirect to `target` may be followed: the crawl could have asked
+    /// for that address itself — it is on this site, inside the scope, a page by
+    /// its ending — and `rules` do not rule it out. A redirect is an address the
+    /// server writes, so it is held to what a link is; otherwise a page that is
+    /// allowed could send the crawl into one that is not, and the request would be
+    /// made before anyone looked.
+    func mayRedirect(to target: String, rules: RobotsRules) -> Bool {
+        guard let address = Self.normalize(target), accepts(address) else { return false }
+        return rules.allows(path: RobotsRules.requestPath(of: address) ?? "/")
+    }
+}
+
 /// What the crawl sends and takes, apart from the limits a person chooses.
 enum CrawlPolicy {
     /// The name robots.txt files know this crawler by.

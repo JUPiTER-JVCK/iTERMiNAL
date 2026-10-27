@@ -27,6 +27,7 @@ enum SitemapParser {
     /// SAX rather than a tree: the file can be large and only the `<loc>`
     /// values are wanted. External entities are not resolved.
     static func parse(_ data: Data) -> SitemapContents? {
+        guard !XMLTree.hasTagWithTooManyAttributes(data) else { return nil }
         let handler = Handler()
         let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false

@@ -70,17 +70,21 @@ final class PageAssistant: ObservableObject {
                     system: AIExtractionRequest.systemPrompt, user: request.userContent, temperature: 0
                 )
                 let parsed = AIExtractionReply.parse(reply, knownAddresses: known)
+                // A `let` for the hop to the main thread: a weak capture is a
+                // `var`, and a closure that runs concurrently may not read one.
+                guard let assistant = self else { return }
                 await MainActor.run {
-                    guard let self, self.generation == mine else { return }
-                    self.outcome = parsed
-                    self.phase = .answered
+                    guard assistant.generation == mine else { return }
+                    assistant.outcome = parsed
+                    assistant.phase = .answered
                 }
             } catch is CancellationError {
                 return
             } catch {
+                guard let assistant = self else { return }
                 await MainActor.run {
-                    guard let self, self.generation == mine else { return }
-                    self.phase = .failed(error.localizedDescription)
+                    guard assistant.generation == mine else { return }
+                    assistant.phase = .failed(error.localizedDescription)
                 }
             }
         }

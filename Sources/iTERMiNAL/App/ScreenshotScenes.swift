@@ -646,6 +646,9 @@ final class ScreenshotRun {
             + "\(crawler.results.media.rows.count) media, \(crawler.results.files.rows.count) files")
         let seen = requestLog().dropFirst(started)
         say("crawl: the site saw \(seen.count) requests: \(seen.map { $0.split(separator: " ").dropFirst().prefix(2).joined(separator: " ") })")
+        // The folder robots.txt rules out is named by a link and by a redirect from an
+        // allowed page; neither may have led the crawl into it.
+        say("crawl: requests for the folder robots.txt rules out: \(seen.filter { $0.contains(" /admin") }.count)")
         await pause(1.0)
         taken = capture("extract-crawl") && taken
 

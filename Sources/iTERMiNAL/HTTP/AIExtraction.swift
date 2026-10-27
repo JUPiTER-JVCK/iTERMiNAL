@@ -26,6 +26,11 @@ struct AIExtractionRequest: Equatable {
     static let textLimit = 12_000
     static let questionLimit = 500
     static let titleLimit = 200
+    /// How far past what is sent the masking reads, so that a key or a token that
+    /// begins inside what is sent and runs on is masked whole and not left as a
+    /// fragment. The rest of a long page is not read at all: it is not sent, and
+    /// the sheet works this out again as the question is typed.
+    static let maskingMargin = 4_000
 
     static let systemPrompt = """
         You extract structured data from the text of one web page, for a person who asked for it. \
@@ -44,16 +49,21 @@ struct AIExtractionRequest: Equatable {
         guard !question.isEmpty else { return nil }
 
         let source = page.markdown.isEmpty ? page.text : page.markdown
-        // Masked whole and then cut: a token across the cut would otherwise be
-        // left as a fragment too short to be recognised as one.
-        let masked = SecretRedactor.redact(ContextSanitizer.stripANSI(source))
+        let sourceCount = source.count
+        // Masked and then cut, not the other way about: a token across the cut would
+        // otherwise be left as a fragment too short to be recognised as one. Only a
+        // margin past the cut is masked with what is sent, though — a page can be
+        // hundreds of thousands of characters, and none of the rest goes anywhere.
+        let window = sourceCount > limit + Self.maskingMargin ? String(source.prefix(limit + Self.maskingMargin)) : source
+        let cutShort = window.count < sourceCount
+        let masked = SecretRedactor.redact(ContextSanitizer.stripANSI(window))
             .replacingOccurrences(of: "\r\n", with: "\n")
         var text = masked
         var sent = masked.count
-        if text.count > limit {
-            var kept = String(text.prefix(limit))
+        if masked.count > limit || cutShort {
+            var kept = String(masked.prefix(limit))
             // What is kept ends on a line of its own, unless that would be most of it.
-            if let newline = kept.lastIndex(of: "\n"), kept.distance(from: kept.startIndex, to: newline) > limit / 2 {
+            if masked.count > limit, let newline = kept.lastIndex(of: "\n"), kept.distance(from: kept.startIndex, to: newline) > limit / 2 {
                 kept = String(kept[..<newline])
             }
             kept = kept.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -66,7 +76,7 @@ struct AIExtractionRequest: Equatable {
             pageURL: HTTPRedaction.redactedURL(page.pageURL),
             title: title,
             text: text,
-            totalCharacters: masked.count,
+            totalCharacters: cutShort ? max(sourceCount, sent) : masked.count,
             sentCharacters: sent,
             destination: AssistantDestination.describe(baseURL: baseURL)
         )

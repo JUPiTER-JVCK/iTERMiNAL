@@ -71,8 +71,10 @@ reviewers' trust. Before **every** push:
 - **`run_number` is not unique.** It is workflow-scoped and unchanged on
   re-run. Build tags use `${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}` because a
   tag collision is not a retryable failure — it burns that name for good.
-- **Actions majors move independently**: `checkout@v5`, `upload-artifact@v6`,
-  `download-artifact@v7`. Read each `action.yml` rather than bumping in step.
+- **Actions majors move independently**: `checkout`, `upload-artifact`,
+  `download-artifact` and `cache` are versioned separately (see the `uses:`
+  lines; two sharing a number is a coincidence). Read each `action.yml` rather
+  than bumping in step.
 - **App Sandbox is off deliberately** (Hardened Runtime is on). A sandboxed
   terminal cannot reach `~/.ssh` or Homebrew. Do not "fix" this. Secrets live
   only in the Keychain — never in preferences, exports, logs, or the workspace

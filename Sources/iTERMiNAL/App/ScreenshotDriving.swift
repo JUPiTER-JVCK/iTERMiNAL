@@ -160,7 +160,7 @@ extension ScreenshotMode {
             }
             say("\(label): terminal \(index): container \(inWindow), terminal frame \(terminal.frame)\(grid), "
                 + "hidden \(terminal.isHidden || container.isHidden), alpha \(terminal.alphaValue), "
-                + "in a window \(terminal.window != nil), can draw \(terminal.canDraw), "
+                + "in a window \(terminal.window != nil), "
                 + "hidden or faded above: \(hiddenAbove)")
             if let directory {
                 _ = write(terminal, "debug-\(label)-\(index)", in: directory, scale: 2, trimmingBottom: 0, overlays: [])

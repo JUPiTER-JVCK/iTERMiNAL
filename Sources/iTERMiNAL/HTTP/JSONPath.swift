@@ -236,8 +236,25 @@ struct JSONPath {
     fileprivate struct PathParser {
         private let c: [Character]
         private var i = 0
+        /// How deep a filter nests, and how many pieces it may have. Each is a
+        /// call, here and again when the path is evaluated, on a thread with half a
+        /// megabyte of stack — and a path pasted from somewhere can have thousands.
+        private var depth = 0
+        private var pieces = 0
+        private static let maxDepth = 32
+        private static let maxPieces = 256
 
         init(_ characters: [Character]) { c = characters }
+
+        private mutating func descend() throws {
+            depth += 1
+            guard depth <= Self.maxDepth else { throw error("Nested more than \(Self.maxDepth) deep") }
+        }
+
+        private mutating func piece() throws {
+            pieces += 1
+            guard pieces <= Self.maxPieces else { throw error("More than \(Self.maxPieces) pieces in one filter") }
+        }
 
         private func error(_ message: String) -> JSONPathError { JSONPathError(message: message, position: min(i, c.count)) }
         private var atEnd: Bool { i >= c.count }
@@ -359,10 +376,13 @@ struct JSONPath {
         // MARK: Filter expressions
 
         private mutating func parseOr() throws -> Filter {
+            try descend()
+            defer { depth -= 1 }
             var left = try parseAnd()
             while true {
                 skipSpace()
                 guard i + 1 < c.count, c[i] == "|", c[i + 1] == "|" else { return left }
+                try piece()
                 i += 2
                 left = .or(left, try parseAnd())
             }
@@ -373,6 +393,7 @@ struct JSONPath {
             while true {
                 skipSpace()
                 guard i + 1 < c.count, c[i] == "&", c[i + 1] == "&" else { return left }
+                try piece()
                 i += 2
                 left = .and(left, try parseNot())
             }
@@ -381,6 +402,9 @@ struct JSONPath {
         private mutating func parseNot() throws -> Filter {
             skipSpace()
             if i < c.count, c[i] == "!", !(i + 1 < c.count && c[i + 1] == "=") {
+                try descend()
+                defer { depth -= 1 }
+                try piece()
                 i += 1
                 return .not(try parseNot())
             }
@@ -397,9 +421,11 @@ struct JSONPath {
                 i += 1
                 return inner
             }
+            try piece()
             let left = try parseOperand()
             skipSpace()
             for op in ["==", "!=", "<=", ">=", "<", ">"] where matches(op) {
+                try piece()
                 i += op.count
                 skipSpace()
                 return .compare(left, op, try parseOperand())

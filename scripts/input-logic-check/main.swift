@@ -893,6 +893,36 @@ do {
     check(!once.contains("abc") && !once.contains(":p@") && !once.contains("zzz") && !once.contains("AKIAIOSFODNN7EXAMPLE") && !once.contains("hunter2"),
           "several secrets in one line all go: \(once)")
     check(masked(once) == once, "masking twice changes nothing more: \(masked(once)) vs \(once)")
+
+    // The names that start before the word that says they are secret keep their start; the match
+    // begins at the word, so the rest of a long name is not read again from each of its boundaries.
+    check(masked("x-api-key: abc123") == "x-api-key: [redacted]", "a header-style name keeps its start: \(masked("x-api-key: abc123"))")
+    check(masked("DB_PASSWORD=hunter2") == "DB_PASSWORD=[redacted]", "a name that begins before the word: \(masked("DB_PASSWORD=hunter2"))")
+    check(masked("MY_SERVICE.token.value = abc") == "MY_SERVICE.token.value = [redacted]", "and one with dots after it: \(masked("MY_SERVICE.token.value = abc"))")
+    check(masked("see chrome-extension://u:pw@host/x") == "see chrome-extension://u:[redacted]@host/x", "a longer scheme is still a scheme: \(masked("see chrome-extension://u:pw@host/x"))")
+    let bigJWT = "t=eyJ" + String(repeating: "a", count: 40) + "." + String(repeating: "B", count: 5_000) + "." + String(repeating: "c", count: 43)
+    check(!masked(bigJWT).contains("BBBBBBBB"), "a JWT with a payload of 5,000 characters is masked whole")
+
+    // Redaction is run on text a stranger wrote, so it has to take time in proportion to the text. These
+    // are the shapes that once took minutes: long runs of dots and hyphens, a token's first letters over
+    // and over, and a word that says "secret" with no end to the name after it.
+    func seconds(_ text: String) -> Double {
+        let began = Date()
+        _ = masked(text)
+        return Date().timeIntervalSince(began)
+    }
+    let hostile: [(name: String, text: String)] = [
+        ("dots", String(repeating: "a.", count: 10_000)),
+        ("hyphens", String(repeating: "a-", count: 10_000)),
+        ("eyJ", String(repeating: "eyJ-", count: 5_000)),
+        ("sk", String(repeating: "sk-", count: 7_000)),
+        ("token", String(repeating: "token", count: 4_000)),
+        // Long enough that reading the run from every point in it takes seconds, not a fraction of one.
+        ("scheme", String(repeating: "ab+", count: 20_000) + "://"),
+        ("password", String(repeating: "password-", count: 2_500)),
+    ]
+    let slowest = hostile.map { (name: $0.name, took: seconds($0.text)) }.max { $0.took < $1.took }!
+    check(slowest.took < 3, "masking a run of \(slowest.name) took \(slowest.took) s")
 }
 
 // MARK: Sanitising output
@@ -2896,6 +2926,82 @@ do {
     check(binary.isEmpty && binary.languages.isEmpty && binary.note?.contains("Save") == true && binary.kindLabel == "Binary data (image/png)", "binary: nothing to take, and what to do instead")
 }
 
+// MARK: Hostile shapes: nesting, length and number of parts
+
+// A selector, a path or a document can be written with thousands of levels, and every level is a call
+// — here and again when it is used — on a background thread with half a megabyte of stack. These ran
+// out of it. They are tried on a thread of that size, so that a regression takes the check down with it.
+do {
+    func onSmallStack(_ work: @escaping () -> Void) {
+        let finished = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            work()
+            finished.signal()
+        }
+        thread.stackSize = 512 * 1024
+        thread.start()
+        finished.wait()
+    }
+    func repeated(_ piece: String, _ count: Int) -> String { String(repeating: piece, count: count) }
+
+    var verdicts: [String: Bool] = [:]
+    onSmallStack {
+        verdicts["css deep not"] = (try? CSSSelector.parse(repeated(":not(", 5_000) + "a" + repeated(")", 5_000))) == nil
+        verdicts["css deep has"] = (try? CSSSelector.parse("a" + repeated(":has(", 5_000) + "b" + repeated(")", 5_000))) == nil
+        verdicts["css 24 not"] = (try? CSSSelector.parse(repeated(":not(", 24) + "a" + repeated(")", 24))) != nil
+        verdicts["css 25 not"] = (try? CSSSelector.parse(repeated(":not(", 25) + "a" + repeated(")", 25))) == nil
+        verdicts["css 64 parts"] = (try? CSSSelector.parse(repeated("div ", 63) + "a")) != nil
+        verdicts["css 65 parts"] = (try? CSSSelector.parse(repeated("div ", 64) + "a")) == nil
+        verdicts["css siblings"] = (try? CSSSelector.parse(repeated("a + ", 5_000) + "a")) == nil
+        verdicts["css commas"] = (try? CSSSelector.parse(repeated("a,", 5_000) + "b")) != nil
+
+        verdicts["xpath deep predicates"] = (try? XPath.parse(repeated("a[", 2_000) + "b" + repeated("]", 2_000))) == nil
+        verdicts["xpath few predicates"] = (try? XPath.parse(repeated("a[", 5) + "b" + repeated("]", 5))) != nil
+        verdicts["xpath deep parens"] = (try? XPath.parse("//a[" + repeated("(", 5_000) + "1" + repeated(")", 5_000) + "]")) == nil
+        verdicts["xpath long chain"] = (try? XPath.parse("//a[" + repeated("@x and ", 5_000) + "@y]")) == nil
+        verdicts["xpath short chain"] = (try? XPath.parse("//a[" + repeated("@x and ", 50) + "@y]")) != nil
+
+        verdicts["jsonpath deep parens"] = (try? JSONPath.parse("$[?(" + repeated("(", 5_000) + "@.a" + repeated(")", 5_000) + ")]")) == nil
+        verdicts["jsonpath long chain"] = (try? JSONPath.parse("$[?(" + repeated("@.a && ", 50_000) + "@.b)]")) == nil
+        verdicts["jsonpath nots"] = (try? JSONPath.parse("$[?(" + repeated("!", 5_000) + "@.a)]")) == nil
+        verdicts["jsonpath short chain"] = (try? JSONPath.parse("$[?(" + repeated("@.a && ", 20) + "@.b)]")) != nil
+        verdicts["jsonpath few nots"] = (try? JSONPath.parse("$[?(!!@.a)]")) != nil
+
+        // A document nested 100,000 deep: the part that was read is kept and the rest is not.
+        let tree = XMLTree.parseWithStatus(Data(repeated("<a>", 100_000).utf8))
+        verdicts["xml nested kept"] = tree != nil && tree?.complete == false
+        var depth = 0
+        var node = tree?.tree.children.first
+        while let current = node, current.kind == .element {
+            depth += 1
+            node = current.children.first
+        }
+        verdicts["xml depth capped"] = depth > 0 && depth <= XMLTree.maxDepth
+        verdicts["xml balanced"] = XMLTree.parse(Data((repeated("<a>", 100_000) + repeated("</a>", 100_000)).utf8)) != nil
+        // Whether a document cut off like this counts as read is the parser's business; that it comes back is ours.
+        _ = SitemapParser.parse(Data(("<urlset>" + repeated("<a>", 100_000)).utf8))
+        verdicts["sitemap nested"] = true
+    }
+    for (name, ok) in verdicts.sorted(by: { $0.key < $1.key }) {
+        check(ok, "hostile shape: \(name)")
+    }
+    check(verdicts.count == 22, "every hostile shape was tried (\(verdicts.count))")
+
+    // Tags with thousands of attributes.
+    let many = "<feed>" + "<entry " + (0..<12_000).map { "k\($0)=\"v\"" }.joined(separator: " ") + "/></feed>"
+    check(XMLTree.parse(Data(many.utf8)) == nil && SitemapParser.parse(Data(("<urlset><url " + (0..<12_000).map { "k\($0)=\"v\"" }.joined(separator: " ") + "/></urlset>").utf8)) == nil,
+          "a tag with 12,000 attributes is not read")
+    let ordinary = "<feed><entry " + (0..<100).map { "k\($0)=\"v\"" }.joined(separator: " ") + "/></feed>"
+    check(XMLTree.parse(Data(ordinary.utf8)) != nil, "and one with a hundred is")
+    let text = "<feed><entry>" + String(repeating: "a=b ", count: 20_000) + "</entry></feed>"
+    check(XMLTree.parse(Data(text.utf8)) != nil, "equals signs outside a tag are only text")
+    check(XMLTree.hasTagWithTooManyAttributes(Data(("<a " + String(repeating: "x=1 ", count: XMLTree.maxAttributes + 1) + ">").utf8))
+            && !XMLTree.hasTagWithTooManyAttributes(Data(("<a " + String(repeating: "x=1 ", count: XMLTree.maxAttributes) + ">").utf8)),
+          "the limit is exact")
+    check(!XMLTree.hasTagWithTooManyAttributes(Data(("<a x=1>" + String(repeating: "<b y=2/>", count: 10_000) + "</a>").utf8)),
+          "and counted for each tag, not for the document")
+}
+
 // MARK: Downloads: what a page may make this app fetch
 
 // A page chooses the addresses it lists, and an address is not always on the
@@ -3074,6 +3180,30 @@ do {
     check(allowed(rules("<html><body>not robots.txt</body></html>"), "/a"), "a page that is not a robots.txt asks nothing")
     check(allowed(rules("User-agent: *\nDisallow: /robots.txt\n"), "/robots.txt"), "robots.txt itself is always fetchable")
     check(allowed(rules("User-agent: *\nDisallow: /a\n"), "a") == false, "a path without its slash is read as having one")
+
+    // Spelled differently, ruled the same: RFC 9309 compares percent-encoded bytes, so a rule
+    // written in UTF-8 has to meet the address a link spells with escapes.
+    let cafe = rules("User-agent: *\nDisallow: /café/\n")
+    check(!allowed(cafe, "/caf%C3%A9/menu") && !allowed(cafe, "/caf%c3%a9/menu") && !allowed(cafe, "/café/menu"),
+          "a rule written in UTF-8 rules out the address spelled with escapes, in either case of hex")
+    check(allowed(cafe, "/cafe/menu") && allowed(cafe, "/caf%C3%A8/menu"), "and only that address")
+    let tilde = rules("User-agent: *\nDisallow: /~user/\n")
+    check(!allowed(tilde, "/%7Euser/page") && !allowed(tilde, "/%7euser/page"), "an escaped ~ is a ~")
+    let escapedRule = rules("User-agent: *\nDisallow: /%7Euser/\nDisallow: /caf%c3%a9/\n")
+    check(!allowed(escapedRule, "/~user/x") && !allowed(escapedRule, "/café/x") && !allowed(escapedRule, "/caf%C3%A9/x"),
+          "and so is one in the rule")
+    check(allowed(rules("User-agent: *\nDisallow: /a/b\n"), "/a%2Fb") && !allowed(rules("User-agent: *\nDisallow: /a/b\n"), "/a/b"),
+          "an escaped slash is not a slash")
+    let escapedStar = rules("User-agent: *\nDisallow: /a%2Ab\n")
+    check(!allowed(escapedStar, "/a%2Ab") && allowed(escapedStar, "/axxb"), "an escaped * is that character, not a wildcard")
+    let percent = rules("User-agent: *\nDisallow: /50%\n")
+    check(!allowed(percent, "/50%") && allowed(percent, "/500"), "a % that begins no escape is left as it is")
+    let queryAccent = rules("User-agent: *\nDisallow: /search?q=é\n")
+    check(!allowed(queryAccent, "/search?q=%C3%A9&page=2") && allowed(queryAccent, "/search?q=e"), "the query is compared the same way")
+    check(RobotsRules.canonicalSpelling("/café?q=é") == "/caf%C3%A9?q=%C3%A9", "bytes outside ASCII are escaped, in capitals")
+    check(RobotsRules.canonicalSpelling("/%7e%41%2f%2F%zz%4") == "/~A%2F%2F%zz%4", "unreserved escapes are the character, the rest keep capitals, and a broken escape is left")
+    check(["/", "/a b", "/é%e9%7E", "*$", "/%", "/%%41", "\u{1F600}"].allSatisfy { RobotsRules.canonicalSpelling(RobotsRules.canonicalSpelling($0)) == RobotsRules.canonicalSpelling($0) },
+          "spelling it twice changes nothing")
     let huge = "User-agent: *\n" + String(repeating: "Disallow: /x\n", count: 100_000) + "Disallow: /late\n"
     check(huge.utf8.count > RobotsRules.maxBytes && !allowed(rules(huge), "/x") && allowed(rules(huge), "/late"), "only the first half-megabyte is read")
     check(rules("User-agent: *\nCrawl-delay: 10\n").crawlDelay == 10 && rules("User-agent: *\nCrawl-delay: 0.5\n").crawlDelay == 0.5, "a Crawl-delay is read")
@@ -3095,6 +3225,27 @@ do {
     check(CrawlFrontier.normalize("https://example.org/" + String(repeating: "a", count: 2_100)) == nil, "and not absurdly long ones")
     check(CrawlFrontier(start: "mailto:x@y.z", limits: CrawlLimits()) == nil && CrawlFrontier(start: "not an address", limits: CrawlLimits()) == nil,
           "a crawl cannot begin from anything else")
+
+    // A redirect is followed only to a page the crawl could have asked for itself: on the site, inside
+    // its scope, a page by its ending, and not one robots.txt rules out — in any spelling.
+    let redirectRules = rules("User-agent: *\nDisallow: /admin/\nDisallow: /café/\nDisallow: /private/\nAllow: /private/public/\n")
+    let anywhere = frontier("https://example.org/blog/post")
+    let inBlog = frontier("https://example.org/blog/post", CrawlLimits(maxPages: 10, maxDepth: 2, delay: 1, stayUnder: "/blog/"))
+    func may(_ crawl: CrawlFrontier, _ target: String) -> Bool { crawl.mayRedirect(to: target, rules: redirectRules) }
+    check(may(anywhere, "https://example.org/blog/other") && may(anywhere, "https://example.org/about#team") && may(anywhere, "https://EXAMPLE.org:443/a.html"),
+          "to another page of the same site")
+    check(!may(anywhere, "https://example.org/admin/news-archive") && !may(anywhere, "https://example.org/admin/"),
+          "but not into a folder robots.txt rules out")
+    check(!may(anywhere, "https://example.org/caf%C3%A9/menu") && !may(anywhere, "https://example.org/caf%c3%a9/") && !may(anywhere, "https://example.org/%61dmin/x"),
+          "whichever way the address spells it")
+    check(!may(anywhere, "https://example.org/private/x") && may(anywhere, "https://example.org/private/public/x"), "and the longer rule decides, as it does for any address")
+    check(!may(anywhere, "https://other.example/") && !may(anywhere, "https://www.example.org/") && !may(anywhere, "http://example.org/blog/")
+            && !may(anywhere, "https://example.org:8443/blog/"), "not to another site: host, www., scheme and port are compared exactly")
+    check(!may(anywhere, "mailto:a@example.org") && !may(anywhere, "ftp://example.org/") && !may(anywhere, "https://u:pw@example.org/x"), "nor to anything that is not a plain web address")
+    check(may(inBlog, "https://example.org/blog/2025/post") && !may(inBlog, "https://example.org/about") && !may(inBlog, "https://example.org/blogger/"),
+          "nor out of the folder the crawl was asked to stay under")
+    check(!may(anywhere, "https://example.org/files/report.pdf") && !may(anywhere, "https://example.org/logo.PNG") && may(anywhere, "https://example.org/files/report.html"),
+          "nor to what is a file by its ending")
 
     var queue = frontier()
     queue.offer(["https://example.org/a", "https://example.org/b#top", "https://example.org/a", "https://EXAMPLE.org/a", page, page + "#x"], foundOn: page, depth: 0)
@@ -3259,6 +3410,33 @@ do {
     check(request?.coverage == "\(request?.totalCharacters ?? 0) characters", "a short page is sent whole: \(request?.coverage ?? "")")
     let tiny = AIExtractionRequest.make(question: "q", page: shop, baseURL: local, limit: 40)
     check((tiny?.sentCharacters ?? 99) <= 40 && tiny?.text.contains("rest of the page") == true, "the limit is a parameter")
+
+    // A page can be hundreds of thousands of characters, and none of the rest of it is sent. Masking
+    // reads only a margin past the cut, so the time does not grow with the page, and a key that runs
+    // across the cut is still masked whole.
+    // A secret that masking would shorten sits far past the cut (about 54,000 characters in, and the
+    // text is read to 400,000): it is not sent, and masking does not read it.
+    let huge = read("<title>Huge</title><main>" + String(repeating: "<p>Item number 1234 is here.</p>", count: 2_000)
+        + "<p>password=" + String(repeating: "x", count: 5_000) + "</p>"
+        + String(repeating: "<p>Item number 1234 is here.</p>", count: 8_000) + "</main>")
+    let hugeSource = huge.markdown.isEmpty ? huge.text : huge.markdown
+    check(hugeSource.count > 4 * (AIExtractionRequest.textLimit + AIExtractionRequest.maskingMargin), "the page is far longer than what is read (\(hugeSource.count))")
+    let hugeBegan = Date()
+    let hugeRequest = AIExtractionRequest.make(question: "the items", page: huge, baseURL: local)
+    check(Date().timeIntervalSince(hugeBegan) < 3, "a huge page is prepared in moments")
+    check((hugeRequest?.sentCharacters ?? Int.max) <= AIExtractionRequest.textLimit && hugeRequest?.totalCharacters == hugeSource.count
+            && hugeRequest?.text.hasSuffix("\n… (the rest of the page is not included)") == true,
+          "and says how long it was: \(hugeRequest?.coverage ?? "")")
+    let keyed = read("<title>k</title><main><p>" + String(repeating: "word ", count: 38) + "sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF "
+        + String(repeating: "tail ", count: 2_000) + "</p></main>")
+    for limit in stride(from: 150, through: 260, by: 7) {
+        let sent = AIExtractionRequest.make(question: "q", page: keyed, baseURL: local, limit: limit)?.text ?? ""
+        check(!sent.contains("abcdefghij") && !sent.contains("0123456789"), "a key across the cut at \(limit) leaves no fragment: \(sent.suffix(60).debugDescription)")
+    }
+    let dotted = read("<title>d</title><main><p>" + String(repeating: "a.", count: 50_000) + "</p></main>")
+    let dottedBegan = Date()
+    _ = AIExtractionRequest.make(question: "q", page: dotted, baseURL: local)
+    check(Date().timeIntervalSince(dottedBegan) < 3, "a page made of one long run of dots is prepared in moments")
 
     // What comes back.
     func parse(_ reply: String, known: Set<String> = []) -> AIExtractionReply.Outcome { AIExtractionReply.parse(reply, knownAddresses: known) }
@@ -3468,6 +3646,73 @@ do {
                   "the README's shortcut table lists keys the app does not have: \(mentioned.subtracting(known).sorted())")
         } else {
             check(false, "the README has a Keyboard shortcuts section to check")
+        }
+
+        // The command palette is said to find every action, so every command in the menus has a
+        // row in it, and the keys a row prints are the ones the shortcut list has for it.
+        let paletteFile = root.appendingPathComponent("Sources/iTERMiNAL/Chrome/CommandPalette.swift")
+        if let paletteSource = try? String(contentsOf: paletteFile, encoding: .utf8),
+           let menuSource = try? String(contentsOf: root.appendingPathComponent(marker), encoding: .utf8) {
+            func literals(in text: String) -> [String] {
+                let quoted = try! NSRegularExpression(pattern: #""([^"\\]*)""#)
+                let ns = text as NSString
+                return quoted.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
+            }
+            // `PaletteAction(id: "tab.close", title: …, shortcut: "⌃⌘W") {` — a row whose id is a plain
+            // word, with what its arguments say. (Rows made in a loop, from a theme or a host, have an
+            // id with a `\(` in it and are not listed here.)
+            let row = try! NSRegularExpression(pattern: #"PaletteAction\(\s*id:\s*"([A-Za-z0-9.]+)"([^{]*?)\)\s*\{"#, options: [.dotMatchesLineSeparators])
+            let titleOf = try! NSRegularExpression(pattern: #"title:\s*(.*?)\s*,\s*(?:subtitle|systemImage|shortcut):"#, options: [.dotMatchesLineSeparators])
+            let keysOf = try! NSRegularExpression(pattern: #"shortcut:\s*"([^"]+)""#)
+            let text = paletteSource as NSString
+            var rowKeys: [String: String] = [:]
+            var rowIDs: [String] = []
+            var rowTitles: Set<String> = []
+            for match in row.matches(in: paletteSource, range: NSRange(location: 0, length: text.length)) {
+                let id = text.substring(with: match.range(at: 1))
+                let arguments = text.substring(with: match.range(at: 2))
+                let ns = arguments as NSString
+                rowIDs.append(id)
+                if let keys = keysOf.firstMatch(in: arguments, range: NSRange(location: 0, length: ns.length)) {
+                    rowKeys[id] = ns.substring(with: keys.range(at: 1))
+                }
+                if let title = titleOf.firstMatch(in: arguments, range: NSRange(location: 0, length: ns.length)) {
+                    rowTitles.formUnion(literals(in: ns.substring(with: title.range(at: 1))))
+                }
+            }
+            check(rowIDs.count >= 20, "the palette's rows were found (\(rowIDs.count))")
+            check(Set(rowIDs).count == rowIDs.count, "two palette rows share an id: \(Dictionary(grouping: rowIDs, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted())")
+
+            // Opening the palette from inside it is the one shortcut that does nothing there, and
+            // sending a request needs the HTTP client to be the thing in front.
+            let notInPalette: Set<String> = ["palette.open", "http.send"]
+            let needed = all.filter { $0.source == .bound && !notInPalette.contains($0.id) }
+            check(needed.allSatisfy { rowIDs.contains($0.id) },
+                  "bound in the menus but with no row in the command palette: \(needed.filter { !rowIDs.contains($0.id) }.map(\.id))")
+            let misprinted = needed.filter { entry in
+                guard let printed = rowKeys[entry.id] else { return true }
+                return printed != entry.chords.first?.display
+            }
+            check(misprinted.isEmpty, "the palette prints other keys than the shortcut list for: \(misprinted.map { "\($0.id) \(rowKeys[$0.id] ?? "none") ≠ \($0.chords.first?.display ?? "?")" })")
+            let catalogIDs = Set(all.map(\.id))
+            let strayKeys = rowKeys.filter { !catalogIDs.contains($0.key) }
+            check(strayKeys.isEmpty, "palette rows print keys the shortcut list does not know: \(strayKeys.keys.sorted())")
+
+            // Every button in the menus, by its title. The two spellings of one toggle each are
+            // one row in the palette, and the palette's own menu entries are for opening it.
+            let button = try! NSRegularExpression(pattern: #"Button\(((?:"[^"\\]*"|[^")])*)\)\s*\{"#)
+            let menus = menuSource as NSString
+            var menuTitles: Set<String> = []
+            for match in button.matches(in: menuSource, range: NSRange(location: 0, length: menus.length)) {
+                menuTitles.formUnion(literals(in: menus.substring(with: match.range(at: 1))))
+            }
+            check(menuTitles.count >= 20, "the menus' commands were found (\(menuTitles.count))")
+            let spelledElsewhere: Set<String> = ["Command Palette", "Command Palette (⌘P)", "Hide Sidebar", "Show Sidebar"]
+            let missing = menuTitles.subtracting(spelledElsewhere).subtracting(rowTitles)
+            check(missing.isEmpty, "in a menu but not in the command palette: \(missing.sorted())")
+            check(rowTitles.contains("Toggle Sidebar"), "the palette has the row the sidebar's two menu titles stand for")
+        } else {
+            check(false, "the palette's source can be read to check it against the menus")
         }
     }
 }

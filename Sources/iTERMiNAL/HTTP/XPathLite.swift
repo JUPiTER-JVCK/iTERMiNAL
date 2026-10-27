@@ -259,8 +259,25 @@ struct XPath {
     fileprivate struct Parser {
         private let c: [Character]
         private var i = 0
+        /// How deep expressions nest, and how many pieces one may have. Each is a
+        /// call, here and again when the path is evaluated, on a thread with half a
+        /// megabyte of stack — and a path pasted from somewhere can have thousands.
+        private var depth = 0
+        private var pieces = 0
+        private static let maxDepth = 32
+        private static let maxPieces = 256
 
         init(_ characters: [Character]) { c = characters }
+
+        private mutating func descend() throws {
+            depth += 1
+            guard depth <= Self.maxDepth else { throw error("Nested more than \(Self.maxDepth) deep") }
+        }
+
+        private mutating func piece() throws {
+            pieces += 1
+            guard pieces <= Self.maxPieces else { throw error("More than \(Self.maxPieces) pieces in one expression") }
+        }
 
         private func error(_ message: String) -> XPathError { XPathError(message: message, position: min(i, c.count)) }
         private mutating func skipSpace() { while i < c.count, c[i].isWhitespace { i += 1 } }
@@ -375,8 +392,11 @@ struct XPath {
         }
 
         private mutating func parseOr() throws -> Expr {
+            try descend()
+            defer { depth -= 1 }
             var left = try parseAnd()
             while matchesWord("or") {
+                try piece()
                 i += 2
                 left = .or(left, try parseAnd())
             }
@@ -386,6 +406,7 @@ struct XPath {
         private mutating func parseAnd() throws -> Expr {
             var left = try parseComparison()
             while matchesWord("and") {
+                try piece()
                 i += 3
                 left = .and(left, try parseComparison())
             }
@@ -396,6 +417,7 @@ struct XPath {
             let left = try parsePrimary()
             skipSpace()
             for op in ["!=", "<=", ">=", "=", "<", ">"] where matches(op) {
+                try piece()
                 i += op.count
                 return .compare(left, op, try parsePrimary())
             }
@@ -404,6 +426,7 @@ struct XPath {
 
         private mutating func parsePrimary() throws -> Expr {
             skipSpace()
+            try piece()
             guard i < c.count else { throw error("The expression ends where a value was expected") }
             if c[i] == "(" {
                 i += 1

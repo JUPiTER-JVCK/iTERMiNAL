@@ -24,8 +24,11 @@ enum SecretRedactor {
             pattern: #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)"#,
             template: "[redacted private key]"
         ),
-        // A password in a URL: scheme://user:password@host.
-        Definition(pattern: #"(\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/:@]+):[^\s/@]+@"#, template: "$1:[redacted]@"),
+        // A password in a URL: scheme://user:password@host. The scheme is at most 32
+        // characters (they are a dozen or so): unbounded, a long run of letters and
+        // dots was read to its end from every word boundary in it, and a page of
+        // those took minutes.
+        Definition(pattern: #"(\b[A-Za-z][A-Za-z0-9+.-]{0,31}://[^\s/:@]+):[^\s/@]+@"#, template: "$1:[redacted]@"),
         // Authorization headers, whatever the scheme.
         Definition(
             pattern: #"(\bauthorization[ \t]*[:=][ \t]*)(?:(?:basic|bearer|token|digest)[ \t]+)?[^\s'"]+"#,
@@ -41,7 +44,9 @@ enum SecretRedactor {
         Definition(pattern: #"\bsk-[A-Za-z0-9_-]{20,}"#, template: mask),
         Definition(pattern: #"\bAIza[0-9A-Za-z_-]{35}\b"#, template: mask),
         Definition(pattern: #"\b[rs]k_(?:live|test)_[0-9A-Za-z]{16,}\b"#, template: mask),
-        Definition(pattern: #"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"#, template: mask),
+        // A JWT's header is a hundred characters or so and its payload a few thousand;
+        // the bounds keep `eyJ-eyJ-eyJ-…` from being read to its end from every `eyJ`.
+        Definition(pattern: #"\beyJ[A-Za-z0-9_-]{8,1024}\.[A-Za-z0-9_-]{8,16384}\.[A-Za-z0-9_-]{8,}"#, template: mask),
         // A secret handed to a command as a flag: --password hunter2, --token=abc.
         // Not when what follows is another flag.
         Definition(
@@ -52,8 +57,14 @@ enum SecretRedactor {
         // A secret assigned to a name that says it is one: PASSWORD=…, "api_key": "…".
         // The value must be on the same line, so a prompt that ends in a colon
         // does not take the next line with it.
+        //
+        // The match begins at the word that says it (`PASSWORD` in `DB_PASSWORD`)
+        // and not at the start of the name, which is left as it was: reading the
+        // name from its start meant reading it to its end from every word boundary
+        // in a long run of dots and hyphens, over and over. What follows the word is
+        // read for at most 64 characters, for the same reason.
         Definition(
-            pattern: #"\b([A-Za-z0-9_.-]*(?:password|passwd|passphrase|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credentials?)[A-Za-z0-9_.-]*["']?[ \t]*[:=][ \t]*)(?:"[^"]*"|'[^']*'|[^\s,;]+)"#,
+            pattern: #"((?:password|passwd|passphrase|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credentials?)[A-Za-z0-9_.-]{0,64}["']?[ \t]*[:=][ \t]*)(?:"[^"]*"|'[^']*'|[^\s,;]+)"#,
             template: "$1[redacted]",
             caseInsensitive: true
         ),

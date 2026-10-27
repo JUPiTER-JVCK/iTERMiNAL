@@ -196,6 +196,14 @@ final class SiteCrawler: ObservableObject {
         }
         let note = Self.describe(rules)
         let wait = limits.wait(siteDelay: rules.crawlDelay)
+        // A redirect is followed only to a page this crawl could have asked for
+        // itself: on this site, inside its scope, and not one robots.txt asks to be
+        // left alone. Otherwise a page that is allowed could send the crawl to one
+        // that is not, and the request would be made before anyone looked. Copies,
+        // so what the closure holds does not change under it.
+        let siteRules = rules
+        let scope = frontier
+        let mayFollow: (URL) -> Bool = { scope.mayRedirect(to: $0.absoluteString, rules: siteRules) }
         await publish(generation: mine) { crawler in
             crawler.robotsNote = note
             crawler.phase = .running
@@ -241,7 +249,8 @@ final class SiteCrawler: ObservableObject {
                 let response = try await executor.execute(
                     Self.spec(entry.url, userAgent: userAgent, accept: CrawlPolicy.accept),
                     settings: settings, sameOriginRedirectsOnly: true, maxResponseBytes: CrawlPolicy.maxPageBytes,
-                    acceptResponse: { CrawlPolicy.isPage(contentType: $0.value(forHTTPHeaderField: "Content-Type")) }
+                    acceptResponse: { CrawlPolicy.isPage(contentType: $0.value(forHTTPHeaderField: "Content-Type")) },
+                    followRedirectTo: mayFollow
                 )
                 outcome.status = response.statusCode
                 outcome.bytes = response.body.count
@@ -254,7 +263,7 @@ final class SiteCrawler: ObservableObject {
                 case 200..<300:
                     if !CrawlPolicy.isPage(contentType: type) {
                         outcome.note = "not a web page (\(Self.mimeType(type)))"
-                    } else if !frontier.accepts(outcome.url) || !rules.allows(path: RobotsRules.requestPath(of: outcome.url) ?? "/") {
+                    } else if !frontier.mayRedirect(to: outcome.url, rules: rules) {
                         outcome.note = "redirected outside what this crawl may read"
                     } else {
                         let text = HTTPResponseFormatter.decodedText(response.body, contentType: type)
@@ -264,7 +273,7 @@ final class SiteCrawler: ObservableObject {
                     }
                 case 300..<400:
                     let location = response.headers.first { $0.name.lowercased() == "location" }?.value ?? ""
-                    outcome.note = location.isEmpty ? "redirects elsewhere, not followed" : "redirects to \(Self.shortLocation(location)), not followed"
+                    outcome.note = Self.redirectNote(location: location, from: entry.url)
                 default:
                     break
                 }
@@ -355,8 +364,16 @@ final class SiteCrawler: ObservableObject {
         contentType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() ?? "no type"
     }
 
-    private static func shortLocation(_ location: String) -> String {
-        URL(string: location)?.host ?? location
+    /// Where a redirect that was not followed pointed, in a few words: a path
+    /// when it stays on the site (robots.txt or the scope kept the crawl from it),
+    /// the other site's name when it does not.
+    private static func redirectNote(location: String, from page: String) -> String {
+        guard !location.isEmpty, let base = URL(string: page),
+              let target = URL(string: location, relativeTo: base)?.absoluteURL else {
+            return "redirects elsewhere, not followed"
+        }
+        let place = target.host == base.host ? (target.path.isEmpty ? "/" : target.path) : (target.host ?? location)
+        return "redirects to \(place), not followed"
     }
 
     /// What robots.txt asked of this crawler, in a line.

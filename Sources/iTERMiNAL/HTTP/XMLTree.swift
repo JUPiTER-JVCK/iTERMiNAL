@@ -12,6 +12,43 @@ import FoundationXML
 /// make this read a file or call out to a server.
 enum XMLTree {
     static let maxNodes = 500_000
+    /// How deep elements may nest before the rest of the document is left unread.
+    /// Nothing real is more than a dozen levels down, and everything that walks the
+    /// tree does it with a call for each level, on a thread with half a megabyte
+    /// of stack — a server can send a hundred thousand.
+    static let maxDepth = 256
+    /// The most attributes one element may have. Real documents have a handful; XML
+    /// parsers check a tag's attributes against each other, so a hundred thousand
+    /// in one tag held a thread for seventeen seconds, and a million would for
+    /// hours. Ten thousand take a fifth of a second.
+    static let maxAttributes = 10_000
+
+    /// Whether any tag in `data` has more attributes than `maxAttributes`, counted
+    /// as the `=` signs inside it. Read before the parser is, because it is the
+    /// parser that takes the time.
+    static func hasTagWithTooManyAttributes(_ data: Data) -> Bool {
+        data.withUnsafeBytes { bytes in
+            var inTag = false
+            var equals = 0
+            for byte in bytes {
+                switch byte {
+                case UInt8(ascii: "<"):
+                    inTag = true
+                    equals = 0
+                case UInt8(ascii: ">"):
+                    inTag = false
+                case UInt8(ascii: "="):
+                    if inTag {
+                        equals += 1
+                        if equals > maxAttributes { return true }
+                    }
+                default:
+                    break
+                }
+            }
+            return false
+        }
+    }
 
     static func parse(_ data: Data) -> HTMLNode? {
         parseWithStatus(data)?.tree
@@ -21,6 +58,7 @@ enum XMLTree {
     /// character in it is still a feed: what was read before the error is
     /// kept, and `complete` says the rest was not.
     static func parseWithStatus(_ data: Data) -> (tree: HTMLNode, complete: Bool)? {
+        guard !hasTagWithTooManyAttributes(data) else { return nil }
         let builder = Builder()
         let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false
@@ -45,7 +83,7 @@ enum XMLTree {
             qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]
         ) {
             count += 1
-            if count > XMLTree.maxNodes {
+            if count > XMLTree.maxNodes || stack.count >= XMLTree.maxDepth {
                 stoppedAtCap = true
                 parser.abortParsing()
                 return

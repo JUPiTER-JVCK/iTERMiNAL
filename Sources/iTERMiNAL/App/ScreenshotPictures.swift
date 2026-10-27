@@ -31,7 +31,7 @@ extension ScreenshotMode {
         window.makeKeyAndOrderFront(nil)
         await pause(1.0)
         if !NSApp.isActive {
-            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
             window.makeKeyAndOrderFront(nil)
             await pause(1.0)
         }

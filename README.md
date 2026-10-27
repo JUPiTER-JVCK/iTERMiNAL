@@ -289,7 +289,10 @@ A tour of the app in thirty-three pictures, in five groups.
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop. When a host
   turns the file browser away it says why and what to do about it — see
-  [When a host can't be reached](#when-a-host-cant-be-reached).
+  [When a host can't be reached](#when-a-host-cant-be-reached) — and one that
+  wants a password can be browsed through a terminal tab you sign in to, without
+  this app ever being given the password: see
+  [A host that wants a password](#a-host-that-wants-a-password).
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -314,7 +317,10 @@ A tour of the app in thirty-three pictures, in five groups.
   (plain or Markdown), and the rows of JSON, CSV and feeds — with a query box
   that speaks CSS selectors, XPath, JSONPath and regular expressions. Images,
   media and files can be downloaded, after a sheet that says from where, into
-  which folder, and what will not be fetched. See [Extract](#extract).
+  which folder, and what will not be fetched. Image previews (off until you turn
+  them on), a same-site crawl that obeys `robots.txt`, and **Ask…**, which has your
+  AI assistant read the page into rows, are each one click, after a sheet that says
+  what they will do. See [Extract](#extract).
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -328,7 +334,8 @@ A tour of the app in thirty-three pictures, in five groups.
 - **Local scripting API + CLI** — a Unix-socket JSON API and the `iterminalctl`
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
-- **Command palette** — ⌘K, fuzzy search over every action.
+- **Command palette** — ⌘K (or ⌘P), fuzzy search over every command in the
+  menus, your saved hosts, the themes and the tabs that are open.
 - **Gentle motion** — panels, the dock, banners and the sidebar's sections
   move on springs, and hover and selection in the sidebar, toolbar and dock
   fade instead of flashing. With Reduce Motion on (System Settings →
@@ -337,8 +344,8 @@ A tour of the app in thirty-three pictures, in five groups.
   live, so changing it applies without a relaunch. Splitting or closing a pane
   is not animated.
 - **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Panels, Connections, Security, AI, HTTP Client,
-  Backup, Shortcuts, and Advanced, all applying live.
+  cursor, scrollback, GPU), Composer, Panels, Connections, Security, AI, HTTP
+  Client, Backup, Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY. When a
@@ -390,9 +397,8 @@ release where one exists: artifacts expire after 90 days and are buried inside
 a workflow run, while a release keeps its link forever and sits in the repo
 sidebar.
 
-While this repository is private, both routes need a GitHub account with
-access to it. Making the repository public is what turns the release link into
-one anybody can open — artifacts would still require an account even then.
+This repository is public, so a release opens for anybody. An Actions artifact
+still needs a GitHub account to download.
 
 ### Build from source
 
@@ -485,7 +491,12 @@ those commands already read, to each **local** shell.
 - **What it is not.** The terminal never rewrites output after the fact, and
   nothing here wraps commands in a colorizer the way zpm-zsh/colorize wraps
   them with `grc`. What you type in the composer is colored separately — see
-  the composer in [Features](#features).
+  the composer in [Features](#features). What you type at your shell's own
+  prompt is drawn by the shell, so coloring commands, functions and paths there
+  is the shell's job: fish does it out of the box, and for zsh it is
+  [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
+  (`brew install zsh-syntax-highlighting`, then the `source` line Homebrew
+  prints, in your `.zshrc`).
 
 ## Ghostty configuration
 
@@ -574,6 +585,7 @@ iterminalctl subscribe events=session.exited,tab.created
 | `browser.navigated` | a browser pane finishes loading |
 | `browser.tab.created` / `browser.tab.closed` | browser panel tab lifecycle |
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle (`connection` set on a remote tab) |
+| `composer.session.created` | the composer started a shell of its own |
 | `dock.session.moved` | a running shell was moved from a pane into the dock |
 | `http.sent` | an HTTP client pane's request finished — status on success, error on failure |
 
@@ -751,6 +763,14 @@ small link icon in the file browser's toolbar says it is doing that.
   or the network it is on — a redirect included — and requests carry no cookies
   or credentials. Files are never overwritten and are marked as downloaded from
   the web. See [Extract](#extract) for the rules and their one stated gap.
+- **The rest of Extract asks first, too.** Image previews are off until you turn
+  them on, and go by the same rules as downloads. A crawl stays on the one site,
+  reads `robots.txt` before anything else and obeys it (a redirect into a page it
+  rules out is not followed either), goes one page at a time, and starts only
+  after a sheet that says so. **Ask…** sends a page's text to your assistant only
+  after a sheet that names the destination and can show every character, with
+  anything that looks like a key or a password masked first (best effort, not a
+  promise); what comes back is shown as text and never run, opened or fetched.
 - **Certificate validation is never disabled.** A self-signed Proxmox host is
   reached by pinning the one certificate you confirmed by fingerprint, for that
   host and port alone — the system's own verdict is tried first, so pinning can
@@ -804,12 +824,19 @@ Sources/
 │   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
 │   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
-│   │                TerminalSession (PTY lifecycle, cwd/title/git metadata)
+│   │                TerminalSession (PTY lifecycle, cwd/title/git metadata),
+│   │                the right-click menu and the colored-output environment
+│   ├── Input/       the composer's input: shell tokenizer, completion, history
+│   │                search, suggestions — Foundation-only where it can be
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
-│   ├── Panels/      scriptable browser pane, file pane, HTTP client pane
-│   ├── HTTP/        request/response types, formatting, site-explorer parsers and
-│   │                path tree — Foundation-only
-│   ├── Files/       FileSystemProvider protocol, local + SFTP providers
+│   ├── Panels/      scriptable browser pane, file pane, notes, HTTP client pane
+│   │                with the site explorer and the Extract tab (previews, crawler,
+│   │                assistant)
+│   ├── HTTP/        request/response types, formatting, the site-explorer and
+│   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
+│   │                robots rules, crawl frontier — Foundation-only
+│   ├── Files/       FileSystemProvider protocol, local + SFTP providers, the
+│   │                shared-sign-in control socket
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
@@ -1054,7 +1081,9 @@ counted); how deep (1 to 4 links from here); how long to wait between requests
 - **robots.txt comes first, and is obeyed.** It is read the way RFC 9309 says: the
   group that names iTERMiNAL, or failing that the one for everyone; the longest
   matching rule wins, and an allow beats a disallow of the same length; `*` and a
-  closing `$` work in patterns. A page it asks crawlers to leave alone is listed,
+  closing `$` work in patterns, and a rule written in UTF-8 (`Disallow: /café/`)
+  matches the address spelled with escapes (`/caf%C3%A9/`), as the RFC says. A page
+  it asks crawlers to leave alone is listed,
   marked as left alone, and not fetched — and doesn't use up a place in the page
   limit. A `Crawl-delay` longer than your wait is waited out, up to 30 seconds. A
   robots.txt the server can't deliver (a 5xx, or a redirect off the site) stops the
@@ -1071,8 +1100,9 @@ counted); how deep (1 to 4 links from here); how long to wait between requests
 - **Web pages only.** An address that ends like a picture, an archive, a document
   or a script isn't requested, and any other whose response says it isn't a web
   page is stopped at the headers, before its body is taken. No page is read past
-  2 MB, and a redirect within the site is followed while one that leaves it is
-  noted and not followed.
+  2 MB. A redirect is followed only to a page the crawl could have asked for
+  itself — on the site, inside the folder if you chose that, and not one
+  `robots.txt` rules out — and is otherwise noted and not followed.
 - **It says who is asking**: `User-Agent: iTERMiNAL/<version>
   (+https://github.com/JUPiTER-JVCK/iTERMiNAL)`. Each request stands alone — no
   cookies, no credentials, nothing carried from one to the next — and the
@@ -1239,6 +1269,7 @@ scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 - [x] Workspace snapshots: export/import with no account required
 - [x] HTTP client pane: request builder, response viewer, history
 - [x] HTTP client: declared-site explorer (`robots.txt` / `sitemap.xml` / links in fetched pages), command-line navigation
+- [x] HTTP client: Extract tab — parsers, queries, downloads, image previews, a bounded same-site crawl, assistant-read rows
 - [ ] HTTP client: saved `.http` collections
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
