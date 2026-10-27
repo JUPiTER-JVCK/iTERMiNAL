@@ -214,6 +214,11 @@ enum SessionLaunch {
         env["COLORTERM"] = "truecolor"
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
         env["TERM_PROGRAM"] = "iTERMiNAL"
+        // rg, bat and imgcat, last: a person's own copy of any of them wins.
+        if let tools = BundledCommand.directory, FileManager.default.fileExists(atPath: tools.path),
+           let path = ToolsPath.appending(tools.path, to: env["PATH"]) {
+            env["PATH"] = path
+        }
         if let colors {
             // Only what is not set already, and the shell's own startup files
             // run after this — so a person's `.zshrc` has the last word.

@@ -106,7 +106,8 @@ jobs:
           mkdir -p "$tools/licenses"
 
           scripts/fetch-superfile.sh "$tools"
-          manifest="\"superfile\":\"$SUPERFILE_VERSION\""
+          scripts/fetch-cli-tools.sh "$tools"
+          manifest="\"ripgrep\":\"$RIPGREP_VERSION\",\"bat\":\"$BAT_VERSION\",\"superfile\":\"$SUPERFILE_VERSION\""
           if [ -x btop-out/btop ]; then
             cp btop-out/btop "$tools/btop"
             codesign --force --sign - "$tools/btop"

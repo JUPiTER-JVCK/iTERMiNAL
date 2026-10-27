@@ -4036,5 +4036,31 @@ do {
     check(FontImport.sampleText.contains("\u{F07B}") && FontImport.sampleText.contains("Il1"), "the sample shows a symbol and look-alike letters")
 }
 
+// MARK: Bundled tools on PATH
+
+do {
+    let tools = "/Applications/iTERMiNAL.app/Contents/Resources/Tools/bin"
+    check(ToolsPath.appending(tools, to: "/usr/bin:/bin") == "/usr/bin:/bin:" + tools, "the tools folder goes last")
+    check(ToolsPath.appending(tools, to: "/usr/bin:/bin:" + tools) == "/usr/bin:/bin:" + tools, "already there: left alone")
+    check(ToolsPath.appending(tools, to: tools + ":/usr/bin") == tools + ":/usr/bin", "already first: left alone, not moved")
+    check(ToolsPath.appending(tools, to: "/usr/bin:" + tools + "/") == "/usr/bin:" + tools + "/", "already there with a trailing slash: left alone")
+    check(ToolsPath.appending(tools + "/", to: "/usr/bin:" + tools) == "/usr/bin:" + tools, "the folder with a trailing slash is the same entry")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:/tools/binary") == "/usr/bin:/tools/binary:/tools/bin", "a longer name that starts the same is another folder")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:/other/tools/bin") == "/usr/bin:/other/tools/bin:/tools/bin", "…and so is the same name somewhere else")
+    check(ToolsPath.appending("/Applications/My App.app/Tools/bin", to: "/usr/bin") == "/usr/bin:/Applications/My App.app/Tools/bin", "a folder with a space in it is added")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:") == "/usr/bin::/tools/bin", "an empty entry in PATH is kept as it was")
+    check(ToolsPath.appending("/", to: "/usr/bin") == "/usr/bin:/", "the root folder is a folder")
+    check(ToolsPath.appending("/", to: "/usr/bin:/") == "/usr/bin:/", "…and is not added twice")
+
+    check(ToolsPath.appending(tools, to: nil) == nil, "no PATH gets none: the shell's own default is better than one folder")
+    check(ToolsPath.appending(tools, to: "") == nil, "an empty PATH gets none")
+    check(ToolsPath.appending(nil, to: "/usr/bin") == "/usr/bin", "no folder changes nothing")
+    check(ToolsPath.appending("", to: "/usr/bin") == "/usr/bin", "an empty folder changes nothing")
+    check(ToolsPath.appending("tools/bin", to: "/usr/bin") == "/usr/bin", "a relative folder would depend on where the shell is, so it is not added")
+    check(ToolsPath.appending("/a:/b", to: "/usr/bin") == "/usr/bin", "a colon would split it in two, so it is not added")
+    check(ToolsPath.appending("/a\nb", to: "/usr/bin") == "/usr/bin", "a newline cannot be in an entry")
+    check(ToolsPath.appending("/a\0b", to: "/usr/bin") == "/usr/bin", "a NUL cannot be in an entry")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

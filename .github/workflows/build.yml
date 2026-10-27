@@ -198,8 +198,14 @@ jobs:
             Sources/iTERMiNAL/Terminal/TerminalLinks.swift \
             Sources/iTERMiNAL/Terminal/CursorAnimation.swift \
             Sources/iTERMiNAL/Terminal/FontImport.swift \
+            Sources/iTERMiNAL/Terminal/ToolsPath.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
+
+      # imgcat is a shell script, so its output is read here the way the
+      # terminal engine reads an inline image, on the Mac's own base64 and sh.
+      - name: Check imgcat
+        run: python3 scripts/imgcat-check.py
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
@@ -255,10 +261,14 @@ jobs:
 
           scripts/fetch-superfile.sh "$tools"
 
+          # ripgrep, bat and imgcat, in Tools/bin: the one folder every terminal
+          # tab gets on its PATH.
+          scripts/fetch-cli-tools.sh "$tools"
+
           # Read by the About box, so it reports what was actually bundled
           # rather than a second copy of the pins that could drift.
-          printf '{"btop":"%s","superfile":"%s"}\n' \
-            "$BTOP_VERSION" "$SUPERFILE_VERSION" > "$tools/manifest.json"
+          printf '{"btop":"%s","superfile":"%s","ripgrep":"%s","bat":"%s"}\n' \
+            "$BTOP_VERSION" "$SUPERFILE_VERSION" "$RIPGREP_VERSION" "$BAT_VERSION" > "$tools/manifest.json"
           ls -la "$tools" "$tools/licenses"
 
           # The terminal's fallback for the icons superfile draws.
@@ -373,8 +383,8 @@ jobs:
           # would pass every check made on the inputs. Each must be present,
           # executable, universal, link only what a stock Mac has, and run.
           tools="$APP/Contents/Resources/Tools"
-          for tool in spf btop; do
-            bin="$tools/$tool"
+          for bin in "$tools/spf" "$tools/btop" "$tools/bin/rg" "$tools/bin/bat"; do
+            tool="$(basename "$bin")"
             if [ ! -x "$bin" ]; then
               echo "::error::bundled $tool is missing or not executable: $bin"
               fail=1
@@ -394,15 +404,23 @@ jobs:
             fi
             # This runner is arm64, so only the arm64 slice runs here. btop's
             # x86_64 slice already ran on the Intel runner that built it;
-            # superfile's is upstream's release binary, checked by hash but
-            # never executed by this workflow.
+            # superfile's, ripgrep's and bat's are upstream's release binaries,
+            # checked by hash but never executed by this workflow.
             if ! "$bin" --version; then
               echo "::error::bundled $tool does not run"
               fail=1
             fi
           done
+          # imgcat is this repository's own script: present, executable, and it
+          # answers. (Its output is checked by the Check imgcat step.)
+          if [ ! -x "$tools/bin/imgcat" ] || ! "$tools/bin/imgcat" --version; then
+            echo "::error::bundled imgcat is missing, not executable, or does not run"
+            fail=1
+          fi
           # MIT and Apache-2.0 both require the notice to ship with the binary.
-          for file in licenses/superfile-LICENSE.txt licenses/btop-LICENSE.txt manifest.json; do
+          for file in licenses/superfile-LICENSE.txt licenses/btop-LICENSE.txt \
+            licenses/ripgrep-LICENSE.txt licenses/bat-LICENSE.txt manifest.json
+          do
             if [ ! -s "$tools/$file" ]; then
               echo "::error::missing from bundled tools: $file"
               fail=1
