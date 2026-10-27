@@ -3982,5 +3982,59 @@ do {
     check(CursorAnimation(rawValue: "teleport") == nil, "a name from a newer build reads as nothing, for the caller to default")
 }
 
+// MARK: Font import
+
+do {
+    for good in ["JetBrainsMono-Regular.ttf", "a.otf", "Fonts.ttc", "x.OTC", "UPPER.TTF", "My Font (1).ttf"] {
+        check(FontImport.refusal(fileName: good, size: 1000) == nil, "importable: \(good)")
+    }
+    for bad in ["notes.txt", "face.woff", "face.woff2", "face.pfb", "face.dfont", "face", "face.ttf.exe", "face.zip", ".ttf"] {
+        check(FontImport.refusal(fileName: bad, size: 1000) != nil, "refused: \(bad)")
+    }
+    check(FontImport.refusal(fileName: "a.ttf", size: 0) == .empty, "an empty file is refused")
+    check(FontImport.refusal(fileName: "a.ttf", size: -5) == .empty, "a negative size is refused")
+    check(FontImport.refusal(fileName: "a.ttf", size: FontImport.maxBytes) == nil, "exactly the limit is allowed")
+    check(FontImport.refusal(fileName: "a.ttf", size: FontImport.maxBytes + 1) == .tooLarge, "one byte over is refused")
+    check(FontImport.Refusal.notAFont("x.txt").message.contains("x.txt") && FontImport.Refusal.tooLarge.message.contains("50 MB"),
+          "the refusals say what is wrong")
+
+    check(FontImport.storedName(for: "Fira Code.ttf", existing: []) == "Fira Code.ttf", "an ordinary name is kept")
+    check(FontImport.storedName(for: "../../etc/evil.ttf", existing: []) == "evil.ttf", "a path is cut to its last part")
+    check(FontImport.storedName(for: "/Users/x/Library/Fonts/a.otf", existing: []) == "a.otf", "an absolute path is cut to its last part")
+    check(FontImport.storedName(for: "a/b\\c:d*e?.ttf", existing: []).hasSuffix(".ttf") && !FontImport.storedName(for: "a:b*c?.ttf", existing: []).contains("*"),
+          "odd characters do not survive")
+    check(FontImport.storedName(for: ".hidden.ttf", existing: []) == "hidden.ttf", "a name cannot start with a dot")
+    check(FontImport.storedName(for: "...ttf", existing: []).hasSuffix(".ttf"), "dots only still makes a name")
+    check(FontImport.storedName(for: "Ünïcode.TTF", existing: []) == "_n_code.ttf", "non-ASCII letters become underscores and the extension is lower-case")
+    let longName = String(repeating: "a", count: 300) + ".ttf"
+    check(FontImport.storedName(for: longName, existing: []).count <= 85, "a long name is cut")
+    check(FontImport.storedName(for: longName, existing: []).hasSuffix(".ttf"), "…with its extension kept")
+    check(FontImport.storedName(for: "a.ttf", existing: ["a.ttf"]) == "a 2.ttf", "a taken name gets a number")
+    check(FontImport.storedName(for: "a.ttf", existing: ["a.ttf", "a 2.ttf"]) == "a 3.ttf", "…and the next free one")
+    check(FontImport.storedName(for: "a.ttf", existing: ["A.TTF"]) == "a 2.ttf", "a name taken but for its case is taken (the volume may not tell them apart)")
+    check(FontImport.storedName(for: "", existing: []) == "font", "no name at all is 'font'")
+
+    typealias Face = FontImport.Face
+    let faces = [
+        Face(family: "Zed Mono", style: "Bold", postScriptName: "ZedMono-Bold"),
+        Face(family: "alpha Mono", style: "Italic", postScriptName: "AlphaMono-Italic"),
+        Face(family: "alpha Mono", style: "Regular", postScriptName: "AlphaMono-Regular"),
+        Face(family: "alpha Mono", style: "Bold Italic", postScriptName: "AlphaMono-BoldItalic"),
+        Face(family: "alpha Mono", style: "Bold", postScriptName: "AlphaMono-Bold"),
+        Face(family: "alpha Mono", style: "Light", postScriptName: "AlphaMono-Light"),
+        Face(family: "alpha Mono", style: "Regular", postScriptName: "AlphaMono-Regular"),
+        Face(family: "  ", style: "Regular", postScriptName: "Nameless"),
+        Face(family: "Beta Code", style: "Regular", postScriptName: "BetaCode-Regular"),
+    ]
+    let groups = FontImport.groups(faces)
+    check(groups.map(\.name) == ["alpha Mono", "Beta Code", "Zed Mono"], "families A to Z without regard to case (\(groups.map(\.name)))")
+    check(groups.first?.faces.map(\.style) == ["Regular", "Bold", "Italic", "Bold Italic", "Light"],
+          "regular, bold, italic, bold italic, then the rest (\(groups.first?.faces.map(\.style) ?? []))")
+    check(groups.first?.faces.count == 5, "a face listed twice is shown once")
+    check(!groups.contains { $0.name.trimmingCharacters(in: .whitespaces).isEmpty }, "a face with no family is left out")
+    check(FontImport.groups([]).isEmpty, "no faces, no families")
+    check(FontImport.sampleText.contains("\u{F07B}") && FontImport.sampleText.contains("Il1"), "the sample shows a symbol and look-alike letters")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

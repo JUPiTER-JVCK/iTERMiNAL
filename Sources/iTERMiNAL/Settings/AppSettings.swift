@@ -475,6 +475,9 @@ final class AppSettings: ObservableObject {
     /// The font every terminal draws with, backed by the bundled Nerd Font
     /// symbols for the icons it has no glyphs for — see `SymbolsFont`.
     func resolvedTerminalFont() -> NSFont {
+        // Fonts the person imported are registered the first time this is
+        // asked, before the name below is looked up.
+        _ = ImportedFonts.shared
         let size = CGFloat(terminalFontSize)
         var font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
         if !terminalFontName.isEmpty, let chosen = NSFont(name: terminalFontName, size: size) {
