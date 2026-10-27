@@ -1,6 +1,7 @@
 #if SCREENSHOTS
 import AppKit
 import Combine
+import SwiftTerm
 import SwiftUI
 import WebKit
 
@@ -134,6 +135,8 @@ final class ScreenshotRun {
 
         await scene("terminal-colors") { await self.terminalColors() }
         await scene("terminal-tools") { await self.bundledTools() }
+        await scene("terminal-opacity") { await self.terminalOpacity() }
+        await scene("edit-in-terminal") { await self.editInTerminal() }
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
         await scene("extract-crawl") { await self.siteCrawl() }
@@ -798,6 +801,87 @@ final class ScreenshotRun {
         session.send(text: "clear\n")
         settings.composerCollapsed = false
         await pause(0.8)
+        return taken
+    }
+
+    // MARK: Edit in Terminal
+
+    /// "Edit in Terminal" for a file with a space in its name, with the editor
+    /// the runner has — Vim, which macOS ships; Helix and Neovim are not
+    /// installed there. A tab opens, the line typed into it is quoted, and the
+    /// editor comes up on that file.
+    private func editInTerminal() async -> Bool {
+        guard let demo else { return false }
+        await baseline()
+        let manager = FileManager.default
+        let folder = URL(fileURLWithPath: demo, isDirectory: true).appendingPathComponent("edit-demo", isDirectory: true)
+        try? manager.removeItem(at: folder)
+        defer { try? manager.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("release notes.txt")
+        do {
+            try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("Release notes\n\n- faster startup\n- jump hosts\n".utf8).write(to: file)
+        } catch {
+            say("edit: could not make the sample file: \(error.localizedDescription)")
+            return false
+        }
+        let before = store.workspaces.flatMap(\.tabs).count
+        if let problem = store.editFile(at: file.path) {
+            say("edit: refused: \(problem)")
+            return false
+        }
+        await pause(3.5)
+        let after = store.workspaces.flatMap(\.tabs).count
+        guard let tab = store.selectedTab, let session = tab.primarySession else {
+            say("edit: no tab came up")
+            return false
+        }
+        say("edit: tabs \(before) -> \(after); the editor is \(settings.editorChoice.label)")
+        let lines = session.captureVisibleText().split(separator: "\n", omittingEmptySubsequences: false)
+        for line in lines.prefix(5) { say("edit: the screen: \(line)") }
+        for line in lines.suffix(3) { say("edit: the last lines: \(line)") }
+        let taken = capture("edit-in-terminal")
+        // Out of the editor without saving, and the tab away.
+        session.send(text: "\u{1b}:q!\r")
+        await pause(1.0)
+        store.closeTab(tab)
+        return taken
+    }
+
+    // MARK: Terminal opacity
+
+    /// The Appearance slider, as the terminals receive it. A picture cannot show
+    /// a desktop through a window — the window is drawn by itself — so what is
+    /// read is what the setting did to each terminal's views: its background
+    /// carries the opacity, a frosted view sits beneath it and the padding round
+    /// it is tinted; and at 100% all of that is gone again.
+    private func terminalOpacity() async -> Bool {
+        guard let root = window.contentView else { return false }
+        await baseline()
+        let before = settings.backgroundOpacity
+        defer { settings.backgroundOpacity = before }
+        say("opacity: the window is opaque: \(window.isOpaque); its background is \(window.backgroundColor.map { "\($0)" } ?? "none")")
+        var taken = false
+        for value in [0.5, 1.0] {
+            settings.backgroundOpacity = value
+            await pause(1.5)
+            for container in ScreenshotMode.allViews(of: TerminalContainerView.self, in: root) where !container.visibleRect.isEmpty {
+                let terminalAlpha = (container.terminal as? TerminalView)?.nativeBackgroundColor.cgColor.alpha
+                let containerAlpha = container.layer?.backgroundColor?.alpha
+                let painted = terminalAlpha.map { String(format: "%.2f", Double($0)) } ?? "-"
+                let contained = containerAlpha.map { String(format: "%.2f", Double($0)) } ?? "-"
+                let frost = container.subviews.compactMap { $0 as? NSVisualEffectView }
+                var frosted = "none"
+                if let view = frost.first {
+                    let place = view.blendingMode == .behindWindow ? "behind the window" : "within the window"
+                    let drawn = view.state == .active ? "always drawn" : "follows the window"
+                    frosted = "\(frost.count) (\(place), \(drawn))"
+                }
+                let order = container.subviews.map { String(describing: type(of: $0)) }
+                say("opacity: \(Int(value * 100))%: the terminal paints its background at \(painted), its container at \(contained); frost views: \(frosted); subviews bottom to top: \(order)")
+            }
+            if value < 1 { taken = capture("terminal-opacity") }
+        }
         return taken
     }
 

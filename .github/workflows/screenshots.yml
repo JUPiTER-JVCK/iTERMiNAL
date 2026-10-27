@@ -38,6 +38,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # imgcat's own checks, on this Mac's base64 and sh. build.yml runs them
+      # too, but only for a pull request; a run here proves them before there is
+      # one.
+      - name: Check imgcat
+        run: python3 scripts/imgcat-check.py
+
       # The same way build.yml installs it, and for the same reason: straight
       # from its release, not through Homebrew.
       - name: Install XcodeGen
