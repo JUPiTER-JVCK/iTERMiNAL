@@ -935,12 +935,68 @@ final class ScreenshotRun {
         await run("(cd tools-demo && imgcat logo.png)", in: session)
         await pause(2.5)
         _ = capture("terminal-tools-auto")
+
+        // The same picture by the Kitty protocol's unicode placeholders, which
+        // the terminal draws as one whole image rather than in strips.
+        do {
+            try Data(Self.kittyProbe.utf8).write(to: folder.appendingPathComponent("kitty-probe.sh"))
+        } catch {
+            say("tools: could not write the Kitty probe: \(error.localizedDescription)")
+        }
+        await run("(cd tools-demo && sh kitty-probe.sh)", in: session)
+        await pause(3.0)
+        _ = capture("terminal-tools-kitty")
         stripeProbe()
 
         session.send(text: "clear\n")
         await pause(0.8)
         return taken
     }
+
+    /// A shell script that shows `logo.png` the way the Kitty graphics protocol
+    /// does it with unicode placeholders: the image is sent once, as a virtual
+    /// placement, and the cells it covers are text — U+10EEEE, a mark naming the
+    /// row, and a colour that carries the image's number.
+    private static let kittyProbe = #"""
+    id=7
+    cols=24
+    rows=7
+    data=$(base64 < logo.png | tr -d '\n')
+    total=${#data}
+    offset=0
+    first=1
+    while [ "$offset" -lt "$total" ]; do
+      chunk=$(printf '%s' "$data" | cut -c$((offset + 1))-$((offset + 4096)))
+      offset=$((offset + 4096))
+      if [ "$offset" -lt "$total" ]; then more=1; else more=0; fi
+      if [ "$first" = 1 ]; then
+        printf '\033_Ga=T,U=1,f=100,t=d,i=%s,c=%s,r=%s,q=2,m=%s;%s\033\\' "$id" "$cols" "$rows" "$more" "$chunk"
+        first=0
+      else
+        printf '\033_Gm=%s;%s\033\\' "$more" "$chunk"
+      fi
+    done
+    r=0
+    while [ "$r" -lt "$rows" ]; do
+      case $r in
+        0) mark='\314\205' ;;
+        1) mark='\314\215' ;;
+        2) mark='\314\216' ;;
+        3) mark='\314\220' ;;
+        4) mark='\314\222' ;;
+        5) mark='\314\275' ;;
+        *) mark='\314\276' ;;
+      esac
+      printf "\033[38;2;0;0;${id}m\364\216\273\256${mark}"
+      c=1
+      while [ "$c" -lt "$cols" ]; do
+        printf '\364\216\273\256'
+        c=$((c + 1))
+      done
+      printf '\033[39m\n'
+      r=$((r + 1))
+    done
+    """#
 
     /// What SwiftTerm does to cut an inline image into one strip per row — an
     /// `NSImage` holding a bitmap, focus locked, the source drawn into it — and
