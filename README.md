@@ -217,7 +217,7 @@ A tour of the app in thirty-three pictures, in five groups.
 
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
   support, alternate-screen apps, configurable scrollback, cursor style and
-  cursor animation, and an opt-in Metal GPU renderer.
+  cursor animation, inline images, and an opt-in Metal GPU renderer.
 - **Right-click menu** — right-click a terminal (or the margin around it) for
   Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that
   is a tab or a pane, Split Right, Split Down and New Tab. Copy is greyed out
@@ -370,8 +370,8 @@ A tour of the app in thirty-three pictures, in five groups.
   every change between. See [Bundled tools](#bundled-tools).
 - **ripgrep, bat and imgcat, built in** — `rg` (fast regular-expression search),
   `bat` (`cat` with syntax highlighting, paged through `less` when it is longer
-  than the screen) and `imgcat` (sends a PNG, JPEG, GIF, HEIC or TIFF to the
-  terminal as an inline image) are on the `PATH` of every local terminal, after whatever you
+  than the screen) and `imgcat` (shows a PNG, JPEG, GIF, HEIC or TIFF in the
+  terminal itself) are on the `PATH` of every local terminal, after whatever you
   have installed yourself, so yours is the one that runs. See
   [Command-line tools](#command-line-tools).
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
@@ -1388,11 +1388,12 @@ when there is nothing else.
 | --- | --- | --- | --- | --- |
 | `rg` | [ripgrep](https://github.com/BurntSushi/ripgrep): recursive regular-expression search | MIT or Unlicense | 15.2.0 | Upstream's macOS release binaries for both chips, checked against pinned SHA-256 hashes that were matched to upstream's own `.sha256` files, merged into one universal binary and ad-hoc signed |
 | `bat` | [bat](https://github.com/sharkdp/bat): `cat` with syntax highlighting; output longer than the screen is paged through `less` | MIT or Apache-2.0 | 0.26.1 | The same, except that upstream publishes no checksums for it: its hashes are those of the files when the pin was made, so they say a file has not changed since, not that upstream vouched for it |
-| `imgcat` | Sends an image to the terminal as an inline image: `imgcat photo.png`, `imgcat -W 40 photo.heic`, or one piped in; sizes are cells, a percentage or pixels | MIT | this repository's own [script](scripts/imgcat) | Copied as it is |
+| `imgcat` | Shows an image in the terminal: `imgcat photo.png`, `imgcat -W 40 photo.heic`, or one piped in; sizes are cells, a percentage or pixels | MIT | this repository's own [script](scripts/imgcat) | Copied as it is |
 
-`imgcat` writes the inline-image escape sequence that iTerm2 introduced, which
-the terminal engine decodes with macOS's own image reader — PNG, JPEG, GIF, HEIC,
-TIFF — so it works in any terminal that draws those, and it prints nothing else. It refuses a missing file, a size that is not a size, and anything
+`imgcat` writes the inline-image escape sequence that iTerm2 introduced, and the
+terminal draws it, decoding the file with macOS's own image reader — PNG, JPEG,
+GIF, HEIC, TIFF — so it works in any terminal that draws those, and it prints
+nothing else. It refuses a missing file, a size that is not a size, and anything
 over 25 MB, with exit codes a script can read.
 
 **Versions** are pinned in `scripts/tools.env` and move only by a pull request
