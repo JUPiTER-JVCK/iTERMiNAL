@@ -30,9 +30,15 @@ enum SessionLaunchError: LocalizedError {
     case missingExecutable(String)
     case emptyCustomCommand
     case toolUnavailable(TerminalTool)
+    /// The jump hosts written for a connection cannot be used. Refused rather
+    /// than connected to directly: a host that is meant to be reached through a
+    /// bastion is not to be reached any other way by accident.
+    case invalidJumpHosts(String)
 
     var errorDescription: String? {
         switch self {
+        case .invalidJumpHosts(let problem):
+            return JumpHosts.refusal(problem)
         case .unknownConnection:
             return "That saved connection no longer exists."
         case .missingExecutable(let name):
@@ -61,7 +67,8 @@ enum SessionLaunch {
         settings: AppSettings,
         directory: String?,
         shellOverride: String? = nil,
-        controlPath: String? = nil
+        controlPath: String? = nil,
+        agentApproved: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         switch kind {
         case .localShell:
@@ -78,7 +85,7 @@ enum SessionLaunch {
             guard let connection = settings.sshConnections.first(where: { $0.id == id }) else {
                 return .failure(.unknownConnection)
             }
-            return remoteConfiguration(connection, controlPath: controlPath)
+            return remoteConfiguration(connection, controlPath: controlPath, agentApproved: agentApproved)
 
         case .tool(let tool):
             guard let executable = tool.resolvedExecutable else {
@@ -104,9 +111,12 @@ enum SessionLaunch {
         }
     }
 
+    /// `agentApproved` is the answer to "forward your agent?" for a connection
+    /// set to ask; every other choice ignores it.
     private static func remoteConfiguration(
         _ connection: SSHConnection,
-        controlPath: String? = nil
+        controlPath: String? = nil,
+        agentApproved: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         var executable: String
         var args: [String] = []
@@ -128,7 +138,15 @@ enum SessionLaunch {
             }
             // Arguments written for mosh or a custom command are not ssh's.
             if connection.transport == .ssh {
+                if let problem = connection.jumpHostsProblem {
+                    return .failure(.invalidJumpHosts(problem))
+                }
                 args.append(contentsOf: tokenize(connection.extraArguments))
+                // After the person's own arguments, like the control path
+                // below: ssh keeps the first value it is given for an option,
+                // so a `-J` or `-A` written by hand is theirs to keep.
+                args.append(contentsOf: connection.proxyJumpArguments)
+                args.append(contentsOf: connection.agentForwarding.arguments(approved: agentApproved))
             }
             if let controlPath {
                 // After the person's own arguments, so a ControlPath they chose

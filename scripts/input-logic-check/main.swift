@@ -3751,5 +3751,116 @@ do {
     check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xEFF1F5), "a typical light theme wants the light frost")
 }
 
+// MARK: Jump hosts and agent forwarding
+
+do {
+    func hops(_ text: String) -> [String]? {
+        if case .hops(let list) = JumpHosts.parse(text) { return list }
+        return nil
+    }
+    func problem(_ text: String) -> String? {
+        if case .invalid(let message) = JumpHosts.parse(text) { return message }
+        return nil
+    }
+
+    check(JumpHosts.parse("") == .none, "nothing written is no jump")
+    check(JumpHosts.parse("  \n ") == .none, "blank is no jump")
+    check(hops("bastion") == ["bastion"], "a bare name")
+    check(hops("bastion.example.com") == ["bastion.example.com"], "a dotted name")
+    check(hops("alice@bastion") == ["alice@bastion"], "user@host")
+    check(hops("alice@bastion:2222") == ["alice@bastion:2222"], "user@host:port")
+    check(hops("10.0.0.5") == ["10.0.0.5"], "an IPv4 address")
+    check(hops("[::1]") == ["[::1]"], "a bracketed IPv6 address")
+    check(hops("bob@[2001:db8::1]:2200") == ["bob@[2001:db8::1]:2200"], "user, bracketed IPv6 and a port")
+    check(hops(" a , b@c:22 ") == ["a", "b@c:22"], "space around a hop is ignored")
+    check(hops("a,b,c") == ["a", "b", "c"], "the order is kept")
+    check(hops("host:022") == ["host:22"], "a port is spelled as a number")
+    check(hops("host.example.com.") == ["host.example.com."], "a fully qualified name keeps its dot")
+    check(hops("my_host-1") == ["my_host-1"], "underscores and dashes inside a name")
+    check(hops("NONE@x") == ["NONE@x"], "a user called none is a user")
+    check(hops("a,b,c,d,e")?.count == 5, "five hops are allowed")
+
+    // Nothing that ssh would take for an option, a token, or a second command.
+    let refused = [
+        "-oProxyCommand=evil", "-J", "-host", "-x@host", "host -oProxyCommand=x", "a b", "a;b", "a|b", "a&b",
+        "$(id)", "`id`", "a'b", "a\"b", "ssh://host", "host/path", "%h", "a%h", "a\\b", "a\tb", "ho\nst",
+        "bästion", "bast\u{200B}ion", "host:٢٢",
+        "a,,b", "a,", ",a", ",",
+        "none", "None", "u@none",
+        "host:0", "host:65536", "host:99999999999999999999", "host:abc", "host:", ":22", "@host", "user@", "a@b@c",
+        "::1", "1:2:3", "[::1", "[abc]", "[]", "[::1]x", "[::g]", "[::1]:99999", "[::1]:", "[[::1]]", "a[1]",
+    ]
+    for text in refused {
+        check(problem(text) != nil, "refused as jump hosts: \(text.debugDescription)")
+        check(hops(text) == nil, "no hops come out of: \(text.debugDescription)")
+        check(JumpHosts.proxyJumpValue(text) == nil, "no ProxyJump value comes out of: \(text.debugDescription)")
+    }
+    check(hops("a,b,c,d,e,f") == nil && problem("a,b,c,d,e,f") != nil, "six hops are too many")
+    check(problem(String(repeating: "a", count: 513)) != nil, "an over-long list is refused")
+    check(problem("host:") == "A port is missing after the colon in “host:”.", "an empty port says so")
+    check(problem("@host")?.contains("before the @") == true, "an empty user says so")
+    check(problem("::1")?.contains("square brackets") == true, "an unbracketed IPv6 address says to bracket it")
+    check(problem("none")?.contains("leave the box empty") == true, "'none' says how to go direct")
+
+    check(JumpHosts.proxyJumpValue(" a , b@c:22 ") == "a,b@c:22", "the ProxyJump value is the hops joined by commas")
+    check(JumpHosts.proxyJumpValue("") == nil, "no hops, no value")
+    check(JumpHosts.refusal("X.").hasPrefix("Not connecting:") && JumpHosts.refusal("X.").contains("X."), "the refusal names the problem")
+
+    // On a connection.
+    var connection = SSHConnection(name: "n", host: "target", username: "u", jumpHosts: "bastion, alice@hop2:2222")
+    check(connection.proxyJumpArguments == ["-o", "ProxyJump=bastion,alice@hop2:2222"], "the arguments carry the hops")
+    check(connection.jumpHostsProblem == nil, "a good list has no problem")
+    connection.jumpHosts = ""
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "no list adds nothing and is not a problem")
+    connection.jumpHosts = "bad host"
+    check(connection.proxyJumpArguments.isEmpty, "a bad list adds no arguments…")
+    check(connection.jumpHostsProblem != nil, "…and is a problem, which is what stops the connection from going direct")
+    connection = SSHConnection(name: "n", host: "t", username: "u", transport: .mosh, jumpHosts: "bastion")
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "mosh does not go through jump hosts")
+    connection = SSHConnection(name: "n", host: "t", username: "u", transport: .custom, jumpHosts: "bad host")
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "a custom command's jump hosts are not looked at")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u", jumpHosts: "bastion"))
+            == "ssh-copy-id -o ProxyJump=bastion u@t", "ssh-copy-id goes through the same hosts")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u", jumpHosts: "[::1]:22,b"))
+            == "ssh-copy-id -o 'ProxyJump=[::1]:22,b' u@t", "a bracketed address is quoted for the shell")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u"))
+            == "ssh-copy-id u@t", "without hops the command is as it was")
+
+    // Agent forwarding.
+    check(AgentForwarding.sshConfig.arguments(approved: true).isEmpty && AgentForwarding.sshConfig.arguments(approved: false).isEmpty,
+          "'as in ssh config' adds nothing either way")
+    check(AgentForwarding.never.arguments(approved: true) == ["-o", "ForwardAgent=no"], "never says no, even to a yes")
+    check(AgentForwarding.always.arguments(approved: false) == ["-A"], "always forwards whatever the answer")
+    check(AgentForwarding.ask.arguments(approved: true) == ["-A"], "asked and allowed forwards")
+    check(AgentForwarding.ask.arguments(approved: false) == ["-o", "ForwardAgent=no"],
+          "asked and refused is spelled out, so a config that says yes cannot override it")
+    check(AgentForwarding.ask.needsAnswer && !AgentForwarding.always.needsAnswer
+            && !AgentForwarding.never.needsAnswer && !AgentForwarding.sshConfig.needsAnswer, "only 'ask' needs an answer")
+    check(Set(AgentForwarding.allCases.map(\.label)).count == AgentForwarding.allCases.count, "the choices read differently")
+    check(AgentForwarding.allCases.count == 4, "four choices")
+
+    // Saved hosts from before these existed, and from a newer build.
+    let decoder = JSONDecoder()
+    let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(old.utf8)) {
+        check(decoded.jumpHosts.isEmpty && decoded.agentForwarding == .sshConfig, "a host saved before these loads with the defaults")
+    } else {
+        check(false, "a host saved before jump hosts and agent forwarding still loads")
+    }
+    let future = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h","agentForwarding":"teleport","jumpHosts":"b"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(future.utf8)) {
+        check(decoded.agentForwarding == .sshConfig && decoded.jumpHosts == "b",
+              "a choice this build does not know falls back to the default without losing the host")
+    } else {
+        check(false, "a choice from a newer build does not drop the host")
+    }
+    let kept = SSHConnection(name: "n", host: "h", username: "u", jumpHosts: "a,b", agentForwarding: .ask)
+    if let data = try? JSONEncoder().encode(kept), let back = try? decoder.decode(SSHConnection.self, from: data) {
+        check(back == kept, "jump hosts and the agent choice survive being saved")
+    } else {
+        check(false, "a connection with jump hosts can be saved and read back")
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

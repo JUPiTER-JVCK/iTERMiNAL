@@ -48,6 +48,29 @@ struct ConnectionsSettingsView: View {
                         set: { binding.wrappedValue.initialPath = $0.isEmpty ? nil : $0 }
                     ), prompt: Text("~"))
 
+                    if binding.wrappedValue.transport == .ssh {
+                        TextField("Jump host(s) (optional)", text: binding.jumpHosts,
+                                  prompt: Text("bastion.example.com"))
+                        if let problem = binding.wrappedValue.jumpHostsProblem {
+                            Label(problem, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else {
+                            Text("Hosts to go through on the way, in order, as user@host:port and separated by commas. The terminal and the file browser both use them. Nothing connects directly while this has something wrong with it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Picker("Forward SSH agent", selection: binding.agentForwarding) {
+                            ForEach(AgentForwarding.allCases) { choice in
+                                Text(choice.label).tag(choice)
+                            }
+                        }
+                        Text(Self.agentCaption(binding.wrappedValue.agentForwarding))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if binding.wrappedValue.transport == .custom {
                         TextField("Command", text: binding.customCommand,
                                   prompt: Text("tailscale ssh %u@%h"))
@@ -56,7 +79,7 @@ struct ConnectionsSettingsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         TextField("Extra arguments (optional)", text: binding.extraArguments,
-                                  prompt: Text("-A -J bastion"))
+                                  prompt: Text("-o ServerAliveInterval=30"))
                     }
 
                     ConnectionTestRow(connection: binding.wrappedValue)
@@ -80,6 +103,20 @@ struct ConnectionsSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// What each choice does, in a line, under the picker.
+    private static func agentCaption(_ choice: AgentForwarding) -> String {
+        switch choice {
+        case .sshConfig:
+            return "Adds nothing: ~/.ssh/config decides, as it does for ssh outside this app."
+        case .never:
+            return "Never forwards, even where ~/.ssh/config says to."
+        case .ask:
+            return "Asks each time a tab connects or reconnects. Return answers no."
+        case .always:
+            return "Forwards on every connection. While you are connected, a program on the host — or anyone who can act as you there — can use your keys to sign in elsewhere."
+        }
     }
 
     private func addConnection() {

@@ -131,6 +131,12 @@ final class SFTPFileSystemProvider: FileSystemProvider {
             // attempts hangs up before reaching the one that was chosen.
             args.append(contentsOf: ["-o", "IdentitiesOnly=yes"])
         }
+        // Through the same hosts the terminal goes through. A listing made
+        // directly to a host that is only meant to be reached by way of a
+        // bastion would be a different connection from the one the person
+        // set up. (Where a terminal tab's sign-in is shared, the socket above
+        // already goes through them, and this is not looked at.)
+        args.append(contentsOf: connection.proxyJumpArguments)
         args.append(connection.destination)
         return args
     }
@@ -140,6 +146,13 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         timeout: TimeInterval = 30,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
+        // Refused, not connected directly: see `JumpHosts`.
+        if let problem = connection.jumpHostsProblem {
+            DispatchQueue.main.async {
+                completion(.failure(FileProviderError.commandFailed(JumpHosts.refusal(problem))))
+            }
+            return
+        }
         let args = arguments()
         let connection = connection
         let script = (commands + ["bye"]).joined(separator: "\n") + "\n"

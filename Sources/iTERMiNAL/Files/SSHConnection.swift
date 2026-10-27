@@ -44,11 +44,19 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     var identityFile: String?
     var initialPath: String?
     var transport: SSHTransport
-    /// Extra flags passed through to the transport, e.g. "-A -J bastion".
+    /// Extra flags passed through to the transport, e.g. "-o ServerAliveInterval=30".
+    /// Where one of them sets something the fields below also set, ssh keeps
+    /// the first it is given, and these come first.
     var extraArguments: String
     /// Full command line used when `transport == .custom` (Tailscale SSH,
     /// Eternal Terminal, a wrapper script…).
     var customCommand: String
+    /// Hosts to go through on the way, written as ssh's `-J` takes them:
+    /// `[user@]host[:port]`, comma-separated. Empty connects directly. See
+    /// `JumpHosts`, which decides what is acceptable.
+    var jumpHosts: String
+    /// Whether the ssh-agent's keys can be used from the host. See `AgentForwarding`.
+    var agentForwarding: AgentForwarding
 
     init(
         id: UUID = UUID(),
@@ -60,7 +68,9 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         initialPath: String? = nil,
         transport: SSHTransport = .ssh,
         extraArguments: String = "",
-        customCommand: String = ""
+        customCommand: String = "",
+        jumpHosts: String = "",
+        agentForwarding: AgentForwarding = .sshConfig
     ) {
         self.id = id
         self.name = name
@@ -72,6 +82,8 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         self.transport = transport
         self.extraArguments = extraArguments
         self.customCommand = customCommand
+        self.jumpHosts = jumpHosts
+        self.agentForwarding = agentForwarding
     }
 
     /// Tolerant decoding so connections saved before transports existed still
@@ -88,6 +100,10 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         transport = try container.decodeIfPresent(SSHTransport.self, forKey: .transport) ?? .ssh
         extraArguments = try container.decodeIfPresent(String.self, forKey: .extraArguments) ?? ""
         customCommand = try container.decodeIfPresent(String.self, forKey: .customCommand) ?? ""
+        jumpHosts = try container.decodeIfPresent(String.self, forKey: .jumpHosts) ?? ""
+        // A choice this build does not know — written by a newer one — falls
+        // back to the default instead of failing the whole host list.
+        agentForwarding = (try? container.decodeIfPresent(AgentForwarding.self, forKey: .agentForwarding)) ?? .sshConfig
     }
 
     var destination: String {
