@@ -1,7 +1,7 @@
 #if SCREENSHOTS
 import AppKit
 import Combine
-import class SwiftTerm.TerminalView
+import SwiftTerm
 import SwiftUI
 import WebKit
 
@@ -158,6 +158,7 @@ final class ScreenshotRun {
 
         await settingsWindows()
 
+        await scene("terminal-link-menu") { await self.linkMenu() }
         await scene("terminal-context-menu") { await self.contextMenu() }
     }
 
@@ -1227,6 +1228,111 @@ final class ScreenshotRun {
         await pause(1.5)
         store.closeTab(tab)
         return taken
+    }
+
+    // MARK: A link under the pointer
+
+    /// A web address printed in the server tab, and what a right-click on it
+    /// offers. Where the menu thinks a link is has to be where the terminal
+    /// thinks it is, so it is checked against the terminal itself: a ⌘-click is
+    /// sent to a few thousand points around the address, the terminal's own
+    /// answer — which link it opens, if any — is read from the opener, and
+    /// the menu's is read from `link(at:)`. They have to agree at every one.
+    private func linkMenu() async -> Bool {
+        await baseline()
+        guard let session = server?.primarySession, let root = window.contentView,
+              let terminal = ScreenshotMode.firstView(ofType: InstrumentedTerminalView.self, in: root) else {
+            say("link menu: no terminal in the window")
+            return false
+        }
+        let address = "https://example.com/docs/start"
+        await run("echo see \(address) for the guide", in: session)
+        await pause(1.5)
+        let lines = session.captureVisibleText().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let row = lines.firstIndex(where: { $0.hasPrefix("see \(address)") }),
+              let range = lines[row].range(of: address) else {
+            say("link menu: the address is not on the screen")
+            return false
+        }
+        let firstColumn = lines[row].distance(from: lines[row].startIndex, to: range.lowerBound)
+        let lastColumn = firstColumn + address.count - 1
+        let engine = terminal.getTerminal()
+        let grid = terminal.getOptimalFrameSize()
+        guard let cell = TerminalLinks.cellSize(
+            gridWidth: Double(grid.width), gridHeight: Double(grid.height), cols: engine.cols, rows: engine.rows
+        ) else {
+            say("link menu: no cell size")
+            return false
+        }
+        say("link menu: the address is on row \(row), columns \(firstColumn)–\(lastColumn) of \(engine.cols)×\(engine.rows); a cell is \(cell.width)×\(cell.height)")
+
+        // The terminal's answer to a ⌘-click, read from where it would open it.
+        var opened: String?
+        let saved = terminal.onLink
+        terminal.onLink = { opened = $0 }
+        defer { terminal.onLink = saved }
+        func event(_ type: NSEvent.EventType, at local: NSPoint, command: Bool) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: terminal.convert(local, to: nil), modifierFlags: command ? [.command] : [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+            )
+        }
+
+        // From two cells before the address to two after, three rows.
+        let left = max(0, Double(firstColumn - 2) * cell.width)
+        let right = Double(lastColumn + 3) * cell.width
+        let top = Double(terminal.bounds.height) - Double(row + 2) * cell.height
+        let bottom = Double(terminal.bounds.height) - Double(row - 1) * cell.height
+        var points = 0, agreed = 0, onLink = 0
+        var disagreements: [String] = []
+        var y = max(0, top)
+        while y < min(Double(terminal.bounds.height), bottom) {
+            var x = left
+            while x < right {
+                let local = NSPoint(x: x, y: y)
+                opened = nil
+                if let click = event(.leftMouseUp, at: local, command: true) { terminal.mouseUp(with: click) }
+                let theirs = opened
+                let ours = terminal.link(at: local)
+                points += 1
+                if ours == theirs { agreed += 1 } else if disagreements.count < 6 {
+                    disagreements.append("(\(Int(x)), \(Int(y))): the menu says \(ours ?? "no link"), the terminal \(theirs ?? "no link")")
+                }
+                if ours != nil { onLink += 1 }
+                x += 3
+            }
+            y += 3
+        }
+        say("link menu: \(points) points tried, the menu and the terminal agreed at \(agreed); \(onLink) of them are on the address")
+        for line in disagreements { say("link menu: disagreement at \(line)") }
+
+        // What the menu holds on the address, and beside it.
+        func describe(_ menu: NSMenu) -> String {
+            menu.update()
+            return menu.items.map { $0.isSeparatorItem ? "—" : "\($0.title)\($0.isEnabled ? "" : " (off)")" }.joined(separator: " | ")
+        }
+        let middle = NSPoint(
+            x: (Double(firstColumn) + Double(address.count) / 2) * cell.width,
+            y: Double(terminal.bounds.height) - (Double(row) + 0.5) * cell.height
+        )
+        guard let click = event(.rightMouseDown, at: middle, command: false), let menu = terminal.menu(for: click) else {
+            say("link menu: no menu on the address")
+            return false
+        }
+        say("link menu: on the address: \(describe(menu))")
+        let apart = NSPoint(x: middle.x, y: middle.y + 3 * cell.height)
+        if let click = event(.rightMouseDown, at: apart, command: false), let plain = terminal.menu(for: click) {
+            say("link menu: three rows above it: \(describe(plain))")
+        }
+        NSPasteboard.general.clearContents()
+        if let index = menu.items.firstIndex(where: { $0.title == "Copy Link" }) { menu.performActionForItem(at: index) }
+        say("link menu: Copy Link put \((NSPasteboard.general.string(forType: .string) ?? "nothing").debugDescription) on the pasteboard")
+
+        session.send(text: "\u{15}")
+        session.send(text: "clear\n")
+        await pause(0.8)
+        return agreed == points && onLink > 0
     }
 
     // MARK: The right-click menu
