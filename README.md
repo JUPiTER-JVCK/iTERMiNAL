@@ -22,7 +22,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
-A tour of the app in thirty-three pictures, in five groups.
+A tour of the app in thirty-four pictures, in five groups.
 
 ### The window
 
@@ -66,6 +66,10 @@ A tour of the app in thirty-three pictures, in five groups.
     <td width="50%" valign="top">
       <img src="docs/images/terminal-colors-man.png" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
       <br><b>Colored man pages</b> — headings and options in red, what you fill in in green, from the same environment.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-tools.png" alt="A terminal after imgcat, bat and rg: a green-to-blue picture with a white disc drawn in the terminal itself, then main.rs listed by bat with line numbers and syntax colours, then the line rg found with the match in red.">
+      <br><b>Command-line tools</b> — <code>rg</code>, <code>bat</code> and <code>imgcat</code> ship inside the app and are on every terminal's <code>PATH</code>. Here: a picture drawn in the terminal, a source file with syntax colours, and a search hit. See <a href="#command-line-tools">Command-line tools</a>.
     </td>
   </tr>
 </table>
@@ -211,7 +215,7 @@ A tour of the app in thirty-three pictures, in five groups.
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-three into `docs/images/`.</sub>
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-four into `docs/images/`.</sub>
 
 ## Features
 
@@ -1393,7 +1397,9 @@ when there is nothing else.
 `imgcat` writes the inline-image escape sequence that iTerm2 introduced, and the
 terminal draws it, decoding the file with macOS's own image reader — PNG, JPEG,
 GIF, HEIC, TIFF — so it works in any terminal that draws those, and it prints
-nothing else. It refuses a missing file, a size that is not a size, and anything
+nothing else. The terminal engine also reads the Kitty graphics protocol: a picture
+sent by hand the way a program that speaks it would send one is drawn too. It refuses
+a missing file, a size that is not a size, and anything
 over 25 MB, with exit codes a script can read.
 
 **Versions** are pinned in `scripts/tools.env` and move only by a pull request
@@ -1409,7 +1415,11 @@ checks, run in CI on a Mac — reads what `imgcat` prints the way the terminal
 engine reads an inline image, and holds its refusals to their exit codes. The
 rule that puts the folder on the `PATH` is plain Foundation code with its own
 checks (it adds nothing that is not an absolute folder, nothing with a colon or a
-newline in it, nothing twice, and nothing to an environment with no `PATH`).
+newline in it, nothing twice, and nothing to an environment with no `PATH`). And
+the [Screenshots workflow](.github/workflows/screenshots.yml) runs the real thing
+on a Mac: it types `command -v rg bat imgcat` into a login shell in a tab of the
+built app, which finds all three inside the app bundle, and then runs them there —
+the *Command-line tools* picture at the top of this page is that run.
 
 **What it cannot do.** A shell whose startup files set `PATH` outright, rather
 than adding to it, takes the folder off again; `command -v rg` says which `rg` a

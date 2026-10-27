@@ -34,6 +34,7 @@ README_PICTURES = [
     "terminal-context-menu",
     "terminal-colors",
     "terminal-colors-man",
+    "terminal-tools",
     "composer-history",
     "ai-assistant",
     "error-help",
