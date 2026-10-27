@@ -140,6 +140,7 @@ final class ScreenshotRun {
         await scene("extract-ask") { await self.askAboutPage() }
         await scene("sftp-problems") { await self.remoteProblems() }
         await scene("sftp-shared") { await self.sharedSignIn() }
+        await scene("sftp-jump") { await self.jumpHosts() }
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
@@ -839,9 +840,70 @@ final class ScreenshotRun {
             say("tools: on the screen: \(line)")
         }
         let taken = capture("terminal-tools")
+
+        // The picture above shows the room an image took and not the image. So:
+        // the same from another encoder (the sample site's own PNG, through a
+        // pipe), at its own size, and what the system does with the way the
+        // terminal cuts an image into rows.
+        await run("curl -s http://localhost:8765/media/cover.png | imgcat -W 24", in: session)
+        await pause(2.5)
+        _ = capture("terminal-tools-piped")
+        await run("(cd tools-demo && imgcat logo.png)", in: session)
+        await pause(2.5)
+        _ = capture("terminal-tools-auto")
+        stripeProbe()
+
         session.send(text: "clear\n")
         await pause(0.8)
         return taken
+    }
+
+    /// What SwiftTerm does to cut an inline image into one strip per row — an
+    /// `NSImage` holding a bitmap, focus locked, the source drawn into it — and
+    /// then how a strip is drawn into a view: done here by hand, on this
+    /// machine, and counted. A strip with nothing painted in it is a terminal
+    /// that makes room for an image and draws none.
+    private func stripeProbe() {
+        guard let source = NSImage(data: Self.sampleImage()) else {
+            say("stripe: the sample picture does not decode")
+            return
+        }
+        say("stripe: the picture decodes to \(source.size), \(source.representations.count) representation(s); the window's scale is \(window.backingScaleFactor)")
+        let width = 192, height = 16
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: NSColorSpaceName.calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else {
+            say("stripe: no bitmap")
+            return
+        }
+        let strip = NSImage(size: NSSize(width: width, height: height))
+        strip.addRepresentation(bitmap)
+        strip.lockFocus()
+        source.draw(
+            in: CGRect(x: 0, y: 0, width: width, height: height),
+            from: CGRect(x: 0, y: 90, width: source.size.width, height: 10),
+            operation: .copy, fraction: 1
+        )
+        strip.unlockFocus()
+        say("stripe: the strip holds \(strip.representations.count) representation(s)")
+
+        func painted(_ rep: NSBitmapImageRep) -> Int {
+            var count = 0
+            for y in 0..<rep.pixelsHigh {
+                for x in 0..<rep.pixelsWide where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 { count += 1 }
+            }
+            return count
+        }
+        say("stripe: the bitmap that was added has \(painted(bitmap)) of \(width * height) pixels painted")
+        guard let probe = ScreenshotMode.bitmap(width: width, height: height),
+              let context = NSGraphicsContext(bitmapImageRep: probe) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        strip.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+        NSGraphicsContext.restoreGraphicsState()
+        say("stripe: the strip, drawn into a view's kind of context, paints \(painted(probe)) of \(width * height) pixels")
     }
 
     /// A small picture to show: a diagonal wash from green to blue under a pale
@@ -1002,6 +1064,100 @@ final class ScreenshotRun {
         store.closeTab(tab)
         model.switchTo(connectionID: nil)
         closePanels()
+        return taken
+    }
+
+    // MARK: Through jump hosts
+
+    /// A host reached through jump hosts, with the real `sftp` and `ssh`. The
+    /// workflow's one-key server is the destination and, since it is the only
+    /// server there is, the hop as well: the hop is an alias in the runner's own
+    /// ssh config (named by `ITERMINAL_SSH_JUMP_HOST`) that holds the server's
+    /// address and key, because ssh configures a hop there and not from the
+    /// connection's own settings.
+    ///
+    /// With both ends on one machine, the evidence that a connection went the
+    /// long way is the server's own log: each ssh connection it lets in is one
+    /// "Accepted publickey", so a listing made directly costs some number of
+    /// them, through one hop twice as many, through two hops three times. The
+    /// numbers go to the log; the scene only reports what it saw.
+    private func jumpHosts() async -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["ITERMINAL_SSH_SHARED_PORT"], let port = Int(portText),
+              let key = environment["ITERMINAL_SSH_SHARED_KEY"],
+              let hop = environment["ITERMINAL_SSH_JUMP_HOST"],
+              let logPath = environment["ITERMINAL_SSH_SHARED_LOG"] else {
+            say("jump hosts: the workflow did not set up a jump host for it")
+            return false
+        }
+        func logins() -> Int {
+            let text = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+            return text.components(separatedBy: "Accepted publickey").count - 1
+        }
+        let knownHosts = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iterminal-known-hosts-\(UUID().uuidString.prefix(8))").path
+        func make(_ name: String, jumps: String) -> SSHConnection {
+            SSHConnection(
+                name: name, host: "127.0.0.1", port: port, username: NSUserName(),
+                identityFile: key, initialPath: demo,
+                extraArguments: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=\(knownHosts)",
+                jumpHosts: jumps
+            )
+        }
+        let hosts = [
+            make("direct-vm", jumps: ""),
+            make("one-hop-vm", jumps: hop),
+            make("two-hop-vm", jumps: "\(hop),\(hop)"),
+        ]
+        let saved = settings.sshConnections
+        settings.sshConnections = saved + hosts
+        defer {
+            settings.sshConnections = saved
+            try? FileManager.default.removeItem(atPath: knownHosts)
+        }
+
+        await baseline()
+        settings.railPanelOpen = false
+        settings.rightPanelWidth = 460
+        store.openPanel(.files)
+        await pause(2.0)
+        let model = store.panelFiles
+        var taken = false
+        for (index, host) in hosts.enumerated() {
+            let before = logins()
+            model.switchTo(connectionID: host.id.uuidString)
+            _ = await ScreenshotMode.until(timeout: 60) { !model.isLoading }
+            await pause(1.0)
+            say("jump hosts: \(host.name) [\(host.jumpHosts.isEmpty ? "direct" : host.jumpHosts)]: "
+                + "\(model.items.count) items in \(model.directory); problem: \(model.listingProblem?.title ?? "none"); "
+                + "logins at the server: \(logins() - before)")
+            if index == 1 {
+                await tidyServer()
+                taken = capture("files-sftp-jump")
+            }
+        }
+        model.switchTo(connectionID: nil)
+        closePanels()
+
+        // And a terminal tab, opened the way a person opens a saved host,
+        // through the one hop. The line is typed after the handshakes, which a
+        // terminal in raw mode would not otherwise be sure to keep.
+        let before = logins()
+        let tab = store.newTab(kind: .remote(hosts[1].id))
+        guard let session = tab.primarySession else {
+            say("jump hosts: the tab has no terminal")
+            return taken
+        }
+        await pause(6.0)
+        session.send(text: "echo via-$((6 * 7))\n")
+        let answered = await ScreenshotMode.until(timeout: 40) { session.captureVisibleText().contains("via-42") }
+        say("jump hosts: the tab through one hop answered: \(answered); logins at the server: \(logins() - before)")
+        for line in session.captureVisibleText().split(separator: "\n").suffix(6) {
+            say("jump hosts: the tab says: \(line)")
+        }
+        session.send(text: "exit\n")
+        await pause(1.5)
+        store.closeTab(tab)
         return taken
     }
 
