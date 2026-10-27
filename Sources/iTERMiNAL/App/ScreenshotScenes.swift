@@ -925,19 +925,8 @@ final class ScreenshotRun {
         }
         let taken = capture("terminal-tools")
 
-        // The picture above shows the room an image took and not the image. So:
-        // the same from another encoder (the sample site's own PNG, through a
-        // pipe), at its own size, and what the system does with the way the
-        // terminal cuts an image into rows.
-        await run("curl -s http://localhost:8765/media/cover.png | imgcat -W 24", in: session)
-        await pause(2.5)
-        _ = capture("terminal-tools-piped")
-        await run("(cd tools-demo && imgcat logo.png)", in: session)
-        await pause(2.5)
-        _ = capture("terminal-tools-auto")
-
-        // The same picture by the Kitty protocol's unicode placeholders, which
-        // the terminal draws as one whole image rather than in strips.
+        // The other protocol the engine reads, sent by hand the way a program
+        // that speaks it would: the same picture, placed directly.
         do {
             try Data(Self.kittyProbe.utf8).write(to: folder.appendingPathComponent("kitty-probe.sh"))
         } catch {
@@ -946,19 +935,16 @@ final class ScreenshotRun {
         await run("(cd tools-demo && sh kitty-probe.sh)", in: session)
         await pause(3.0)
         _ = capture("terminal-tools-kitty")
-        stripeProbe()
 
         session.send(text: "clear\n")
         await pause(0.8)
         return taken
     }
 
-    /// A shell script that shows `logo.png` the way the Kitty graphics protocol
-    /// does it with unicode placeholders: the image is sent once, as a virtual
-    /// placement, and the cells it covers are text — U+10EEEE, a mark naming the
-    /// row, and a colour that carries the image's number.
+    /// A shell script that sends `logo.png` the way a program that speaks the
+    /// Kitty graphics protocol does: transmitted and placed in one go, a
+    /// quarter of a screen's width wide, in chunks of at most 4096 characters.
     private static let kittyProbe = #"""
-    id=7
     cols=24
     rows=7
     data=$(base64 < logo.png | tr -d '\n')
@@ -970,96 +956,38 @@ final class ScreenshotRun {
       offset=$((offset + 4096))
       if [ "$offset" -lt "$total" ]; then more=1; else more=0; fi
       if [ "$first" = 1 ]; then
-        printf '\033_Ga=T,U=1,f=100,t=d,i=%s,c=%s,r=%s,q=2,m=%s;%s\033\\' "$id" "$cols" "$rows" "$more" "$chunk"
+        printf '\033_Ga=T,f=100,t=d,c=%s,r=%s,q=2,m=%s;%s\033\\' "$cols" "$rows" "$more" "$chunk"
         first=0
       else
         printf '\033_Gm=%s;%s\033\\' "$more" "$chunk"
       fi
     done
-    r=0
-    while [ "$r" -lt "$rows" ]; do
-      case $r in
-        0) mark='\314\205' ;;
-        1) mark='\314\215' ;;
-        2) mark='\314\216' ;;
-        3) mark='\314\220' ;;
-        4) mark='\314\222' ;;
-        5) mark='\314\275' ;;
-        *) mark='\314\276' ;;
-      esac
-      printf "\033[38;2;0;0;${id}m\364\216\273\256${mark}"
-      c=1
-      while [ "$c" -lt "$cols" ]; do
-        printf '\364\216\273\256'
-        c=$((c + 1))
-      done
-      printf '\033[39m\n'
-      r=$((r + 1))
-    done
+    printf '\n'
     """#
-
-    /// What SwiftTerm does to cut an inline image into one strip per row — an
-    /// `NSImage` holding a bitmap, focus locked, the source drawn into it — and
-    /// then how a strip is drawn into a view: done here by hand, on this
-    /// machine, and counted. A strip with nothing painted in it is a terminal
-    /// that makes room for an image and draws none.
-    private func stripeProbe() {
-        guard let source = NSImage(data: Self.sampleImage()) else {
-            say("stripe: the sample picture does not decode")
-            return
-        }
-        say("stripe: the picture decodes to \(source.size), \(source.representations.count) representation(s); the window's scale is \(window.backingScaleFactor)")
-        let width = 192, height = 16
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: NSColorSpaceName.calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
-        ) else {
-            say("stripe: no bitmap")
-            return
-        }
-        let strip = NSImage(size: NSSize(width: width, height: height))
-        strip.addRepresentation(bitmap)
-        strip.lockFocus()
-        source.draw(
-            in: CGRect(x: 0, y: 0, width: width, height: height),
-            from: CGRect(x: 0, y: 90, width: source.size.width, height: 10),
-            operation: .copy, fraction: 1
-        )
-        strip.unlockFocus()
-        say("stripe: the strip holds \(strip.representations.count) representation(s)")
-
-        func painted(_ rep: NSBitmapImageRep) -> Int {
-            var count = 0
-            for y in 0..<rep.pixelsHigh {
-                for x in 0..<rep.pixelsWide where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 { count += 1 }
-            }
-            return count
-        }
-        say("stripe: the bitmap that was added has \(painted(bitmap)) of \(width * height) pixels painted")
-        guard let probe = ScreenshotMode.bitmap(width: width, height: height),
-              let context = NSGraphicsContext(bitmapImageRep: probe) else { return }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        strip.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
-        NSGraphicsContext.restoreGraphicsState()
-        say("stripe: the strip, drawn into a view's kind of context, paints \(painted(probe)) of \(width * height) pixels")
-    }
 
     /// A small picture to show: a diagonal wash from green to blue under a pale
     /// disc. Drawn here, so the sample project holds nothing a person made.
+    ///
+    /// The pixels are written as bytes, every one opaque. A first version set
+    /// them one at a time with `setColor`, and what came out decoded to the right
+    /// size and drew as nothing at all.
     private static func sampleImage() -> Data {
         let width = 320, height = 180
-        guard let bitmap = ScreenshotMode.bitmap(width: width, height: height) else { return Data() }
+        guard let bitmap = ScreenshotMode.bitmap(width: width, height: height),
+              let pixels = bitmap.bitmapData else { return Data() }
         for y in 0..<height {
             for x in 0..<width {
                 let t = (Double(x) / Double(width) + Double(y) / Double(height)) / 2
                 let dx = Double(x - 230), dy = Double(y - 70)
                 let inDisc = dx * dx + dy * dy < 38 * 38
-                let color = inDisc
-                    ? NSColor(srgbRed: 0.96, green: 0.96, blue: 0.98, alpha: 1)
-                    : NSColor(srgbRed: 0.06 + 0.08 * t, green: 0.64 - 0.28 * t, blue: 0.50 + 0.35 * t, alpha: 1)
-                bitmap.setColor(color, atX: x, y: y)
+                let red = inDisc ? 0.96 : 0.06 + 0.08 * t
+                let green = inDisc ? 0.96 : 0.64 - 0.28 * t
+                let blue = inDisc ? 0.98 : 0.50 + 0.35 * t
+                let offset = y * bitmap.bytesPerRow + x * 4
+                pixels[offset] = UInt8(red * 255)
+                pixels[offset + 1] = UInt8(green * 255)
+                pixels[offset + 2] = UInt8(blue * 255)
+                pixels[offset + 3] = 255
             }
         }
         return bitmap.representation(using: .png, properties: [:]) ?? Data()
