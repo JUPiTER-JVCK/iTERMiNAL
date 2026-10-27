@@ -1,7 +1,7 @@
 #if SCREENSHOTS
 import AppKit
 import Combine
-import SwiftTerm
+import class SwiftTerm.TerminalView
 import SwiftUI
 import WebKit
 
