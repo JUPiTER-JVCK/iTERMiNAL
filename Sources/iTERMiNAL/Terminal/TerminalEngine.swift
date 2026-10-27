@@ -43,6 +43,10 @@ protocol TerminalEngine: AnyObject {
     func apply(_ appearance: TerminalAppearance)
     func applyPalette(_ colors: [PaletteColor])
 
+    /// The cursor's style, by `CursorStyle` tag name, and on top of it an
+    /// animation. Safe to call on every styling pass.
+    func applyCursor(styleTag: String, animation: CursorAnimation)
+
     /// Requests GPU-accelerated rendering; returns whether it is actually
     /// active afterwards, so callers can report a fallback to the CPU path.
     @discardableResult

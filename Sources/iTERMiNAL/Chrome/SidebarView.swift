@@ -256,6 +256,12 @@ struct SidebarView: View {
             },
             onDelete: { store.deleteWorkspace(workspace) }
         )
+        // A tab dropped on a project's own row goes last in it.
+        .dropDestination(for: String.self) { items, _ in
+            guard let id = items.compactMap(UUID.init(uuidString:)).first else { return false }
+            store.moveTab(id, before: nil, in: workspace)
+            return true
+        }
 
         ForEach(visible) { tab in
             tabRow(tab, indented: true)
@@ -640,8 +646,11 @@ private struct SidebarTabRow: View {
     let onRename: () -> Void
 
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @State private var hovering = false
+    /// A tab is being dragged over this row: it would land just above it.
+    @State private var dropTargeted = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -698,6 +707,24 @@ private struct SidebarTabRow: View {
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
+        // Drag a tab to reorder it, or onto a row in another project to move it
+        // there. The payload is the tab's id as text, which another app could
+        // also offer, so a drop is only acted on when it names a tab that exists.
+        .draggable(tab.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard let id = items.compactMap(UUID.init(uuidString:)).first,
+                  let workspace = store.workspace(containingTab: tab.id) else { return false }
+            store.moveTab(id, before: tab, in: workspace)
+            return true
+        } isTargeted: { dropTargeted = $0 }
+        .overlay(alignment: .top) {
+            if dropTargeted {
+                Rectangle()
+                    .fill(settings.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 8)
+            }
+        }
         .contextMenu {
             Button(tab.isPinned ? "Unpin" : "Pin") { store.togglePin(tab) }
             Button("Rename…", action: onRename)

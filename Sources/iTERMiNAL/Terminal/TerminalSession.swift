@@ -42,6 +42,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var lastAttentionAt = Date.distantPast
     private var lastAttentionFingerprint: String?
     private var hasStarted = false
+    /// Set while the question about forwarding the agent is on screen, so a
+    /// second start cannot put a second copy of it up.
+    private var awaitingAgentAnswer = false
 
     /// Everything `applyStyling` reads. Held so the work can be skipped when
     /// none of it has changed — see the guard there for why that matters.
@@ -52,6 +55,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         var fontSize: Double
         var backgroundOpacity: Double
         var gpuRequested: Bool
+        var cursorStyleTag: String
+        var cursorAnimationTag: String
     }
     private var appliedStyling: StylingInputs?
 
@@ -221,14 +226,28 @@ final class TerminalSession: ObservableObject, Identifiable {
         launch()
     }
 
-    private func launch() {
+    /// `agentApproved` is nil on the first call. A connection set to ask whether
+    /// to forward the agent puts the question and comes back here with the
+    /// answer; anything else carries straight on.
+    private func launch(agentApproved: Bool? = nil) {
         let settings = AppSettings.shared
+        if agentApproved == nil, let connection = connectionThatAsksAboutAgent(settings) {
+            guard !awaitingAgentAnswer else { return }
+            awaitingAgentAnswer = true
+            AgentForwardingPrompt.ask(for: connection) { [weak self] approved in
+                guard let self else { return }
+                self.awaitingAgentAnswer = false
+                self.launch(agentApproved: approved)
+            }
+            return
+        }
         switch SessionLaunch.configuration(
             for: kind,
             settings: settings,
             directory: isRemote ? nil : currentDirectory,
             shellOverride: shellOverride,
-            controlPath: controlPath
+            controlPath: controlPath,
+            agentApproved: agentApproved ?? false
         ) {
         case .success(let configuration):
             launchError = nil
@@ -247,6 +266,17 @@ final class TerminalSession: ObservableObject, Identifiable {
             launchError = error.localizedDescription
             isRunning = false
         }
+    }
+
+    /// The saved connection this session is for, when it is an ssh one set to
+    /// ask before the agent is forwarded. mosh and a custom command do not take
+    /// ssh's `-A`, so there is nothing to ask about for them.
+    private func connectionThatAsksAboutAgent(_ settings: AppSettings) -> SSHConnection? {
+        guard case .remote(let id) = kind,
+              let connection = settings.sshConnections.first(where: { $0.id == id }),
+              connection.transport == .ssh,
+              connection.agentForwarding.needsAnswer else { return nil }
+        return connection
     }
 
     func send(text: String) {
@@ -272,6 +302,14 @@ final class TerminalSession: ObservableObject, Identifiable {
         engine.display(text: "\r\n\u{1B}[2m— end of restored session —\u{1B}[0m\r\n")
     }
 
+    /// How see-through this terminal's background is. A bundled tool is always
+    /// solid: it sits in a side panel that paints an opaque surface of its own,
+    /// so a translucent terminal there would only tint that surface — and
+    /// btop and superfile are drawn for a background of a known colour.
+    private func effectiveBackgroundOpacity(_ settings: AppSettings) -> Double {
+        kind.isTool ? 1 : BackgroundOpacity.clamped(settings.backgroundOpacity)
+    }
+
     /// Pushes font, colors, ANSI palette, and the GPU renderer preference
     /// into the engine. Safe to call on every SwiftUI update — the engine
     /// ignores values that haven't changed.
@@ -290,8 +328,10 @@ final class TerminalSession: ObservableObject, Identifiable {
             darkMode: darkMode,
             fontName: settings.terminalFontName,
             fontSize: settings.terminalFontSize,
-            backgroundOpacity: settings.backgroundOpacity,
-            gpuRequested: settings.useGPURendering
+            backgroundOpacity: effectiveBackgroundOpacity(settings),
+            gpuRequested: settings.useGPURendering,
+            cursorStyleTag: settings.cursorStyleTag,
+            cursorAnimationTag: settings.cursorAnimationTag
         )
         guard inputs != appliedStyling else { return }
         appliedStyling = inputs
@@ -302,11 +342,19 @@ final class TerminalSession: ObservableObject, Identifiable {
             font: settings.resolvedTerminalFont(),
             background: theme.backgroundColor,
             foreground: theme.foregroundColor,
-            backgroundAlpha: CGFloat(settings.backgroundOpacity)
+            backgroundAlpha: CGFloat(inputs.backgroundOpacity)
         ))
         let active = engine.setGPUAcceleration(settings.useGPURendering)
         if isGPUAccelerated != active {
             isGPUAccelerated = active
+        }
+        // After the renderer is settled: an animation is only drawn on the CPU
+        // one. A bundled tool keeps the cursor it asks for.
+        if !kind.isTool {
+            engine.applyCursor(
+                styleTag: settings.cursorStyleTag,
+                animation: CursorAnimation(rawValue: settings.cursorAnimationTag) ?? .none
+            )
         }
         // A bundled tool follows the palette the terminal just took on —
         // a theme picked in Settings, or the switch to or from dark mode.

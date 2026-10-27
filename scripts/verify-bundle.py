@@ -8,6 +8,7 @@ is parsed with plistlib, which handles the binary format CI produces.
 Usage: verify_bundle.py <path to iTERMiNAL.app> [expected-version]
 Exits non-zero and prints one ::error:: line per failed invariant.
 """
+import os
 import plistlib
 import struct
 import sys
@@ -60,6 +61,25 @@ def main() -> int:
                     f"main binary has no {arch} slice (found: "
                     f"{', '.join(sorted(slices)) or 'thin binary'})"
                 )
+
+    # The bundled tools: each present and universal, and imgcat — a script,
+    # not a binary — present and executable. superfile and btop open as panels;
+    # ripgrep, bat and imgcat are on every tab's PATH.
+    tools = app / "Contents/Resources/Tools"
+    for relative in ("spf", "btop", "bin/rg", "bin/bat"):
+        tool = tools / relative
+        if not tool.exists():
+            failures.append(f"missing from the bundled tools: {relative}")
+            continue
+        found = arch_slices(tool)
+        for arch in ("x86_64", "arm64"):
+            if arch not in found:
+                failures.append(f"bundled {relative} has no {arch} slice")
+    imgcat = tools / "bin/imgcat"
+    if not imgcat.exists():
+        failures.append("missing from the bundled tools: bin/imgcat")
+    elif not os.access(imgcat, os.X_OK):
+        failures.append("bundled bin/imgcat is not executable")
 
     plist_path = app / "Contents/Info.plist"
     if plist_path.exists():

@@ -22,7 +22,7 @@ terminal (vim, htop, and ssh all work), not a command runner. No Electron.
   <img src="docs/images/workspace.png" width="900" alt="The iTERMiNAL window: an icon rail and a Workspaces sidebar with a pinned tab, a terminal showing a git history graph, and the floating composer with a command typed into it, coloured as it is typed.">
 </p>
 
-A tour of the app in thirty-three pictures, in five groups.
+A tour of the app in thirty-four pictures, in five groups.
 
 ### The window
 
@@ -66,6 +66,10 @@ A tour of the app in thirty-three pictures, in five groups.
     <td width="50%" valign="top">
       <img src="docs/images/terminal-colors-man.png" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
       <br><b>Colored man pages</b> — headings and options in red, what you fill in in green, from the same environment.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/terminal-tools.png" alt="A terminal after imgcat, bat and rg: a green-to-blue picture with a white disc drawn in the terminal itself, then main.rs listed by bat with line numbers and syntax colours, then the line rg found with the match in red.">
+      <br><b>Command-line tools</b> — <code>rg</code>, <code>bat</code> and <code>imgcat</code> ship inside the app and are on every terminal's <code>PATH</code>. Here: a picture drawn in the terminal, a source file with syntax colours, and a search hit. See <a href="#command-line-tools">Command-line tools</a>.
     </td>
   </tr>
 </table>
@@ -199,8 +203,8 @@ A tour of the app in thirty-three pictures, in five groups.
       <br><b>Keyboard shortcuts</b> — every shortcut in one searchable window, opened with ⌘/.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/settings-appearance.png" alt="Settings, Appearance page: theme, accent colours, window opacity, and a preview of the workspace frame.">
-      <br><b>Appearance settings</b> — theme, accent colour, window opacity and the workspace frame.
+      <img src="docs/images/settings-appearance.png" alt="Settings, Appearance page: theme, accent colours, terminal opacity, and a preview of the workspace frame.">
+      <br><b>Appearance settings</b> — theme, accent colour, terminal opacity and the workspace frame. The whole Settings window is one colour, the rail and the page alike.
     </td>
   </tr>
   <tr>
@@ -211,13 +215,13 @@ A tour of the app in thirty-three pictures, in five groups.
   </tr>
 </table>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-three into `docs/images/`.</sub>
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-four into `docs/images/`.</sub>
 
 ## Features
 
 - **Real terminal emulation** — PTY-backed login shell, full ANSI/xterm
-  support, alternate-screen apps, configurable scrollback and cursor style,
-  and an opt-in Metal GPU renderer.
+  support, alternate-screen apps, configurable scrollback, cursor style and
+  cursor animation, inline images, and an opt-in Metal GPU renderer.
 - **Right-click menu** — right-click a terminal (or the margin around it) for
   Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that
   is a tab or a pane, Split Right, Split Down and New Tab. Copy is greyed out
@@ -231,9 +235,37 @@ A tour of the app in thirty-three pictures, in five groups.
   and placeholders, with no shell plugin to install: the app gives each local
   shell the environment those plugins set. See
   [Colored output](#colored-output).
+- **Links** — ⌘-click a web address in a terminal and it opens in this app's own
+  browser pane. Right-click one and the menu leads with the address as it will
+  really be opened — a program can print a hyperlink whose text says one thing
+  and whose address is another — then **Open Link** (the ⌘-click route), **Open in
+  Default Browser** and **Copy Link**. Only `http` and `https` addresses are
+  offered for opening; any kind of link can be copied.
+- **Cursor animations** — Settings → Terminal → Cursor has an Animation choice
+  beside the cursor style: Breathing, Heartbeat, Neon flicker, Pulse and Candle,
+  each a fixed table of opacities, so the cursor looks the same on every launch.
+  An animation takes the place of the blink while the terminal is the one you are
+  typing in. It needs the default renderer — with the opt-in GPU renderer on, the
+  cursor stays as its style says — and it is off while Reduce Motion is.
+- **Your own fonts** — Settings → Terminal → Font has an **Import Font…** button
+  for `.ttf`, `.otf`, `.ttc` and `.otc` files. What you import appears in the
+  picker under **Imported**, grouped by family — a family spread over several
+  files is one entry — and is listed under the preview with its file name and
+  how many styles it holds, each with a Remove button. The preview draws sample
+  text — letters, digits, ligature candidates, box drawing and two icon glyphs —
+  in the font and size the terminal will use, so a choice shows before it is
+  made. An imported font is copied into the app's own folder and registered for
+  this app only: nothing is installed on your Mac, it is not in Font Book, and
+  removing it here deletes the copy. A file is refused before anything reads it
+  if it is not one of those four kinds or is over 50 MB.
+- **Terminal opacity** — Settings → Appearance → Window → Terminal opacity
+  (20–100 %) lets the desktop show through a terminal's background, softly
+  blurred. Text and the cursor stay solid, and so do the chrome, the panels,
+  btop and superfile; the frame has its own *Translucent frame* switch.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
-  live background sessions); a landing screen with quick-start cards and
+  live background sessions; drag a tab to put it where you want it, or onto
+  another project to move it there); a landing screen with quick-start cards and
   recent commands from your shell history; and a floating composer that types
   into whichever terminal has focus — drag it anywhere, minimise it to a pill,
   and recall earlier commands with the arrow keys. It colours what you type —
@@ -287,12 +319,25 @@ A tour of the app in thirty-three pictures, in five groups.
   a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
   (with reconnect), plus a Finder-style file pane that browses this Mac or any
-  saved host over SFTP, with upload, download, and drag-and-drop. When a host
-  turns the file browser away it says why and what to do about it — see
+  saved host over SFTP, with upload, download, and drag-and-drop. A saved host
+  can be reached **through jump hosts** — a bastion, or several in a row — by
+  the terminal and the file browser alike, and has a choice about **forwarding
+  your ssh-agent**: see [Jump hosts and the SSH agent](#jump-hosts-and-the-ssh-agent).
+  When a host turns the file browser away it says why and what to do about it — see
   [When a host can't be reached](#when-a-host-cant-be-reached) — and one that
   wants a password can be browsed through a terminal tab you sign in to, without
   this app ever being given the password: see
   [A host that wants a password](#a-host-that-wants-a-password).
+- **Edit in Terminal** — right-click a file in the file browser, on this Mac, and
+  the menu has **Edit in Terminal**: a new terminal tab in the file's folder,
+  with the file open in your editor. Settings → General → Editor chooses which:
+  *Automatic* takes the first of Helix (`hx`), Neovim, Vim and Nano that this Mac
+  has, or pick one, or write a command of your own (the file's path goes at the
+  end). Helix and Neovim are not bundled; the setting says where to get them
+  (`brew install helix`, `brew install neovim`) and, under the picker, which
+  program it will run — Vim and Nano come with macOS. The line typed into the tab
+  names the editor by the absolute path found for it and quotes the file's, and a
+  file whose name has a control character in it is refused.
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -327,6 +372,12 @@ A tour of the app in thirty-three pictures, in five groups.
   (a resource monitor, ⌥⌘P) in the side panel. Both ship inside the app,
   nothing to install, and both wear the terminal's colours — light, dark, and
   every change between. See [Bundled tools](#bundled-tools).
+- **ripgrep, bat and imgcat, built in** — `rg` (fast regular-expression search),
+  `bat` (`cat` with syntax highlighting, paged through `less` when it is longer
+  than the screen) and `imgcat` (shows a PNG, JPEG, GIF, HEIC or TIFF in the
+  terminal itself) are on the `PATH` of every local terminal, after whatever you
+  have installed yourself, so yours is the one that runs. See
+  [Command-line tools](#command-line-tools).
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
   a guest's console in the browser panel, and save a guest as an SSH host. The
   API token's secret half stays in the keychain; a self-signed certificate is
@@ -617,6 +668,46 @@ you for a password or 2FA code itself; the file browser runs `sftp`
 non-interactively, so it signs in **with a key, or through a terminal tab you
 have signed in to** ([below](#a-host-that-wants-a-password)).
 
+### Jump hosts and the SSH agent
+
+A saved `ssh` host has two more settings in **Settings → Connections**.
+
+**Jump host(s)** is a chain of hosts to go through on the way — a bastion, or
+several in a row — written the way `ssh -J` takes them: `[user@]host[:port]`,
+separated by commas, at most five, in the order they are used. The terminal tab
+and the file browser both use it (as `-o ProxyJump=…` for `ssh`, `sftp` and
+`ssh-copy-id`), so a host that is only reachable through a bastion browses like
+any other. What is written is checked before it goes anywhere near a command
+line, and what does not pass is refused rather than trimmed into something that
+does: the editor says what is wrong in place, and a connection with a bad list
+does not connect at all, because one meant to go through a bastion must never
+quietly go direct. Only `ssh` uses jump hosts: `mosh` talks to the host directly
+over UDP, which a host behind a bastion cannot accept, and a custom command is
+yours to write. `ssh` checks each hop's host key against your `known_hosts` as it
+always does, and a hop you have never connected to can ask whether to trust it —
+a question the file browser, with no terminal to ask on, cannot put. If a listing
+through a new bastion fails on its host key, connect to it once in a terminal tab
+and ask again.
+
+**Forward SSH agent** is the choice of whether a terminal session lets the host
+use the keys in your ssh-agent. Forwarding lets a program on the host — and
+anyone who can act as you there, such as root — ask the agent on this Mac to
+sign in elsewhere for as long as the connection is open. The keys themselves
+never leave this Mac either way; the risk is the use of them. So the default
+adds nothing, and the four choices are:
+
+| Choice | What happens |
+| --- | --- |
+| As in `~/.ssh/config` (default) | Nothing is added; your config decides, as it does for `ssh` outside this app |
+| Never | `-o ForwardAgent=no`, even where your config says yes |
+| Ask each time I connect | A question before each new tab and each reconnect, with **Don't Forward** as the button Return presses; *Forward Agent* adds `-A`, the other adds `ForwardAgent=no` |
+| Always | `-A` on every connection |
+
+That is a choice of *when* to forward: never, per connection, or always. A
+prompt for each *use* of a key — what some clients offer as per-request
+approval — is not built; see [Considered and left out](#considered-and-left-out).
+The file browser does not forward the agent: it has no use for it.
+
 ### Screen sharing, and what the network is advertising
 
 **Settings → Connections** has two sections beyond saved SSH hosts.
@@ -771,6 +862,24 @@ small link icon in the file browser's toolbar says it is doing that.
   after a sheet that names the destination and can show every character, with
   anything that looks like a key or a password masked first (best effort, not a
   promise); what comes back is shown as text and never run, opened or fetched.
+- **What reaches a command line is checked first, and refused rather than
+  repaired.** Jump hosts must be `[user@]host[:port]`, in the characters `ssh`
+  accepts — no quotes, `%` tokens, whitespace or URLs — and a connection whose
+  list fails does not connect at all, instead of connecting directly. The line
+  *Edit in Terminal* types names the editor by an absolute path and quotes the
+  file's, and a file name with a control character in it is refused (a newline
+  would end the line early and run what follows). An imported font must have one
+  of four extensions and be under 50 MB, is kept under a name that cannot leave
+  the app's folder, and is read by macOS's own font parser — the one place an
+  untrusted font could do harm — only because you chose it. A link in the
+  right-click menu is shown as it will really be opened, with control and
+  invisible characters replaced by a dot, and only `http` and `https` addresses
+  can be opened from it.
+- **This app never forwards the ssh-agent on its own.** The default adds
+  nothing, leaving it to your `~/.ssh/config`; forwarding happens only where
+  you chose *Always* or answered *Forward Agent*, and *Ask each time I connect*
+  answers *no* to Return. See
+  [Jump hosts and the SSH agent](#jump-hosts-and-the-ssh-agent).
 - **Certificate validation is never disabled.** A self-signed Proxmox host is
   reached by pinning the one certificate you confirmed by fingerprint, for that
   host and port alone — the system's own verdict is tried first, so pinning can
@@ -825,10 +934,14 @@ Sources/
 │   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,
 │   │                TerminalSession (PTY lifecycle, cwd/title/git metadata),
-│   │                the right-click menu and the colored-output environment
+│   │                the right-click menu and the colored-output environment,
+│   │                cursor animations, imported fonts, the bundled tools'
+│   │                PATH and the editor command line — Foundation-only where
+│   │                it can be
 │   ├── Input/       the composer's input: shell tokenizer, completion, history
 │   │                search, suggestions — Foundation-only where it can be
-│   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence
+│   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence, the
+│   │                order a dragged tab lands in
 │   ├── Panels/      scriptable browser pane, file pane, notes, HTTP client pane
 │   │                with the site explorer and the Extract tab (previews, crawler,
 │   │                assistant)
@@ -836,7 +949,8 @@ Sources/
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
 │   │                robots rules, crawl frontier — Foundation-only
 │   ├── Files/       FileSystemProvider protocol, local + SFTP providers, the
-│   │                shared-sign-in control socket
+│   │                shared-sign-in control socket, jump hosts and agent
+│   │                forwarding (what a saved host adds to an ssh command line)
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
@@ -1160,7 +1274,9 @@ Settings → Backup shows where, and moves them: **Export Workspaces…** writes
 single `.iterminal` JSON snapshot, **Import Workspaces…** reads one back and
 replaces the current layout.
 
-A snapshot carries workspaces, tabs, the split layout, and non-secret
+A snapshot carries workspaces, tabs, the split layout, saved connections (jump
+hosts and the agent-forwarding choice included — read an imported snapshot's
+hosts the way you would read an `ssh_config` someone sent you) and non-secret
 preferences. It deliberately leaves out secrets — the API token stays in the
 keychain, SSH has no passwords to carry — and machine-local paths such as
 `composerShell`, so importing on another Mac cannot point the app at a shell
@@ -1176,7 +1292,8 @@ file. App Sandbox stays off; Hardened Runtime stays on.
 ## Bundled tools
 
 Two third-party programs ship inside `iTERMiNAL.app`, in
-`Contents/Resources/Tools`, and open from the icons at the top right:
+`Contents/Resources/Tools`, and open from the icons at the top right (three more
+tools, for typing rather than opening, are [further down](#command-line-tools)):
 
 | Tool | What it is | Licence | How it gets into the app |
 | --- | --- | --- | --- |
@@ -1259,7 +1376,54 @@ panels and in Settings. To include them, on a Mac:
 scripts/fetch-superfile.sh                 # needs curl, lipo, codesign
 brew install gcc@15 make && scripts/build-btop.sh Vendor/Tools   # this Mac's arch only
 scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
+scripts/fetch-cli-tools.sh                 # rg, bat, imgcat; needs curl, lipo, codesign
 ```
+
+### Command-line tools
+
+Three more programs ship in the app, for typing rather than for opening from an
+icon. They are in `Contents/Resources/Tools/bin`, and that folder is added to the
+**end** of the `PATH` of every local terminal — tabs, the dock and the composer's
+shell; a remote session has its own machine — so a `rg` or a `bat` you installed
+yourself, Homebrew's say, is found first, and the bundled one is what you have
+when there is nothing else.
+
+| Command | What it is | Licence | Version | How it gets into the app |
+| --- | --- | --- | --- | --- |
+| `rg` | [ripgrep](https://github.com/BurntSushi/ripgrep): recursive regular-expression search | MIT or Unlicense | 15.2.0 | Upstream's macOS release binaries for both chips, checked against pinned SHA-256 hashes that were matched to upstream's own `.sha256` files, merged into one universal binary and ad-hoc signed |
+| `bat` | [bat](https://github.com/sharkdp/bat): `cat` with syntax highlighting; output longer than the screen is paged through `less` | MIT or Apache-2.0 | 0.26.1 | The same, except that upstream publishes no checksums for it: its hashes are those of the files when the pin was made, so they say a file has not changed since, not that upstream vouched for it |
+| `imgcat` | Shows an image in the terminal: `imgcat photo.png`, `imgcat -W 40 photo.heic`, or one piped in; sizes are cells, a percentage or pixels | MIT | this repository's own [script](scripts/imgcat) | Copied as it is |
+
+`imgcat` writes the inline-image escape sequence that iTerm2 introduced, and the
+terminal draws it, decoding the file with macOS's own image reader — PNG, JPEG,
+GIF, HEIC, TIFF — so it works in any terminal that draws those, and it prints
+nothing else. The terminal engine also reads the Kitty graphics protocol: a picture
+sent by hand the way a program that speaks it would send one is drawn too. It refuses
+a missing file, a size that is not a size, and anything
+over 25 MB, with exit codes a script can read.
+
+**Versions** are pinned in `scripts/tools.env` and move only by a pull request
+that edits it; nothing is downloaded at runtime. Settings → Advanced lists them
+with their licences. In the bundle ripgrep is 8.4 MB and bat 12.0 MB (each is both
+chips' binaries in one file); the upstream archives they come from add up to
+10.2 MB, which is about what they add to the download.
+
+**What is checked.** CI refuses a finished app in which any of the three is
+missing, is not universal, links a library outside `/usr/lib` and
+`/System/Library`, or does not run (`--version`). `scripts/imgcat-check.py` — 34
+checks, run in CI on a Mac — reads what `imgcat` prints the way the terminal
+engine reads an inline image, and holds its refusals to their exit codes. The
+rule that puts the folder on the `PATH` is plain Foundation code with its own
+checks (it adds nothing that is not an absolute folder, nothing with a colon or a
+newline in it, nothing twice, and nothing to an environment with no `PATH`). And
+the [Screenshots workflow](.github/workflows/screenshots.yml) runs the real thing
+on a Mac: it types `command -v rg bat imgcat` into a login shell in a tab of the
+built app, which finds all three inside the app bundle, and then runs them there —
+the *Command-line tools* picture at the top of this page is that run.
+
+**What it cannot do.** A shell whose startup files set `PATH` outright, rather
+than adding to it, takes the folder off again; `command -v rg` says which `rg` a
+tab will run.
 
 ## Roadmap
 
@@ -1273,6 +1437,45 @@ scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 - [ ] HTTP client: saved `.http` collections
 - [ ] Optional libghostty engine
 - [ ] Signed/notarized releases
+
+### Considered and left out
+
+Things looked at and not built, with the reason, so that a gap reads as a
+decision and not as an oversight.
+
+- **A native SSH client written in Swift.** Terminal tabs and the file browser run
+  the system's `ssh` and `sftp`, which is how they get your `~/.ssh/config`,
+  `known_hosts`, agent, jump hosts and keys without this app ever holding a
+  password. An SSH stack of its own would be a large, security-sensitive piece of
+  code to write and keep current; `TerminalEngine` and `FileSystemProvider` are
+  where one would plug in.
+- **Keys in the Secure Enclave, and approval for each use of a key.** Both need an
+  ssh-agent of this app's own: the Mac's agent holds the keys and signs without
+  asking the app, and keys in the Secure Enclave also need a signed build, which
+  is on the list above. Until then `ssh` uses whichever agent your
+  `~/.ssh/config` points at, here as anywhere. What is built is the choice of
+  *when* to forward the agent
+  ([above](#jump-hosts-and-the-ssh-agent)).
+- **mtr.** It sends ICMP probes, which on macOS takes root, and a setuid-root
+  binary inside an app bundle is the risk the btop note above refuses to take.
+  `traceroute` and `ping` ship with macOS and run in any tab.
+- **croc, Helix, Vim and curl are not bundled.** The macOS archives of croc are
+  8.5 MB and 9.2 MB, one per chip, and Helix's 16.7 MB and 16.1 MB (the versions
+  current when this was written: croc 11.5.5, Helix 25.07.1): together about
+  50 MB on top of the download, for programs `brew install` puts on the `PATH`
+  in a minute. Helix and Neovim are what *Edit in Terminal* opens when they are
+  installed; macOS ships Vim, Nano and a curl, upstream Vim publishes no macOS
+  binary, and the HTTP client panel is its own client, built on the system's URL
+  loading — which uses HTTP/2 wherever a server offers it — with *Copy as cURL*.
+- **bsdtar and unzip.** Both ship with macOS (`tar` is libarchive's `bsdtar`).
+  Which archive formats they open depends on the macOS release, and this has not
+  been checked here, so nothing in this app claims more than that.
+- **More Nerd Fonts.** *Symbols Nerd Font Mono* is bundled so Nerd Font icons draw
+  with any terminal font ([above](#bundled-tools)), and any Nerd Font family you
+  download can be imported (Settings → Terminal → Font). No patched families are
+  bundled.
+- **A shell of its own.** This is a terminal for the shell you already use; shell
+  scripts run in `sh`, `bash` or `zsh` on this Mac.
 
 ## License
 

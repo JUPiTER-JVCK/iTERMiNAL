@@ -441,6 +441,39 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// A new tab in `directory` that runs `line` as soon as its shell is up.
+    ///
+    /// Only for a line this app built itself, with what goes into it checked —
+    /// see `EditorCommand`. Text that came from anywhere else belongs in
+    /// `newTab(typing:)`, which leaves Return to the person.
+    func newTab(directory: String?, running line: String) {
+        let tab = newTab(directory: directory)
+        guard let session = tab.root.firstTerminal() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak session] in
+            session?.send(text: line)
+        }
+    }
+
+    /// Opens the file at `path` in the editor chosen under Settings → General,
+    /// in a new tab beside where it lives. Returns what to tell the person when
+    /// that cannot be done, and nil when the tab is open.
+    @discardableResult
+    func editFile(at path: String) -> String? {
+        let settings = AppSettings.shared
+        switch EditorCommand.line(
+            choice: settings.editorChoice,
+            custom: settings.editorCustomCommand,
+            path: path,
+            locate: SessionLaunch.resolveExecutable
+        ) {
+        case .success(let line):
+            newTab(directory: (path as NSString).deletingLastPathComponent, running: line)
+            return nil
+        case .failure(let problem):
+            return problem.message
+        }
+    }
+
     /// A tab signed in to `connection` whose sign-in the file browser can use,
     /// for a host that wants a password. The tab is the same ssh a connection
     /// opens anywhere else, told to keep its connection open to others; the
@@ -511,6 +544,28 @@ final class WorkspaceStore: ObservableObject {
     /// Pinned tabs across every workspace, newest activity first.
     var pinnedTabs: [WorkspaceTab] {
         workspaces.flatMap(\.tabs).filter(\.isPinned)
+    }
+
+    /// Moves a tab to sit just before `target` in `destination`, or last in it
+    /// when `target` is nil — within its own workspace or into another. Which
+    /// tab is selected does not change: it is the same tab, somewhere else.
+    func moveTab(_ id: UUID, before target: WorkspaceTab?, in destination: Workspace) {
+        guard target?.id != id,
+              let source = workspace(containingTab: id),
+              let tab = source.tabs.first(where: { $0.id == id }) else { return }
+        let pool = source === destination ? destination.tabs : destination.tabs + [tab]
+        let byID = Dictionary(pool.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let order = TabOrder.placing(id, before: target?.id, in: destination.tabs.map(\.id))
+        let arranged = order.compactMap { byID[$0] }
+        // Nothing is touched until the new order is known to hold every tab.
+        guard arranged.count == pool.count else { return }
+        if source !== destination {
+            source.tabs.removeAll { $0 === tab }
+        }
+        if arranged.map(\.id) != destination.tabs.map(\.id) {
+            destination.tabs = arranged
+            scheduleSave()
+        }
     }
 
     func togglePin(_ tab: WorkspaceTab) {

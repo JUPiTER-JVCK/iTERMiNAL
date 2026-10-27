@@ -3,10 +3,11 @@ import Foundation
 /// A full-screen terminal program that ships inside the app and opens as a
 /// side panel: superfile for files, btop for the machine.
 ///
-/// These are the only third-party executables in the bundle. Both are fetched
-/// or built by `scripts/` at the versions pinned in `scripts/tools.env`, copied
-/// to `Contents/Resources/Tools`, and checked there by CI — present,
-/// universal, linking only system libraries, and able to run.
+/// These are the third-party executables the app launches itself — ripgrep and
+/// bat, which a person types, are `BundledCommand`. Both are fetched or built
+/// by `scripts/` at the versions pinned in `scripts/tools.env`, copied to
+/// `Contents/Resources/Tools`, and checked there by CI — present, universal,
+/// linking only system libraries, and able to run.
 enum TerminalTool: String, CaseIterable, Identifiable {
     case superfile
     case btop

@@ -29,6 +29,8 @@ final class SwiftTermEngine: TerminalEngine {
     private var lastAppearance: TerminalAppearance?
     private var lastPalette: [PaletteColor]?
     private var lastGPURequest: Bool?
+    private var lastCursor: (style: CursorStyle, animation: CursorAnimation)?
+    private lazy var cursorAnimator = CursorAnimator(host: terminalView)
     private var clickMonitor: Any?
     private var lastActivityAt = Date.distantPast
 
@@ -131,8 +133,13 @@ final class SwiftTermEngine: TerminalEngine {
         lastAppearance = appearance
         terminalView.font = appearance.font
         terminalView.nativeForegroundColor = appearance.foreground
-        let alpha = max(0.5, min(1.0, appearance.backgroundAlpha))
-        terminalView.nativeBackgroundColor = appearance.background.withAlphaComponent(alpha)
+        // The colour, then the opacity, and the opacity through SwiftTerm's own
+        // property rather than as the colour's alpha: that property is what
+        // also tells its GPU renderer's layer to composite instead of painting
+        // opaque, and it redraws. Text, the cursor and cells with a colour of
+        // their own stay solid whatever it is.
+        terminalView.nativeBackgroundColor = appearance.background
+        terminalView.backgroundOpacity = CGFloat(BackgroundOpacity.clamped(Double(appearance.backgroundAlpha)))
         terminalView.caretColor = appearance.foreground
     }
 
@@ -147,6 +154,28 @@ final class SwiftTermEngine: TerminalEngine {
         if let appearance = lastAppearance {
             lastAppearance = nil
             apply(appearance)
+        }
+    }
+
+    func applyCursor(styleTag: String, animation: CursorAnimation) {
+        let base = CursorStyle(tagName: styleTag) ?? .steadyBlock
+        // An animation is the blink, so SwiftTerm's own would only fight it —
+        // and it can only be drawn where the cursor is a layer, which under the
+        // GPU renderer it is not. There the plain style is kept as it is.
+        let animated = animation != .none && !isGPUAccelerated
+        let style = animated ? Self.steady(base) : base
+        let applied = animated ? animation : .none
+        if let last = lastCursor, last.style == style, last.animation == applied { return }
+        lastCursor = (style, applied)
+        terminalView.getTerminal().setCursorStyle(style)
+        cursorAnimator.set(applied)
+    }
+
+    private static func steady(_ style: CursorStyle) -> CursorStyle {
+        switch style {
+        case .blinkBlock, .steadyBlock: return .steadyBlock
+        case .blinkUnderline, .steadyUnderline: return .steadyUnderline
+        case .blinkBar, .steadyBar: return .steadyBar
         }
     }
 

@@ -8,7 +8,7 @@ name: Screenshots
 # (Sources/iTERMiNAL/App/Screenshot*.swift). They are uploaded as an artifact;
 # nothing here publishes anything. To update the README, download the artifact,
 # unpack it, and run scripts/screenshots/publish.py on the folder: it writes the
-# thirty-three pictures the README shows into docs/images/. The artifact holds more
+# thirty-four pictures the README shows into docs/images/. The artifact holds more
 # than that — each file is named for what it shows, and app.log says what the
 # app saw while it took them.
 on:
@@ -37,6 +37,12 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
       - uses: actions/checkout@v7
+
+      # imgcat's own checks, on this Mac's base64 and sh. build.yml runs them
+      # too, but only for a pull request; a run here proves them before there is
+      # one.
+      - name: Check imgcat
+        run: python3 scripts/imgcat-check.py
 
       # The same way build.yml installs it, and for the same reason: straight
       # from its release, not through Homebrew.
@@ -106,7 +112,8 @@ jobs:
           mkdir -p "$tools/licenses"
 
           scripts/fetch-superfile.sh "$tools"
-          manifest="\"superfile\":\"$SUPERFILE_VERSION\""
+          scripts/fetch-cli-tools.sh "$tools"
+          manifest="\"ripgrep\":\"$RIPGREP_VERSION\",\"bat\":\"$BAT_VERSION\",\"superfile\":\"$SUPERFILE_VERSION\""
           if [ -x btop-out/btop ]; then
             cp btop-out/btop "$tools/btop"
             codesign --force --sign - "$tools/btop"
@@ -226,7 +233,7 @@ jobs:
           AuthorizedKeysFile $sshd_dir/authorized_keys
           StrictModes no
           Subsystem sftp /usr/libexec/sftp-server
-          LogLevel ERROR
+          LogLevel INFO
           EOF
           /usr/sbin/sshd -D -e -f "$sshd_dir/sshd_shared_config" > "$sshd_dir/sshd_shared.log" 2>&1 &
           sshd_shared=$!
@@ -241,6 +248,24 @@ jobs:
             echo "::warning::the one-key server did not start"
             cat "$sshd_dir/sshd_shared.log"
           fi
+
+          # The same server is the jump host for the scene that goes through
+          # jump hosts: ssh configures a hop from this file, not from the
+          # connection's own key, so the hop is an alias here that names the
+          # server, its key and what to do with its host key. It is the runner's
+          # own throwaway home, and the alias is not a name anything else uses.
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          cat >> "$HOME/.ssh/config" <<EOF
+          Host bastion-demo
+          HostName 127.0.0.1
+          Port 2297
+          IdentityFile $sshd_dir/shared_key
+          IdentitiesOnly yes
+          StrictHostKeyChecking accept-new
+          UserKnownHostsFile $sshd_dir/known_hosts_bastion
+          EOF
+          chmod 600 "$HOME/.ssh/config"
           for port in 8765 11434; do
             ready=0
             for _ in $(seq 1 30); do
@@ -278,6 +303,8 @@ jobs:
             ITERMINAL_FIXTURE_LOG="$requests" \
             ITERMINAL_SSH_SHARED_PORT=2297 \
             ITERMINAL_SSH_SHARED_KEY="$sshd_dir/shared_key" \
+            ITERMINAL_SSH_SHARED_LOG="$sshd_dir/sshd_shared.log" \
+            ITERMINAL_SSH_JUMP_HOST=bastion-demo \
             "$app" > "$log" 2>&1 &
           pid=$!
 

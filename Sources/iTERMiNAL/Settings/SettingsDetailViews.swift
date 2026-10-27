@@ -26,8 +26,37 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Editor") {
+                Picker("Editor", selection: $settings.editorChoiceTag) {
+                    ForEach(EditorChoice.allCases) { choice in
+                        Text(choice.label).tag(choice.rawValue)
+                    }
+                }
+                if settings.editorChoice == .custom {
+                    TextField("Command", text: $settings.editorCustomCommand, prompt: Text("code -w"))
+                }
+                Text(editorNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// What "Edit in Terminal" in the file browser will run, found the way it
+    /// will be found: so a missing editor is known here, not on the first try.
+    private var editorNote: String {
+        let choice = settings.editorChoice
+        if choice == .custom {
+            return "Runs in a new terminal tab beside the file, with the file's path added at the end of the command."
+        }
+        for name in choice.candidates {
+            if let path = SessionLaunch.resolveExecutable(name) {
+                return "Edit in Terminal (right-click a file in the file browser) opens it with \(path), in a new terminal tab."
+            }
+        }
+        let how = choice.installHint.map { " Install it with \($0)." } ?? ""
+        return "\(choice.label) isn't installed on this Mac.\(how)"
     }
 
     private func chooseDirectory() {
@@ -96,12 +125,13 @@ struct AppearanceSettingsView: View {
             }
             Section("Window") {
                 HStack {
-                    Slider(value: $settings.backgroundOpacity, in: 0.5...1.0)
-                    Text("\(Int(settings.backgroundOpacity * 100))%")
+                    Text("Terminal opacity")
+                    Slider(value: $settings.backgroundOpacity, in: BackgroundOpacity.range)
+                    Text(BackgroundOpacity.percentText(settings.backgroundOpacity))
                         .monospacedDigit()
                         .frame(width: 42, alignment: .trailing)
                 }
-                Text("Terminal background opacity.")
+                Text("Lets the desktop show through a terminal's background, softly blurred. Text and the cursor stay solid. btop and superfile keep a solid background.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

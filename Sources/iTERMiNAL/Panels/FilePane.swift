@@ -27,6 +27,12 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     @Published var selection: String?
     @Published private(set) var transferNote: String?
 
+    /// Says something in the strip under the list, for an action that is not
+    /// one of the transfers but has something to tell the person.
+    func say(_ text: String) {
+        transferNote = text
+    }
+
     private var history: [String] = []
 
     var canGoBack: Bool { !history.isEmpty }
@@ -449,6 +455,13 @@ struct FilePaneView: View {
                                 store.newTab(directory: item.isDirectory
                                     ? item.path
                                     : (item.path as NSString).deletingLastPathComponent)
+                            }
+                            if !item.isDirectory {
+                                Button("Edit in Terminal") {
+                                    if let problem = store.editFile(at: item.path) {
+                                        model.say(problem)
+                                    }
+                                }
                             }
                             Button("Reveal in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])

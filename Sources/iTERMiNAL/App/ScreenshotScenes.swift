@@ -1,6 +1,7 @@
 #if SCREENSHOTS
 import AppKit
 import Combine
+import SwiftTerm
 import SwiftUI
 import WebKit
 
@@ -133,12 +134,16 @@ final class ScreenshotRun {
         await probeActivity("after superfile and btop, which each took the whole content area")
 
         await scene("terminal-colors") { await self.terminalColors() }
+        await scene("terminal-tools") { await self.bundledTools() }
+        await scene("terminal-opacity") { await self.terminalOpacity() }
+        await scene("edit-in-terminal") { await self.editInTerminal() }
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
         await scene("extract-crawl") { await self.siteCrawl() }
         await scene("extract-ask") { await self.askAboutPage() }
         await scene("sftp-problems") { await self.remoteProblems() }
         await scene("sftp-shared") { await self.sharedSignIn() }
+        await scene("sftp-jump") { await self.jumpHosts() }
 
         await scene("command-palette") { await self.palette() }
         await scene("keyboard-shortcuts") { await self.shortcuts() }
@@ -153,6 +158,8 @@ final class ScreenshotRun {
 
         await settingsWindows()
 
+        await scene("cursor-animation") { await self.cursorAnimation() }
+        await scene("terminal-link-menu") { await self.linkMenu() }
         await scene("terminal-context-menu") { await self.contextMenu() }
     }
 
@@ -799,6 +806,200 @@ final class ScreenshotRun {
         return taken
     }
 
+    // MARK: Edit in Terminal
+
+    /// "Edit in Terminal" for a file with a space in its name, with the editor
+    /// the runner has — Vim, which macOS ships; Helix and Neovim are not
+    /// installed there. A tab opens, the line typed into it is quoted, and the
+    /// editor comes up on that file.
+    private func editInTerminal() async -> Bool {
+        guard let demo else { return false }
+        await baseline()
+        let manager = FileManager.default
+        let folder = URL(fileURLWithPath: demo, isDirectory: true).appendingPathComponent("edit-demo", isDirectory: true)
+        try? manager.removeItem(at: folder)
+        defer { try? manager.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("release notes.txt")
+        do {
+            try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("Release notes\n\n- faster startup\n- jump hosts\n".utf8).write(to: file)
+        } catch {
+            say("edit: could not make the sample file: \(error.localizedDescription)")
+            return false
+        }
+        let before = store.workspaces.flatMap(\.tabs).count
+        if let problem = store.editFile(at: file.path) {
+            say("edit: refused: \(problem)")
+            return false
+        }
+        await pause(3.5)
+        let after = store.workspaces.flatMap(\.tabs).count
+        guard let tab = store.selectedTab, let session = tab.primarySession else {
+            say("edit: no tab came up")
+            return false
+        }
+        say("edit: tabs \(before) -> \(after); the editor is \(settings.editorChoice.label)")
+        let lines = session.captureVisibleText().split(separator: "\n", omittingEmptySubsequences: false)
+        for line in lines.prefix(5) { say("edit: the screen: \(line)") }
+        for line in lines.suffix(3) { say("edit: the last lines: \(line)") }
+        let taken = capture("edit-in-terminal")
+        // Out of the editor without saving, and the tab away.
+        session.send(text: "\u{1b}:q!\r")
+        await pause(1.0)
+        store.closeTab(tab)
+        return taken
+    }
+
+    // MARK: Terminal opacity
+
+    /// The Appearance slider, as the terminals receive it. A picture cannot show
+    /// a desktop through a window — the window is drawn by itself — so what is
+    /// read is what the setting did to each terminal's views: its background
+    /// carries the opacity, a frosted view sits beneath it and the padding round
+    /// it is tinted; and at 100% all of that is gone again.
+    private func terminalOpacity() async -> Bool {
+        guard let root = window.contentView else { return false }
+        await baseline()
+        let before = settings.backgroundOpacity
+        defer { settings.backgroundOpacity = before }
+        say("opacity: the window is opaque: \(window.isOpaque); its background is \(window.backgroundColor.map { "\($0)" } ?? "none")")
+        var taken = false
+        for value in [0.5, 1.0] {
+            settings.backgroundOpacity = value
+            await pause(1.5)
+            for container in ScreenshotMode.allViews(of: TerminalContainerView.self, in: root) where !container.visibleRect.isEmpty {
+                let terminalAlpha = (container.terminal as? TerminalView)?.nativeBackgroundColor.cgColor.alpha
+                let containerAlpha = container.layer?.backgroundColor?.alpha
+                let painted = terminalAlpha.map { String(format: "%.2f", Double($0)) } ?? "-"
+                let contained = containerAlpha.map { String(format: "%.2f", Double($0)) } ?? "-"
+                let frost = container.subviews.compactMap { $0 as? NSVisualEffectView }
+                var frosted = "none"
+                if let view = frost.first {
+                    let place = view.blendingMode == .behindWindow ? "behind the window" : "within the window"
+                    let drawn = view.state == .active ? "always drawn" : "follows the window"
+                    frosted = "\(frost.count) (\(place), \(drawn))"
+                }
+                let order = container.subviews.map { String(describing: type(of: $0)) }
+                say("opacity: \(Int(value * 100))%: the terminal paints its background at \(painted), its container at \(contained); frost views: \(frosted); subviews bottom to top: \(order)")
+            }
+            if value < 1 { taken = capture("terminal-opacity") }
+        }
+        return taken
+    }
+
+    // MARK: Bundled command-line tools
+
+    /// `rg`, `bat` and `imgcat` typed into the server tab's own shell, which the
+    /// app started with the folder they ship in on its `PATH`. Where the shell
+    /// finds each goes to the log, and what they print is the picture: `imgcat`'s
+    /// image is drawn by the terminal itself, which nothing else here exercises.
+    private func bundledTools() async -> Bool {
+        guard let demo, let session = server?.primarySession else { return false }
+        await baseline()
+
+        let manager = FileManager.default
+        let folder = URL(fileURLWithPath: demo, isDirectory: true).appendingPathComponent("tools-demo", isDirectory: true)
+        try? manager.removeItem(at: folder)
+        defer { try? manager.removeItem(at: folder) }
+        do {
+            try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.sampleImage().write(to: folder.appendingPathComponent("logo.png"))
+            let source = "fn main() {\n    println!(\"hello, hello-api\");\n}\n"
+            try Data(source.utf8).write(to: folder.appendingPathComponent("main.rs"))
+        } catch {
+            say("tools: could not make the sample folder: \(error.localizedDescription)")
+            return false
+        }
+
+        // Where the shell finds each one: the bundle's, unless something on the
+        // machine is earlier on the PATH.
+        await run("command -v rg bat imgcat", in: session)
+        await pause(1.5)
+        for line in session.captureVisibleText().split(separator: "\n").suffix(4) {
+            say("tools: the shell says: \(line)")
+        }
+
+        // In the folder, so that what is typed fits a line. bat is told not to
+        // page (-P): the scene must not be left in a pager.
+        await run("cd tools-demo", in: session)
+        await pause(0.8)
+        await run("imgcat -W 24 logo.png && bat -P main.rs && rg -n hello", in: session)
+        await pause(3.5)
+        for line in session.captureVisibleText().split(separator: "\n").suffix(10) {
+            say("tools: on the screen: \(line)")
+        }
+        let taken = capture("terminal-tools")
+
+        // The other protocol the engine reads, sent by hand the way a program
+        // that speaks it would: the same picture, placed directly.
+        do {
+            try Data(Self.kittyProbe.utf8).write(to: folder.appendingPathComponent("kitty-probe.sh"))
+        } catch {
+            say("tools: could not write the Kitty probe: \(error.localizedDescription)")
+        }
+        await run("sh kitty-probe.sh", in: session)
+        await pause(3.0)
+        _ = capture("terminal-tools-kitty")
+
+        await run("cd ..", in: session)
+        await pause(0.8)
+        session.send(text: "clear\n")
+        await pause(0.8)
+        return taken
+    }
+
+    /// A shell script that sends `logo.png` the way a program that speaks the
+    /// Kitty graphics protocol does: transmitted and placed in one go, a
+    /// quarter of a screen's width wide, in chunks of at most 4096 characters.
+    private static let kittyProbe = #"""
+    cols=24
+    rows=7
+    data=$(base64 < logo.png | tr -d '\n')
+    total=${#data}
+    offset=0
+    first=1
+    while [ "$offset" -lt "$total" ]; do
+      chunk=$(printf '%s' "$data" | cut -c$((offset + 1))-$((offset + 4096)))
+      offset=$((offset + 4096))
+      if [ "$offset" -lt "$total" ]; then more=1; else more=0; fi
+      if [ "$first" = 1 ]; then
+        printf '\033_Ga=T,f=100,t=d,c=%s,r=%s,q=2,m=%s;%s\033\\' "$cols" "$rows" "$more" "$chunk"
+        first=0
+      else
+        printf '\033_Gm=%s;%s\033\\' "$more" "$chunk"
+      fi
+    done
+    printf '\n'
+    """#
+
+    /// A small picture to show: a diagonal wash from green to blue under a pale
+    /// disc. Drawn here, so the sample project holds nothing a person made.
+    ///
+    /// The pixels are written as bytes, every one opaque. A first version set
+    /// them one at a time with `setColor`, and what came out decoded to the right
+    /// size and drew as nothing at all.
+    private static func sampleImage() -> Data {
+        let width = 320, height = 180
+        guard let bitmap = ScreenshotMode.bitmap(width: width, height: height),
+              let pixels = bitmap.bitmapData else { return Data() }
+        for y in 0..<height {
+            for x in 0..<width {
+                let t = (Double(x) / Double(width) + Double(y) / Double(height)) / 2
+                let dx = Double(x - 230), dy = Double(y - 70)
+                let inDisc = dx * dx + dy * dy < 38 * 38
+                let red = inDisc ? 0.96 : 0.06 + 0.08 * t
+                let green = inDisc ? 0.96 : 0.64 - 0.28 * t
+                let blue = inDisc ? 0.98 : 0.50 + 0.35 * t
+                let offset = y * bitmap.bytesPerRow + x * 4
+                pixels[offset] = UInt8(red * 255)
+                pixels[offset + 1] = UInt8(green * 255)
+                pixels[offset + 2] = UInt8(blue * 255)
+                pixels[offset + 3] = 255
+            }
+        }
+        return bitmap.representation(using: .png, properties: [:]) ?? Data()
+    }
+
     // MARK: Remote problems
 
     /// What the file browser says when a host turns it away, from the real
@@ -939,6 +1140,273 @@ final class ScreenshotRun {
         model.switchTo(connectionID: nil)
         closePanels()
         return taken
+    }
+
+    // MARK: Through jump hosts
+
+    /// A host reached through jump hosts, with the real `sftp` and `ssh`. The
+    /// workflow's one-key server is the destination and, since it is the only
+    /// server there is, the hop as well: the hop is an alias in the runner's own
+    /// ssh config (named by `ITERMINAL_SSH_JUMP_HOST`) that holds the server's
+    /// address and key, because ssh configures a hop there and not from the
+    /// connection's own settings.
+    ///
+    /// With both ends on one machine, the evidence that a connection went the
+    /// long way is the server's own log: each ssh connection it lets in is one
+    /// "Accepted publickey", so a listing made directly costs some number of
+    /// them, through one hop twice as many, through two hops three times. The
+    /// numbers go to the log; the scene only reports what it saw.
+    private func jumpHosts() async -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["ITERMINAL_SSH_SHARED_PORT"], let port = Int(portText),
+              let key = environment["ITERMINAL_SSH_SHARED_KEY"],
+              let hop = environment["ITERMINAL_SSH_JUMP_HOST"],
+              let logPath = environment["ITERMINAL_SSH_SHARED_LOG"] else {
+            say("jump hosts: the workflow did not set up a jump host for it")
+            return false
+        }
+        func logins() -> Int {
+            let text = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+            return text.components(separatedBy: "Accepted publickey").count - 1
+        }
+        let knownHosts = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iterminal-known-hosts-\(UUID().uuidString.prefix(8))").path
+        func make(_ name: String, jumps: String) -> SSHConnection {
+            SSHConnection(
+                name: name, host: "127.0.0.1", port: port, username: NSUserName(),
+                identityFile: key, initialPath: demo,
+                extraArguments: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=\(knownHosts)",
+                jumpHosts: jumps
+            )
+        }
+        let hosts = [
+            make("direct-vm", jumps: ""),
+            make("one-hop-vm", jumps: hop),
+            make("two-hop-vm", jumps: "\(hop),\(hop)"),
+        ]
+        let saved = settings.sshConnections
+        settings.sshConnections = saved + hosts
+        defer {
+            settings.sshConnections = saved
+            try? FileManager.default.removeItem(atPath: knownHosts)
+        }
+
+        await baseline()
+        settings.railPanelOpen = false
+        settings.rightPanelWidth = 460
+        store.openPanel(.files)
+        await pause(2.0)
+        let model = store.panelFiles
+        var taken = false
+        for (index, host) in hosts.enumerated() {
+            let before = logins()
+            model.switchTo(connectionID: host.id.uuidString)
+            _ = await ScreenshotMode.until(timeout: 60) { !model.isLoading }
+            await pause(1.0)
+            say("jump hosts: \(host.name) [\(host.jumpHosts.isEmpty ? "direct" : host.jumpHosts)]: "
+                + "\(model.items.count) items in \(model.directory); problem: \(model.listingProblem?.title ?? "none"); "
+                + "logins at the server: \(logins() - before)")
+            if index == 1 {
+                await tidyServer()
+                taken = capture("files-sftp-jump")
+            }
+        }
+        model.switchTo(connectionID: nil)
+        closePanels()
+
+        // And a terminal tab, opened the way a person opens a saved host,
+        // through the one hop. The line is typed after the handshakes, which a
+        // terminal in raw mode would not otherwise be sure to keep.
+        let before = logins()
+        let tab = store.newTab(kind: .remote(hosts[1].id))
+        guard let session = tab.primarySession else {
+            say("jump hosts: the tab has no terminal")
+            return taken
+        }
+        await pause(6.0)
+        session.send(text: "echo via-$((6 * 7))\n")
+        let answered = await ScreenshotMode.until(timeout: 40) { session.captureVisibleText().contains("via-42") }
+        say("jump hosts: the tab through one hop answered: \(answered); logins at the server: \(logins() - before)")
+        for line in session.captureVisibleText().split(separator: "\n").suffix(6) {
+            say("jump hosts: the tab says: \(line)")
+        }
+        session.send(text: "exit\n")
+        await pause(1.5)
+        store.closeTab(tab)
+        return taken
+    }
+
+    // MARK: Cursor animation
+
+    /// Each cursor animation, on the cursor of the real terminal in the front
+    /// window with the keys going to it: whether the animation is on the
+    /// cursor's layer, and whether the opacity the screen shows is moving. A
+    /// still picture cannot tell a breathing cursor from a steady one.
+    private func cursorAnimation() async -> Bool {
+        await baseline()
+        guard let root = window.contentView,
+              let terminal = ScreenshotMode.firstView(ofType: InstrumentedTerminalView.self, in: root) else {
+            say("cursor: no terminal in the window")
+            return false
+        }
+        let before = settings.cursorAnimationTag
+        // The runner's app is never active, so no window of it is key, which is
+        // what an animated cursor waits for; see `CursorAnimator.assumeTypedInto`.
+        CursorAnimator.assumeTypedInto = true
+        defer {
+            settings.cursorAnimationTag = before
+            CursorAnimator.assumeTypedInto = false
+            CursorAnimator.reduceMotionOverride = nil
+        }
+        let systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        say("cursor: the window is key: \(window.isKeyWindow); the GPU renderer is on: \(settings.useGPURendering); the system's Reduce Motion is on: \(systemReduceMotion)")
+        window.makeFirstResponder(terminal)
+        await pause(0.6)
+        say("cursor: the terminal has the keys: \(window.firstResponder === terminal)")
+
+        func caret() -> CALayer? {
+            terminal.subviews.first { NSStringFromClass(type(of: $0)).hasSuffix(".CaretView") }?.layer
+        }
+        func look(_ animation: CursorAnimation) async -> (keys: [String], low: Float, high: Float)? {
+            settings.cursorAnimationTag = animation.rawValue
+            await pause(1.3)
+            guard let layer = caret() else {
+                say("cursor: \(animation.label): no caret view among \(terminal.subviews.map { NSStringFromClass(type(of: $0)) })")
+                return nil
+            }
+            var seen: [Float] = []
+            for _ in 0..<14 {
+                seen.append(layer.presentation()?.opacity ?? -1)
+                await pause(0.2)
+            }
+            return (layer.animationKeys() ?? [], seen.min() ?? -1, seen.max() ?? -1)
+        }
+
+        // As the system has it: where Reduce Motion is on, nothing may move.
+        var respected = true
+        if systemReduceMotion, let result = await look(.breathing) {
+            respected = result.keys.isEmpty && result.high - result.low < 0.05
+            say("cursor: with the system's Reduce Motion on, Breathing has animation keys \(result.keys) and the opacity seen is \(result.low) to \(result.high): respected \(respected)")
+        }
+
+        // With it off, each animation has to be on the cursor and moving.
+        CursorAnimator.reduceMotionOverride = false
+        var moving = 0
+        for animation in CursorAnimation.allCases where animation != .none {
+            guard let result = await look(animation) else { continue }
+            say("cursor: \(animation.label): animation keys \(result.keys); opacity seen from \(result.low) to \(result.high) over 14 looks, 2 s")
+            if result.high - result.low > 0.15 { moving += 1 }
+        }
+        settings.cursorAnimationTag = CursorAnimation.none.rawValue
+        await pause(1.3)
+        say("cursor: back to none: animation keys \(caret()?.animationKeys() ?? [])")
+        say("cursor: \(moving) of \(CursorAnimation.allCases.count - 1) animations were moving")
+        return respected && moving == CursorAnimation.allCases.count - 1
+    }
+
+    // MARK: A link under the pointer
+
+    /// A web address printed in the server tab, and what a right-click on it
+    /// offers. Where the menu thinks a link is has to be where the terminal
+    /// thinks it is, so it is checked against the terminal itself: a ⌘-click is
+    /// sent to a few thousand points around the address, the terminal's own
+    /// answer — which link it opens, if any — is read from the opener, and
+    /// the menu's is read from `link(at:)`. They have to agree at every one.
+    private func linkMenu() async -> Bool {
+        await baseline()
+        guard let session = server?.primarySession, let root = window.contentView,
+              let terminal = ScreenshotMode.firstView(ofType: InstrumentedTerminalView.self, in: root) else {
+            say("link menu: no terminal in the window")
+            return false
+        }
+        let address = "https://example.com/docs/start"
+        await run("echo see \(address) for the guide", in: session)
+        await pause(1.5)
+        let lines = session.captureVisibleText().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let row = lines.firstIndex(where: { $0.hasPrefix("see \(address)") }),
+              let range = lines[row].range(of: address) else {
+            say("link menu: the address is not on the screen")
+            return false
+        }
+        let firstColumn = lines[row].distance(from: lines[row].startIndex, to: range.lowerBound)
+        let lastColumn = firstColumn + address.count - 1
+        let engine = terminal.getTerminal()
+        let grid = terminal.getOptimalFrameSize()
+        guard let cell = TerminalLinks.cellSize(
+            gridWidth: Double(grid.width), gridHeight: Double(grid.height), cols: engine.cols, rows: engine.rows
+        ) else {
+            say("link menu: no cell size")
+            return false
+        }
+        say("link menu: the address is on row \(row), columns \(firstColumn)–\(lastColumn) of \(engine.cols)×\(engine.rows); a cell is \(cell.width)×\(cell.height)")
+
+        // The terminal's answer to a ⌘-click, read from where it would open it.
+        var opened: String?
+        let saved = terminal.onLink
+        terminal.onLink = { opened = $0 }
+        defer { terminal.onLink = saved }
+        func event(_ type: NSEvent.EventType, at local: NSPoint, command: Bool) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: terminal.convert(local, to: nil), modifierFlags: command ? [.command] : [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+            )
+        }
+
+        // From two cells before the address to two after, three rows.
+        let left = max(0, Double(firstColumn - 2) * cell.width)
+        let right = Double(lastColumn + 3) * cell.width
+        let top = Double(terminal.bounds.height) - Double(row + 2) * cell.height
+        let bottom = Double(terminal.bounds.height) - Double(row - 1) * cell.height
+        var points = 0, agreed = 0, onLink = 0
+        var disagreements: [String] = []
+        var y = max(0, top)
+        while y < min(Double(terminal.bounds.height), bottom) {
+            var x = left
+            while x < right {
+                let local = NSPoint(x: x, y: y)
+                opened = nil
+                if let click = event(.leftMouseUp, at: local, command: true) { terminal.mouseUp(with: click) }
+                let theirs = opened
+                let ours = terminal.link(at: local)
+                points += 1
+                if ours == theirs { agreed += 1 } else if disagreements.count < 6 {
+                    disagreements.append("(\(Int(x)), \(Int(y))): the menu says \(ours ?? "no link"), the terminal \(theirs ?? "no link")")
+                }
+                if ours != nil { onLink += 1 }
+                x += 3
+            }
+            y += 3
+        }
+        say("link menu: \(points) points tried, the menu and the terminal agreed at \(agreed); \(onLink) of them are on the address")
+        for line in disagreements { say("link menu: disagreement at \(line)") }
+
+        // What the menu holds on the address, and beside it.
+        func describe(_ menu: NSMenu) -> String {
+            menu.update()
+            return menu.items.map { $0.isSeparatorItem ? "—" : "\($0.title)\($0.isEnabled ? "" : " (off)")" }.joined(separator: " | ")
+        }
+        let middle = NSPoint(
+            x: (Double(firstColumn) + Double(address.count) / 2) * cell.width,
+            y: Double(terminal.bounds.height) - (Double(row) + 0.5) * cell.height
+        )
+        guard let click = event(.rightMouseDown, at: middle, command: false), let menu = terminal.menu(for: click) else {
+            say("link menu: no menu on the address")
+            return false
+        }
+        say("link menu: on the address: \(describe(menu))")
+        let apart = NSPoint(x: middle.x, y: middle.y + 3 * cell.height)
+        if let click = event(.rightMouseDown, at: apart, command: false), let plain = terminal.menu(for: click) {
+            say("link menu: three rows above it: \(describe(plain))")
+        }
+        NSPasteboard.general.clearContents()
+        if let index = menu.items.firstIndex(where: { $0.title == "Copy Link" }) { menu.performActionForItem(at: index) }
+        say("link menu: Copy Link put \((NSPasteboard.general.string(forType: .string) ?? "nothing").debugDescription) on the pasteboard")
+
+        session.send(text: "\u{15}")
+        session.send(text: "clear\n")
+        await pause(0.8)
+        return agreed == points && onLink > 0
     }
 
     // MARK: The right-click menu
@@ -1479,6 +1947,22 @@ final class ScreenshotRun {
                 in: self.directory,
                 scrolledToEnd: true
             )
+        }
+
+        // The Terminal page again, a little over a third of the way down: the
+        // font picker with its preview and the Import button, and the cursor
+        // choices, which the first screenful of that page does not reach. Only
+        // looked at; the installed fonts are this runner's.
+        for (fraction, name) in [(0.35, "settings-terminal-font"), (0.6, "settings-terminal-cursor")] {
+            await scene(name) {
+                await ScreenshotMode.host(
+                    SettingsRootView(initialSection: .terminal),
+                    size: NSSize(width: 940, height: 640),
+                    name: name,
+                    in: self.directory,
+                    scrolledTo: fraction
+                )
+            }
         }
 
         // The default directory is a field, and shows what it holds: written

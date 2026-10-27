@@ -39,6 +39,12 @@ final class AppSettings: ObservableObject {
     @Published var shellPath: String { didSet { defaults.set(shellPath, forKey: "shellPath") } }
     @Published var loginShell: Bool { didSet { defaults.set(loginShell, forKey: "loginShell") } }
     @Published var defaultDirectory: String { didSet { defaults.set(defaultDirectory, forKey: "defaultDirectory") } }
+    /// An `EditorChoice` raw value: what "Edit in Terminal" opens a file in.
+    /// Kept as the string so a name this build does not know is read as
+    /// automatic and not lost.
+    @Published var editorChoiceTag: String { didSet { defaults.set(editorChoiceTag, forKey: "editorChoiceTag") } }
+    /// The command for `EditorChoice.custom`; the file is added at its end.
+    @Published var editorCustomCommand: String { didSet { defaults.set(editorCustomCommand, forKey: "editorCustomCommand") } }
 
     // MARK: Appearance
     @Published var theme: ThemeChoice {
@@ -122,6 +128,9 @@ final class AppSettings: ObservableObject {
     @Published var terminalFontName: String { didSet { defaults.set(terminalFontName, forKey: "terminalFontName") } }
     @Published var terminalFontSize: Double { didSet { defaults.set(terminalFontSize, forKey: "terminalFontSize") } }
     @Published var cursorStyleTag: String { didSet { defaults.set(cursorStyleTag, forKey: "cursorStyleTag") } }
+    /// A `CursorAnimation` raw value. Kept as the string so a name this build
+    /// does not know (from a newer one) is read as "none" and not lost.
+    @Published var cursorAnimationTag: String { didSet { defaults.set(cursorAnimationTag, forKey: "cursorAnimationTag") } }
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
@@ -284,6 +293,8 @@ final class AppSettings: ObservableObject {
         restoreSession = defaults.object(forKey: "restoreSession") as? Bool ?? true
         shellPath = defaults.string(forKey: "shellPath") ?? ""
         loginShell = defaults.object(forKey: "loginShell") as? Bool ?? true
+        editorChoiceTag = defaults.string(forKey: "editorChoiceTag") ?? EditorChoice.automatic.rawValue
+        editorCustomCommand = defaults.string(forKey: "editorCustomCommand") ?? ""
         defaultDirectory = defaults.string(forKey: "defaultDirectory") ?? ""
 
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
@@ -312,6 +323,7 @@ final class AppSettings: ObservableObject {
         terminalFontName = defaults.string(forKey: "terminalFontName") ?? ""
         terminalFontSize = defaults.object(forKey: "terminalFontSize") as? Double ?? 13
         cursorStyleTag = defaults.string(forKey: "cursorStyleTag") ?? "steadyBlock"
+        cursorAnimationTag = defaults.string(forKey: "cursorAnimationTag") ?? CursorAnimation.none.rawValue
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
         useGPURendering = defaults.bool(forKey: "useGPURendering")
@@ -470,7 +482,14 @@ final class AppSettings: ObservableObject {
 
     /// The font every terminal draws with, backed by the bundled Nerd Font
     /// symbols for the icons it has no glyphs for — see `SymbolsFont`.
+    var editorChoice: EditorChoice {
+        EditorChoice(rawValue: editorChoiceTag) ?? .automatic
+    }
+
     func resolvedTerminalFont() -> NSFont {
+        // Fonts the person imported are registered the first time this is
+        // asked, before the name below is looked up.
+        _ = ImportedFonts.shared
         let size = CGFloat(terminalFontSize)
         var font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
         if !terminalFontName.isEmpty, let chosen = NSFont(name: terminalFontName, size: size) {
@@ -544,6 +563,8 @@ final class AppSettings: ObservableObject {
         restoreSession = true
         shellPath = ""
         loginShell = true
+        editorChoiceTag = EditorChoice.automatic.rawValue
+        editorCustomCommand = ""
         defaultDirectory = ""
         theme = .system
         accentID = "green"
@@ -557,6 +578,7 @@ final class AppSettings: ObservableObject {
         terminalFontName = ""
         terminalFontSize = 13
         cursorStyleTag = "steadyBlock"
+        cursorAnimationTag = CursorAnimation.none.rawValue
         scrollbackLines = 10_000
         terminalThemeID = "auto"
         useGPURendering = false

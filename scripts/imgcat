@@ -1,0 +1,111 @@
+#!/bin/sh
+# imgcat — show an image in the terminal.
+#
+#   imgcat [-W WIDTH] [-H HEIGHT] [--stretch] FILE...
+#   some-command-that-prints-an-image | imgcat
+#
+# iTERMiNAL draws an image sent in the iTerm2 inline-image format (an OSC 1337
+# escape sequence carrying the file, base64-encoded), and decodes it with
+# macOS's own image reader: PNG, JPEG, GIF, HEIC, TIFF and the rest. This writes
+# that sequence and nothing else, so it works in any terminal that draws them.
+#
+# WIDTH and HEIGHT are a number of cells (80), a percentage of the window (50%),
+# a number of pixels (300px) or "auto", the default. The picture keeps its
+# proportions unless --stretch is given.
+set -eu
+
+VERSION=1
+# The sequence travels through the terminal as text, a third larger than the file.
+MAX_BYTES=$((25 * 1024 * 1024))
+
+program=${0##*/}
+width=auto
+height=auto
+aspect=1
+
+usage() {
+    cat >&2 <<EOF
+usage: $program [-W WIDTH] [-H HEIGHT] [--stretch] [FILE...]
+
+Shows each FILE in the terminal; with no FILE, or -, reads one image from
+standard input. WIDTH and HEIGHT: cells (80), a percentage (50%), pixels
+(300px) or auto.
+
+  -W, --width WIDTH    how wide to draw it
+  -H, --height HEIGHT  how tall to draw it
+  --stretch            fill WIDTH and HEIGHT without keeping the proportions
+  --version            print the version and exit
+  -h, --help           this text
+EOF
+}
+
+fail() {
+    echo "$program: $*" >&2
+    exit 1
+}
+
+# A dimension as the terminal reads one: "auto", digits, digits%, or digitspx.
+check_dimension() {
+    if [ "$2" != auto ]; then
+        printf '%s' "$2" | grep -Eq '^([0-9]+|[0-9]+%|[0-9]+px)$' \
+            || fail "$1 must be a number of cells, a percentage (50%), pixels (300px) or auto: '$2'"
+    fi
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help) usage; exit 0 ;;
+        --version) echo "$program $VERSION"; exit 0 ;;
+        -W | --width)
+            [ $# -ge 2 ] || { usage; exit 2; }
+            width=$2; shift 2 ;;
+        --width=*) width=${1#--width=}; shift ;;
+        -H | --height)
+            [ $# -ge 2 ] || { usage; exit 2; }
+            height=$2; shift 2 ;;
+        --height=*) height=${1#--height=}; shift ;;
+        --stretch) aspect=0; shift ;;
+        --) shift; break ;;
+        -) break ;;
+        -*) echo "$program: unknown option $1" >&2; usage; exit 2 ;;
+        *) break ;;
+    esac
+done
+check_dimension width "$width"
+check_dimension height "$height"
+
+tmp=
+cleanup() {
+    [ -z "$tmp" ] || rm -f "$tmp"
+}
+trap cleanup EXIT INT TERM
+
+# One image: `file` is the path to read, `name` what to call it.
+show() {
+    file=$1
+    name=$2
+    [ -f "$file" ] && [ -r "$file" ] || fail "$name: not a readable file"
+    size=$(wc -c < "$file" | tr -d ' ')
+    [ "$size" -gt 0 ] || fail "$name: empty"
+    [ "$size" -le "$MAX_BYTES" ] || fail "$name: larger than $((MAX_BYTES / 1024 / 1024)) MB, which is more than a terminal can be asked to draw"
+    encoded_name=$(printf '%s' "$name" | base64 | tr -d '\n')
+    printf '\033]1337;File=name=%s;size=%s;inline=1;width=%s;height=%s;preserveAspectRatio=%s:' \
+        "$encoded_name" "$size" "$width" "$height" "$aspect"
+    base64 < "$file" | tr -d '\n'
+    printf '\007\n'
+}
+
+if [ $# -eq 0 ]; then
+    set -- -
+fi
+for arg in "$@"; do
+    if [ "$arg" = "-" ]; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/imgcat.XXXXXX")
+        cat > "$tmp"
+        show "$tmp" "stdin"
+        rm -f "$tmp"
+        tmp=
+    else
+        show "$arg" "${arg##*/}"
+    fi
+done

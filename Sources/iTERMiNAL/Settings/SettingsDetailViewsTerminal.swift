@@ -1,9 +1,14 @@
 import SwiftUI
 import AppKit
+import CoreText
+import UniformTypeIdentifiers
 
 struct TerminalSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject private var attention = AttentionSettings.shared
+    @ObservedObject private var imported = ImportedFonts.shared
+    /// What the last import did, in a sentence.
+    @State private var importMessage: String?
 
     private static let monospacedFamilies: [String] = {
         NSFontManager.shared.availableFontFamilies.filter { family in
@@ -18,11 +23,11 @@ struct TerminalSettingsView: View {
 
     /// Twenty coding fonts worth knowing about, all free.
     ///
-    /// The app can only use what is installed on this Mac — there is no way to
-    /// load a font it doesn't have — so this is a recommendation list, not a
-    /// second source of fonts. Ones you have are selectable; ones you don't are
-    /// shown greyed with somewhere to get them, which is more useful than
-    /// hiding them and leaving you to wonder what to install.
+    /// A recommendation list, not a second source of fonts: the app does not
+    /// download any. Ones this Mac has — installed, or imported with Import
+    /// Font… below — are selectable; ones it doesn't are listed with somewhere
+    /// to get them, which is more useful than hiding them and leaving you to
+    /// wonder what to install.
     static let recommendedFonts: [(family: String, source: String)] = [
         ("JetBrains Mono", "https://www.jetbrains.com/lp/mono/"),
         ("Fira Code", "https://github.com/tonsky/FiraCode"),
@@ -46,15 +51,21 @@ struct TerminalSettingsView: View {
         ("CommitMono", "https://commitmono.com"),
     ]
 
-    /// Split once: which recommendations this Mac actually has.
-    private static var installedRecommended: [String] {
-        let installed = Set(monospacedFamilies)
-        return recommendedFonts.map(\.family).filter { installed.contains($0) }
+    /// Every family this Mac can use for the terminal: installed fixed-pitch
+    /// ones, and the ones imported here (a font can be fixed-pitch without
+    /// saying so, which is why imported ones are not filtered).
+    private var knownFamilies: Set<String> {
+        Set(Self.monospacedFamilies).union(imported.families.map(\.name))
     }
 
-    private static var missingRecommended: [(family: String, source: String)] {
-        let installed = Set(monospacedFamilies)
-        return recommendedFonts.filter { !installed.contains($0.family) }
+    private var installedRecommended: [String] {
+        let known = knownFamilies
+        return Self.recommendedFonts.map(\.family).filter { known.contains($0) }
+    }
+
+    private var missingRecommended: [(family: String, source: String)] {
+        let known = knownFamilies
+        return Self.recommendedFonts.filter { !known.contains($0.family) }
     }
 
     private let cursorStyles: [(tag: String, label: String)] = [
@@ -81,21 +92,30 @@ struct TerminalSettingsView: View {
             Section("Font") {
                 Picker("Font", selection: $settings.terminalFontName) {
                     Text("System monospace (SF Mono)").tag("")
-                    if !Self.installedRecommended.isEmpty {
+                    if !imported.families.isEmpty {
+                        Section("Imported") {
+                            ForEach(imported.families) { family in
+                                Text(family.name).tag(family.name)
+                            }
+                        }
+                    }
+                    if !installedRecommended.isEmpty {
                         Section("Recommended") {
-                            ForEach(Self.installedRecommended, id: \.self) { family in
+                            ForEach(installedRecommended, id: \.self) { family in
                                 Text(family).tag(family)
                             }
                         }
                     }
                     Section("All monospaced fonts") {
-                        ForEach(Self.monospacedFamilies, id: \.self) { family in
+                        ForEach(Self.monospacedFamilies.filter { name in
+                            !imported.families.contains { $0.name == name }
+                        }, id: \.self) { family in
                             Text(family).tag(family)
                         }
                     }
                 }
-                if !Self.missingRecommended.isEmpty {
-                    RecommendedFontsNotice(missing: Self.missingRecommended)
+                if !missingRecommended.isEmpty {
+                    RecommendedFontsNotice(missing: missingRecommended)
                 }
                 HStack {
                     Slider(value: $settings.terminalFontSize, in: 9...24, step: 1)
@@ -103,6 +123,27 @@ struct TerminalSettingsView: View {
                         .monospacedDigit()
                         .frame(width: 42, alignment: .trailing)
                 }
+                FontPreview()
+                HStack {
+                    Button("Import Font…") { importFonts() }
+                    Spacer()
+                }
+                if let importMessage {
+                    Text(importMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                ImportedFontsList(onRemoved: { entry in
+                    // The font that was picked is gone: back to the default
+                    // rather than a name nothing answers to.
+                    if entry.faces.contains(where: { $0.family == settings.terminalFontName }) {
+                        settings.terminalFontName = ""
+                    }
+                })
+                Text("Import copies a .ttf, .otf, .ttc or .otc file into this app's own folder and uses it here only — nothing is installed on the Mac. macOS reads the file, so import fonts you trust.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Cursor") {
                 Picker("Cursor style", selection: $settings.cursorStyleTag) {
@@ -110,7 +151,12 @@ struct TerminalSettingsView: View {
                         Text(style.label).tag(style.tag)
                     }
                 }
-                Text("Applies to new terminals.")
+                Picker("Animation", selection: $settings.cursorAnimationTag) {
+                    ForEach(CursorAnimation.allCases) { animation in
+                        Text(animation.label).tag(animation.rawValue)
+                    }
+                }
+                Text("An animation takes the place of the blink, while the terminal is the one you are typing in. It is drawn by the default renderer, so it does nothing with GPU rendering on, and it is off while Reduce Motion is. Applies to open terminals as they come into view.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -166,6 +212,83 @@ struct PanelsSettingsView: View {
 
 /// Lists the recommended fonts this Mac doesn't have, with somewhere to get
 /// them. Collapsed by default — it is a suggestion, not a task.
+extension TerminalSettingsView {
+    fileprivate func importFonts() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.font]
+        panel.message = "Choose font files: .ttf, .otf, .ttc or .otc."
+        guard panel.runModal() == .OK else { return }
+
+        var added: [String] = []
+        var problems: [String] = []
+        for url in panel.urls {
+            switch imported.importFont(from: url) {
+            case .success(let families): added += families
+            case .failure(let failure): problems.append(failure.message)
+            }
+        }
+        // The first font brought in is the one picked, so the preview shows it.
+        if let first = added.first { settings.terminalFontName = first }
+        var parts: [String] = []
+        if !added.isEmpty {
+            let names = Array(Set(added)).sorted().joined(separator: ", ")
+            parts.append("Imported \(names).")
+        }
+        parts.append(contentsOf: problems)
+        importMessage = parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+}
+
+/// The terminal's font as it will draw — the one the terminal gets, with the
+/// symbols fallback behind it — over a few lines that tell fonts apart, so a
+/// font that is wrong for a terminal shows here first.
+private struct FontPreview: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Text(FontImport.sampleText)
+            .font(Font(settings.resolvedTerminalFont() as CTFont))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: settings.resolvedTerminalTheme(darkMode: settings.isDarkAppearance).backgroundColor))
+            )
+            .foregroundStyle(Color(nsColor: settings.resolvedTerminalTheme(darkMode: settings.isDarkAppearance).foregroundColor))
+            .accessibilityLabel("Font preview")
+    }
+}
+
+/// The fonts that have been imported, one row per file with what it holds,
+/// each with a way to take it out again.
+private struct ImportedFontsList: View {
+    @ObservedObject private var imported = ImportedFonts.shared
+    let onRemoved: (ImportedFonts.Entry) -> Void
+
+    var body: some View {
+        ForEach(imported.entries) { entry in
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    let families = Array(Set(entry.faces.map(\.family))).sorted()
+                    Text(families.joined(separator: ", "))
+                    Text("\(entry.fileName) · \(entry.faces.count) style\(entry.faces.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Remove", role: .destructive) {
+                    imported.remove(entry)
+                    onRemoved(entry)
+                }
+            }
+        }
+    }
+}
+
 struct RecommendedFontsNotice: View {
     let missing: [(family: String, source: String)]
 

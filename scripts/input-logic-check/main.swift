@@ -3717,5 +3717,476 @@ do {
     }
 }
 
+// MARK: Background opacity
+
+do {
+    let floor = BackgroundOpacity.range.lowerBound
+    check(floor > 0 && floor < 1 && BackgroundOpacity.range.upperBound == 1,
+          "the slider runs from a floor above zero up to a solid background")
+    check(BackgroundOpacity.clamped(1.0) == 1.0, "a solid background stays solid")
+    check(BackgroundOpacity.clamped(0.7) == 0.7, "a value in range is kept as it is")
+    check(BackgroundOpacity.clamped(floor) == floor, "the floor itself is allowed")
+    check(BackgroundOpacity.clamped(0.05) == floor, "below the floor is raised to it")
+    check(BackgroundOpacity.clamped(-3) == floor, "a negative value is raised to the floor")
+    check(BackgroundOpacity.clamped(3) == 1.0, "above 100% is 100%")
+    check(BackgroundOpacity.clamped(.nan) == 1.0, "not a number reads as a solid background")
+    check(BackgroundOpacity.clamped(.infinity) == 1.0, "infinity reads as a solid background")
+    check(BackgroundOpacity.clamped(-.infinity) == 1.0, "minus infinity reads as a solid background, not as invisible")
+
+    check(!BackgroundOpacity.isTranslucent(1.0), "100% is not see-through, so no backdrop is built")
+    check(!BackgroundOpacity.isTranslucent(7.0), "a value above range is clamped to solid first")
+    check(!BackgroundOpacity.isTranslucent(.nan), "a damaged preference is not see-through")
+    check(BackgroundOpacity.isTranslucent(0.99), "99% is see-through")
+    check(BackgroundOpacity.isTranslucent(0.0), "zero is raised to the floor, which is see-through")
+
+    check(BackgroundOpacity.percentText(0.704) == "70%", "the slider reads whole percent")
+    check(BackgroundOpacity.percentText(1.0) == "100%", "a solid background reads 100%")
+    check(BackgroundOpacity.percentText(0.0) == "\(Int((floor * 100).rounded()))%", "the reading never goes below the floor")
+
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x000000), "black wants the dark frost")
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x1E1E2E), "a typical dark theme wants the dark frost")
+    check(BackgroundOpacity.prefersDarkBackdrop(background: 0x002B36), "solarized dark wants the dark frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xFFFFFF), "white wants the light frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xFDF6E3), "solarized light wants the light frost")
+    check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xEFF1F5), "a typical light theme wants the light frost")
+}
+
+// MARK: Jump hosts and agent forwarding
+
+do {
+    func hops(_ text: String) -> [String]? {
+        if case .hops(let list) = JumpHosts.parse(text) { return list }
+        return nil
+    }
+    func problem(_ text: String) -> String? {
+        if case .invalid(let message) = JumpHosts.parse(text) { return message }
+        return nil
+    }
+
+    check(JumpHosts.parse("") == .none, "nothing written is no jump")
+    check(JumpHosts.parse("  \n ") == .none, "blank is no jump")
+    check(hops("bastion") == ["bastion"], "a bare name")
+    check(hops("bastion.example.com") == ["bastion.example.com"], "a dotted name")
+    check(hops("alice@bastion") == ["alice@bastion"], "user@host")
+    check(hops("alice@bastion:2222") == ["alice@bastion:2222"], "user@host:port")
+    check(hops("10.0.0.5") == ["10.0.0.5"], "an IPv4 address")
+    check(hops("[::1]") == ["[::1]"], "a bracketed IPv6 address")
+    check(hops("bob@[2001:db8::1]:2200") == ["bob@[2001:db8::1]:2200"], "user, bracketed IPv6 and a port")
+    check(hops(" a , b@c:22 ") == ["a", "b@c:22"], "space around a hop is ignored")
+    check(hops("a,b,c") == ["a", "b", "c"], "the order is kept")
+    check(hops("host:022") == ["host:22"], "a port is spelled as a number")
+    check(hops("host.example.com.") == ["host.example.com."], "a fully qualified name keeps its dot")
+    check(hops("my_host-1") == ["my_host-1"], "underscores and dashes inside a name")
+    check(hops("NONE@x") == ["NONE@x"], "a user called none is a user")
+    check(hops("a,b,c,d,e")?.count == 5, "five hops are allowed")
+
+    // Nothing that ssh would take for an option, a token, or a second command.
+    let refused = [
+        "-oProxyCommand=evil", "-J", "-host", "-x@host", "host -oProxyCommand=x", "a b", "a;b", "a|b", "a&b",
+        "$(id)", "`id`", "a'b", "a\"b", "ssh://host", "host/path", "%h", "a%h", "a\\b", "a\tb", "ho\nst",
+        "bästion", "bast\u{200B}ion", "host:٢٢",
+        "a,,b", "a,", ",a", ",",
+        "none", "None", "u@none",
+        "host:0", "host:65536", "host:99999999999999999999", "host:abc", "host:", ":22", "@host", "user@", "a@b@c",
+        "::1", "1:2:3", "[::1", "[abc]", "[]", "[::1]x", "[::g]", "[::1]:99999", "[::1]:", "[[::1]]", "a[1]",
+    ]
+    for text in refused {
+        check(problem(text) != nil, "refused as jump hosts: \(text.debugDescription)")
+        check(hops(text) == nil, "no hops come out of: \(text.debugDescription)")
+        check(JumpHosts.proxyJumpValue(text) == nil, "no ProxyJump value comes out of: \(text.debugDescription)")
+    }
+    check(hops("a,b,c,d,e,f") == nil && problem("a,b,c,d,e,f") != nil, "six hops are too many")
+    check(problem(String(repeating: "a", count: 513)) != nil, "an over-long list is refused")
+    check(problem("host:") == "A port is missing after the colon in “host:”.", "an empty port says so")
+    check(problem("@host")?.contains("before the @") == true, "an empty user says so")
+    check(problem("::1")?.contains("square brackets") == true, "an unbracketed IPv6 address says to bracket it")
+    check(problem("none")?.contains("leave the box empty") == true, "'none' says how to go direct")
+
+    check(JumpHosts.proxyJumpValue(" a , b@c:22 ") == "a,b@c:22", "the ProxyJump value is the hops joined by commas")
+    check(JumpHosts.proxyJumpValue("") == nil, "no hops, no value")
+    check(JumpHosts.refusal("X.").hasPrefix("Not connecting:") && JumpHosts.refusal("X.").contains("X."), "the refusal names the problem")
+
+    // On a connection.
+    var connection = SSHConnection(name: "n", host: "target", username: "u", jumpHosts: "bastion, alice@hop2:2222")
+    check(connection.proxyJumpArguments == ["-o", "ProxyJump=bastion,alice@hop2:2222"], "the arguments carry the hops")
+    check(connection.jumpHostsProblem == nil, "a good list has no problem")
+    connection.jumpHosts = ""
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "no list adds nothing and is not a problem")
+    connection.jumpHosts = "bad host"
+    check(connection.proxyJumpArguments.isEmpty, "a bad list adds no arguments…")
+    check(connection.jumpHostsProblem != nil, "…and is a problem, which is what stops the connection from going direct")
+    connection = SSHConnection(name: "n", host: "t", username: "u", transport: .mosh, jumpHosts: "bastion")
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "mosh does not go through jump hosts")
+    connection = SSHConnection(name: "n", host: "t", username: "u", transport: .custom, jumpHosts: "bad host")
+    check(connection.proxyJumpArguments.isEmpty && connection.jumpHostsProblem == nil, "a custom command's jump hosts are not looked at")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u", jumpHosts: "bastion"))
+            == "ssh-copy-id -o ProxyJump=bastion u@t", "ssh-copy-id goes through the same hosts")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u", jumpHosts: "[::1]:22,b"))
+            == "ssh-copy-id -o 'ProxyJump=[::1]:22,b' u@t", "a bracketed address is quoted for the shell")
+    check(RemoteProblem.keySetupCommand(for: SSHConnection(name: "n", host: "t", username: "u"))
+            == "ssh-copy-id u@t", "without hops the command is as it was")
+
+    // Agent forwarding.
+    check(AgentForwarding.sshConfig.arguments(approved: true).isEmpty && AgentForwarding.sshConfig.arguments(approved: false).isEmpty,
+          "'as in ssh config' adds nothing either way")
+    check(AgentForwarding.never.arguments(approved: true) == ["-o", "ForwardAgent=no"], "never says no, even to a yes")
+    check(AgentForwarding.always.arguments(approved: false) == ["-A"], "always forwards whatever the answer")
+    check(AgentForwarding.ask.arguments(approved: true) == ["-A"], "asked and allowed forwards")
+    check(AgentForwarding.ask.arguments(approved: false) == ["-o", "ForwardAgent=no"],
+          "asked and refused is spelled out, so a config that says yes cannot override it")
+    check(AgentForwarding.ask.needsAnswer && !AgentForwarding.always.needsAnswer
+            && !AgentForwarding.never.needsAnswer && !AgentForwarding.sshConfig.needsAnswer, "only 'ask' needs an answer")
+    check(Set(AgentForwarding.allCases.map(\.label)).count == AgentForwarding.allCases.count, "the choices read differently")
+    check(AgentForwarding.allCases.count == 4, "four choices")
+
+    // Saved hosts from before these existed, and from a newer build.
+    let decoder = JSONDecoder()
+    let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(old.utf8)) {
+        check(decoded.jumpHosts.isEmpty && decoded.agentForwarding == .sshConfig, "a host saved before these loads with the defaults")
+    } else {
+        check(false, "a host saved before jump hosts and agent forwarding still loads")
+    }
+    let future = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h","agentForwarding":"teleport","jumpHosts":"b"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(future.utf8)) {
+        check(decoded.agentForwarding == .sshConfig && decoded.jumpHosts == "b",
+              "a choice this build does not know falls back to the default without losing the host")
+    } else {
+        check(false, "a choice from a newer build does not drop the host")
+    }
+    let kept = SSHConnection(name: "n", host: "h", username: "u", jumpHosts: "a,b", agentForwarding: .ask)
+    if let data = try? JSONEncoder().encode(kept), let back = try? decoder.decode(SSHConnection.self, from: data) {
+        check(back == kept, "jump hosts and the agent choice survive being saved")
+    } else {
+        check(false, "a connection with jump hosts can be saved and read back")
+    }
+}
+
+// MARK: Terminal links
+
+do {
+    let size = TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 100, rows: 24)
+    check(size?.width == 8 && size?.height == 20, "a cell is the grid divided by its cells")
+    check(TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 0, rows: 24) == nil, "no columns, no cell size")
+    check(TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 100, rows: 0) == nil, "no rows, no cell size")
+    check(TerminalLinks.cellSize(gridWidth: 0, gridHeight: 480, cols: 100, rows: 24) == nil, "an empty grid has no cell size")
+    check(TerminalLinks.cellSize(gridWidth: .nan, gridHeight: 480, cols: 100, rows: 24) == nil, "a width that is not a number has no cell size")
+
+    func cell(_ x: Double, _ y: Double, height: Double = 480, rows: Int = 24) -> String {
+        guard let found = TerminalLinks.cell(x: x, y: y, viewHeight: height, cellWidth: 8, cellHeight: 20, cols: 100, rows: rows) else {
+            return "none"
+        }
+        return "\(found.col),\(found.row)"
+    }
+    check(cell(0, 480) == "0,0", "the top left corner is cell 0,0")
+    check(cell(7.99, 480) == "0,0", "just inside the first column")
+    check(cell(8, 480) == "1,0", "the next column starts at one cell width")
+    check(cell(0, 460.1) == "0,0", "just inside the first row, measured from the bottom")
+    check(cell(0, 460) == "0,1", "the next row starts one cell height down")
+    check(cell(0, 0.5) == "0,23", "the bottom row")
+    check(cell(799.9, 240) == "99,12", "the last column")
+    check(cell(0, 0) == "none", "the bottom edge is outside the grid")
+    check(cell(800, 240) == "none", "the right edge is outside the grid")
+    check(cell(-0.5, 240) == "none", "left of the grid is not on it")
+    check(cell(10, 480.5) == "none", "above the grid is not on it")
+    check(cell(10, 10, height: 500) == "none", "the strip below the last row, when the view is not whole cells, is not on a cell")
+    check(cell(.nan, 10) == "none" && cell(10, .infinity) == "none", "a point that is not a number is not on a cell")
+    check(TerminalLinks.cell(x: 1, y: 1, viewHeight: 10, cellWidth: 0, cellHeight: 20, cols: 1, rows: 1) == nil, "a zero-width cell has nothing in it")
+
+    func web(_ text: String) -> String? { TerminalLinks.webURL(text)?.absoluteString }
+    check(web("https://example.com/a?b=c") == "https://example.com/a?b=c", "an https address")
+    check(web("http://localhost:8080") == "http://localhost:8080", "an http address with a port")
+    check(web("  https://example.com \n") == "https://example.com", "whitespace around an address is dropped")
+    check(web("HTTPS://EXAMPLE.COM") != nil, "the scheme's case does not matter")
+    for notAPage in ["", "example.com", "file:///etc/passwd", "javascript:alert(1)", "ssh://host", "mailto:a@b.c",
+                     "x-apple.systempreferences:", "https://", "https:///path", "~/notes.txt", "src/main.rs:12",
+                     "ftp://host/file", "data:text/html,<b>x</b>", "vnc://host", "tel:+1"] {
+        check(web(notAPage) == nil, "not offered to open: \(notAPage.debugDescription)")
+    }
+
+    check(TerminalLinks.preview("https://example.com") == "https://example.com", "a short address is shown as it is")
+    check(TerminalLinks.preview("a\u{0}b\nc") == "a·b·c", "control characters are replaced")
+    check(TerminalLinks.preview("ex\u{200B}ample") == "ex·ample", "a zero-width space is shown")
+    check(TerminalLinks.preview("a\u{202E}b") == "a·b", "a right-to-left override is replaced")
+    check(TerminalLinks.preview("a\u{2028}b\u{2029}c") == "a·b·c", "line and paragraph separators are replaced")
+    check(TerminalLinks.preview("https://例え.jp/パス") == "https://例え.jp/パス", "ordinary non-ASCII text is left alone")
+    let long = "https://example.com/" + String(repeating: "x", count: 100) + "/end"
+    let shortened = TerminalLinks.preview(long, limit: 20)
+    check(shortened.count == 20, "a long address is cut to the limit (\(shortened.count))")
+    check(shortened.contains("…") && shortened.hasPrefix("https://e") && shortened.hasSuffix("/end".suffix(4)), "the middle goes, not the ends")
+    check(TerminalLinks.preview(String(repeating: "a", count: 20), limit: 20) == String(repeating: "a", count: 20), "exactly the limit is not cut")
+    check(TerminalLinks.preview(String(repeating: "a", count: 40), limit: 4).count == 40, "a limit too small to show anything useful cuts nothing")
+    check(TerminalLinks.preview(String(repeating: "e\u{301}", count: 30), limit: 10).count == 10, "it counts what is seen, not scalars")
+}
+
+// MARK: Cursor animation
+
+do {
+    check(CursorAnimation.none.loop == nil, "no animation has no loop")
+    check(CursorAnimation.allCases.count == 6, "six choices")
+    check(Set(CursorAnimation.allCases.map(\.rawValue)).count == 6, "the choices have different names")
+    check(Set(CursorAnimation.allCases.map(\.label)).count == 6, "the choices read differently")
+
+    /// The loop's mean opacity, weighting each stretch by how long it lasts.
+    func mean(_ loop: CursorAnimation.Loop) -> Double {
+        var area = 0.0
+        for index in 1..<loop.times.count {
+            area += (loop.times[index] - loop.times[index - 1]) * (loop.values[index] + loop.values[index - 1]) / 2
+        }
+        return area
+    }
+
+    for animation in CursorAnimation.allCases {
+        guard let loop = animation.loop else { continue }
+        let name = animation.rawValue
+        check(loop.times.count == loop.values.count && loop.times.count >= 2, "\(name): a time for every value")
+        check(abs(loop.times[0]) < 1e-9 && abs(loop.times[loop.times.count - 1] - 1) < 1e-9, "\(name): the loop runs from 0 to 1")
+        check(zip(loop.times, loop.times.dropFirst()).allSatisfy { $0 < $1 }, "\(name): times only go forward")
+        check(loop.values.allSatisfy { $0 >= 0.05 && $0 <= 1.0 + 1e-9 }, "\(name): never out entirely, never brighter than solid")
+        check(abs(loop.values[0] - loop.values[loop.values.count - 1]) < 1e-9, "\(name): the end joins the start, so the loop has no jump")
+        check(loop.values.max()! > 0.99, "\(name): fully on at some point")
+        check(loop.values.max()! - loop.values.min()! >= 0.25, "\(name): moves enough to be seen")
+        check((0.5...10.0).contains(loop.duration), "\(name): a duration a person can watch")
+    }
+
+    if let breathing = CursorAnimation.breathing.loop,
+       let lowest = breathing.values.enumerated().min(by: { $0.element < $1.element }) {
+        check(abs(breathing.times[lowest.offset] - 0.5) < 0.05, "breathing is lowest halfway through")
+        check(breathing.times.count >= 16, "breathing is sampled often enough to look smooth")
+    } else {
+        check(false, "breathing has a loop")
+    }
+    if let beat = CursorAnimation.heartbeat.loop {
+        var peaks = 0
+        for index in 1..<(beat.values.count - 1) where beat.values[index] > beat.values[index - 1] && beat.values[index] > beat.values[index + 1] {
+            peaks += 1
+        }
+        check(peaks == 2, "a heartbeat has two beats (found \(peaks))")
+        check(beat.times.last! - beat.times[beat.times.count - 2] > 0.4, "…and then a rest")
+    }
+    if let flicker = CursorAnimation.neonFlicker.loop {
+        check(mean(flicker) > 0.85, "neon is on nearly all the time (\(mean(flicker)))")
+        check(flicker.values.filter { $0 < 0.5 }.count >= 3, "…with several drop-outs")
+    }
+    if let candle = CursorAnimation.candle.loop {
+        check(candle.values.min()! > 0.6, "a candle never goes nearly out (\(candle.values.min()!))")
+        check(candle.values.min()! < 0.8, "…but it does move")
+    }
+    if let pulse = CursorAnimation.pulse.loop {
+        check(pulse.times[1] < 0.1, "a pulse comes on sharply")
+        check(mean(pulse) < 0.5, "…and is mostly faded (\(mean(pulse)))")
+    }
+
+    let encoded = try! JSONEncoder().encode(CursorAnimation.allCases)
+    check((try? JSONDecoder().decode([CursorAnimation].self, from: encoded)) == CursorAnimation.allCases, "the choices survive being saved")
+    check(CursorAnimation(rawValue: "teleport") == nil, "a name from a newer build reads as nothing, for the caller to default")
+}
+
+// MARK: Font import
+
+do {
+    for good in ["JetBrainsMono-Regular.ttf", "a.otf", "Fonts.ttc", "x.OTC", "UPPER.TTF", "My Font (1).ttf"] {
+        check(FontImport.refusal(fileName: good, size: 1000) == nil, "importable: \(good)")
+    }
+    for bad in ["notes.txt", "face.woff", "face.woff2", "face.pfb", "face.dfont", "face", "face.ttf.exe", "face.zip", ".ttf", "...ttf", "face."] {
+        check(FontImport.refusal(fileName: bad, size: 1000) != nil, "refused: \(bad)")
+    }
+    check(FontImport.refusal(fileName: "a.ttf", size: 0) == .empty, "an empty file is refused")
+    check(FontImport.refusal(fileName: "a.ttf", size: -5) == .empty, "a negative size is refused")
+    check(FontImport.refusal(fileName: "a.ttf", size: FontImport.maxBytes) == nil, "exactly the limit is allowed")
+    check(FontImport.refusal(fileName: "a.ttf", size: FontImport.maxBytes + 1) == .tooLarge, "one byte over is refused")
+    check(FontImport.Refusal.notAFont("x.txt").message.contains("x.txt") && FontImport.Refusal.tooLarge.message.contains("50 MB"),
+          "the refusals say what is wrong")
+
+    check(FontImport.storedName(for: "Fira Code.ttf", existing: []) == "Fira Code.ttf", "an ordinary name is kept")
+    check(FontImport.storedName(for: "../../etc/evil.ttf", existing: []) == "evil.ttf", "a path is cut to its last part")
+    check(FontImport.storedName(for: "/Users/x/Library/Fonts/a.otf", existing: []) == "a.otf", "an absolute path is cut to its last part")
+    check(FontImport.storedName(for: "a/b\\c:d*e?.ttf", existing: []).hasSuffix(".ttf") && !FontImport.storedName(for: "a:b*c?.ttf", existing: []).contains("*"),
+          "odd characters do not survive")
+    check(FontImport.storedName(for: ".hidden.ttf", existing: []) == "hidden.ttf", "a name cannot start with a dot")
+    check(FontImport.storedName(for: "...", existing: []) == "font", "dots only still makes a name")
+    let dotted = FontImport.storedName(for: "...ttf", existing: [])
+    check(!dotted.isEmpty && !dotted.hasPrefix("."), "a name made of dots and an extension is neither empty nor hidden (\(dotted))")
+    check(FontImport.split("a.b.TTF") == (stem: "a.b", ext: "ttf"), "the extension is after the last dot, in lower case")
+    check(FontImport.split(".hidden.ttf") == (stem: ".hidden", ext: "ttf"), "a dot at the start is part of the stem")
+    check(FontImport.split("...ttf") == (stem: "...ttf", ext: ""), "dots before the last dot are no stem: no extension")
+    check(FontImport.split(".ttf") == (stem: ".ttf", ext: ""), "a hidden file has no extension")
+    check(FontImport.split("face") == (stem: "face", ext: ""), "no dot, no extension")
+    check(FontImport.split("face.") == (stem: "face", ext: ""), "a trailing dot is an empty extension")
+    check(FontImport.storedName(for: "Ünïcode.TTF", existing: []) == "_n_code.ttf", "non-ASCII letters become underscores and the extension is lower-case")
+    let longName = String(repeating: "a", count: 300) + ".ttf"
+    check(FontImport.storedName(for: longName, existing: []).count <= 85, "a long name is cut")
+    check(FontImport.storedName(for: longName, existing: []).hasSuffix(".ttf"), "…with its extension kept")
+    check(FontImport.storedName(for: "a.ttf", existing: ["a.ttf"]) == "a 2.ttf", "a taken name gets a number")
+    check(FontImport.storedName(for: "a.ttf", existing: ["a.ttf", "a 2.ttf"]) == "a 3.ttf", "…and the next free one")
+    check(FontImport.storedName(for: "a.ttf", existing: ["A.TTF"]) == "a 2.ttf", "a name taken but for its case is taken (the volume may not tell them apart)")
+    check(FontImport.storedName(for: "", existing: []) == "font", "no name at all is 'font'")
+
+    typealias Face = FontImport.Face
+    let faces = [
+        Face(family: "Zed Mono", style: "Bold", postScriptName: "ZedMono-Bold"),
+        Face(family: "alpha Mono", style: "Italic", postScriptName: "AlphaMono-Italic"),
+        Face(family: "alpha Mono", style: "Regular", postScriptName: "AlphaMono-Regular"),
+        Face(family: "alpha Mono", style: "Bold Italic", postScriptName: "AlphaMono-BoldItalic"),
+        Face(family: "alpha Mono", style: "Bold", postScriptName: "AlphaMono-Bold"),
+        Face(family: "alpha Mono", style: "Light", postScriptName: "AlphaMono-Light"),
+        Face(family: "alpha Mono", style: "Regular", postScriptName: "AlphaMono-Regular"),
+        Face(family: "  ", style: "Regular", postScriptName: "Nameless"),
+        Face(family: "Beta Code", style: "Regular", postScriptName: "BetaCode-Regular"),
+    ]
+    let groups = FontImport.groups(faces)
+    check(groups.map(\.name) == ["alpha Mono", "Beta Code", "Zed Mono"], "families A to Z without regard to case (\(groups.map(\.name)))")
+    check(groups.first?.faces.map(\.style) == ["Regular", "Bold", "Italic", "Bold Italic", "Light"],
+          "regular, bold, italic, bold italic, then the rest (\(groups.first?.faces.map(\.style) ?? []))")
+    check(groups.first?.faces.count == 5, "a face listed twice is shown once")
+    check(!groups.contains { $0.name.trimmingCharacters(in: .whitespaces).isEmpty }, "a face with no family is left out")
+    check(FontImport.groups([]).isEmpty, "no faces, no families")
+    check(FontImport.sampleText.contains("\u{F07B}") && FontImport.sampleText.contains("Il1"), "the sample shows a symbol and look-alike letters")
+}
+
+// MARK: Bundled tools on PATH
+
+do {
+    let tools = "/Applications/iTERMiNAL.app/Contents/Resources/Tools/bin"
+    check(ToolsPath.appending(tools, to: "/usr/bin:/bin") == "/usr/bin:/bin:" + tools, "the tools folder goes last")
+    check(ToolsPath.appending(tools, to: "/usr/bin:/bin:" + tools) == "/usr/bin:/bin:" + tools, "already there: left alone")
+    check(ToolsPath.appending(tools, to: tools + ":/usr/bin") == tools + ":/usr/bin", "already first: left alone, not moved")
+    check(ToolsPath.appending(tools, to: "/usr/bin:" + tools + "/") == "/usr/bin:" + tools + "/", "already there with a trailing slash: left alone")
+    check(ToolsPath.appending(tools + "/", to: "/usr/bin:" + tools) == "/usr/bin:" + tools, "the folder with a trailing slash is the same entry")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:/tools/binary") == "/usr/bin:/tools/binary:/tools/bin", "a longer name that starts the same is another folder")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:/other/tools/bin") == "/usr/bin:/other/tools/bin:/tools/bin", "…and so is the same name somewhere else")
+    check(ToolsPath.appending("/Applications/My App.app/Tools/bin", to: "/usr/bin") == "/usr/bin:/Applications/My App.app/Tools/bin", "a folder with a space in it is added")
+    check(ToolsPath.appending("/tools/bin", to: "/usr/bin:") == "/usr/bin::/tools/bin", "an empty entry in PATH is kept as it was")
+    check(ToolsPath.appending("/", to: "/usr/bin") == "/usr/bin:/", "the root folder is a folder")
+    check(ToolsPath.appending("/", to: "/usr/bin:/") == "/usr/bin:/", "…and is not added twice")
+
+    check(ToolsPath.appending(tools, to: nil) == nil, "no PATH gets none: the shell's own default is better than one folder")
+    check(ToolsPath.appending(tools, to: "") == nil, "an empty PATH gets none")
+    check(ToolsPath.appending(nil, to: "/usr/bin") == "/usr/bin", "no folder changes nothing")
+    check(ToolsPath.appending("", to: "/usr/bin") == "/usr/bin", "an empty folder changes nothing")
+    check(ToolsPath.appending("tools/bin", to: "/usr/bin") == "/usr/bin", "a relative folder would depend on where the shell is, so it is not added")
+    check(ToolsPath.appending("/a:/b", to: "/usr/bin") == "/usr/bin", "a colon would split it in two, so it is not added")
+    check(ToolsPath.appending("/a\nb", to: "/usr/bin") == "/usr/bin", "a newline cannot be in an entry")
+    check(ToolsPath.appending("/a\0b", to: "/usr/bin") == "/usr/bin", "a NUL cannot be in an entry")
+}
+
+// MARK: Editor command
+
+do {
+    func installed(_ names: [String: String]) -> (String) -> String? {
+        { names[$0] }
+    }
+    func line(_ choice: EditorChoice, _ path: String, custom: String = "", have: [String: String] = [:]) -> String? {
+        if case .success(let text) = EditorCommand.line(choice: choice, custom: custom, path: path, locate: installed(have)) { return text }
+        return nil
+    }
+    func problem(_ choice: EditorChoice, _ path: String, custom: String = "", have: [String: String] = [:]) -> EditorCommand.Problem? {
+        if case .failure(let why) = EditorCommand.line(choice: choice, custom: custom, path: path, locate: installed(have)) { return why }
+        return nil
+    }
+    let all = ["hx": "/opt/homebrew/bin/hx", "nvim": "/opt/homebrew/bin/nvim", "vim": "/usr/bin/vim", "nano": "/usr/bin/nano"]
+
+    check(line(.automatic, "/tmp/a.txt", have: all) == "/opt/homebrew/bin/hx /tmp/a.txt\r", "automatic prefers Helix")
+    var withoutHelix = all; withoutHelix["hx"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/opt/homebrew/bin/nvim /tmp/a.txt\r", "…then Neovim")
+    withoutHelix["nvim"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/usr/bin/vim /tmp/a.txt\r", "…then Vim")
+    withoutHelix["vim"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/usr/bin/nano /tmp/a.txt\r", "…then Nano")
+    check(problem(.automatic, "/tmp/a.txt") == .notInstalled(label: "Automatic", hint: nil), "none of them: not installed, with nothing to install")
+    check(line(.helix, "/tmp/a.txt", have: ["helix": "/usr/local/bin/helix"]) == "/usr/local/bin/helix /tmp/a.txt\r", "Helix under its other name")
+    check(line(.helix, "/tmp/a.txt", have: ["vim": "/usr/bin/vim"]) == nil, "a chosen editor is not swapped for another")
+    check(problem(.helix, "/tmp/a.txt", have: ["vim": "/usr/bin/vim"]) == .notInstalled(label: "Helix", hint: "brew install helix"), "Helix says how to get it")
+    check(problem(.neovim, "/tmp/a.txt") == .notInstalled(label: "Neovim", hint: "brew install neovim"), "Neovim says how to get it")
+    check(problem(.vim, "/tmp/a.txt") == .notInstalled(label: "Vim", hint: nil), "Vim ships with macOS, so there is nothing to install")
+    check(line(.vim, "/tmp/a.txt", have: ["vim": "vim"]) == nil, "a program found by a relative path is not used")
+    check(EditorCommand.Problem.notInstalled(label: "Helix", hint: "brew install helix").message.contains("brew install helix"), "the message carries the hint")
+
+    // The path is typed into a shell: it has to survive one.
+    check(line(.vim, "/tmp/my file.txt", have: all) == "/usr/bin/vim '/tmp/my file.txt'\r", "a space is quoted")
+    check(line(.vim, "/tmp/it's.txt", have: all) == "/usr/bin/vim '/tmp/it'\\''s.txt'\r", "a single quote is closed, escaped and reopened")
+    check(line(.vim, "/tmp/a;b.txt", have: all) == "/usr/bin/vim '/tmp/a;b.txt'\r", "a semicolon is quoted")
+    check(line(.vim, "/tmp/$(id).txt", have: all) == "/usr/bin/vim '/tmp/$(id).txt'\r", "a command substitution is quoted")
+    check(line(.vim, "/tmp/`id`.txt", have: all) == "/usr/bin/vim '/tmp/`id`.txt'\r", "backticks are quoted")
+    check(line(.vim, "/tmp/café.txt", have: all) == "/usr/bin/vim '/tmp/café.txt'\r", "non-ASCII is quoted, and kept")
+    for unusable in ["tmp/a.txt", "-rf", "-", "", "~/a.txt", "a.txt", "/tmp/a\nrm -rf ~\n", "/tmp/a\r", "/tmp/a\tb", "/tmp/a\u{1B}b",
+                     "/tmp/a\u{7F}", "/tmp/a\u{0}b", "/tmp/a\u{85}b"] {
+        check(problem(.vim, unusable, have: all) == .unusablePath, "a path that cannot be typed: \(unusable.debugDescription)")
+    }
+    for path in ["/tmp/a.txt", "/tmp/a b.txt", "/tmp/it's.txt", "/tmp/a;b&c|d.txt", "/tmp/$HOME/{a,b}*?.txt", "/tmp/日本語.txt", "/"] {
+        if let typed = line(.vim, path, have: all) {
+            let body = typed.dropLast()
+            check(typed.hasSuffix("\r") && !EditorCommand.hasControlCharacter(String(body)), "one Return, at the end, and nothing else a terminal would act on: \(path.debugDescription)")
+        } else {
+            check(false, "a usable path is accepted: \(path.debugDescription)")
+        }
+    }
+
+    // Quoting survives a round trip through a POSIX shell's rules for single quotes.
+    func unquote(_ text: String) -> String {
+        var result = ""
+        var index = text.startIndex
+        var quoted = false
+        while index < text.endIndex {
+            let character = text[index]
+            if quoted {
+                if character == "'" { quoted = false } else { result.append(character) }
+            } else if character == "'" {
+                quoted = true
+            } else if character == "\\" {
+                index = text.index(after: index)
+                if index < text.endIndex { result.append(text[index]) }
+            } else {
+                result.append(character)
+            }
+            index = text.index(after: index)
+        }
+        return result
+    }
+    for tricky in ["a b", "it's", "''", "'", "a'b'c", "\\", "a\\'b", "$x", "`x`", "*", "[a]", "~", "#x", "a&b", "a>b", "日本", "😀", " leading", "trailing "] {
+        check(unquote(EditorCommand.quote(tricky)) == tricky, "quoting round-trips: \(tricky.debugDescription)")
+    }
+    check(EditorCommand.quote("plain/path-1.txt") == "plain/path-1.txt", "a plain word is left alone")
+    check(EditorCommand.quote("") == "''", "an empty word is two quotes")
+
+    // A custom command.
+    check(line(.custom, "/tmp/a.txt", custom: "code -w") == "code -w /tmp/a.txt\r", "a custom command gets the file added")
+    check(line(.custom, "/tmp/a b.txt", custom: "  code -w  ") == "code -w '/tmp/a b.txt'\r", "…trimmed, with the file quoted")
+    check(problem(.custom, "/tmp/a.txt", custom: "   ") == .emptyCustom, "no command is a problem")
+    check(problem(.custom, "/tmp/a.txt", custom: "code\nrm -rf ~") == .unusableCustom, "a custom command is one line")
+    check(problem(.custom, "/tmp/a.txt", custom: "code\u{1B}[2J") == .unusableCustom, "…with nothing a terminal would act on")
+    check(problem(.custom, "bad", custom: "code") == .unusablePath, "the path is checked for a custom command too")
+
+    check(EditorChoice.allCases.count == 6 && Set(EditorChoice.allCases.map(\.label)).count == 6, "six choices that read differently")
+    check(EditorChoice(rawValue: "emacs") == nil, "a name from another build reads as nothing, for the caller to default")
+    check(EditorChoice.automatic.candidates.first == "hx", "automatic looks for Helix first")
+    check(EditorChoice.custom.candidates.isEmpty, "a custom command has no program to look for")
+}
+
+// MARK: Tab order
+
+do {
+    let a = UUID(), b = UUID(), c = UUID(), d = UUID(), missing = UUID()
+    check(TabOrder.placing(c, before: a, in: [a, b, c]) == [c, a, b], "a tab dragged to the top goes before the first")
+    check(TabOrder.placing(a, before: c, in: [a, b, c]) == [b, a, c], "a tab dragged down goes before its target")
+    check(TabOrder.placing(a, before: nil, in: [a, b, c]) == [b, c, a], "no target is last")
+    check(TabOrder.placing(a, before: missing, in: [a, b, c]) == [b, c, a], "a target that is not there is last")
+    check(TabOrder.placing(b, before: b, in: [a, b, c]) == [a, b, c], "dropped on itself, nothing changes")
+    check(TabOrder.placing(b, before: c, in: [a, b, c]) == [a, b, c], "dropped where it already is, nothing changes")
+    check(TabOrder.placing(d, before: b, in: [a, b, c]) == [a, d, b, c], "a tab from another project is put before its target")
+    check(TabOrder.placing(d, before: nil, in: [a, b, c]) == [a, b, c, d], "…or last")
+    check(TabOrder.placing(a, before: nil, in: []) == [a], "into an empty project")
+    check(TabOrder.placing(a, before: b, in: [a, a, b]).filter { $0 == a }.count == 1, "a tab is never listed twice")
+    for id in [a, b, c] {
+        for target in [a, b, c, nil] as [UUID?] {
+            let order = TabOrder.placing(id, before: target, in: [a, b, c])
+            check(order.count == 3 && Set(order) == [a, b, c], "moving keeps every tab exactly once")
+            if let target, target != id, let at = order.firstIndex(of: id) {
+                check(order.firstIndex(of: target) == at + 1, "the tab sits right before its target")
+            }
+        }
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

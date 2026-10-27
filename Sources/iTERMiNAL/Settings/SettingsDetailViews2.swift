@@ -29,8 +29,11 @@ struct AdvancedSettingsView: View {
                 ForEach(TerminalTool.allCases) { tool in
                     BundledToolRow(tool: tool)
                 }
+                ForEach(BundledCommand.allCases) { command in
+                    BundledCommandRow(command: command)
+                }
                 BundledFontRow()
-                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile is upstream's release binary, checked against its published hash; btop publishes no macOS build, so it is compiled from pinned source. Neither runs with elevated privileges. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac.")
+                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile and ripgrep are upstream's release binaries, checked against their published hashes; bat's is checked against the hash of the file when it was pinned, because upstream publishes none; btop publishes no macOS build, so it is compiled from pinned source. None runs with elevated privileges. rg, bat and imgcat are on the PATH of every local terminal tab, after anything you have installed yourself. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -74,6 +77,48 @@ private struct BundledToolRow: View {
         }
         let version = tool.bundledVersion.map { "v\($0)" } ?? "version unknown"
         return "\(tool.summary) · \(version) · \(tool.licenseName)"
+    }
+}
+
+/// One command-line tool on every tab's PATH: what it is, the version that
+/// shipped, and its licence. Laid out like `BundledToolRow` so the list reads as
+/// one.
+private struct BundledCommandRow: View {
+    let command: BundledCommand
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: command.icon)
+                .frame(width: 18)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(command.title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let licenseURL = command.licenseURL {
+                Button("Licence") {
+                    NSWorkspace.shared.open(licenseURL)
+                }
+            }
+            Button("Project") {
+                NSWorkspace.shared.open(command.homepage)
+            }
+        }
+    }
+
+    /// Says plainly when a build has no copy, rather than printing a version
+    /// that isn't there.
+    private var detail: String {
+        guard command.isBundled else {
+            return "\(command.summary) · not included in this build"
+        }
+        let version = command.manifestKey == nil
+            ? "script"
+            : (command.bundledVersion.map { "v\($0)" } ?? "version unknown")
+        return "\(command.summary) · \(version) · \(command.licenseName) · on every tab's PATH"
     }
 }
 

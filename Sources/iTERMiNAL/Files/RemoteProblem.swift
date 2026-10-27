@@ -442,12 +442,16 @@ struct RemoteProblem: Equatable {
         return named.isEmpty ? "~/.ssh/id_ed25519" : pathForShell(named)
     }
 
-    /// `ssh-copy-id` for this connection: the port and the key it names, if any.
-    /// Run on this Mac, it asks for the host's password once and leaves the key
-    /// in `authorized_keys`.
+    /// `ssh-copy-id` for this connection: the port, the jump hosts and the key
+    /// it names, if any. Run on this Mac, it asks for the host's password once
+    /// and leaves the key in `authorized_keys`.
     static func keySetupCommand(for connection: SSHConnection) -> String {
         var parts = ["ssh-copy-id"]
         if connection.port != 22 { parts += ["-p", String(connection.port)] }
+        if let jump = JumpHosts.proxyJumpValue(connection.jumpHosts), connection.transport == .ssh {
+            // Quoted: a bracketed IPv6 address is a pattern to some shells.
+            parts += ["-o", shellQuoted("ProxyJump=\(jump)")]
+        }
         if let identity = connection.identityFile?.trimmingCharacters(in: .whitespaces), !identity.isEmpty {
             parts += ["-i", pathForShell(identity)]
         }
