@@ -133,6 +133,7 @@ final class ScreenshotRun {
         await probeActivity("after superfile and btop, which each took the whole content area")
 
         await scene("terminal-colors") { await self.terminalColors() }
+        await scene("terminal-tools") { await self.bundledTools() }
         await scene("extract") { await self.pageExtraction() }
         await scene("extract-feed") { await self.feedExtraction() }
         await scene("extract-crawl") { await self.siteCrawl() }
@@ -797,6 +798,69 @@ final class ScreenshotRun {
         settings.composerCollapsed = false
         await pause(0.8)
         return taken
+    }
+
+    // MARK: Bundled command-line tools
+
+    /// `rg`, `bat` and `imgcat` typed into the server tab's own shell, which the
+    /// app started with the folder they ship in on its `PATH`. Where the shell
+    /// finds each goes to the log, and what they print is the picture: `imgcat`'s
+    /// image is drawn by the terminal itself, which nothing else here exercises.
+    private func bundledTools() async -> Bool {
+        guard let demo, let session = server?.primarySession else { return false }
+        await baseline()
+
+        let manager = FileManager.default
+        let folder = URL(fileURLWithPath: demo, isDirectory: true).appendingPathComponent("tools-demo", isDirectory: true)
+        try? manager.removeItem(at: folder)
+        defer { try? manager.removeItem(at: folder) }
+        do {
+            try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.sampleImage().write(to: folder.appendingPathComponent("logo.png"))
+            let source = "fn main() {\n    println!(\"hello, hello-api\");\n}\n"
+            try Data(source.utf8).write(to: folder.appendingPathComponent("main.rs"))
+        } catch {
+            say("tools: could not make the sample folder: \(error.localizedDescription)")
+            return false
+        }
+
+        // Where the shell finds each one: the bundle's, unless something on the
+        // machine is earlier on the PATH.
+        await run("command -v rg bat imgcat", in: session)
+        await pause(1.5)
+        for line in session.captureVisibleText().split(separator: "\n").suffix(4) {
+            say("tools: the shell says: \(line)")
+        }
+
+        // bat is told not to page: the scene must not be left in a pager.
+        await run("(cd tools-demo && imgcat -W 24 logo.png && bat --paging=never main.rs && rg -n hello)", in: session)
+        await pause(3.5)
+        for line in session.captureVisibleText().split(separator: "\n").suffix(10) {
+            say("tools: on the screen: \(line)")
+        }
+        let taken = capture("terminal-tools")
+        session.send(text: "clear\n")
+        await pause(0.8)
+        return taken
+    }
+
+    /// A small picture to show: a diagonal wash from green to blue under a pale
+    /// disc. Drawn here, so the sample project holds nothing a person made.
+    private static func sampleImage() -> Data {
+        let width = 320, height = 180
+        guard let bitmap = ScreenshotMode.bitmap(width: width, height: height) else { return Data() }
+        for y in 0..<height {
+            for x in 0..<width {
+                let t = (Double(x) / Double(width) + Double(y) / Double(height)) / 2
+                let dx = Double(x - 230), dy = Double(y - 70)
+                let inDisc = dx * dx + dy * dy < 38 * 38
+                let color = inDisc
+                    ? NSColor(srgbRed: 0.96, green: 0.96, blue: 0.98, alpha: 1)
+                    : NSColor(srgbRed: 0.06 + 0.08 * t, green: 0.64 - 0.28 * t, blue: 0.50 + 0.35 * t, alpha: 1)
+                bitmap.setColor(color, atX: x, y: y)
+            }
+        }
+        return bitmap.representation(using: .png, properties: [:]) ?? Data()
     }
 
     // MARK: Remote problems
