@@ -55,6 +55,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         var fontSize: Double
         var backgroundOpacity: Double
         var gpuRequested: Bool
+        var cursorStyleTag: String
+        var cursorAnimationTag: String
     }
     private var appliedStyling: StylingInputs?
 
@@ -327,7 +329,9 @@ final class TerminalSession: ObservableObject, Identifiable {
             fontName: settings.terminalFontName,
             fontSize: settings.terminalFontSize,
             backgroundOpacity: effectiveBackgroundOpacity(settings),
-            gpuRequested: settings.useGPURendering
+            gpuRequested: settings.useGPURendering,
+            cursorStyleTag: settings.cursorStyleTag,
+            cursorAnimationTag: settings.cursorAnimationTag
         )
         guard inputs != appliedStyling else { return }
         appliedStyling = inputs
@@ -343,6 +347,14 @@ final class TerminalSession: ObservableObject, Identifiable {
         let active = engine.setGPUAcceleration(settings.useGPURendering)
         if isGPUAccelerated != active {
             isGPUAccelerated = active
+        }
+        // After the renderer is settled: an animation is only drawn on the CPU
+        // one. A bundled tool keeps the cursor it asks for.
+        if !kind.isTool {
+            engine.applyCursor(
+                styleTag: settings.cursorStyleTag,
+                animation: CursorAnimation(rawValue: settings.cursorAnimationTag) ?? .none
+            )
         }
         // A bundled tool follows the palette the terminal just took on —
         // a theme picked in Settings, or the switch to or from dark mode.

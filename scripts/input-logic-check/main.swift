@@ -3862,5 +3862,125 @@ do {
     }
 }
 
+// MARK: Terminal links
+
+do {
+    let size = TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 100, rows: 24)
+    check(size?.width == 8 && size?.height == 20, "a cell is the grid divided by its cells")
+    check(TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 0, rows: 24) == nil, "no columns, no cell size")
+    check(TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 100, rows: 0) == nil, "no rows, no cell size")
+    check(TerminalLinks.cellSize(gridWidth: 0, gridHeight: 480, cols: 100, rows: 24) == nil, "an empty grid has no cell size")
+    check(TerminalLinks.cellSize(gridWidth: .nan, gridHeight: 480, cols: 100, rows: 24) == nil, "a width that is not a number has no cell size")
+
+    func cell(_ x: Double, _ y: Double, height: Double = 480, rows: Int = 24) -> String {
+        guard let found = TerminalLinks.cell(x: x, y: y, viewHeight: height, cellWidth: 8, cellHeight: 20, cols: 100, rows: rows) else {
+            return "none"
+        }
+        return "\(found.col),\(found.row)"
+    }
+    check(cell(0, 480) == "0,0", "the top left corner is cell 0,0")
+    check(cell(7.99, 480) == "0,0", "just inside the first column")
+    check(cell(8, 480) == "1,0", "the next column starts at one cell width")
+    check(cell(0, 460.1) == "0,0", "just inside the first row, measured from the bottom")
+    check(cell(0, 460) == "0,1", "the next row starts one cell height down")
+    check(cell(0, 0.5) == "0,23", "the bottom row")
+    check(cell(799.9, 240) == "99,12", "the last column")
+    check(cell(0, 0) == "none", "the bottom edge is outside the grid")
+    check(cell(800, 240) == "none", "the right edge is outside the grid")
+    check(cell(-0.5, 240) == "none", "left of the grid is not on it")
+    check(cell(10, 480.5) == "none", "above the grid is not on it")
+    check(cell(10, 10, height: 500) == "none", "the strip below the last row, when the view is not whole cells, is not on a cell")
+    check(cell(.nan, 10) == "none" && cell(10, .infinity) == "none", "a point that is not a number is not on a cell")
+    check(TerminalLinks.cell(x: 1, y: 1, viewHeight: 10, cellWidth: 0, cellHeight: 20, cols: 1, rows: 1) == nil, "a zero-width cell has nothing in it")
+
+    func web(_ text: String) -> String? { TerminalLinks.webURL(text)?.absoluteString }
+    check(web("https://example.com/a?b=c") == "https://example.com/a?b=c", "an https address")
+    check(web("http://localhost:8080") == "http://localhost:8080", "an http address with a port")
+    check(web("  https://example.com \n") == "https://example.com", "whitespace around an address is dropped")
+    check(web("HTTPS://EXAMPLE.COM") != nil, "the scheme's case does not matter")
+    for notAPage in ["", "example.com", "file:///etc/passwd", "javascript:alert(1)", "ssh://host", "mailto:a@b.c",
+                     "x-apple.systempreferences:", "https://", "https:///path", "~/notes.txt", "src/main.rs:12",
+                     "ftp://host/file", "data:text/html,<b>x</b>", "vnc://host", "tel:+1"] {
+        check(web(notAPage) == nil, "not offered to open: \(notAPage.debugDescription)")
+    }
+
+    check(TerminalLinks.preview("https://example.com") == "https://example.com", "a short address is shown as it is")
+    check(TerminalLinks.preview("a\u{0}b\nc") == "a·b·c", "control characters are replaced")
+    check(TerminalLinks.preview("ex\u{200B}ample") == "ex·ample", "a zero-width space is shown")
+    check(TerminalLinks.preview("a\u{202E}b") == "a·b", "a right-to-left override is replaced")
+    check(TerminalLinks.preview("a\u{2028}b\u{2029}c") == "a·b·c", "line and paragraph separators are replaced")
+    check(TerminalLinks.preview("https://例え.jp/パス") == "https://例え.jp/パス", "ordinary non-ASCII text is left alone")
+    let long = "https://example.com/" + String(repeating: "x", count: 100) + "/end"
+    let shortened = TerminalLinks.preview(long, limit: 20)
+    check(shortened.count == 20, "a long address is cut to the limit (\(shortened.count))")
+    check(shortened.contains("…") && shortened.hasPrefix("https://e") && shortened.hasSuffix("/end".suffix(4)), "the middle goes, not the ends")
+    check(TerminalLinks.preview(String(repeating: "a", count: 20), limit: 20) == String(repeating: "a", count: 20), "exactly the limit is not cut")
+    check(TerminalLinks.preview(String(repeating: "a", count: 40), limit: 4).count == 40, "a limit too small to show anything useful cuts nothing")
+    check(TerminalLinks.preview(String(repeating: "e\u{301}", count: 30), limit: 10).count == 10, "it counts what is seen, not scalars")
+}
+
+// MARK: Cursor animation
+
+do {
+    check(CursorAnimation.none.loop == nil, "no animation has no loop")
+    check(CursorAnimation.allCases.count == 6, "six choices")
+    check(Set(CursorAnimation.allCases.map(\.rawValue)).count == 6, "the choices have different names")
+    check(Set(CursorAnimation.allCases.map(\.label)).count == 6, "the choices read differently")
+
+    /// The loop's mean opacity, weighting each stretch by how long it lasts.
+    func mean(_ loop: CursorAnimation.Loop) -> Double {
+        var area = 0.0
+        for index in 1..<loop.times.count {
+            area += (loop.times[index] - loop.times[index - 1]) * (loop.values[index] + loop.values[index - 1]) / 2
+        }
+        return area
+    }
+
+    for animation in CursorAnimation.allCases {
+        guard let loop = animation.loop else { continue }
+        let name = animation.rawValue
+        check(loop.times.count == loop.values.count && loop.times.count >= 2, "\(name): a time for every value")
+        check(abs(loop.times[0]) < 1e-9 && abs(loop.times[loop.times.count - 1] - 1) < 1e-9, "\(name): the loop runs from 0 to 1")
+        check(zip(loop.times, loop.times.dropFirst()).allSatisfy { $0 < $1 }, "\(name): times only go forward")
+        check(loop.values.allSatisfy { $0 >= 0.05 && $0 <= 1.0 + 1e-9 }, "\(name): never out entirely, never brighter than solid")
+        check(abs(loop.values[0] - loop.values[loop.values.count - 1]) < 1e-9, "\(name): the end joins the start, so the loop has no jump")
+        check(loop.values.max()! > 0.99, "\(name): fully on at some point")
+        check(loop.values.max()! - loop.values.min()! >= 0.25, "\(name): moves enough to be seen")
+        check((0.5...10.0).contains(loop.duration), "\(name): a duration a person can watch")
+    }
+
+    if let breathing = CursorAnimation.breathing.loop,
+       let lowest = breathing.values.enumerated().min(by: { $0.element < $1.element }) {
+        check(abs(breathing.times[lowest.offset] - 0.5) < 0.05, "breathing is lowest halfway through")
+        check(breathing.times.count >= 16, "breathing is sampled often enough to look smooth")
+    } else {
+        check(false, "breathing has a loop")
+    }
+    if let beat = CursorAnimation.heartbeat.loop {
+        var peaks = 0
+        for index in 1..<(beat.values.count - 1) where beat.values[index] > beat.values[index - 1] && beat.values[index] > beat.values[index + 1] {
+            peaks += 1
+        }
+        check(peaks == 2, "a heartbeat has two beats (found \(peaks))")
+        check(beat.times.last! - beat.times[beat.times.count - 2] > 0.4, "…and then a rest")
+    }
+    if let flicker = CursorAnimation.neonFlicker.loop {
+        check(mean(flicker) > 0.85, "neon is on nearly all the time (\(mean(flicker)))")
+        check(flicker.values.filter { $0 < 0.5 }.count >= 3, "…with several drop-outs")
+    }
+    if let candle = CursorAnimation.candle.loop {
+        check(candle.values.min()! > 0.6, "a candle never goes nearly out (\(candle.values.min()!))")
+        check(candle.values.min()! < 0.8, "…but it does move")
+    }
+    if let pulse = CursorAnimation.pulse.loop {
+        check(pulse.times[1] < 0.1, "a pulse comes on sharply")
+        check(mean(pulse) < 0.5, "…and is mostly faded (\(mean(pulse)))")
+    }
+
+    let encoded = try! JSONEncoder().encode(CursorAnimation.allCases)
+    check((try? JSONDecoder().decode([CursorAnimation].self, from: encoded)) == CursorAnimation.allCases, "the choices survive being saved")
+    check(CursorAnimation(rawValue: "teleport") == nil, "a name from a newer build reads as nothing, for the caller to default")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

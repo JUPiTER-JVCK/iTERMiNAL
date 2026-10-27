@@ -102,7 +102,32 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// which is as far as a right-click gets: SwiftTerm does not handle the
     /// right button at all. See `TerminalContextMenu`.
     override func menu(for event: NSEvent) -> NSMenu? {
-        TerminalContextMenu.make(for: self, actions: contextMenuActions?() ?? [])
+        TerminalContextMenu.make(
+            for: self,
+            actions: contextMenuActions?() ?? [],
+            link: link(at: convert(event.locationInWindow, from: nil))
+        )
+    }
+
+    /// The link under a point in this view's own coordinates: a hyperlink a
+    /// program printed, or text that reads as a URL. Nil in the padding around
+    /// the grid and anywhere there is none.
+    ///
+    /// SwiftTerm finds it for a click itself, with geometry it keeps to itself;
+    /// this finds the cell from the size of the grid it does report. The
+    /// scrollbar is hidden in every container this view is put in, so the grid
+    /// is all cells.
+    func link(at point: NSPoint) -> String? {
+        let terminal = getTerminal()
+        let grid = getOptimalFrameSize()
+        guard let size = TerminalLinks.cellSize(
+                gridWidth: Double(grid.width), gridHeight: Double(grid.height),
+                cols: terminal.cols, rows: terminal.rows),
+              let cell = TerminalLinks.cell(
+                x: Double(point.x), y: Double(point.y), viewHeight: Double(bounds.height),
+                cellWidth: size.width, cellHeight: size.height,
+                cols: terminal.cols, rows: terminal.rows) else { return nil }
+        return terminal.link(at: .screen(Position(col: cell.col, row: cell.row)), mode: .explicitAndImplicit)
     }
 
     /// BEL — SwiftTerm exposes this as an open TerminalDelegate method.

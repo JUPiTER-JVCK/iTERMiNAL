@@ -26,6 +26,8 @@ struct PreferencesArchive: Codable {
     var terminalFontName: String
     var terminalFontSize: Double
     var cursorStyleTag: String
+    /// Optional so archives written before cursor animations still decode.
+    var cursorAnimationTag: String?
     var scrollbackLines: Int
     var terminalThemeID: String
     var useGPURendering: Bool
@@ -102,6 +104,7 @@ struct PreferencesArchive: Codable {
         terminalFontName = settings.terminalFontName
         terminalFontSize = settings.terminalFontSize
         cursorStyleTag = settings.cursorStyleTag
+        cursorAnimationTag = settings.cursorAnimationTag
         scrollbackLines = settings.scrollbackLines
         terminalThemeID = settings.terminalThemeID
         useGPURendering = settings.useGPURendering
@@ -175,6 +178,7 @@ struct PreferencesArchive: Codable {
         settings.terminalFontName = terminalFontName
         settings.terminalFontSize = terminalFontSize
         settings.cursorStyleTag = cursorStyleTag
+        if let cursorAnimationTag { settings.cursorAnimationTag = cursorAnimationTag }
         settings.scrollbackLines = scrollbackLines
         settings.terminalThemeID = terminalThemeID
         settings.useGPURendering = useGPURendering

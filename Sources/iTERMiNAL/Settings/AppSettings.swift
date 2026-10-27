@@ -122,6 +122,9 @@ final class AppSettings: ObservableObject {
     @Published var terminalFontName: String { didSet { defaults.set(terminalFontName, forKey: "terminalFontName") } }
     @Published var terminalFontSize: Double { didSet { defaults.set(terminalFontSize, forKey: "terminalFontSize") } }
     @Published var cursorStyleTag: String { didSet { defaults.set(cursorStyleTag, forKey: "cursorStyleTag") } }
+    /// A `CursorAnimation` raw value. Kept as the string so a name this build
+    /// does not know (from a newer one) is read as "none" and not lost.
+    @Published var cursorAnimationTag: String { didSet { defaults.set(cursorAnimationTag, forKey: "cursorAnimationTag") } }
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
@@ -312,6 +315,7 @@ final class AppSettings: ObservableObject {
         terminalFontName = defaults.string(forKey: "terminalFontName") ?? ""
         terminalFontSize = defaults.object(forKey: "terminalFontSize") as? Double ?? 13
         cursorStyleTag = defaults.string(forKey: "cursorStyleTag") ?? "steadyBlock"
+        cursorAnimationTag = defaults.string(forKey: "cursorAnimationTag") ?? CursorAnimation.none.rawValue
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
         useGPURendering = defaults.bool(forKey: "useGPURendering")
@@ -557,6 +561,7 @@ final class AppSettings: ObservableObject {
         terminalFontName = ""
         terminalFontSize = 13
         cursorStyleTag = "steadyBlock"
+        cursorAnimationTag = CursorAnimation.none.rawValue
         scrollbackLines = 10_000
         terminalThemeID = "auto"
         useGPURendering = false

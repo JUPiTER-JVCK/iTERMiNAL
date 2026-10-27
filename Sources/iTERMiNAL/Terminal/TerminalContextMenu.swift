@@ -45,13 +45,19 @@ final class ActionMenuItem: NSMenuItem {
 /// moment: Copy needs a selection, and the pane items only make sense for a
 /// terminal that is a pane.
 enum TerminalContextMenu {
+    /// `link` is what is under the pointer, when something is: a hyperlink a
+    /// program printed or text that reads as a URL.
     @MainActor
-    static func make(for terminal: InstrumentedTerminalView, actions: [TerminalMenuAction]) -> NSMenu {
+    static func make(for terminal: InstrumentedTerminalView, actions: [TerminalMenuAction], link: String? = nil) -> NSMenu {
         let menu = NSMenu(title: "Terminal")
         // The system adds its own entries to a context menu for a view that takes
         // text input — an "AutoFill" submenu showed up under the first real
         // menu taken of this one — and none of them has a meaning in a terminal.
         menu.allowsContextMenuPlugIns = false
+
+        if let link {
+            addLinkItems(for: link, to: menu, terminal: terminal)
+        }
 
         // The editing items are SwiftTerm's own, aimed at the terminal itself
         // rather than "whatever is first responder": a right-click does not
@@ -81,6 +87,33 @@ enum TerminalContextMenu {
             }
         }
         return menu
+    }
+
+    /// The address first, as it will really be opened — a program that prints a
+    /// hyperlink chooses its text and its address separately — then what can be
+    /// done with it. Only a web page is offered to open (see
+    /// `TerminalLinks.webURL`); any kind can be copied.
+    @MainActor
+    private static func addLinkItems(for link: String, to menu: NSMenu, terminal: InstrumentedTerminalView) {
+        let destination = NSMenuItem(title: TerminalLinks.preview(link), action: nil, keyEquivalent: "")
+        destination.isEnabled = false
+        menu.addItem(destination)
+
+        if let page = TerminalLinks.webURL(link) {
+            // The same route a Cmd-click takes: this app's own browser pane.
+            menu.addItem(ActionMenuItem("Open Link") { [weak terminal] in
+                guard let terminal else { return }
+                terminal.requestOpenLink(source: terminal, link: page.absoluteString, params: [:])
+            })
+            menu.addItem(ActionMenuItem("Open in Default Browser") {
+                NSWorkspace.shared.open(page)
+            })
+        }
+        menu.addItem(ActionMenuItem("Copy Link") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(link, forType: .string)
+        })
+        menu.addItem(.separator())
     }
 
     @MainActor

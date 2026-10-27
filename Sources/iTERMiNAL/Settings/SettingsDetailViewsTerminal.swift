@@ -110,7 +110,12 @@ struct TerminalSettingsView: View {
                         Text(style.label).tag(style.tag)
                     }
                 }
-                Text("Applies to new terminals.")
+                Picker("Animation", selection: $settings.cursorAnimationTag) {
+                    ForEach(CursorAnimation.allCases) { animation in
+                        Text(animation.label).tag(animation.rawValue)
+                    }
+                }
+                Text("An animation takes the place of the blink, while the terminal is the one you are typing in. It is drawn by the default renderer, so it does nothing with GPU rendering on, and it is off while Reduce Motion is. Applies to open terminals as they come into view.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
