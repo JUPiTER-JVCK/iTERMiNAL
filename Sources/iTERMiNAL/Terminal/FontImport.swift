@@ -43,9 +43,28 @@ enum FontImport {
         }
     }
 
+    /// What follows the last slash: a name with `..` or a slash in it has to
+    /// land in the folder, not beside it.
+    private static func lastComponent(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: true).last.map(String.init) ?? ""
+    }
+
+    /// A file name as its stem and its lower-case extension, worked out here and
+    /// not left to `NSString`, which does not agree with itself between
+    /// platforms about a name that is nothing but dots: the Mac finds no
+    /// extension in "...ttf", the Linux the logic checks also run on finds ".ttf"
+    /// after "..". The extension is what follows the last dot, and only when
+    /// something other than dots comes before it: ".ttf" is a hidden file
+    /// without one, not a font called "ttf".
+    static func split(_ name: String) -> (stem: String, ext: String) {
+        guard let dot = name.lastIndex(of: "."),
+              name[name.startIndex..<dot].contains(where: { $0 != "." }) else { return (name, "") }
+        return (String(name[name.startIndex..<dot]), name[name.index(after: dot)...].lowercased())
+    }
+
     /// Nil when a file called `fileName` of `size` bytes may be imported.
     static func refusal(fileName: String, size: Int) -> Refusal? {
-        let ext = (fileName as NSString).pathExtension.lowercased()
+        let ext = split(lastComponent(fileName)).ext
         guard allowedExtensions.contains(ext) else { return .notAFont(fileName) }
         guard size > 0 else { return .empty }
         guard size <= maxBytes else { return .tooLarge }
@@ -59,10 +78,8 @@ enum FontImport {
     /// to a sane length with its extension intact, and a name already taken gets
     /// a number rather than replacing what is there.
     static func storedName(for fileName: String, existing: Set<String>) -> String {
-        let last = (fileName as NSString).lastPathComponent
-        let ext = (last as NSString).pathExtension.lowercased()
-        var stem = (last as NSString).deletingPathExtension
-        stem = String(stem.unicodeScalars.map { scalar -> Character in
+        let (rawStem, ext) = split(lastComponent(fileName))
+        var stem = String(rawStem.unicodeScalars.map { scalar -> Character in
             let ok = (scalar.value < 128 && (CharacterSet.alphanumerics.contains(scalar) || " ._-()".unicodeScalars.contains(scalar)))
             return ok ? Character(scalar) : "_"
         })

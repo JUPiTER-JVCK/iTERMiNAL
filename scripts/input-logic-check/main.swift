@@ -3988,7 +3988,7 @@ do {
     for good in ["JetBrainsMono-Regular.ttf", "a.otf", "Fonts.ttc", "x.OTC", "UPPER.TTF", "My Font (1).ttf"] {
         check(FontImport.refusal(fileName: good, size: 1000) == nil, "importable: \(good)")
     }
-    for bad in ["notes.txt", "face.woff", "face.woff2", "face.pfb", "face.dfont", "face", "face.ttf.exe", "face.zip", ".ttf"] {
+    for bad in ["notes.txt", "face.woff", "face.woff2", "face.pfb", "face.dfont", "face", "face.ttf.exe", "face.zip", ".ttf", "...ttf", "face."] {
         check(FontImport.refusal(fileName: bad, size: 1000) != nil, "refused: \(bad)")
     }
     check(FontImport.refusal(fileName: "a.ttf", size: 0) == .empty, "an empty file is refused")
@@ -4004,7 +4004,15 @@ do {
     check(FontImport.storedName(for: "a/b\\c:d*e?.ttf", existing: []).hasSuffix(".ttf") && !FontImport.storedName(for: "a:b*c?.ttf", existing: []).contains("*"),
           "odd characters do not survive")
     check(FontImport.storedName(for: ".hidden.ttf", existing: []) == "hidden.ttf", "a name cannot start with a dot")
-    check(FontImport.storedName(for: "...ttf", existing: []).hasSuffix(".ttf"), "dots only still makes a name")
+    check(FontImport.storedName(for: "...", existing: []) == "font", "dots only still makes a name")
+    let dotted = FontImport.storedName(for: "...ttf", existing: [])
+    check(!dotted.isEmpty && !dotted.hasPrefix("."), "a name made of dots and an extension is neither empty nor hidden (\(dotted))")
+    check(FontImport.split("a.b.TTF") == (stem: "a.b", ext: "ttf"), "the extension is after the last dot, in lower case")
+    check(FontImport.split(".hidden.ttf") == (stem: ".hidden", ext: "ttf"), "a dot at the start is part of the stem")
+    check(FontImport.split("...ttf") == (stem: "...ttf", ext: ""), "dots before the last dot are no stem: no extension")
+    check(FontImport.split(".ttf") == (stem: ".ttf", ext: ""), "a hidden file has no extension")
+    check(FontImport.split("face") == (stem: "face", ext: ""), "no dot, no extension")
+    check(FontImport.split("face.") == (stem: "face", ext: ""), "a trailing dot is an empty extension")
     check(FontImport.storedName(for: "Ünïcode.TTF", existing: []) == "_n_code.ttf", "non-ASCII letters become underscores and the extension is lower-case")
     let longName = String(repeating: "a", count: 300) + ".ttf"
     check(FontImport.storedName(for: longName, existing: []).count <= 85, "a long name is cut")
