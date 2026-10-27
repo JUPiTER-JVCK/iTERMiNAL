@@ -546,6 +546,28 @@ final class WorkspaceStore: ObservableObject {
         workspaces.flatMap(\.tabs).filter(\.isPinned)
     }
 
+    /// Moves a tab to sit just before `target` in `destination`, or last in it
+    /// when `target` is nil — within its own workspace or into another. Which
+    /// tab is selected does not change: it is the same tab, somewhere else.
+    func moveTab(_ id: UUID, before target: WorkspaceTab?, in destination: Workspace) {
+        guard target?.id != id,
+              let source = workspace(containingTab: id),
+              let tab = source.tabs.first(where: { $0.id == id }) else { return }
+        let pool = source === destination ? destination.tabs : destination.tabs + [tab]
+        let byID = Dictionary(pool.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let order = TabOrder.placing(id, before: target?.id, in: destination.tabs.map(\.id))
+        let arranged = order.compactMap { byID[$0] }
+        // Nothing is touched until the new order is known to hold every tab.
+        guard arranged.count == pool.count else { return }
+        if source !== destination {
+            source.tabs.removeAll { $0 === tab }
+        }
+        if arranged.map(\.id) != destination.tabs.map(\.id) {
+            destination.tabs = arranged
+            scheduleSave()
+        }
+    }
+
     func togglePin(_ tab: WorkspaceTab) {
         tab.isPinned.toggle()
         scheduleSave()

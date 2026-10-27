@@ -200,6 +200,7 @@ jobs:
             Sources/iTERMiNAL/Terminal/FontImport.swift \
             Sources/iTERMiNAL/Terminal/ToolsPath.swift \
             Sources/iTERMiNAL/Terminal/EditorCommand.swift \
+            Sources/iTERMiNAL/Workspace/TabOrder.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

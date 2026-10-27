@@ -4155,5 +4155,30 @@ do {
     check(EditorChoice.custom.candidates.isEmpty, "a custom command has no program to look for")
 }
 
+// MARK: Tab order
+
+do {
+    let a = UUID(), b = UUID(), c = UUID(), d = UUID(), missing = UUID()
+    check(TabOrder.placing(c, before: a, in: [a, b, c]) == [c, a, b], "a tab dragged to the top goes before the first")
+    check(TabOrder.placing(a, before: c, in: [a, b, c]) == [b, a, c], "a tab dragged down goes before its target")
+    check(TabOrder.placing(a, before: nil, in: [a, b, c]) == [b, c, a], "no target is last")
+    check(TabOrder.placing(a, before: missing, in: [a, b, c]) == [b, c, a], "a target that is not there is last")
+    check(TabOrder.placing(b, before: b, in: [a, b, c]) == [a, b, c], "dropped on itself, nothing changes")
+    check(TabOrder.placing(b, before: c, in: [a, b, c]) == [a, b, c], "dropped where it already is, nothing changes")
+    check(TabOrder.placing(d, before: b, in: [a, b, c]) == [a, d, b, c], "a tab from another project is put before its target")
+    check(TabOrder.placing(d, before: nil, in: [a, b, c]) == [a, b, c, d], "…or last")
+    check(TabOrder.placing(a, before: nil, in: []) == [a], "into an empty project")
+    check(TabOrder.placing(a, before: b, in: [a, a, b]).filter { $0 == a }.count == 1, "a tab is never listed twice")
+    for id in [a, b, c] {
+        for target in [a, b, c, nil] as [UUID?] {
+            let order = TabOrder.placing(id, before: target, in: [a, b, c])
+            check(order.count == 3 && Set(order) == [a, b, c], "moving keeps every tab exactly once")
+            if let target, target != id, let at = order.firstIndex(of: id) {
+                check(order.firstIndex(of: target) == at + 1, "the tab sits right before its target")
+            }
+        }
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
