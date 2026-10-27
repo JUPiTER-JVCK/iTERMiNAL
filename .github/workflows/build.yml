@@ -199,6 +199,7 @@ jobs:
             Sources/iTERMiNAL/Terminal/CursorAnimation.swift \
             Sources/iTERMiNAL/Terminal/FontImport.swift \
             Sources/iTERMiNAL/Terminal/ToolsPath.swift \
+            Sources/iTERMiNAL/Terminal/EditorCommand.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 

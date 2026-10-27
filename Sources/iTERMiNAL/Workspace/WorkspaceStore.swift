@@ -441,6 +441,39 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// A new tab in `directory` that runs `line` as soon as its shell is up.
+    ///
+    /// Only for a line this app built itself, with what goes into it checked —
+    /// see `EditorCommand`. Text that came from anywhere else belongs in
+    /// `newTab(typing:)`, which leaves Return to the person.
+    func newTab(directory: String?, running line: String) {
+        let tab = newTab(directory: directory)
+        guard let session = tab.root.firstTerminal() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak session] in
+            session?.send(text: line)
+        }
+    }
+
+    /// Opens the file at `path` in the editor chosen under Settings → General,
+    /// in a new tab beside where it lives. Returns what to tell the person when
+    /// that cannot be done, and nil when the tab is open.
+    @discardableResult
+    func editFile(at path: String) -> String? {
+        let settings = AppSettings.shared
+        switch EditorCommand.line(
+            choice: settings.editorChoice,
+            custom: settings.editorCustomCommand,
+            path: path,
+            locate: SessionLaunch.resolveExecutable
+        ) {
+        case .success(let line):
+            newTab(directory: (path as NSString).deletingLastPathComponent, running: line)
+            return nil
+        case .failure(let problem):
+            return problem.message
+        }
+    }
+
     /// A tab signed in to `connection` whose sign-in the file browser can use,
     /// for a host that wants a password. The tab is the same ssh a connection
     /// opens anywhere else, told to keep its connection open to others; the

@@ -76,7 +76,8 @@ extension ScreenshotMode {
         size: NSSize?,
         name: String,
         in directory: URL,
-        scrolledToEnd: Bool = false
+        scrolledToEnd: Bool = false,
+        scrolledTo fraction: Double? = nil
     ) async -> Bool {
         let settings = AppSettings.shared
         let root = content
@@ -106,7 +107,10 @@ extension ScreenshotMode {
         window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: target), display: true)
         window.makeKeyAndOrderFront(nil)
         await pause(2.0)
-        if scrolledToEnd {
+        if scrolledToEnd || fraction != nil {
+            // How far down: all the way, or a fraction of the way, of what
+            // does not fit.
+            let share = scrolledToEnd ? 1.0 : min(max(fraction ?? 0, 0), 1)
             // The widest scroll view is the page; the narrow one beside it is the
             // list of pages.
             let scrollers = allViews(of: NSScrollView.self, in: hosting)
@@ -115,7 +119,9 @@ extension ScreenshotMode {
                 let overflow = document.frame.height - page.contentView.bounds.height
                 say("\(name): the page is \(Int(document.frame.height)) high in a view \(Int(page.contentView.bounds.height)) high")
                 if overflow > 0 {
-                    page.contentView.scroll(to: NSPoint(x: 0, y: document.isFlipped ? overflow : 0))
+                    // Not a flipped document: the origin is at the bottom, so 0 is the end.
+                    let top = overflow * share
+                    page.contentView.scroll(to: NSPoint(x: 0, y: document.isFlipped ? top : overflow - top))
                     page.reflectScrolledClipView(page.contentView)
                     await pause(0.8)
                 }

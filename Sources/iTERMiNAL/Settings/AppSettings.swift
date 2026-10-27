@@ -39,6 +39,12 @@ final class AppSettings: ObservableObject {
     @Published var shellPath: String { didSet { defaults.set(shellPath, forKey: "shellPath") } }
     @Published var loginShell: Bool { didSet { defaults.set(loginShell, forKey: "loginShell") } }
     @Published var defaultDirectory: String { didSet { defaults.set(defaultDirectory, forKey: "defaultDirectory") } }
+    /// An `EditorChoice` raw value: what "Edit in Terminal" opens a file in.
+    /// Kept as the string so a name this build does not know is read as
+    /// automatic and not lost.
+    @Published var editorChoiceTag: String { didSet { defaults.set(editorChoiceTag, forKey: "editorChoiceTag") } }
+    /// The command for `EditorChoice.custom`; the file is added at its end.
+    @Published var editorCustomCommand: String { didSet { defaults.set(editorCustomCommand, forKey: "editorCustomCommand") } }
 
     // MARK: Appearance
     @Published var theme: ThemeChoice {
@@ -287,6 +293,8 @@ final class AppSettings: ObservableObject {
         restoreSession = defaults.object(forKey: "restoreSession") as? Bool ?? true
         shellPath = defaults.string(forKey: "shellPath") ?? ""
         loginShell = defaults.object(forKey: "loginShell") as? Bool ?? true
+        editorChoiceTag = defaults.string(forKey: "editorChoiceTag") ?? EditorChoice.automatic.rawValue
+        editorCustomCommand = defaults.string(forKey: "editorCustomCommand") ?? ""
         defaultDirectory = defaults.string(forKey: "defaultDirectory") ?? ""
 
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
@@ -474,6 +482,10 @@ final class AppSettings: ObservableObject {
 
     /// The font every terminal draws with, backed by the bundled Nerd Font
     /// symbols for the icons it has no glyphs for — see `SymbolsFont`.
+    var editorChoice: EditorChoice {
+        EditorChoice(rawValue: editorChoiceTag) ?? .automatic
+    }
+
     func resolvedTerminalFont() -> NSFont {
         // Fonts the person imported are registered the first time this is
         // asked, before the name below is looked up.
@@ -551,6 +563,8 @@ final class AppSettings: ObservableObject {
         restoreSession = true
         shellPath = ""
         loginShell = true
+        editorChoiceTag = EditorChoice.automatic.rawValue
+        editorCustomCommand = ""
         defaultDirectory = ""
         theme = .system
         accentID = "green"

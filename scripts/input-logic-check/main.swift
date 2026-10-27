@@ -4062,5 +4062,98 @@ do {
     check(ToolsPath.appending("/a\0b", to: "/usr/bin") == "/usr/bin", "a NUL cannot be in an entry")
 }
 
+// MARK: Editor command
+
+do {
+    func installed(_ names: [String: String]) -> (String) -> String? {
+        { names[$0] }
+    }
+    func line(_ choice: EditorChoice, _ path: String, custom: String = "", have: [String: String] = [:]) -> String? {
+        if case .success(let text) = EditorCommand.line(choice: choice, custom: custom, path: path, locate: installed(have)) { return text }
+        return nil
+    }
+    func problem(_ choice: EditorChoice, _ path: String, custom: String = "", have: [String: String] = [:]) -> EditorCommand.Problem? {
+        if case .failure(let why) = EditorCommand.line(choice: choice, custom: custom, path: path, locate: installed(have)) { return why }
+        return nil
+    }
+    let all = ["hx": "/opt/homebrew/bin/hx", "nvim": "/opt/homebrew/bin/nvim", "vim": "/usr/bin/vim", "nano": "/usr/bin/nano"]
+
+    check(line(.automatic, "/tmp/a.txt", have: all) == "/opt/homebrew/bin/hx /tmp/a.txt\r", "automatic prefers Helix")
+    var withoutHelix = all; withoutHelix["hx"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/opt/homebrew/bin/nvim /tmp/a.txt\r", "…then Neovim")
+    withoutHelix["nvim"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/usr/bin/vim /tmp/a.txt\r", "…then Vim")
+    withoutHelix["vim"] = nil
+    check(line(.automatic, "/tmp/a.txt", have: withoutHelix) == "/usr/bin/nano /tmp/a.txt\r", "…then Nano")
+    check(problem(.automatic, "/tmp/a.txt") == .notInstalled(label: "Automatic", hint: nil), "none of them: not installed, with nothing to install")
+    check(line(.helix, "/tmp/a.txt", have: ["helix": "/usr/local/bin/helix"]) == "/usr/local/bin/helix /tmp/a.txt\r", "Helix under its other name")
+    check(line(.helix, "/tmp/a.txt", have: ["vim": "/usr/bin/vim"]) == nil, "a chosen editor is not swapped for another")
+    check(problem(.helix, "/tmp/a.txt", have: ["vim": "/usr/bin/vim"]) == .notInstalled(label: "Helix", hint: "brew install helix"), "Helix says how to get it")
+    check(problem(.neovim, "/tmp/a.txt") == .notInstalled(label: "Neovim", hint: "brew install neovim"), "Neovim says how to get it")
+    check(problem(.vim, "/tmp/a.txt") == .notInstalled(label: "Vim", hint: nil), "Vim ships with macOS, so there is nothing to install")
+    check(line(.vim, "/tmp/a.txt", have: ["vim": "vim"]) == nil, "a program found by a relative path is not used")
+    check(EditorCommand.Problem.notInstalled(label: "Helix", hint: "brew install helix").message.contains("brew install helix"), "the message carries the hint")
+
+    // The path is typed into a shell: it has to survive one.
+    check(line(.vim, "/tmp/my file.txt", have: all) == "/usr/bin/vim '/tmp/my file.txt'\r", "a space is quoted")
+    check(line(.vim, "/tmp/it's.txt", have: all) == "/usr/bin/vim '/tmp/it'\\''s.txt'\r", "a single quote is closed, escaped and reopened")
+    check(line(.vim, "/tmp/a;b.txt", have: all) == "/usr/bin/vim '/tmp/a;b.txt'\r", "a semicolon is quoted")
+    check(line(.vim, "/tmp/$(id).txt", have: all) == "/usr/bin/vim '/tmp/$(id).txt'\r", "a command substitution is quoted")
+    check(line(.vim, "/tmp/`id`.txt", have: all) == "/usr/bin/vim '/tmp/`id`.txt'\r", "backticks are quoted")
+    check(line(.vim, "/tmp/café.txt", have: all) == "/usr/bin/vim '/tmp/café.txt'\r", "non-ASCII is quoted, and kept")
+    for unusable in ["tmp/a.txt", "-rf", "-", "", "~/a.txt", "a.txt", "/tmp/a\nrm -rf ~\n", "/tmp/a\r", "/tmp/a\tb", "/tmp/a\u{1B}b",
+                     "/tmp/a\u{7F}", "/tmp/a\u{0}b", "/tmp/a\u{85}b"] {
+        check(problem(.vim, unusable, have: all) == .unusablePath, "a path that cannot be typed: \(unusable.debugDescription)")
+    }
+    for path in ["/tmp/a.txt", "/tmp/a b.txt", "/tmp/it's.txt", "/tmp/a;b&c|d.txt", "/tmp/$HOME/{a,b}*?.txt", "/tmp/日本語.txt", "/"] {
+        if let typed = line(.vim, path, have: all) {
+            let body = typed.dropLast()
+            check(typed.hasSuffix("\r") && !EditorCommand.hasControlCharacter(String(body)), "one Return, at the end, and nothing else a terminal would act on: \(path.debugDescription)")
+        } else {
+            check(false, "a usable path is accepted: \(path.debugDescription)")
+        }
+    }
+
+    // Quoting survives a round trip through a POSIX shell's rules for single quotes.
+    func unquote(_ text: String) -> String {
+        var result = ""
+        var index = text.startIndex
+        var quoted = false
+        while index < text.endIndex {
+            let character = text[index]
+            if quoted {
+                if character == "'" { quoted = false } else { result.append(character) }
+            } else if character == "'" {
+                quoted = true
+            } else if character == "\\" {
+                index = text.index(after: index)
+                if index < text.endIndex { result.append(text[index]) }
+            } else {
+                result.append(character)
+            }
+            index = text.index(after: index)
+        }
+        return result
+    }
+    for tricky in ["a b", "it's", "''", "'", "a'b'c", "\\", "a\\'b", "$x", "`x`", "*", "[a]", "~", "#x", "a&b", "a>b", "日本", "😀", " leading", "trailing "] {
+        check(unquote(EditorCommand.quote(tricky)) == tricky, "quoting round-trips: \(tricky.debugDescription)")
+    }
+    check(EditorCommand.quote("plain/path-1.txt") == "plain/path-1.txt", "a plain word is left alone")
+    check(EditorCommand.quote("") == "''", "an empty word is two quotes")
+
+    // A custom command.
+    check(line(.custom, "/tmp/a.txt", custom: "code -w") == "code -w /tmp/a.txt\r", "a custom command gets the file added")
+    check(line(.custom, "/tmp/a b.txt", custom: "  code -w  ") == "code -w '/tmp/a b.txt'\r", "…trimmed, with the file quoted")
+    check(problem(.custom, "/tmp/a.txt", custom: "   ") == .emptyCustom, "no command is a problem")
+    check(problem(.custom, "/tmp/a.txt", custom: "code\nrm -rf ~") == .unusableCustom, "a custom command is one line")
+    check(problem(.custom, "/tmp/a.txt", custom: "code\u{1B}[2J") == .unusableCustom, "…with nothing a terminal would act on")
+    check(problem(.custom, "bad", custom: "code") == .unusablePath, "the path is checked for a custom command too")
+
+    check(EditorChoice.allCases.count == 6 && Set(EditorChoice.allCases.map(\.label)).count == 6, "six choices that read differently")
+    check(EditorChoice(rawValue: "emacs") == nil, "a name from another build reads as nothing, for the caller to default")
+    check(EditorChoice.automatic.candidates.first == "hx", "automatic looks for Helix first")
+    check(EditorChoice.custom.candidates.isEmpty, "a custom command has no program to look for")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

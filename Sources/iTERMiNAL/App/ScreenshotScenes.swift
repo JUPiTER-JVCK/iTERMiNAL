@@ -1481,6 +1481,22 @@ final class ScreenshotRun {
             )
         }
 
+        // The Terminal page again, a little over a third of the way down: the
+        // font picker with its preview and the Import button, and the cursor
+        // choices, which the first screenful of that page does not reach. Only
+        // looked at; the installed fonts are this runner's.
+        for (fraction, name) in [(0.35, "settings-terminal-font"), (0.6, "settings-terminal-cursor")] {
+            await scene(name) {
+                await ScreenshotMode.host(
+                    SettingsRootView(initialSection: .terminal),
+                    size: NSSize(width: 940, height: 640),
+                    name: name,
+                    in: self.directory,
+                    scrolledTo: fraction
+                )
+            }
+        }
+
         // The default directory is a field, and shows what it holds: written
         // with the home folder as ~, which the app expands, rather than as
         // wherever this machine's is.
