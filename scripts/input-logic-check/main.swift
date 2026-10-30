@@ -4591,5 +4591,21 @@ do {
     }
 }
 
+// MARK: Visual option limits
+
+do {
+    check(VisualRange.clamp(1.0, to: VisualRange.lineSpacing) == 1.0, "a value in range is kept")
+    check(VisualRange.clamp(0.1, to: VisualRange.lineSpacing) == 0.8 && VisualRange.clamp(9, to: VisualRange.lineSpacing) == 1.6,
+          "line spacing is held to its range")
+    check(VisualRange.clamp(0, to: VisualRange.animationSpeed) == 0.5 && VisualRange.clamp(50, to: VisualRange.animationSpeed) == 2.0,
+          "animation speed is held to its range, so it can neither stall nor run away")
+    check(VisualRange.clamp(.nan, to: VisualRange.lineSpacing) == 1 && VisualRange.clamp(.infinity, to: VisualRange.animationSpeed) == 1,
+          "a damaged stored value becomes the default")
+    check(FrameStyle.parseHex(FrameStyle.hexString(0x1E1E2E)) == 0x1E1E2E && FrameStyle.hexString(0x00AB12) == "#00AB12",
+          "a picked colour survives being stored as text")
+    check(FrameStyle.parseHex("") == nil && FrameStyle.parseHex("#12") == nil && FrameStyle.parseHex("zzzzzz") == nil,
+          "an empty or damaged override means no override")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

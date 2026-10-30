@@ -18,6 +18,14 @@ import AppKit
 /// transitions therefore take the value from the view's own
 /// `accessibilityReduceMotion` environment, which SwiftUI does refresh.
 enum Motion {
+    /// How much faster than designed every animation runs (Settings →
+    /// Appearance → Effects). Set by `AppSettings`; 1 leaves them as drawn.
+    static var speed: Double = 1
+
+    private static func paced(_ animation: Animation) -> Animation {
+        speed == 1 ? animation : animation.speed(speed)
+    }
+
     /// Whether the person asked the system to cut down on movement.
     static var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -30,33 +38,33 @@ enum Motion {
 
     /// Side panels sliding in from the trailing edge.
     static var panel: Animation {
-        reduceMotion ? shortEase : .spring(response: 0.32, dampingFraction: 0.86)
+        paced(reduceMotion ? shortEase : .spring(response: 0.32, dampingFraction: 0.86))
     }
     /// Sidebar section disclosure.
     static var disclosure: Animation {
-        reduceMotion ? shortEase : .spring(response: 0.22, dampingFraction: 0.9)
+        paced(reduceMotion ? shortEase : .spring(response: 0.22, dampingFraction: 0.9))
     }
     /// Command palette appear/dismiss.
-    static let palette = Animation.easeOut(duration: 0.16)
+    static var palette: Animation { paced(.easeOut(duration: 0.16)) }
     /// Status and notice banners.
     static var banner: Animation {
-        reduceMotion ? shortEase : .spring(response: 0.28, dampingFraction: 0.88)
+        paced(reduceMotion ? shortEase : .spring(response: 0.28, dampingFraction: 0.88))
     }
 
     /// The composer's input field warming on focus.
-    static let field = Animation.easeOut(duration: 0.18)
+    static var field: Animation { paced(.easeOut(duration: 0.18)) }
     /// A control giving under the pointer: quick, with a little give.
-    static let press = Animation.spring(response: 0.22, dampingFraction: 0.68)
+    static var press: Animation { paced(.spring(response: 0.22, dampingFraction: 0.68)) }
 
     /// A row's background warming when the pointer arrives or the row is
     /// selected, and the controls that appear on it. A colour change, not
     /// movement, so Reduce Motion leaves it as it is: it is only quick enough
     /// to stop the change reading as a flash.
-    static let hover = Animation.easeOut(duration: 0.14)
+    static var hover: Animation { paced(.easeOut(duration: 0.14)) }
 
     /// The composer's suggestion list opening, and its highlight moving between
     /// rows. A little give, but settled quickly: it is in the way of typing.
-    static let suggestion = Animation.spring(response: 0.24, dampingFraction: 0.86)
+    static var suggestion: Animation { paced(.spring(response: 0.24, dampingFraction: 0.86)) }
 
     /// Pass the view's `@Environment(\.accessibilityReduceMotion)`, not
     /// `Motion.reduceMotion`; see the note above.

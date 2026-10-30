@@ -93,7 +93,7 @@ final class AppSettings: ObservableObject {
     var frameTintHex: UInt32? {
         FrameStyle.tintHex(
             source: frameTintSource,
-            accentHex: Accents.hex(for: accentID),
+            accentHex: resolvedAccentHex,
             customHex: frameCustomValue
         )
     }
@@ -105,7 +105,7 @@ final class AppSettings: ObservableObject {
         return Color(p3: FrameStyle.frameHex(
             base: Theme.sidebarHex(for: scheme),
             source: frameTintSource,
-            accentHex: Accents.hex(for: accentID),
+            accentHex: resolvedAccentHex,
             customHex: frameCustomValue,
             strength: frameTintStrength
         ))
@@ -150,6 +150,24 @@ final class AppSettings: ObservableObject {
     /// Whether a new ssh tab keeps its connection open for the file browser and
     /// the port scan to use, so a host that wants a password needs signing in
     /// to once, in a tab, and nothing else. See `SSHControlSocket`.
+    /// "#RRGGBB" overrides for the terminal cursor, the text under it and the
+    /// selection. Empty keeps what the theme gives.
+    @Published var cursorColorHex: String { didSet { defaults.set(cursorColorHex, forKey: "cursorColorHex") } }
+    @Published var cursorTextColorHex: String { didSet { defaults.set(cursorTextColorHex, forKey: "cursorTextColorHex") } }
+    @Published var selectionColorHex: String { didSet { defaults.set(selectionColorHex, forKey: "selectionColorHex") } }
+    /// Whether bold text in the eight dark ANSI colours is drawn in the bright ones.
+    @Published var boldAsBright: Bool { didSet { defaults.set(boldAsBright, forKey: "boldAsBright") } }
+    /// Multiplier on the terminal's line height. See `VisualRange`.
+    @Published var terminalLineSpacing: Double { didSet { defaults.set(terminalLineSpacing, forKey: "terminalLineSpacing") } }
+    /// The accent when `accentID` is "custom", as "#RRGGBB".
+    @Published var customAccentHex: String { didSet { defaults.set(customAccentHex, forKey: "customAccentHex") } }
+    /// Multiplier on every animation's pace. See `Motion`.
+    @Published var animationSpeed: Double {
+        didSet {
+            defaults.set(animationSpeed, forKey: "animationSpeed")
+            Motion.speed = animationSpeed
+        }
+    }
     @Published var shareSignInWithFiles: Bool { didSet { defaults.set(shareSignInWithFiles, forKey: "shareSignInWithFiles") } }
     /// Forwards kept in Settings and run in the background. See `SavedTunnel`.
     @Published var savedTunnels: [SavedTunnel] {
@@ -383,6 +401,18 @@ final class AppSettings: ObservableObject {
         httpGeolocationEnabled = defaults.bool(forKey: "httpGeolocationEnabled")
         httpGeolocationTemplate = defaults.string(forKey: "httpGeolocationTemplate") ?? GeoLookup.defaultTemplate
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
+        cursorColorHex = defaults.string(forKey: "cursorColorHex") ?? ""
+        cursorTextColorHex = defaults.string(forKey: "cursorTextColorHex") ?? ""
+        selectionColorHex = defaults.string(forKey: "selectionColorHex") ?? ""
+        boldAsBright = defaults.object(forKey: "boldAsBright") as? Bool ?? true
+        terminalLineSpacing = VisualRange.clamp(
+            defaults.object(forKey: "terminalLineSpacing") as? Double ?? 1, to: VisualRange.lineSpacing)
+        customAccentHex = defaults.string(forKey: "customAccentHex") ?? FrameStyle.hexString(0x10A37F)
+        let storedSpeed = VisualRange.clamp(
+            defaults.object(forKey: "animationSpeed") as? Double ?? 1, to: VisualRange.animationSpeed)
+        animationSpeed = storedSpeed
+        // `didSet` does not run in an initialiser.
+        Motion.speed = storedSpeed
         splitFocusStyleTag = defaults.string(forKey: "splitFocusStyleTag") ?? SplitFocusStyle.standard.rawValue
         splitFocusColorTag = defaults.string(forKey: "splitFocusColorTag") ?? SplitFocusColor.accent.rawValue
         customTerminalPadding = defaults.bool(forKey: "customTerminalPadding")
@@ -533,7 +563,19 @@ final class AppSettings: ObservableObject {
         NSApp?.appearance = appearance
     }
 
-    var accentColor: Color { Accents.color(for: accentID) }
+    /// The accent as 0xRRGGBB: one of the named ones, or the person's own.
+    var resolvedAccentHex: UInt32 {
+        if accentID == "custom", let own = FrameStyle.parseHex(customAccentHex) { return own }
+        return Accents.hex(for: accentID)
+    }
+
+    var accentColor: Color { Color(hex: resolvedAccentHex) }
+
+    /// A colour override as a colour, or nil when none is set (or it is damaged).
+    func colorOverride(_ hex: String) -> NSColor? {
+        guard let value = FrameStyle.parseHex(hex) else { return nil }
+        return NSColor(hex: value)
+    }
 
     /// Whether the app is showing its dark appearance right now — the colour
     /// scheme SwiftUI hands its views, readable where there is no view.
@@ -657,6 +699,12 @@ final class AppSettings: ObservableObject {
         httpGeolocationEnabled = false
         httpGeolocationTemplate = GeoLookup.defaultTemplate
         shareSignInWithFiles = true
+        cursorColorHex = ""
+        cursorTextColorHex = ""
+        selectionColorHex = ""
+        boldAsBright = true
+        terminalLineSpacing = 1
+        animationSpeed = 1
         splitFocusStyleTag = SplitFocusStyle.standard.rawValue
         splitFocusColorTag = SplitFocusColor.accent.rawValue
         customTerminalPadding = false

@@ -57,6 +57,11 @@ final class TerminalSession: ObservableObject, Identifiable {
         var gpuRequested: Bool
         var cursorStyleTag: String
         var cursorAnimationTag: String
+        var cursorColorHex: String
+        var cursorTextColorHex: String
+        var selectionColorHex: String
+        var boldAsBright: Bool
+        var lineSpacing: Double
     }
     private var appliedStyling: StylingInputs?
 
@@ -350,7 +355,12 @@ final class TerminalSession: ObservableObject, Identifiable {
             backgroundOpacity: effectiveBackgroundOpacity(settings),
             gpuRequested: settings.useGPURendering,
             cursorStyleTag: settings.cursorStyleTag,
-            cursorAnimationTag: settings.cursorAnimationTag
+            cursorAnimationTag: settings.cursorAnimationTag,
+            cursorColorHex: settings.cursorColorHex,
+            cursorTextColorHex: settings.cursorTextColorHex,
+            selectionColorHex: settings.selectionColorHex,
+            boldAsBright: settings.boldAsBright,
+            lineSpacing: settings.terminalLineSpacing
         )
         guard inputs != appliedStyling else { return }
         appliedStyling = inputs
@@ -361,7 +371,13 @@ final class TerminalSession: ObservableObject, Identifiable {
             font: settings.resolvedTerminalFont(),
             background: theme.backgroundColor,
             foreground: theme.foregroundColor,
-            backgroundAlpha: CGFloat(inputs.backgroundOpacity)
+            backgroundAlpha: CGFloat(inputs.backgroundOpacity),
+            // A bundled tool draws its own colours and keeps its own cursor.
+            cursorColor: kind.isTool ? nil : settings.colorOverride(inputs.cursorColorHex),
+            cursorTextColor: kind.isTool ? nil : settings.colorOverride(inputs.cursorTextColorHex),
+            selectionColor: settings.colorOverride(inputs.selectionColorHex),
+            boldAsBright: inputs.boldAsBright,
+            lineSpacing: kind.isTool ? 1 : CGFloat(inputs.lineSpacing)
         ))
         let active = engine.setGPUAcceleration(settings.useGPURendering)
         if isGPUAccelerated != active {

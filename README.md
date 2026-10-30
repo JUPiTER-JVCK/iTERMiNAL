@@ -812,6 +812,24 @@ and which are not (this machine only). Process names appear only where the
 machine's own tools give them — `ss` and `lsof` show other accounts' sockets
 without a name — so a blank name never means nothing owns the port.
 
+### Colors, text and effects
+
+**Settings → Terminal** can override the cursor color, the color of the text
+under it and the selection color (each off by default, keeping the theme's), turn
+off drawing bold text in bright colors, and set the line height from 0.8× to
+1.6×. **Edit a theme** duplicates the current theme into an editable copy — its
+background, text and all sixteen ANSI colors, with the changes applied as you
+make them — and imported Ghostty themes can be edited the same way. **Settings →
+Appearance** takes any accent color beside the six, and an animation speed from
+0.5× to 2×.
+
+What these cannot do is limited by the terminal engine (SwiftTerm), which has no
+setting for character width, ligatures, a minimum contrast, a hollow block that
+is always on (it draws one only while the terminal is not the focused one), or the
+bold and italic faces. Those would need changes to SwiftTerm, so they are not
+offered rather than offered and ignored. The interface's own text sizes are fixed
+point sizes throughout the views, so there is no global interface scale.
+
 ### Ghostty themes
 
 **Settings → Terminal → Ghostty themes → Import Theme Files…** reads Ghostty
