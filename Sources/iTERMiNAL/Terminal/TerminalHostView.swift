@@ -10,7 +10,15 @@ struct TerminalHostView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> TerminalContainerView {
-        session.startIfNeeded()
+        // Not here: starting a session sets several `@Published` values
+        // (`isRunning`, `startedAt`, `launchError`, `lastActivityAt`), and this
+        // runs while SwiftUI is still computing a view, which it logs as
+        // "Publishing changes from within view updates is not allowed". The next
+        // turn of the run loop is early enough: nothing is drawn by a shell in
+        // between. `startIfNeeded` does nothing a second time, so a session that
+        // two views ask for starts once.
+        let starting = session
+        DispatchQueue.main.async { starting.startIfNeeded() }
         session.applyStyling(settings: settings, darkMode: colorScheme == .dark)
         let terminal = session.engine.view
         let container = TerminalContainerView(terminal: terminal)
