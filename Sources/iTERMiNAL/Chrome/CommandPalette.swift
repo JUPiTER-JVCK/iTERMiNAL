@@ -249,7 +249,7 @@ struct CommandPaletteView: View {
             })
         }
 
-        for theme in TerminalTheme.all {
+        for theme in TerminalTheme.available {
             actions.append(PaletteAction(
                 id: "theme.\(theme.id)",
                 title: "Terminal Theme: \(theme.name)",

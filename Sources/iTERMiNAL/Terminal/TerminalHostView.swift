@@ -26,6 +26,7 @@ struct TerminalHostView: NSViewRepresentable {
     func updateNSView(_ nsView: TerminalContainerView, context: Context) {
         session.applyStyling(settings: settings, darkMode: colorScheme == .dark)
         nsView.syncBackground()
+        nsView.refreshPadding()
         let terminal = nsView.terminal
         let sessionID = session.id
         // Cheap synchronous filter before the hop. This method runs on every
@@ -93,7 +94,28 @@ enum SeamDrag {
 final class TerminalContainerView: NSView {
     let terminal: NSView
 
-    private static let inset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 4)
+    private static let builtInInset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 4)
+
+    /// The padding the person set, or the built-in one. Read at each layout, so
+    /// a change in Settings is applied by `refreshPadding()` asking for one.
+    private static var inset: NSEdgeInsets {
+        let settings = AppSettings.shared
+        guard settings.customTerminalPadding else { return builtInInset }
+        let horizontal = CGFloat(TerminalPadding.clamp(settings.terminalPaddingHorizontal))
+        let vertical = CGFloat(TerminalPadding.clamp(settings.terminalPaddingVertical))
+        return NSEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+    }
+
+    private var laidOutInset: NSEdgeInsets?
+
+    /// Lays the terminal out again if the padding is no longer what it was laid
+    /// out with. Called on every update, so it asks first and does nothing when
+    /// nothing changed.
+    func refreshPadding() {
+        let now = Self.inset
+        if let last = laidOutInset, NSEdgeInsetsEqual(last, now) { return }
+        needsLayout = true
+    }
 
     private var dragEndObserver: NSObjectProtocol?
 
@@ -159,6 +181,7 @@ final class TerminalContainerView: NSView {
 
     private func applyTerminalFrame() {
         let inset = Self.inset
+        laidOutInset = inset
         let frame = NSRect(
             x: inset.left,
             y: inset.bottom,

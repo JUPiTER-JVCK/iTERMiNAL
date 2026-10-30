@@ -31,7 +31,14 @@ struct TerminalTheme: Identifiable, Equatable {
         if id == "auto" || id.isEmpty {
             return darkMode ? .codexDark : .codexLight
         }
-        return all.first { $0.id == id } ?? (darkMode ? .codexDark : .codexLight)
+        return available.first { $0.id == id } ?? (darkMode ? .codexDark : .codexLight)
+    }
+
+    /// The built-in schemes followed by the ones imported from Ghostty files.
+    /// What a picker lists and what an id is looked up in; `all` stays the
+    /// built-in set alone.
+    static var available: [TerminalTheme] {
+        all + AppSettings.shared.importedThemes.map(\.theme)
     }
 
     /// Twenty schemes, the app's own two plus eighteen widely used open-source
@@ -329,4 +336,39 @@ struct TerminalTheme: Identifiable, Equatable {
         ]
     )
 
+}
+
+
+/// A theme the person imported from a Ghostty theme file, kept as plain
+/// numbers so it survives in preferences and can be rebuilt on launch.
+struct ImportedTerminalTheme: Codable, Identifiable, Equatable {
+    var id: String
+    var name: String
+    var isDark: Bool
+    var background: UInt32
+    var foreground: UInt32
+    var ansi: [UInt32]
+
+    init(name: String, file: GhosttyThemeFile) {
+        id = "imported-" + UUID().uuidString.lowercased()
+        self.name = name
+        isDark = file.isDark
+        background = file.background
+        foreground = file.foreground
+        ansi = file.ansi
+    }
+
+    /// Built only from a record with exactly sixteen colours; a damaged one
+    /// would otherwise put a palette of the wrong length into the terminal.
+    var theme: TerminalTheme {
+        let palette = ansi.count == 16 ? ansi : TerminalTheme.codexDark.ansi
+        return TerminalTheme(
+            id: id,
+            name: name,
+            isDark: isDark,
+            background: background,
+            foreground: foreground,
+            ansi: palette
+        )
+    }
 }

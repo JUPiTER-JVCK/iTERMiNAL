@@ -186,9 +186,9 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            if settings.showSystemMetrics {
+            if settings.showSystemMetrics || settings.showRemotePorts {
                 FadedDivider()
-                DetailBottomStrip()
+                DetailBottomStrip(showMetrics: settings.showSystemMetrics, showPorts: settings.showRemotePorts)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -284,7 +284,8 @@ struct DetailView: View {
     }
 }
 
-/// The machine's vital signs, in the window's bottom-right corner.
+/// The strip along the window's bottom: the machine's vital signs at the right,
+/// and, when it is turned on, the Remote Ports globe at the left.
 ///
 /// A strip rather than a floating card: that corner is exactly where a terminal
 /// writes its newest output, and something hovering over it would cover the one
@@ -292,28 +293,48 @@ struct DetailView: View {
 ///
 /// One line, not the sidebar's two — the detail column has the width for it.
 private struct DetailBottomStrip: View {
+    let showMetrics: Bool
+    let showPorts: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Opposite the machine's figures, so the two never share a corner:
+            // the ports list opens upward from the left, the numbers stay put
+            // on the right.
+            if showPorts {
+                RemotePortsButton()
+            }
+            Spacer(minLength: 12)
+            if showMetrics {
+                SystemMetricsReadout()
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 26)
+    }
+}
+
+/// CPU, memory, GPU and network for this Mac, sampled only while this is on
+/// screen: someone who has turned the numbers off does not want a timer taking
+/// them either.
+private struct SystemMetricsReadout: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var system = SystemMetrics.shared
     @ObservedObject private var process = ProcessMetrics.shared
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        HStack(spacing: 0) {
-            Spacer(minLength: 12)
-            HStack(spacing: 14) {
-                MetricReadout(label: "CPU", value: system.cpuText, theme: theme)
-                MetricReadout(label: "RAM", value: system.memoryText, theme: theme)
-                // Dropped rather than shown as 0% when no accelerator is
-                // readable, so the strip never states a figure it hasn't got.
-                if let gpu = system.gpuText {
-                    MetricReadout(label: "GPU", value: gpu, theme: theme)
-                }
-                MetricReadout(label: "NET", value: system.networkText, theme: theme)
+        HStack(spacing: 14) {
+            MetricReadout(label: "CPU", value: system.cpuText, theme: theme)
+            MetricReadout(label: "RAM", value: system.memoryText, theme: theme)
+            // Dropped rather than shown as 0% when no accelerator is
+            // readable, so the strip never states a figure it hasn't got.
+            if let gpu = system.gpuText {
+                MetricReadout(label: "GPU", value: gpu, theme: theme)
             }
-            .help(tooltip)
+            MetricReadout(label: "NET", value: system.networkText, theme: theme)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 26)
+        .help(tooltip)
         .onAppear {
             system.start()
         }

@@ -82,6 +82,20 @@ struct RemoteServicesSettingsSection: View {
                     TextField("Host", text: $service.host, prompt: Text("studio.local"))
                     TextField("Port", value: $service.port, format: .number)
                     TextField("Username (optional)", text: $service.username)
+                    if !service.kind.isHandledInApp {
+                        Picker("Go through", selection: $service.tunnelThrough) {
+                            Text("Connect directly").tag(UUID?.none)
+                            ForEach(settings.sshConnections) { connection in
+                                Text("SSH: \(connection.name.isEmpty ? connection.host : connection.name)")
+                                    .tag(UUID?.some(connection.id))
+                            }
+                        }
+                        if service.tunnelThrough != nil {
+                            Text("The host above is read as the SSH host sees it. An ssh forward carries the connection to a port on this Mac, and the client is pointed there. It signs in with a key or an open terminal tab, never a typed password.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     HStack {
                         Button("Connect") { open(service) }
                         Button("Remove", role: .destructive) {
@@ -91,10 +105,15 @@ struct RemoteServicesSettingsSection: View {
                 }
             }
 
-            Button("Add Service") {
-                settings.remoteServices.append(
-                    RemoteService(name: "New service", kind: .vnc, host: "")
-                )
+            HStack {
+                Button("Add Service") {
+                    settings.remoteServices.append(
+                        RemoteService(name: "New service", kind: .vnc, host: "")
+                    )
+                }
+                Button("Share This Mac's Screen…") {
+                    RemoteServiceLauncher.openSharingSettings()
+                }
             }
 
             if let message {
@@ -107,6 +126,8 @@ struct RemoteServicesSettingsSection: View {
             iTERMiNAL does not implement VNC or RDP. It hands the address to whichever app on this Mac has registered the scheme — Screen Sharing for vnc://, Microsoft Remote Desktop or similar for rdp:// — so that client is what authenticates and no password is ever stored here.
 
             SSH, SFTP and web entries open inside the app instead: a terminal tab, the Files panel, and the browser panel.
+
+            Share This Mac's Screen opens System Settings → General → Sharing, where Screen Sharing is switched on or off. iTERMiNAL does not change it.
             """)
             .font(.caption)
             .foregroundStyle(.secondary)

@@ -326,6 +326,22 @@ final class AppSettings: ObservableObject {
         cursorAnimationTag = defaults.string(forKey: "cursorAnimationTag") ?? CursorAnimation.none.rawValue
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
+        localTerminalTypeTag = defaults.string(forKey: "localTerminalTypeTag") ?? TerminalType.default.rawValue
+        remoteTerminalTypeTag = defaults.string(forKey: "remoteTerminalTypeTag") ?? TerminalType.default.rawValue
+        if let data = defaults.data(forKey: "importedThemes"),
+           let decoded = try? JSONDecoder().decode([ImportedTerminalTheme].self, from: data) {
+            importedThemes = decoded
+        } else {
+            importedThemes = []
+        }
+        showRemotePorts = defaults.bool(forKey: "showRemotePorts")
+        splitFocusStyleTag = defaults.string(forKey: "splitFocusStyleTag") ?? SplitFocusStyle.standard.rawValue
+        splitFocusColorTag = defaults.string(forKey: "splitFocusColorTag") ?? SplitFocusColor.accent.rawValue
+        customTerminalPadding = defaults.bool(forKey: "customTerminalPadding")
+        terminalPaddingHorizontal = TerminalPadding.clamp(
+            defaults.object(forKey: "terminalPaddingHorizontal") as? Double ?? TerminalPadding.defaultHorizontal)
+        terminalPaddingVertical = TerminalPadding.clamp(
+            defaults.object(forKey: "terminalPaddingVertical") as? Double ?? TerminalPadding.defaultVertical)
         useGPURendering = defaults.bool(forKey: "useGPURendering")
         colorizeOutput = defaults.object(forKey: "colorizeOutput") as? Bool ?? true
         colorizeListings = defaults.object(forKey: "colorizeListings") as? Bool ?? true
@@ -505,6 +521,12 @@ final class AppSettings: ObservableObject {
         return OutputColors(listings: colorizeListings, manPages: colorizeManPages)
     }
 
+    var localTerminalType: TerminalType { TerminalType.resolve(localTerminalTypeTag) }
+    var remoteTerminalType: TerminalType { TerminalType.resolve(remoteTerminalTypeTag) }
+
+    var splitFocusStyle: SplitFocusStyle { SplitFocusStyle(rawValue: splitFocusStyleTag) ?? .standard }
+    var splitFocusColor: SplitFocusColor { SplitFocusColor(rawValue: splitFocusColorTag) ?? .accent }
+
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
         TerminalTheme.theme(id: terminalThemeID, darkMode: darkMode)
     }
@@ -581,6 +603,14 @@ final class AppSettings: ObservableObject {
         cursorAnimationTag = CursorAnimation.none.rawValue
         scrollbackLines = 10_000
         terminalThemeID = "auto"
+        localTerminalTypeTag = TerminalType.default.rawValue
+        remoteTerminalTypeTag = TerminalType.default.rawValue
+        showRemotePorts = false
+        splitFocusStyleTag = SplitFocusStyle.standard.rawValue
+        splitFocusColorTag = SplitFocusColor.accent.rawValue
+        customTerminalPadding = false
+        terminalPaddingHorizontal = TerminalPadding.defaultHorizontal
+        terminalPaddingVertical = TerminalPadding.defaultVertical
         useGPURendering = false
         colorizeOutput = true
         colorizeListings = true

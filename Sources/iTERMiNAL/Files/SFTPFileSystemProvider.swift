@@ -137,6 +137,7 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         // set up. (Where a terminal tab's sign-in is shared, the socket above
         // already goes through them, and this is not looked at.)
         args.append(contentsOf: connection.proxyJumpArguments)
+        args.append(contentsOf: connection.optionArguments)
         args.append(connection.destination)
         return args
     }

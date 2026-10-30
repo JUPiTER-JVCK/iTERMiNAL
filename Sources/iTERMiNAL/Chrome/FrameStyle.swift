@@ -50,6 +50,80 @@ enum FrameTintSource: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the pane the keyboard drives is marked once a tab is split.
+enum SplitFocusStyle: String, CaseIterable, Identifiable {
+    /// A bar along the pane's top edge: the default, and the only mark that
+    /// does not surround content.
+    case standard
+    /// A line all the way round, inside the pane's edge.
+    case outline
+    /// No mark on the focused pane; the others are dimmed instead.
+    case dimOthers
+    case none
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard: return "Standard"
+        case .outline: return "Outline"
+        case .dimOthers: return "Dim other panes"
+        case .none: return "None"
+        }
+    }
+}
+
+/// The colour of the focus mark.
+enum SplitFocusColor: String, CaseIterable, Identifiable {
+    case accent, blue, violet, green, orange, pink, teal, amber, white
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .accent: return "Accent"
+        case .blue: return "Blue"
+        case .violet: return "Violet"
+        case .green: return "Green"
+        case .orange: return "Orange"
+        case .pink: return "Pink"
+        case .teal: return "Teal"
+        case .amber: return "Amber"
+        case .white: return "White"
+        }
+    }
+
+    /// Nil for `accent`, which is whatever the person's accent is.
+    var hex: UInt32? {
+        switch self {
+        case .accent: return nil
+        case .blue: return 0x3B82F6
+        case .violet: return 0x8B5CF6
+        case .green: return 0x10A37F
+        case .orange: return 0xF97316
+        case .pink: return 0xEC4899
+        case .teal: return 0x14B8C6
+        case .amber: return 0xD4A73C
+        case .white: return 0xF2F2F2
+        }
+    }
+}
+
+/// The space between a terminal's edge and its text, in points, when a person
+/// sets it themselves. The built-in padding is not these two numbers — it is
+/// uneven on purpose, a little more on the left, where text starts — so a
+/// custom value replaces it wholesale rather than adjusting it.
+enum TerminalPadding {
+    static let range: ClosedRange<Double> = 0...40
+    static let defaultHorizontal: Double = 8
+    static let defaultVertical: Double = 8
+
+    static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultHorizontal }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+}
+
 /// What the frame's typeface is. The interface only: the terminal has its own
 /// font setting and is not affected.
 enum FrameFontDesign: String, CaseIterable, Identifiable {

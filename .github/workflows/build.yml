@@ -193,6 +193,13 @@ jobs:
             Sources/iTERMiNAL/Files/SSHRoute.swift \
             Sources/iTERMiNAL/Files/SSHControlSocket.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
+            Sources/iTERMiNAL/Files/PortForward.swift \
+            Sources/iTERMiNAL/Remote/ListeningPorts.swift \
+            Sources/iTERMiNAL/Remote/TunnelPlan.swift \
+            Sources/iTERMiNAL/Remote/HostShorthand.swift \
+            Sources/iTERMiNAL/Remote/HostLookup.swift \
+            Sources/iTERMiNAL/Terminal/TerminalType.swift \
+            Sources/iTERMiNAL/Terminal/GhosttyThemeFile.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
             Sources/iTERMiNAL/Terminal/BackgroundOpacity.swift \
             Sources/iTERMiNAL/Terminal/TerminalLinks.swift \

@@ -22,6 +22,7 @@ struct ConnectionsSettingsView: View {
                 }
                 HStack {
                     Button("Add Host") { addConnection() }
+                    Button("Add This Mac") { addThisMac() }
                     if let selectedID {
                         Button("Remove", role: .destructive) { remove(selectedID) }
                     }
@@ -84,7 +85,13 @@ struct ConnectionsSettingsView: View {
 
                     ConnectionTestRow(connection: binding.wrappedValue)
                 }
+
+                HostOptionsSection(connection: binding)
             }
+
+            QuickConnectSection()
+
+            HostLookupSection()
 
             RemoteServicesSettingsSection()
 
@@ -121,6 +128,16 @@ struct ConnectionsSettingsView: View {
 
     private func addConnection() {
         let connection = SSHConnection(name: "New Host", host: "", username: NSUserName())
+        settings.sshConnections.append(connection)
+        selectedID = connection.id
+    }
+
+    /// This Mac as a host, for trying a connection, a port forward or the
+    /// remote ports list against a machine that is certainly there. It needs
+    /// Remote Login switched on in System Settings → General → Sharing, which
+    /// this does not do.
+    private func addThisMac() {
+        let connection = SSHConnection(name: "This Mac", host: "127.0.0.1", username: NSUserName())
         settings.sshConnections.append(connection)
         selectedID = connection.id
     }

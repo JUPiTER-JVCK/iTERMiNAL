@@ -83,7 +83,7 @@ struct TerminalSettingsView: View {
                 Picker("Terminal theme", selection: $settings.terminalThemeID) {
                     Text("Match system appearance").tag("auto")
                     Divider()
-                    ForEach(TerminalTheme.all) { theme in
+                    ForEach(TerminalTheme.available) { theme in
                         Text(theme.name).tag(theme.id)
                     }
                 }
@@ -160,6 +160,10 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            TerminalPaddingSection()
+            SplitFocusSettingsSection()
+            TerminalTypeSettingsSection()
+            GhosttyThemeImportSection()
             Section("Scrollback") {
                 Stepper(value: $settings.scrollbackLines, in: 500...200_000, step: 500) {
                     Text("\(settings.scrollbackLines) lines")
