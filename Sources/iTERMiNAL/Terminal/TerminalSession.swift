@@ -380,8 +380,14 @@ final class TerminalSession: ObservableObject, Identifiable {
             lineSpacing: kind.isTool ? 1 : CGFloat(inputs.lineSpacing)
         ))
         let active = engine.setGPUAcceleration(settings.useGPURendering)
+        // Published a turn later: this is called from `updateNSView`, which runs
+        // inside a SwiftUI view update, where changing observable state is
+        // logged as a fault ("Publishing changes from within view updates").
         if isGPUAccelerated != active {
-            isGPUAccelerated = active
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isGPUAccelerated != active else { return }
+                self.isGPUAccelerated = active
+            }
         }
         // After the renderer is settled: an animation is only drawn on the CPU
         // one. A bundled tool keeps the cursor it asks for.
