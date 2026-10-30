@@ -160,6 +160,9 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            TerminalColorOverridesSection()
+            ThemeEditorSection()
+            TerminalLineSpacingSection()
             TerminalPaddingSection()
             SplitFocusSettingsSection()
             TerminalTypeSettingsSection()

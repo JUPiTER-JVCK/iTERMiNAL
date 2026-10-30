@@ -358,6 +358,16 @@ struct ImportedTerminalTheme: Codable, Identifiable, Equatable {
         ansi = file.ansi
     }
 
+    /// A copy of a theme that can be edited: the built-in ones cannot be.
+    init(copying theme: TerminalTheme, name: String) {
+        id = "imported-" + UUID().uuidString.lowercased()
+        self.name = name
+        isDark = theme.isDark
+        background = theme.background
+        foreground = theme.foreground
+        ansi = theme.ansi
+    }
+
     /// Built only from a record with exactly sixteen colours; a damaged one
     /// would otherwise put a palette of the wrong length into the terminal.
     var theme: TerminalTheme {

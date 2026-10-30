@@ -34,6 +34,15 @@ struct ITerminalApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands { AppCommands() }
 
+        // One window per remote desktop; the value is the session's id. Nothing
+        // opens one on its own: they are opened from a service, through the main
+        // window, and a window restored from a last launch says it has ended.
+        WindowGroup("Remote Desktop", for: UUID.self) { $sessionID in
+            RemoteDesktopWindow(sessionID: sessionID)
+                .preferredColorScheme(settings.preferredColorScheme)
+        }
+        .defaultSize(width: 1024, height: 720)
+
         Settings {
             SettingsRootView()
                 .environmentObject(settings)

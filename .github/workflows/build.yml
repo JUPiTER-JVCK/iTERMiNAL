@@ -200,6 +200,8 @@ jobs:
             Sources/iTERMiNAL/Remote/HostLookup.swift \
             Sources/iTERMiNAL/Remote/SavedTunnel.swift \
             Sources/iTERMiNAL/HTTP/GeoLookup.swift \
+            Sources/iTERMiNAL/Remote/RFB.swift \
+            Sources/iTERMiNAL/Remote/RFBAuth.swift \
             Sources/iTERMiNAL/Terminal/TerminalType.swift \
             Sources/iTERMiNAL/Terminal/GhosttyThemeFile.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \

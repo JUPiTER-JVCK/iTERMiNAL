@@ -738,6 +738,33 @@ Mac's loopback, and the client is pointed there. **Share This Mac's Screen…**
 opens System Settings → General → Sharing, where Screen Sharing is switched on;
 iTERMiNAL does not change it.
 
+A VNC service can be set to **Open with → Built-in viewer**, which opens the
+desktop in a window of this app instead of handing it to Screen Sharing. It is a
+small client, on purpose: RFB 3.3 to 3.8, **no authentication or a VNC
+password**, raw and copy-rectangle updates, and a desktop that changes size —
+each a few lines whose bounds can be read, because every encoding is code that
+trusts bytes from a server. Sizes are bounded before anything is allocated and a
+rectangle that doesn't lie inside the screen is refused.
+
+- **The password is asked for each time and never kept.** A sheet in the window
+  asks; it is used once to answer the server's challenge and dropped. It is not
+  saved, logged, or put in the Keychain.
+- **Not encrypted, and a weak check.** VNC's password check is DES against a
+  challenge anyone watching can read, and the picture crosses the network
+  as it is. The window says so; **Go through** a saved SSH host carries it
+  through an `ssh` forward, which is the way to use it past a network you trust.
+- **macOS Screen Sharing's own sign-in is not supported.** By default a Mac
+  offers Apple's authentication, not a password. Turn on *VNC viewers may
+  control screen with password* (System Settings → General → Sharing → Screen
+  Sharing, ⓘ), or keep the system app for that host. The viewer says this when
+  that is all a server offers.
+- **Plain updates.** Without compressed encodings the picture is larger on the
+  wire than other viewers send, so a local network or a tunnel suits it better
+  than a slow link. Clipboard sharing, file transfer, audio and RDP are not
+  there; RDP still opens in the system's app.
+- Command is the remote machine's Super key and Option its Alt; keys held when
+  the window loses focus are released.
+
 ### Terminal type, transport options and port forwards
 
 **Settings → Terminal → Terminal type** chooses the `TERM` that local shells and
@@ -814,6 +841,23 @@ list says which ports are reachable from outside the machine (all interfaces)
 and which are not (this machine only). Process names appear only where the
 machine's own tools give them — `ss` and `lsof` show other accounts' sockets
 without a name — so a blank name never means nothing owns the port.
+
+### Colors, text and effects
+
+**Settings → Terminal** can override the cursor color, the color of the text
+under it and the selection color (each off by default, keeping the theme's), turn
+off drawing bold text in bright colors, and set the line height from 0.8× to
+1.6×. **Edit a theme** duplicates the current theme into an editable copy — its
+background, text and all sixteen ANSI colors, with the changes applied as you
+make them — and imported Ghostty themes can be edited the same way. **Settings →
+Appearance** takes any accent color beside the six, and an animation speed from
+0.5× to 2×.
+
+What these cannot do is limited by the terminal engine (SwiftTerm), which has no
+setting for character width, ligatures, a minimum contrast, an always-hollow
+block cursor, or the bold and italic faces. Those would need changes to SwiftTerm, so they are not
+offered rather than offered and ignored. The interface's own text sizes are fixed
+point sizes throughout the views, so there is no global interface scale.
 
 ### Ghostty themes
 

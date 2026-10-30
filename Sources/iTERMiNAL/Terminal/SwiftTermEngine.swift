@@ -27,6 +27,9 @@ final class SwiftTermEngine: TerminalEngine {
     private let terminalView: InstrumentedTerminalView
     private var started = false
     private var lastAppearance: TerminalAppearance?
+    /// SwiftTerm's own selection colour, read before any override, so clearing
+    /// an override puts back exactly what was there.
+    private var defaultSelectionColor: NSColor?
     private var lastPalette: [PaletteColor]?
     private var lastGPURequest: Bool?
     private var lastCursor: (style: CursorStyle, animation: CursorAnimation)?
@@ -58,6 +61,7 @@ final class SwiftTermEngine: TerminalEngine {
         // published, and the watcher that offers Explain / Fix it after a failed
         // command never saw the terminal change, so it never offered.
         terminalView.notifyUpdateChanges = true
+        defaultSelectionColor = terminalView.selectedTextBackgroundColor
 
         terminalView.onInput = { [weak self] in
             self?.onFocusGained?()
@@ -140,7 +144,21 @@ final class SwiftTermEngine: TerminalEngine {
         // their own stay solid whatever it is.
         terminalView.nativeBackgroundColor = appearance.background
         terminalView.backgroundOpacity = CGFloat(BackgroundOpacity.clamped(Double(appearance.backgroundAlpha)))
-        terminalView.caretColor = appearance.foreground
+        terminalView.caretColor = appearance.cursorColor ?? appearance.foreground
+        terminalView.caretTextColor = appearance.cursorTextColor
+        if let selection = appearance.selectionColor ?? defaultSelectionColor {
+            terminalView.selectedTextBackgroundColor = selection
+        }
+        let brightChanged = terminalView.useBrightColors != appearance.boldAsBright
+        terminalView.useBrightColors = appearance.boldAsBright
+        // Set only when it changed: the setter rebuilds the font's cell metrics.
+        let spacing = max(0.5, min(appearance.lineSpacing, 3))
+        if abs(terminalView.lineSpacing - spacing) > 0.001 {
+            terminalView.lineSpacing = spacing
+        }
+        if brightChanged {
+            terminalView.setNeedsDisplay(terminalView.bounds)
+        }
     }
 
     func applyPalette(_ colors: [PaletteColor]) {

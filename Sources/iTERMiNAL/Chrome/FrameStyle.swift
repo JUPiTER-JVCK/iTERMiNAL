@@ -50,6 +50,21 @@ enum FrameTintSource: String, CaseIterable, Identifiable {
     }
 }
 
+/// Limits for the visual options that are a number, with the one place that
+/// holds a stored value to them: a corrupt preference becomes the default
+/// rather than a line height of zero or an animation that never ends.
+enum VisualRange {
+    /// Multiplier on the terminal's cell height; 1.0 is the font's own.
+    static let lineSpacing: ClosedRange<Double> = 0.8...1.6
+    /// Multiplier on every animation's pace; 2 is twice as fast.
+    static let animationSpeed: ClosedRange<Double> = 0.5...2.0
+
+    static func clamp(_ value: Double, to range: ClosedRange<Double>, fallback: Double = 1) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+}
+
 /// How the pane the keyboard drives is marked once a tab is split.
 enum SplitFocusStyle: String, CaseIterable, Identifiable {
     /// A bar along the pane's top edge: the default, and the only mark that

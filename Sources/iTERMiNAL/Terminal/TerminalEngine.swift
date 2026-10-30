@@ -16,6 +16,14 @@ struct TerminalAppearance: Equatable {
     var background: NSColor
     var foreground: NSColor
     var backgroundAlpha: CGFloat
+    /// Overrides; nil leaves what the theme gives (the cursor in the text
+    /// colour, SwiftTerm's own selection colour).
+    var cursorColor: NSColor? = nil
+    var cursorTextColor: NSColor? = nil
+    var selectionColor: NSColor? = nil
+    var boldAsBright: Bool = true
+    /// Multiplier on the cell height; 1 is the font's own.
+    var lineSpacing: CGFloat = 1
 }
 
 protocol TerminalEngineDelegate: AnyObject {

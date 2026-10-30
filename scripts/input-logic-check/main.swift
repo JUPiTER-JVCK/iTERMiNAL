@@ -23,7 +23,8 @@
 //     scripts/input-logic-check/main.swift
 //   ./input-logic-check
 //
-// Everything compiled here must import nothing but Foundation.
+// Everything compiled here must import nothing but Foundation — except
+// Remote/RFBAuth.swift, which uses CommonCrypto's DES and so only compiles on a Mac.
 import Foundation
 
 var failures = 0
@@ -4589,6 +4590,104 @@ do {
     } else {
         check(false, "a sloppy answer is still read")
     }
+}
+
+// MARK: Visual option limits
+
+do {
+    check(VisualRange.clamp(1.0, to: VisualRange.lineSpacing) == 1.0, "a value in range is kept")
+    check(VisualRange.clamp(0.1, to: VisualRange.lineSpacing) == 0.8 && VisualRange.clamp(9, to: VisualRange.lineSpacing) == 1.6,
+          "line spacing is held to its range")
+    check(VisualRange.clamp(0, to: VisualRange.animationSpeed) == 0.5 && VisualRange.clamp(50, to: VisualRange.animationSpeed) == 2.0,
+          "animation speed is held to its range, so it can neither stall nor run away")
+    check(VisualRange.clamp(.nan, to: VisualRange.lineSpacing) == 1 && VisualRange.clamp(.infinity, to: VisualRange.animationSpeed) == 1,
+          "a damaged stored value becomes the default")
+    check(FrameStyle.parseHex(FrameStyle.hexString(0x1E1E2E)) == 0x1E1E2E && FrameStyle.hexString(0x00AB12) == "#00AB12",
+          "a picked colour survives being stored as text")
+    check(FrameStyle.parseHex("") == nil && FrameStyle.parseHex("#12") == nil && FrameStyle.parseHex("zzzzzz") == nil,
+          "an empty or damaged override means no override")
+}
+
+// MARK: The VNC protocol's bytes
+
+do {
+    func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+    check(RFB.parseVersion(bytes("RFB 003.008\n")) == RFB.Version(major: 3, minor: 8), "a version is read")
+    check(RFB.parseVersion(bytes("RFB 003.889\n")) == RFB.Version(major: 3, minor: 889), "Apple's 3.889 is read as written")
+    check(RFB.parseVersion(bytes("RFB 3.8\n")) == nil && RFB.parseVersion(bytes("XXX 003.008\n")) == nil
+            && RFB.parseVersion(bytes("RFB 00a.008\n")) == nil && RFB.parseVersion(bytes("RFB 003.008 ")) == nil,
+          "something that is not a version is not read as one")
+    check(RFB.clientVersion(for: RFB.Version(major: 3, minor: 8)) == RFB.Version(major: 3, minor: 8)
+            && RFB.clientVersion(for: RFB.Version(major: 3, minor: 889)) == RFB.Version(major: 3, minor: 8)
+            && RFB.clientVersion(for: RFB.Version(major: 3, minor: 7)) == RFB.Version(major: 3, minor: 7)
+            && RFB.clientVersion(for: RFB.Version(major: 3, minor: 5)) == RFB.Version(major: 3, minor: 3)
+            && RFB.clientVersion(for: RFB.Version(major: 3, minor: 3)) == RFB.Version(major: 3, minor: 3),
+          "the newest version both sides speak")
+    check(RFB.clientVersion(for: RFB.Version(major: 4, minor: 0)) == nil, "another major version is refused")
+    check(RFB.versionBytes(RFB.Version(major: 3, minor: 8)) == bytes("RFB 003.008\n")
+            && RFB.versionBytes(RFB.Version(major: 3, minor: 3)) == bytes("RFB 003.003\n"), "a version is written")
+
+    check(RFB.chooseSecurity(from: [2, 1]) == RFB.securityNone && RFB.chooseSecurity(from: [2]) == RFB.securityVNC
+            && RFB.chooseSecurity(from: [30, 33]) == nil && RFB.chooseSecurity(from: []) == nil,
+          "no authentication is preferred, then a VNC password, and nothing else is offered")
+    check(RFB.unsupportedSecurityMessage([30]).contains("Apple Remote Desktop")
+            && RFB.unsupportedSecurityMessage([30]).contains("VNC viewers may control screen with password"),
+          "a Mac's own sign-in is explained, with the setting that avoids it")
+    check(RFB.unsupportedSecurityMessage([16]).contains("Tight") && !RFB.unsupportedSecurityMessage([16]).contains("VNC viewers may"),
+          "another server's is named, without advice that is about a Mac")
+
+    let format = RFB.setPixelFormat()
+    check(format.count == 20 && format[0] == 0 && format[4] == 32 && format[6] == 0 && format[7] == 1
+            && Array(format[8...13]) == [0, 255, 0, 255, 0, 255] && Array(format[14...16]) == [16, 8, 0],
+          "pixels are 32-bit true colour, little-endian, red in bits 16-23")
+    check(RFB.setEncodings([1, 0, -223]) == [2, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0x21], "encodings, as signed 32-bit numbers")
+    check(RFB.framebufferUpdateRequest(incremental: true, x: 0, y: 0, width: 1920, height: 1080)
+            == [3, 1, 0, 0, 0, 0, 0x07, 0x80, 0x04, 0x38], "an update request")
+    check(RFB.keyEvent(down: true, keysym: 0xFF0D) == [4, 1, 0, 0, 0, 0, 0xFF, 0x0D], "a key event")
+    check(RFB.pointerEvent(buttons: 1, x: 300, y: 5) == [5, 1, 0x01, 0x2C, 0, 5], "a pointer event")
+
+    var header = [UInt8](repeating: 0, count: 24)
+    header[0] = 4; header[1] = 0; header[2] = 3; header[3] = 0; header[23] = 5
+    check(RFB.parseServerInit(header) == RFB.ServerInit(width: 1024, height: 768, nameLength: 5), "a screen's size and the length of its name")
+    var empty = header; empty[0] = 0; empty[1] = 0
+    var huge = header; huge[0] = 0x4E; huge[1] = 0x20
+    var vast = header; vast[0] = 0x40; vast[1] = 0; vast[2] = 0x40; vast[3] = 0
+    var named = header; named[22] = 0x13; named[23] = 0x88
+    check(RFB.parseServerInit(empty) == nil && RFB.parseServerInit(huge) == nil && RFB.parseServerInit(vast) == nil
+            && RFB.parseServerInit(named) == nil && RFB.parseServerInit([UInt8](repeating: 0, count: 23)) == nil,
+          "a screen with no size, a side past 16384, more than 8K pixels, an enormous name, or a short header is refused")
+
+    check(RFB.parseRect([0, 10, 0, 20, 0, 30, 0, 40, 0, 0, 0, 1]) == RFB.Rect(x: 10, y: 20, width: 30, height: 40, encoding: 1),
+          "a rectangle header")
+    check(RFB.parseRect([0, 0, 0, 0, 0, 1, 0, 1, 0xFF, 0xFF, 0xFF, 0x21])?.encoding == -223, "a negative encoding")
+    check(RFB.parseRect([0, 1, 2]) == nil, "a short rectangle header")
+    check(RFB.rectFits(RFB.Rect(x: 90, y: 0, width: 10, height: 5, encoding: 0), width: 100, height: 100)
+            && !RFB.rectFits(RFB.Rect(x: 90, y: 0, width: 11, height: 5, encoding: 0), width: 100, height: 100)
+            && !RFB.rectFits(RFB.Rect(x: 0, y: 99, width: 1, height: 2, encoding: 0), width: 100, height: 100)
+            && !RFB.rectFits(RFB.Rect(x: 65535, y: 65535, width: 65535, height: 65535, encoding: 0), width: 100, height: 100),
+          "a rectangle must lie wholly inside the screen, whatever numbers a server sends")
+
+    check(RFB.specialKeysym(forKeyCode: 36) == 0xFF0D && RFB.specialKeysym(forKeyCode: 126) == 0xFF52
+            && RFB.specialKeysym(forKeyCode: 122) == 0xFFBE && RFB.specialKeysym(forKeyCode: 111) == 0xFFC9
+            && RFB.specialKeysym(forKeyCode: 0) == nil, "special keys by key code")
+    check(RFB.keysym(forCharacter: "a") == 0x61 && RFB.keysym(forCharacter: "é") == 0xE9
+            && RFB.keysym(forCharacter: "€") == 0x0100_20AC, "characters become keysyms")
+    check(RFB.keysym(forCharacter: "\r") == nil && RFB.keysym(forCharacter: "\u{F700}") == nil, "control and arrow-key characters are not text")
+
+    // The password check: the standard DES test vector, and VNC's own quirks.
+    check(RFBAuth.reversedBits(0x01) == 0x80 && RFBAuth.reversedBits(0xF0) == 0x0F && RFBAuth.reversedBits(0xA5) == 0xA5,
+          "VNC reverses the bits of each key byte")
+    check(RFBAuth.key(forPassword: "ab") == [0x86, 0x46, 0, 0, 0, 0, 0, 0], "a short password is padded with zeros")
+    check(RFBAuth.key(forPassword: "123456789") == RFBAuth.key(forPassword: "12345678"), "only the first eight characters count")
+    check(RFBAuth.desEncrypt(block: [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                             key: [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1])
+            == [0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05], "DES gives the standard test result")
+    let challenge = (0..<16).map { UInt8($0) }
+    check(RFBAuth.response(challenge: challenge, password: "secret")?.count == 16
+            && RFBAuth.response(challenge: challenge, password: "secret") == RFBAuth.response(challenge: challenge, password: "secret")
+            && RFBAuth.response(challenge: challenge, password: "secret") != RFBAuth.response(challenge: challenge, password: "Secret"),
+          "the answer is 16 bytes, and depends on the password")
+    check(RFBAuth.response(challenge: [1, 2, 3], password: "x") == nil, "a challenge that is not 16 bytes gets no answer")
 }
 
 print("\(checks - failures)/\(checks) checks passed")
