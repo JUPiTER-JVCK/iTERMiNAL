@@ -749,7 +749,10 @@ xterm-compatible whichever is chosen, and naming a type a machine has no
 terminfo entry for makes `less`, `vim` and `tput` complain or fall back. The
 settings say whether *this Mac* has the entry; they cannot say it for a remote
 host, so for `xterm-ghostty` they print the command that teaches one
-(`infocmp -x xterm-ghostty | ssh HOST tic -x -`). `COLORTERM=truecolor` is set
+(`infocmp -x xterm-ghostty | ssh HOST tic -x -`). Having the entry is not
+the same as the terminal doing what it describes: the engine is SwiftTerm, not
+Ghostty, and a program that trusts the name to use Ghostty-only features can
+print stray characters. `xterm-256color` is the safe choice. `COLORTERM=truecolor` is set
 only for types that claim 256 colours or more.
 
 **Connections → Terminal and transport** adds, per ssh host, an address family

@@ -12,6 +12,14 @@ struct TerminalTypeSettingsSection: View {
                     Text(type.label).tag(type.rawValue)
                 }
             }
+            if settings.localTerminalType == .ghostty {
+                Label(
+                    "This terminal is not Ghostty. With xterm-ghostty, programs and shell plugins may send features it doesn't have, and stray characters can appear as you type. If they do, switch back to xterm-256color.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
             if !TerminfoLookup.isInstalledLocally(settings.localTerminalType) {
                 Label(
                     "This Mac has no terminfo entry named \(settings.localTerminalType.termValue). Programs here may print “unknown terminal type” until one is installed.",

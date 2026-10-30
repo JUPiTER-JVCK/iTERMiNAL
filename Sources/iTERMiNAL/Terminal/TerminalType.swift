@@ -50,7 +50,7 @@ enum TerminalType: String, CaseIterable, Identifiable {
         case .xterm256:
             return "The common choice. Every host has it."
         case .ghostty:
-            return "What Ghostty reports. Richer features, but a host needs Ghostty's terminfo entry to know it."
+            return "Tells programs they are in Ghostty. This terminal is not Ghostty, though: programs may use features it lacks, and it can show as stray characters. Use xterm-256color unless something needs this name."
         case .xterm:
             return "Plain xterm: 8 colours. For old hosts."
         case .xtermColor:
