@@ -5,8 +5,21 @@ import AppKit
 /// compression, keep-alive and port forwards.
 struct HostOptionsSection: View {
     @Binding var connection: SSHConnection
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        Section("Sign-in") {
+            Button("Set Up Key Login…") {
+                // Typed into a tab and left for you to run: it makes a key if
+                // you have none and asks for the host's password once, in ssh.
+                WorkspaceStore.shared.newTab(typing: RemoteProblem.keyLoginCommand(for: connection))
+                openWindow(id: "main")
+            }
+            .disabled(connection.transport == .custom || connection.host.trimmingCharacters(in: .whitespaces).isEmpty)
+            Text("Opens a terminal tab with the command typed in: it creates an ed25519 key if you have none (asking whether to give it a passphrase), then installs it on this host with ssh-copy-id, which asks for the host's password once. Press Return to run it. After that the file browser and everything else sign in without a password. Nothing runs until you press Return.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
         Section("Terminal and transport") {
             Picker("Terminal type", selection: $connection.terminalTypeTag) {
                 Text("Use the remote default").tag("")

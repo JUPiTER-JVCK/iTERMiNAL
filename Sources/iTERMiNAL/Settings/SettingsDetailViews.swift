@@ -203,7 +203,7 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("Show remote ports", isOn: $settings.showRemotePorts)
-                Text("Shows a globe at the bottom left of the window. It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — and choosing one forwards it to this Mac and opens it in the browser panel. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. Turning it on also lets a new ssh tab share its sign-in with the scan and the forwards, so a host that wants a password works once you have signed in to it in a tab.")
+                Text("Shows a globe at the bottom left of the window. It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — and choosing one forwards it to this Mac and opens it in the browser panel. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. A host that wants a password works once you have signed in to it in a tab (Connections → Authentication shares that sign-in; turning this on shares it too).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

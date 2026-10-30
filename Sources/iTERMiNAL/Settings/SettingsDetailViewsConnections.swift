@@ -98,6 +98,10 @@ struct ConnectionsSettingsView: View {
             ProxmoxSettingsSection()
 
             Section("Authentication") {
+                Toggle("Share each ssh tab's sign-in with the file browser", isOn: $settings.shareSignInWithFiles)
+                Text("On, a new ssh tab keeps its connection open, and the file browser, the port scan and forwards use it. A host that wants a password then needs signing in to once, in a tab, and the file browser fills in by itself; closing the tab ends the sharing. The connection is reachable only by this account, through a private folder. Applies to tabs opened from now on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
 

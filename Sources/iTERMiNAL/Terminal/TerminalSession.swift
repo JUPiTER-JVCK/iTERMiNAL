@@ -246,7 +246,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             settings: settings,
             directory: isRemote ? nil : currentDirectory,
             shellOverride: shellOverride,
-            controlPath: controlPath ?? sharedPathForRemotePorts(settings),
+            controlPath: controlPath ?? sharedPathForSharing(settings),
             agentApproved: agentApproved ?? false
         ) {
         case .success(let configuration):
@@ -268,16 +268,17 @@ final class TerminalSession: ObservableObject, Identifiable {
         }
     }
 
-    /// Where this tab's ssh should listen so the port scan and the forwards can
-    /// use its sign-in, when Remote Ports is on and nothing else decided it.
+    /// Where this tab's ssh should listen so the file browser, the port scan and
+    /// the forwards can use its sign-in, when sharing is on (Settings →
+    /// Connections) or Remote Ports is, and nothing else decided it.
     ///
     /// Only for an ssh connection, and only when the socket can be made
     /// privately (`SSHControlSocket.prepare` says so); otherwise the tab is
-    /// exactly what it was. The scan and the forwards sign in with a key or the
-    /// agent without it, so this only matters for a host that wants a password
-    /// — and it is the same sharing the file browser already offers.
-    private func sharedPathForRemotePorts(_ settings: AppSettings) -> String? {
-        guard settings.showRemotePorts,
+    /// exactly what it was. The file browser, the scan and the forwards sign in
+    /// with a key or the agent without it, so this only matters for a host that
+    /// wants a password: signed in to once in a tab, the rest ride on it.
+    private func sharedPathForSharing(_ settings: AppSettings) -> String? {
+        guard settings.shareSignInWithFiles || settings.showRemotePorts,
               case .remote(let id) = kind,
               let connection = settings.sshConnections.first(where: { $0.id == id }),
               connection.transport == .ssh,

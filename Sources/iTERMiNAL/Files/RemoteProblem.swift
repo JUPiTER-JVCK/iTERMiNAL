@@ -283,10 +283,10 @@ struct RemoteProblem: Equatable {
             }
             return [
                 RemoteStep(
-                    text: "Install a key on \(host). This runs on this Mac and asks for \(host)'s password once:",
-                    command: Self.keySetupCommand(for: connection)
+                    text: "Install a key on \(host). This makes a key if you have none, then installs it, and asks for "
+                        + "\(host)'s password once. Press Return to run it; after that this host needs no password:",
+                    command: Self.keyLoginCommand(for: connection)
                 ),
-                RemoteStep(text: "No key yet? Make one first:", command: "ssh-keygen -t ed25519"),
                 RemoteStep(
                     text: "A key that isn't in ~/.ssh: name it under Settings → Connections → Identity file.",
                     command: nil
@@ -297,7 +297,8 @@ struct RemoteProblem: Equatable {
                 ),
                 RemoteStep(
                     text: "Or sign in with the password instead: press Sign In in a Terminal and enter it there. The file "
-                        + "browser uses that tab's connection for as long as the tab stays open.",
+                        + "browser uses that tab's connection for as long as the tab stays open, and retries by itself "
+                        + "once it is signed in.",
                     command: nil
                 ),
                 RemoteStep(text: "Then press Try Again.", command: nil),
@@ -395,7 +396,7 @@ struct RemoteProblem: Equatable {
         case .signInRefused(let methods):
             var list: [RemoteAction] = [.tryAgain]
             if methods.isEmpty || methods.contains("publickey") {
-                list.append(.runInLocalTerminal(label: "Set Up Key…", command: Self.keySetupCommand(for: connection)))
+                list.append(.runInLocalTerminal(label: "Set Up Key…", command: Self.keyLoginCommand(for: connection)))
             }
             list.append(.signInInTerminal)
             list.append(.editConnection)
@@ -457,6 +458,19 @@ struct RemoteProblem: Equatable {
         }
         parts.append(shellQuoted(connection.destination))
         return parts.joined(separator: " ")
+    }
+
+    /// Everything it takes to get from no key to key sign-in, as one line to
+    /// press Return on: make the key if it is not there (`ssh-keygen` asks for a
+    /// passphrase itself, so whether to have one is the person's choice), then
+    /// `keySetupCommand`. `;` rather than `&&`, so it reads the same in fish.
+    /// Nothing runs from here: it is typed into a tab and waits.
+    static func keyLoginCommand(for connection: SSHConnection) -> String {
+        let named = connection.identityFile?.trimmingCharacters(in: .whitespaces) ?? ""
+        let key = identityPath(for: connection)
+        var make = "ssh-keygen -t ed25519"
+        if !named.isEmpty { make += " -f \(key)" }
+        return "test -f \(key) || \(make); \(keySetupCommand(for: connection))"
     }
 
     /// Removes the host's entry from known_hosts. A host on another port is

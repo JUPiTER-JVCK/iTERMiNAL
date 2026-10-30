@@ -147,6 +147,10 @@ final class AppSettings: ObservableObject {
     }
     /// Off by default: the globe in the status bar and the scans behind it
     /// exist only for someone who asked for them.
+    /// Whether a new ssh tab keeps its connection open for the file browser and
+    /// the port scan to use, so a host that wants a password needs signing in
+    /// to once, in a tab, and nothing else. See `SSHControlSocket`.
+    @Published var shareSignInWithFiles: Bool { didSet { defaults.set(shareSignInWithFiles, forKey: "shareSignInWithFiles") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// How a focused split pane is marked, and in what colour.
     @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
@@ -357,6 +361,7 @@ final class AppSettings: ObservableObject {
             importedThemes = []
         }
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
+        shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
         splitFocusStyleTag = defaults.string(forKey: "splitFocusStyleTag") ?? SplitFocusStyle.standard.rawValue
         splitFocusColorTag = defaults.string(forKey: "splitFocusColorTag") ?? SplitFocusColor.accent.rawValue
         customTerminalPadding = defaults.bool(forKey: "customTerminalPadding")
@@ -628,6 +633,7 @@ final class AppSettings: ObservableObject {
         localTerminalTypeTag = TerminalType.default.rawValue
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showRemotePorts = false
+        shareSignInWithFiles = true
         splitFocusStyleTag = SplitFocusStyle.standard.rawValue
         splitFocusColorTag = SplitFocusColor.accent.rawValue
         customTerminalPadding = false

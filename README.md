@@ -779,8 +779,8 @@ rescans every five seconds.
 The scan and the forwards run with no keyboard: they sign in with a key or the
 agent, or ride the connection a terminal tab to that host already has open,
 and never a typed password (a host that wants one is told to sign in in a tab
-first). With the setting on, a new ssh tab keeps its connection open for them to
-share, the way **Sign In in a Terminal** does for the file browser. A port that
+first). A new ssh tab keeps its connection open for them to share — see
+[A host that wants a password](#a-host-that-wants-a-password). A port that
 is only reachable through one address is forwarded to that address, and the
 list says which ports are reachable from outside the machine (all interfaces)
 and which are not (this machine only). Process names appear only where the
@@ -863,15 +863,29 @@ up before reaching it.
 
 The file browser has no keyboard, and iTERMiNAL never handles a password, so it
 can't sign in to a host that takes only a password — or a code from a phone — by
-itself. It doesn't have to. Press **Sign In in a Terminal** on the message, enter
-the password in the tab that opens (to `ssh`, in a real terminal, as for any
-session), and press **Try Again**. That tab's `ssh` was started with
-`ControlMaster=yes`, so it keeps its connection open for others, and the file
-browser's `sftp` joins it (`ControlMaster=no`) instead of signing in again. A
-small link icon in the file browser's toolbar says it is doing that.
+itself. It doesn't have to. Sign in to the host in a terminal tab — enter the
+password to `ssh`, in a real terminal, as for any session — and the file browser
+fills in on its own a couple of seconds later. Any ssh tab to the host will do,
+including one you opened earlier: **Settings → Connections → Authentication →
+Share each ssh tab's sign-in with the file browser** (on by default, for tabs
+opened from now on) starts every ssh tab with `ControlMaster=yes`, so it keeps
+its connection open for others, and the file browser's `sftp` joins it
+(`ControlMaster=no`) instead of signing in again. **Sign In in a Terminal** on
+the message still opens such a tab for you. A small link icon in the file
+browser's toolbar says it is using one. While the message is up, the file
+browser checks only for that open connection, on this Mac — it sends nothing to
+the host, so waiting cannot add failed sign-ins to its log.
+
+To stop needing a tab at all, **Set Up Key Login…** (on the message, as **Set Up
+Key…**, and under the host in Settings → Connections) types one command into a
+tab: it makes an `ed25519` key if there is none (`ssh-keygen` asks whether to
+give it a passphrase), then installs it with `ssh-copy-id`, which asks for the
+host's password once. Nothing runs until you press Return, and the password goes
+to `ssh`, never to iTERMiNAL. **Try Again** afterwards.
 
 - **The connection is the tab's.** Closing the tab, or `exit`, ends it, and the
-  file browser is back to the message until you sign in again. Nothing is left
+  file browser is back to the message until you sign in again. Turn sharing off
+  and only **Sign In in a Terminal** (or Remote Ports, if on) shares one. Nothing is left
   running behind it — there is no `ControlPersist`.
 - **The socket is yours alone.** It lives in a folder of its own in your
   temporary folder, named for the host, port and user, so a connection is only

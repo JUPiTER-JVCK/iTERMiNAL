@@ -2070,10 +2070,13 @@ do {
     check(problem.steps.last?.text == "Then press Try Again.", "and the last step is to try again")
     check(problem.output == refused, "what sftp said is kept exactly")
     check(problem.actions == [
-        .tryAgain, .runInLocalTerminal(label: "Set Up Key…", command: "ssh-copy-id mb_pro@192.168.1.148"),
+        .tryAgain,
+        .runInLocalTerminal(label: "Set Up Key…", command: "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148"),
         .signInInTerminal, .editConnection,
     ], "a refused key offers to try again, to set one up, to sign in in a terminal, and to edit the host")
-    check(problem.steps.first?.command == "ssh-copy-id mb_pro@192.168.1.148", "the first step is the command that fixes it")
+    check(problem.steps.first?.command == "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148",
+          "the first step is the one command that makes a key if there is none and installs it")
+    check(!problem.steps.contains { $0.command == "ssh-keygen -t ed25519" }, "making a key is no longer a step of its own")
     check(kind("mb_pro@192.168.1.148: Permission denied (publickey).") == .signInRefused(methods: ["publickey"]),
           "one method is one method")
     check(kind("Warning: Permanently added '192.168.1.148' (ED25519) to the list of known hosts.\nmb_pro@192.168.1.148: Permission denied (publickey).")
@@ -2164,9 +2167,17 @@ do {
 
     // Commands: right for this host, and never able to run on their own.
     check(RemoteProblem.keySetupCommand(for: host) == "ssh-copy-id mb_pro@192.168.1.148", "the usual key setup")
+    check(RemoteProblem.keyLoginCommand(for: host) == "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148",
+          "key login makes the default key if it is not there, then installs it")
     let configured = SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519")
     check(RemoteProblem.keySetupCommand(for: configured) == "ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
           "with the port and the key it was set up with, the ~ left to the shell")
+    check(RemoteProblem.keyLoginCommand(for: SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519"))
+            == "test -f ~/.ssh/work_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/work_ed25519; ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
+          "a named key is the one made, and the one installed")
+    check(RemoteProblem.keyLoginCommand(for: SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id"))
+            == "test -f ~/'My Keys/id' || ssh-keygen -t ed25519 -f ~/'My Keys/id'; ssh-copy-id -i ~/'My Keys/id' u@h",
+          "a key path with a space is quoted in both halves")
     let spaced = SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id")
     check(RemoteProblem.keySetupCommand(for: spaced) == "ssh-copy-id -i ~/'My Keys/id' u@h", "a key path with a space is quoted after the ~")
     let hostile = SSHConnection(name: "b", host: "h; rm -rf ~", username: "it's")

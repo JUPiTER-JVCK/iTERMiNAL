@@ -21,6 +21,14 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     /// The listing came through a terminal tab's sign-in, which closing that
     /// tab ends. Read with each listing.
     @Published private(set) var usesSharedSignIn = false
+    /// Watches for a terminal tab to sign in to this host while the sign-in is
+    /// what the listing is waiting on, so the list fills in on its own.
+    private var signInWatch: Timer?
+
+    deinit {
+        signInWatch?.invalidate()
+    }
+
     /// A transfer or a change on a remote host failed. The listing is fine, so
     /// this is a strip below it.
     @Published private(set) var operationProblem: RemoteProblem?
@@ -67,6 +75,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             self.isLoading = false
             switch result {
             case .success(let listing):
+                self.stopWatchingForSignIn()
                 self.directory = listing.path
                 self.items = listing.items
                 self.usesSharedSignIn = (self.provider as? SFTPFileSystemProvider)?.usesSharedSignIn ?? false
@@ -75,11 +84,44 @@ final class FileBrowserModel: ObservableObject, Identifiable {
                 self.usesSharedSignIn = false
                 if case FileProviderError.remote(let problem) = error {
                     self.listingProblem = problem
+                    if case .signInRefused = problem.kind {
+                        self.watchForSignIn()
+                    } else {
+                        self.stopWatchingForSignIn()
+                    }
                 } else {
+                    self.stopWatchingForSignIn()
                     self.errorMessage = error.localizedDescription
                 }
             }
         }
+    }
+
+    /// Looks every two seconds for a connection a terminal tab has signed in
+    /// and left open (`SSHControlSocket`) and, when there is one, lists again.
+    /// Looking is a `stat` and a local connect — nothing is sent to the host —
+    /// so unlike retrying the listing itself it cannot count as a failed
+    /// sign-in. It stops when the listing works, or is about something else.
+    private func watchForSignIn() {
+        guard signInWatch == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard let connection = self.remoteConnection else {
+                self.stopWatchingForSignIn()
+                return
+            }
+            if SSHControlSocket.liveSocket(for: connection, base: NSTemporaryDirectory()) != nil {
+                self.stopWatchingForSignIn()
+                self.reload()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        signInWatch = timer
+    }
+
+    private func stopWatchingForSignIn() {
+        signInWatch?.invalidate()
+        signInWatch = nil
     }
 
     func navigate(to path: String) {
@@ -110,6 +152,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
 
     func switchTo(connectionID: String?) {
         provider = Self.makeProvider(connectionID: connectionID)
+        stopWatchingForSignIn()
         history.removeAll()
         directory = provider.defaultPath()
         selection = nil
@@ -261,6 +304,11 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             reload()
         case .signInInTerminal:
             guard let connection = remoteConnection else { return }
+            // Already signed in in a tab: nothing to open, only to look again.
+            if SSHControlSocket.liveSocket(for: connection, base: NSTemporaryDirectory()) != nil {
+                reload()
+                return
+            }
             // A tab whose sign-in this browser then uses; it says so when it
             // could not be set up that way.
             if let note = WorkspaceStore.shared.newSharedSignIn(for: connection) {
