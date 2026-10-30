@@ -133,6 +133,32 @@ final class AppSettings: ObservableObject {
     @Published var cursorAnimationTag: String { didSet { defaults.set(cursorAnimationTag, forKey: "cursorAnimationTag") } }
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
+    /// `TerminalType` raw values for `TERM` in local shells and in remote
+    /// sessions. Strings, so a name from a newer build reads as the default.
+    @Published var localTerminalTypeTag: String { didSet { defaults.set(localTerminalTypeTag, forKey: "localTerminalTypeTag") } }
+    @Published var remoteTerminalTypeTag: String { didSet { defaults.set(remoteTerminalTypeTag, forKey: "remoteTerminalTypeTag") } }
+    /// Themes imported from Ghostty theme files.
+    @Published var importedThemes: [ImportedTerminalTheme] {
+        didSet {
+            if let data = try? JSONEncoder().encode(importedThemes) {
+                defaults.set(data, forKey: "importedThemes")
+            }
+        }
+    }
+    /// Off by default: the globe in the status bar and the scans behind it
+    /// exist only for someone who asked for them.
+    /// Whether a new ssh tab keeps its connection open for the file browser and
+    /// the port scan to use, so a host that wants a password needs signing in
+    /// to once, in a tab, and nothing else. See `SSHControlSocket`.
+    @Published var shareSignInWithFiles: Bool { didSet { defaults.set(shareSignInWithFiles, forKey: "shareSignInWithFiles") } }
+    @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
+    /// How a focused split pane is marked, and in what colour.
+    @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
+    @Published var splitFocusColorTag: String { didSet { defaults.set(splitFocusColorTag, forKey: "splitFocusColorTag") } }
+    /// Space around the text inside a terminal. Off uses the built-in padding.
+    @Published var customTerminalPadding: Bool { didSet { defaults.set(customTerminalPadding, forKey: "customTerminalPadding") } }
+    @Published var terminalPaddingHorizontal: Double { didSet { defaults.set(terminalPaddingHorizontal, forKey: "terminalPaddingHorizontal") } }
+    @Published var terminalPaddingVertical: Double { didSet { defaults.set(terminalPaddingVertical, forKey: "terminalPaddingVertical") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
     /// Colour for what ordinary commands print — see `OutputColors`. On by
     /// default: a shell that prints `ls` in one colour is the surprising one.
@@ -326,6 +352,23 @@ final class AppSettings: ObservableObject {
         cursorAnimationTag = defaults.string(forKey: "cursorAnimationTag") ?? CursorAnimation.none.rawValue
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
+        localTerminalTypeTag = defaults.string(forKey: "localTerminalTypeTag") ?? TerminalType.default.rawValue
+        remoteTerminalTypeTag = defaults.string(forKey: "remoteTerminalTypeTag") ?? TerminalType.default.rawValue
+        if let data = defaults.data(forKey: "importedThemes"),
+           let decoded = try? JSONDecoder().decode([ImportedTerminalTheme].self, from: data) {
+            importedThemes = decoded
+        } else {
+            importedThemes = []
+        }
+        showRemotePorts = defaults.bool(forKey: "showRemotePorts")
+        shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
+        splitFocusStyleTag = defaults.string(forKey: "splitFocusStyleTag") ?? SplitFocusStyle.standard.rawValue
+        splitFocusColorTag = defaults.string(forKey: "splitFocusColorTag") ?? SplitFocusColor.accent.rawValue
+        customTerminalPadding = defaults.bool(forKey: "customTerminalPadding")
+        terminalPaddingHorizontal = TerminalPadding.clamp(
+            defaults.object(forKey: "terminalPaddingHorizontal") as? Double ?? TerminalPadding.defaultHorizontal)
+        terminalPaddingVertical = TerminalPadding.clamp(
+            defaults.object(forKey: "terminalPaddingVertical") as? Double ?? TerminalPadding.defaultVertical)
         useGPURendering = defaults.bool(forKey: "useGPURendering")
         colorizeOutput = defaults.object(forKey: "colorizeOutput") as? Bool ?? true
         colorizeListings = defaults.object(forKey: "colorizeListings") as? Bool ?? true
@@ -505,6 +548,12 @@ final class AppSettings: ObservableObject {
         return OutputColors(listings: colorizeListings, manPages: colorizeManPages)
     }
 
+    var localTerminalType: TerminalType { TerminalType.resolve(localTerminalTypeTag) }
+    var remoteTerminalType: TerminalType { TerminalType.resolve(remoteTerminalTypeTag) }
+
+    var splitFocusStyle: SplitFocusStyle { SplitFocusStyle(rawValue: splitFocusStyleTag) ?? .standard }
+    var splitFocusColor: SplitFocusColor { SplitFocusColor(rawValue: splitFocusColorTag) ?? .accent }
+
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
         TerminalTheme.theme(id: terminalThemeID, darkMode: darkMode)
     }
@@ -581,6 +630,15 @@ final class AppSettings: ObservableObject {
         cursorAnimationTag = CursorAnimation.none.rawValue
         scrollbackLines = 10_000
         terminalThemeID = "auto"
+        localTerminalTypeTag = TerminalType.default.rawValue
+        remoteTerminalTypeTag = TerminalType.default.rawValue
+        showRemotePorts = false
+        shareSignInWithFiles = true
+        splitFocusStyleTag = SplitFocusStyle.standard.rawValue
+        splitFocusColorTag = SplitFocusColor.accent.rawValue
+        customTerminalPadding = false
+        terminalPaddingHorizontal = TerminalPadding.defaultHorizontal
+        terminalPaddingVertical = TerminalPadding.defaultVertical
         useGPURendering = false
         colorizeOutput = true
         colorizeListings = true

@@ -732,6 +732,71 @@ the button appearing to do nothing.
 SSH, SFTP and web entries open inside the app instead — a terminal tab, the
 Files panel, and the browser panel.
 
+A VNC or RDP entry can be set to **Go through** a saved SSH host: the address is
+then read as that host sees it, an `ssh` forward carries it to a port on this
+Mac's loopback, and the client is pointed there. **Share This Mac's Screen…**
+opens System Settings → General → Sharing, where Screen Sharing is switched on;
+iTERMiNAL does not change it.
+
+### Terminal type, transport options and port forwards
+
+**Settings → Terminal → Terminal type** chooses the `TERM` that local shells and
+remote sessions announce — `xterm-256color` (the default), `xterm-ghostty`,
+`xterm`, `xterm-color`, `screen-256color`, `tmux-256color`, `vt220`, `vt100` or
+`linux` — and a host can override it under **Settings → Connections**. It is
+what programs are *told*, not what the terminal can do: the engine is
+xterm-compatible whichever is chosen, and naming a type a machine has no
+terminfo entry for makes `less`, `vim` and `tput` complain or fall back. The
+settings say whether *this Mac* has the entry; they cannot say it for a remote
+host, so for `xterm-ghostty` they print the command that teaches one
+(`infocmp -x xterm-ghostty | ssh HOST tic -x -`). Having the entry is not
+the same as the terminal doing what it describes: the engine is SwiftTerm, not
+Ghostty, and a program that trusts the name to use Ghostty-only features can
+print stray characters. `xterm-256color` is the safe choice. `COLORTERM=truecolor` is set
+only for types that claim 256 colours or more.
+
+**Connections → Terminal and transport** adds, per ssh host, an address family
+(`-4`/`-6`), compression (`-C`), a keep-alive (`ServerAliveInterval`) and **port
+forwards** — local (`-L`), remote (`-R`) and SOCKS5 (`-D`) — opened with every
+ssh terminal tab on that host. Each option is written only when set, so a host
+that sets none leaves `~/.ssh/config` in charge. Forwards listen on the
+loopback address only, ports and targets are validated before they reach a
+command line, and a rule that isn't valid is left out and reported. **Add This
+Mac** saves `127.0.0.1` as a host (it needs Remote Login switched on).
+**Quick connect** takes `user@host:port`, a pasted `ssh -p 2222 user@host`, or a
+pattern — `web[1-3].example.com`, `r[01-10]`, `db-{a,b}.lan` — and opens a tab
+for each (up to 8; more are saved but not opened). **Look up a host** shows what
+this Mac's own resolver says about a name or an address; nothing goes to a
+lookup service.
+
+### Remote ports
+
+**Settings → Appearance → Status → Show remote ports** (off by default) puts a
+globe at the bottom left of the window, opposite the system monitor. It lists
+the TCP ports the focused terminal's machine is listening on — this Mac, or the
+saved host the tab is connected to — and choosing one opens it in the browser
+panel: directly for this Mac, and through an `ssh` forward on a loopback port for
+a host. Nothing is scanned until the list is open; while it stays open it
+rescans every five seconds.
+
+The scan and the forwards run with no keyboard: they sign in with a key or the
+agent, or ride the connection a terminal tab to that host already has open,
+and never a typed password (a host that wants one is told to sign in in a tab
+first). A new ssh tab keeps its connection open for them to share — see
+[A host that wants a password](#a-host-that-wants-a-password). A port that
+is only reachable through one address is forwarded to that address, and the
+list says which ports are reachable from outside the machine (all interfaces)
+and which are not (this machine only). Process names appear only where the
+machine's own tools give them — `ss` and `lsof` show other accounts' sockets
+without a name — so a blank name never means nothing owns the port.
+
+### Ghostty themes
+
+**Settings → Terminal → Ghostty themes → Import Theme Files…** reads Ghostty
+theme files (`palette = N=#rrggbb`, `background`, `foreground`) and adds each to
+the theme list. Only those colours are read; fonts, keybinds and anything else
+in a file are ignored without being interpreted.
+
 ### Proxmox VE
 
 **Settings → Connections → Proxmox** takes an endpoint and an API token id
@@ -801,15 +866,29 @@ up before reaching it.
 
 The file browser has no keyboard, and iTERMiNAL never handles a password, so it
 can't sign in to a host that takes only a password — or a code from a phone — by
-itself. It doesn't have to. Press **Sign In in a Terminal** on the message, enter
-the password in the tab that opens (to `ssh`, in a real terminal, as for any
-session), and press **Try Again**. That tab's `ssh` was started with
-`ControlMaster=yes`, so it keeps its connection open for others, and the file
-browser's `sftp` joins it (`ControlMaster=no`) instead of signing in again. A
-small link icon in the file browser's toolbar says it is doing that.
+itself. It doesn't have to. Sign in to the host in a terminal tab — enter the
+password to `ssh`, in a real terminal, as for any session — and the file browser
+fills in on its own a couple of seconds later. Any ssh tab to the host will do,
+including one you opened earlier: **Settings → Connections → Authentication →
+Share each ssh tab's sign-in with the file browser** (on by default, for tabs
+opened from now on) starts every ssh tab with `ControlMaster=yes`, so it keeps
+its connection open for others, and the file browser's `sftp` joins it
+(`ControlMaster=no`) instead of signing in again. **Sign In in a Terminal** on
+the message still opens such a tab for you. A small link icon in the file
+browser's toolbar says it is using one. While the message is up, the file
+browser checks only for that open connection, on this Mac — it sends nothing to
+the host, so waiting cannot add failed sign-ins to its log.
+
+To stop needing a tab at all, **Set Up Key Login…** (on the message, as **Set Up
+Key…**, and under the host in Settings → Connections) types one command into a
+tab: it makes an `ed25519` key if there is none (`ssh-keygen` asks whether to
+give it a passphrase), then installs it with `ssh-copy-id`, which asks for the
+host's password once. Nothing runs until you press Return, and the password goes
+to `ssh`, never to iTERMiNAL. **Try Again** afterwards.
 
 - **The connection is the tab's.** Closing the tab, or `exit`, ends it, and the
-  file browser is back to the message until you sign in again. Nothing is left
+  file browser is back to the message until you sign in again. Turn sharing off
+  and only **Sign In in a Terminal** (or Remote Ports, if on) shares one. Nothing is left
   running behind it — there is no `ControlPersist`.
 - **The socket is yours alone.** It lives in a folder of its own in your
   temporary folder, named for the host, port and user, so a connection is only
@@ -875,6 +954,15 @@ small link icon in the file browser's toolbar says it is doing that.
   right-click menu is shown as it will really be opened, with control and
   invisible characters replaced by a dot, and only `http` and `https` addresses
   can be opened from it.
+- **The port scan and forwards never take a password and never leave the
+  loopback.** They run `ssh` with `BatchMode=yes`, so a host that wants a
+  password fails with advice to sign in in a terminal tab (whose connection they
+  then share) instead of prompting. A forward listens on `127.0.0.1` on a port
+  the system chose, its target is checked against a plain host-name alphabet
+  before it reaches a command line, and the app adds no host-key option of its
+  own, so a host `ssh` doesn't already trust fails rather than being trusted by
+  a background call (unless your `~/.ssh/config` says otherwise). Imported Ghostty themes are read as colour numbers
+  only, from a file capped at 64 KB.
 - **This app never forwards the ssh-agent on its own.** The default adds
   nothing, leaving it to your `~/.ssh/config`; forwarding happens only where
   you chose *Always* or answered *Forward Agent*, and *Ask each time I connect*

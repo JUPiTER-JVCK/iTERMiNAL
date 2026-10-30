@@ -201,6 +201,11 @@ struct AppearanceSettingsView: View {
                 Text("Live CPU, memory, GPU and network for this Mac, in a strip along the bottom right of the window. Hover the numbers for detail. Off stops the sampling as well as hiding the strip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle("Show remote ports", isOn: $settings.showRemotePorts)
+                Text("Shows a globe at the bottom left of the window. It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — and choosing one forwards it to this Mac and opens it in the browser panel. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. A host that wants a password works once you have signed in to it in a tab (Connections → Authentication shares that sign-in; turning this on shares it too).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

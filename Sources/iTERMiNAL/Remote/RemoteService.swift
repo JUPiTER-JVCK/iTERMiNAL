@@ -121,6 +121,10 @@ struct RemoteService: Codable, Identifiable, Hashable {
     /// Optional; passed to the handler so the client can pre-fill it. Never a
     /// password — there is nowhere here to put one.
     var username: String
+    /// A saved SSH host to reach it through, for a screen-sharing or remote
+    /// desktop service that is only reachable from that host's network. The
+    /// address above is then read as that host sees it. Nil connects directly.
+    var tunnelThrough: UUID?
 
     init(
         id: UUID = UUID(),
@@ -128,7 +132,8 @@ struct RemoteService: Codable, Identifiable, Hashable {
         kind: RemoteServiceKind,
         host: String,
         port: Int? = nil,
-        username: String = ""
+        username: String = "",
+        tunnelThrough: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -136,6 +141,7 @@ struct RemoteService: Codable, Identifiable, Hashable {
         self.host = host
         self.port = port ?? kind.defaultPort
         self.username = username
+        self.tunnelThrough = tunnelThrough
     }
 
     /// Tolerant decoding, matching `SSHConnection`: a record written by a
@@ -148,6 +154,7 @@ struct RemoteService: Codable, Identifiable, Hashable {
         host = try container.decode(String.self, forKey: .host)
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? kind.defaultPort
         username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
+        tunnelThrough = try container.decodeIfPresent(UUID.self, forKey: .tunnelThrough)
     }
 
     var subtitle: String {

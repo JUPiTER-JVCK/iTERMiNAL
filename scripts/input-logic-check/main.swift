@@ -2070,10 +2070,13 @@ do {
     check(problem.steps.last?.text == "Then press Try Again.", "and the last step is to try again")
     check(problem.output == refused, "what sftp said is kept exactly")
     check(problem.actions == [
-        .tryAgain, .runInLocalTerminal(label: "Set Up Key…", command: "ssh-copy-id mb_pro@192.168.1.148"),
+        .tryAgain,
+        .runInLocalTerminal(label: "Set Up Key…", command: "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148"),
         .signInInTerminal, .editConnection,
     ], "a refused key offers to try again, to set one up, to sign in in a terminal, and to edit the host")
-    check(problem.steps.first?.command == "ssh-copy-id mb_pro@192.168.1.148", "the first step is the command that fixes it")
+    check(problem.steps.first?.command == "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148",
+          "the first step is the one command that makes a key if there is none and installs it")
+    check(!problem.steps.contains { $0.command == "ssh-keygen -t ed25519" }, "making a key is no longer a step of its own")
     check(kind("mb_pro@192.168.1.148: Permission denied (publickey).") == .signInRefused(methods: ["publickey"]),
           "one method is one method")
     check(kind("Warning: Permanently added '192.168.1.148' (ED25519) to the list of known hosts.\nmb_pro@192.168.1.148: Permission denied (publickey).")
@@ -2164,9 +2167,17 @@ do {
 
     // Commands: right for this host, and never able to run on their own.
     check(RemoteProblem.keySetupCommand(for: host) == "ssh-copy-id mb_pro@192.168.1.148", "the usual key setup")
+    check(RemoteProblem.keyLoginCommand(for: host) == "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519; ssh-copy-id mb_pro@192.168.1.148",
+          "key login makes the default key if it is not there, then installs it")
     let configured = SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519")
     check(RemoteProblem.keySetupCommand(for: configured) == "ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
           "with the port and the key it was set up with, the ~ left to the shell")
+    check(RemoteProblem.keyLoginCommand(for: SSHConnection(name: "b", host: "build.example.com", port: 2222, username: "deploy", identityFile: "~/.ssh/work_ed25519"))
+            == "test -f ~/.ssh/work_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/work_ed25519; ssh-copy-id -p 2222 -i ~/.ssh/work_ed25519 deploy@build.example.com",
+          "a named key is the one made, and the one installed")
+    check(RemoteProblem.keyLoginCommand(for: SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id"))
+            == "test -f ~/'My Keys/id' || ssh-keygen -t ed25519 -f ~/'My Keys/id'; ssh-copy-id -i ~/'My Keys/id' u@h",
+          "a key path with a space is quoted in both halves")
     let spaced = SSHConnection(name: "b", host: "h", username: "u", identityFile: "~/My Keys/id")
     check(RemoteProblem.keySetupCommand(for: spaced) == "ssh-copy-id -i ~/'My Keys/id' u@h", "a key path with a space is quoted after the ~")
     let hostile = SSHConnection(name: "b", host: "h; rm -rf ~", username: "it's")
@@ -4186,6 +4197,314 @@ do {
             }
         }
     }
+}
+
+// MARK: Terminal types
+
+do {
+    check(TerminalType.resolve("xterm-ghostty") == .ghostty, "a terminal type is read from its TERM name")
+    check(TerminalType.resolve("nonsense") == .default && TerminalType.resolve("") == .default,
+          "a name this build does not know falls back to the default")
+    check(TerminalType.default == .xterm256, "xterm-256color is the default")
+    check(Set(TerminalType.allCases.map(\.termValue)).count == TerminalType.allCases.count, "no two types share a TERM")
+    check(TerminalType.xterm256.advertisesTrueColor && TerminalType.ghostty.advertisesTrueColor,
+          "colour types go with COLORTERM")
+    check(!TerminalType.vt100.advertisesTrueColor && !TerminalType.xterm.advertisesTrueColor && !TerminalType.linux.advertisesTrueColor,
+          "types without 256 colours do not claim true colour")
+    check(TerminalType.ghostty.installHint != nil && TerminalType.xterm256.installHint == nil,
+          "only a type hosts do not ship has a hint for installing it")
+
+    check(TerminfoLookup.candidates(for: "xterm-256color", in: "/usr/share/terminfo")
+            == ["/usr/share/terminfo/x/xterm-256color", "/usr/share/terminfo/78/xterm-256color"],
+          "a terminfo entry is looked for by letter and by hex directory")
+    check(TerminfoLookup.candidates(for: "vt100", in: "/a/") == ["/a/v/vt100", "/a/76/vt100"],
+          "a trailing slash on the directory is not doubled")
+    check(TerminfoLookup.candidates(for: "../etc/passwd", in: "/a").isEmpty
+            && TerminfoLookup.candidates(for: "a/b", in: "/a").isEmpty
+            && TerminfoLookup.candidates(for: "", in: "/a").isEmpty
+            && TerminfoLookup.candidates(for: ".hidden", in: "/a").isEmpty,
+          "a name that is not plainly a terminal name is never joined into a path")
+    check(TerminfoLookup.isInstalled("xterm-ghostty", directories: ["/y", "/x"], exists: { $0 == "/x/78/xterm-ghostty" }),
+          "an entry in a later directory is found")
+    check(!TerminfoLookup.isInstalled("xterm-ghostty", directories: ["/y"], exists: { $0 == "/x/78/xterm-ghostty" }),
+          "an entry in a directory that is not searched is not found")
+    check(TerminfoLookup.directories(home: "/h", environment: ["TERMINFO": "/t"]).first == "/t",
+          "TERMINFO is searched first")
+    check(TerminfoLookup.directories(home: "/h", environment: [:]).first == "/h/.terminfo",
+          "the home terminfo comes first without TERMINFO")
+    check(TerminfoLookup.directories(home: "/h", environment: [:]).contains("/Applications/Ghostty.app/Contents/Resources/terminfo"),
+          "a Ghostty install's terminfo is searched")
+}
+
+// MARK: Port forwards and host options
+
+do {
+    let local = PortForward(kind: .local, bindPort: 8080, targetHost: "localhost", targetPort: 80)
+    check(local.arguments == ["-L", "127.0.0.1:8080:localhost:80"], "a local forward binds the loopback")
+    let remote = PortForward(kind: .remote, bindPort: 9000, targetHost: "localhost", targetPort: 22)
+    check(remote.arguments == ["-R", "127.0.0.1:9000:localhost:22"], "a remote forward names where it leads back to")
+    let socks = PortForward(kind: .dynamic, bindPort: 1080, targetHost: "", targetPort: 0)
+    check(socks.arguments == ["-D", "127.0.0.1:1080"] && socks.problem == nil, "a SOCKS forward needs no target")
+    check(PortForward(kind: .local, bindPort: 80, targetHost: "h", targetPort: 80).arguments.isEmpty,
+          "a privileged listening port is refused")
+    check(PortForward(kind: .local, bindPort: 8080, targetHost: "a b", targetPort: 80).problem != nil
+            && PortForward(kind: .local, bindPort: 8080, targetHost: "-oProxyCommand=x", targetPort: 80).problem != nil
+            && PortForward(kind: .local, bindPort: 8080, targetHost: "h;rm", targetPort: 80).problem != nil,
+          "a target that could be read as an option or a command is refused")
+    check(PortForward(kind: .local, bindPort: 8080, targetHost: "h", targetPort: 0).problem != nil, "port 0 is not a target")
+    check(PortForward.isPlainHost("db.internal") && !PortForward.isPlainHost(""), "plain hosts")
+
+    let plain = SSHConnection(name: "n", host: "h", username: "u")
+    check(plain.optionArguments.isEmpty && plain.forwardArguments.isEmpty, "a host with nothing set adds nothing to ssh")
+    let tuned = SSHConnection(name: "n", host: "h", username: "u", ipFamily: .v4, compression: true, keepAliveSeconds: 30)
+    check(tuned.optionArguments == ["-4", "-C", "-o", "ServerAliveInterval=30"], "family, compression and keep-alive")
+    check(SSHConnection(name: "n", host: "h", username: "u", keepAliveSeconds: 1).optionArguments == ["-o", "ServerAliveInterval=5"]
+            && SSHConnection(name: "n", host: "h", username: "u", keepAliveSeconds: 9999).optionArguments == ["-o", "ServerAliveInterval=600"],
+          "a keep-alive is held to its range")
+    check(SSHConnection(name: "n", host: "h", username: "u", transport: .mosh, ipFamily: .v4, forwards: [local]).optionArguments.isEmpty
+            && SSHConnection(name: "n", host: "h", username: "u", transport: .mosh, forwards: [local]).forwardArguments.isEmpty,
+          "only ssh is given ssh's options")
+    let bad = PortForward(kind: .local, bindPort: 10, targetHost: "h", targetPort: 1)
+    let mixed = SSHConnection(name: "n", host: "h", username: "u", forwards: [local, bad])
+    check(mixed.forwardArguments == local.arguments && mixed.forwardProblems.count == 1,
+          "a rule that cannot be used is left out and reported")
+
+    let decoder = JSONDecoder()
+    let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(old.utf8)) {
+        check(decoded.terminalTypeTag.isEmpty && decoded.ipFamily == .any && !decoded.compression
+                && decoded.keepAliveSeconds == 0 && decoded.forwards.isEmpty,
+              "a host saved before these options loads with the defaults")
+    } else {
+        check(false, "a host saved before terminal types and forwards still loads")
+    }
+    let future = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h","ipFamily":"v9","terminalTypeTag":"xterm-ghostty"}"#
+    if let decoded = try? decoder.decode(SSHConnection.self, from: Data(future.utf8)) {
+        check(decoded.ipFamily == .any && decoded.terminalTypeTag == "xterm-ghostty",
+              "an address family this build does not know falls back without losing the host")
+    } else {
+        check(false, "an option from a newer build does not drop the host")
+    }
+    let kept = SSHConnection(name: "n", host: "h", username: "u", terminalTypeTag: "vt100", ipFamily: .v6,
+                             compression: true, keepAliveSeconds: 20, forwards: [local, socks])
+    if let data = try? JSONEncoder().encode(kept), let back = try? decoder.decode(SSHConnection.self, from: data) {
+        check(back == kept, "the new options survive being saved")
+    } else {
+        check(false, "a connection with forwards can be saved and read back")
+    }
+}
+
+// MARK: Listening ports
+
+do {
+    let ss = """
+    State   Recv-Q  Send-Q   Local Address:Port    Peer Address:Port Process
+    LISTEN  0       4096     127.0.0.1:8080        0.0.0.0:*     users:(("node",pid=12,fd=19))
+    LISTEN  0       128      0.0.0.0:22            0.0.0.0:*
+    LISTEN  0       128      [::]:22               [::]:*
+    LISTEN  0       511      [::1]:3000            [::]:*
+    """
+    let fromSS = ListeningPorts.parse(ss)
+    check(fromSS.map(\.port) == [22, 3000, 8080], "ss: each port once, in order, header skipped")
+    check(fromSS.last?.process == "node" && fromSS.last?.scope == .loopback, "ss: the process and the scope are read")
+    check(fromSS.first?.scope == .allInterfaces, "ss: 0.0.0.0 and :: are all interfaces")
+
+    let linux = """
+    Active Internet connections (only servers)
+    Proto Recv-Q Send-Q Local Address           Foreign Address         State
+    tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN
+    tcp6       0      0 :::80                   :::*                    LISTEN
+    tcp        0      0 10.0.0.5:5432           0.0.0.0:*               LISTEN
+    tcp        0      0 10.0.0.5:22             10.0.0.9:51000          ESTABLISHED
+    """
+    let fromLinux = ListeningPorts.parse(linux)
+    check(fromLinux.map(\.port) == [22, 80, 5432], "netstat (Linux): listeners only")
+    check(fromLinux.last?.scope == .specific && fromLinux.last?.forwardHost == "10.0.0.5",
+          "a port bound to one address is forwarded to that address")
+    check(fromLinux[1].address == "::", "netstat (Linux): ::: is the IPv6 wildcard")
+
+    let bsd = """
+    Active Internet connections (including servers)
+    Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
+    tcp4       0      0  127.0.0.1.8080         *.*                    LISTEN
+    tcp6       0      0  *.5000                 *.*                    LISTEN
+    tcp46      0      0  *.3000                 *.*                    LISTEN
+    tcp4       0      0  192.168.1.5.52000      17.0.0.1.443           ESTABLISHED
+    """
+    let fromBSD = ListeningPorts.parse(bsd)
+    check(fromBSD.map(\.port) == [3000, 5000, 8080], "netstat (BSD): listeners only, dotted ports")
+    check(fromBSD.first?.address == "*" && fromBSD.last?.scope == .loopback, "netstat (BSD): * and 127.0.0.1")
+
+    let lsof = """
+    COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+    node    12345 me   23u  IPv4 0x1234      0t0  TCP *:3000 (LISTEN)
+    ControlCe 678 me    8u  IPv6 0x5678      0t0  TCP [::1]:7000 (LISTEN)
+    """
+    let fromLsof = ListeningPorts.parse(lsof)
+    check(fromLsof.map(\.port) == [3000, 7000] && fromLsof.first?.process == "node", "lsof: the program is read")
+    let joined = ListeningPorts.merge(fromBSD + fromLsof)
+    check(joined.map(\.port) == [3000, 5000, 7000, 8080] && joined.first?.process == "node",
+          "two tools' views of one port are joined, keeping the name")
+
+    check(ListeningPorts.parse("").isEmpty && ListeningPorts.parse("hello world foo bar").isEmpty,
+          "nothing that is not a listener is read as one")
+    check(ListeningPorts.parse("tcp 0 0 0.0.0.0:99999 0.0.0.0:* LISTEN").isEmpty, "a port past 65535 is not one")
+    let split = ListeningPorts.splitAddress("fe80::1%lo0.8080")
+    check(split?.0 == "fe80::1" && split?.1 == 8080, "a scoped IPv6 address loses its scope")
+    check(ListeningPorts.splitAddress("[::1]:22")?.0 == "::1" && ListeningPorts.splitAddress("*:22")?.0 == "*", "brackets and stars")
+    let many = (1...2000).map { "tcp 0 0 0.0.0.0:\($0) 0.0.0.0:* LISTEN" }.joined(separator: "\n")
+    check(ListeningPorts.parse(many).count <= ListeningPorts.maxPorts, "a host cannot make the list unbounded")
+    check(ListeningPort(port: 3000, address: "*", process: nil).isLikelyWeb
+            && !ListeningPort(port: 22, address: "*", process: nil).isLikelyWeb, "web ports are told apart")
+    check(ListeningPort(port: 22, address: "*", process: nil).forwardHost == "localhost", "a wildcard port is reached as localhost")
+}
+
+// MARK: Tunnels
+
+do {
+    let plain = SSHConnection(name: "n", host: "h", username: "u")
+    check(TunnelPlan.specification(localPort: 5000, targetHost: "h", targetPort: 80) == "127.0.0.1:5000:h:80",
+          "a forward listens on the loopback")
+    check(TunnelPlan.scanArguments(for: plain, sharedSocket: nil, command: "cmd")
+            == ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "u@h", "cmd"], "a scan never asks for a password")
+    check(TunnelPlan.forwardProcessArguments(for: plain, localPort: 5000, targetHost: "h", targetPort: 80)
+            == ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
+                "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-L", "127.0.0.1:5000:h:80", "u@h"],
+          "a forward process stops when its forward fails")
+    check(TunnelPlan.controlArguments(operation: "forward", for: plain, sharedSocket: "/s",
+                                      localPort: 5000, targetHost: "h", targetPort: 80)
+            == ["-O", "forward", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                "-o", "ControlMaster=no", "-o", "ControlPath=/s", "-L", "127.0.0.1:5000:h:80", "u@h"],
+          "a forward on an open connection goes through its control socket")
+    let routed = SSHConnection(name: "n", host: "h", port: 2222, username: "u", identityFile: "/k/id", jumpHosts: "b@bastion")
+    check(TunnelPlan.baseArguments(for: routed, sharedSocket: nil)
+            == ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", "2222", "-i", "/k/id",
+                "-o", "IdentitiesOnly=yes", "-o", "ProxyJump=b@bastion"],
+          "port, key and jump hosts carry over")
+    check(TunnelPlan.problem(targetHost: "a b", targetPort: 80) != nil
+            && TunnelPlan.problem(targetHost: "h", targetPort: 0) != nil
+            && TunnelPlan.problem(targetHost: "h", targetPort: 80) == nil, "targets are checked")
+    check(TunnelPlan.summarise("Warning: Permanently added 'h' (ED25519) to the list of known hosts.\nu@h: Permission denied (publickey).")
+            == "u@h: Permission denied (publickey).", "the line that says what went wrong is the one shown")
+    check(TunnelPlan.summarise("") == "ssh gave no reason.", "silence is said plainly")
+    check(TunnelPlan.isSignInFailure("Permission denied (publickey,password).") && !TunnelPlan.isSignInFailure("Connection refused"),
+          "a refused sign-in is told from a refused connection")
+    if let port = TunnelPlan.freeLocalPort() {
+        check(port >= 1024 && port <= 65535, "a free port is an unprivileged one")
+        check(!TunnelPlan.isAccepting(port: port), "nothing answers on a port that was just free")
+    } else {
+        check(false, "a free local port can be found")
+    }
+}
+
+// MARK: Host shorthand
+
+do {
+    func targets(_ text: String) -> [HostShorthand.Target]? {
+        if case .targets(let list) = HostShorthand.parse(text) { return list }
+        return nil
+    }
+    check(targets("deploy@web.example.com:2222")
+            == [HostShorthand.Target(user: "deploy", host: "web.example.com", port: 2222)], "user, host and port")
+    check(targets("ssh -p 2222 deploy@web") == [HostShorthand.Target(user: "deploy", host: "web", port: 2222)],
+          "a pasted ssh command is understood")
+    check(targets("ssh -l bob web") == [HostShorthand.Target(user: "bob", host: "web", port: nil)], "-l names the user")
+    check(targets("web[1-3].lan")?.map(\.host) == ["web1.lan", "web2.lan", "web3.lan"], "a range")
+    check(targets("r[01-03]")?.map(\.host) == ["r01", "r02", "r03"], "a zero-padded range")
+    check(targets("db-{a,b}.lan:22")?.map(\.host) == ["db-a.lan", "db-b.lan"] && targets("db-{a,b}.lan:22")?.first?.port == 22,
+          "a choice, and a port after it")
+    check(targets("r[1-2]c{a,b}")?.map(\.host) == ["r1ca", "r1cb", "r2ca", "r2cb"], "a range and a choice together")
+    check(targets("web.example.com")?.first?.display == "web.example.com", "a bare host")
+    check(targets("u@h:22")?.first?.display == "u@h:22", "a host written out")
+
+    func invalid(_ text: String) -> Bool {
+        if case .invalid = HostShorthand.parse(text) { return true }
+        return false
+    }
+    check(invalid("") && invalid("   "), "nothing is not a host")
+    check(invalid("web[3-1]") && invalid("web[1-100]") && invalid("web[1-3") && invalid("db{a}") && invalid("a[1-9]b[1-9]"),
+          "a pattern that is backwards, too big, unclosed or has one choice is refused")
+    check(invalid("a b") && invalid("-o ProxyCommand=x") && invalid("host;rm") && invalid("user@") && invalid("web:99999"),
+          "text that is not one host is refused, not trimmed to something that passes")
+    check(invalid("-p") && invalid("-p abc host"), "an option without its value is refused")
+}
+
+// MARK: Host lookup
+
+do {
+    func kind(_ text: String) -> HostLookup.Kind? { HostLookup.classify(text)?.kind }
+    check(kind("127.0.0.1") == .loopback && kind("::1") == .loopback, "loopback")
+    check(kind("10.1.2.3") == .privateNetwork && kind("172.16.0.1") == .privateNetwork
+            && kind("192.168.1.1") == .privateNetwork && kind("fd00::1") == .privateNetwork, "private networks")
+    check(kind("172.32.0.1") == .publicInternet && kind("8.8.8.8") == .publicInternet
+            && kind("2001:4860:4860::8888") == .publicInternet && kind("100.128.0.1") == .publicInternet,
+          "just outside a private block is public")
+    check(kind("169.254.1.1") == .linkLocal && kind("fe80::1") == .linkLocal, "link-local")
+    check(kind("100.64.0.1") == .carrierGradeNAT, "shared address space")
+    check(kind("224.0.0.1") == .multicast && kind("ff02::1") == .multicast, "multicast")
+    check(kind("0.0.0.0") == .unspecified && kind("::") == .unspecified, "the unspecified address")
+    check(HostLookup.classify("example.com") == nil && HostLookup.classify("999.1.1.1") == nil && HostLookup.classify("") == nil,
+          "a name is not an address")
+    check(HostLookup.classify("::1")?.family == .v6 && HostLookup.classify("10.0.0.1")?.family == .v4, "families")
+    check(HostLookup.classify(" 10.0.0.1 ")?.text == "10.0.0.1", "spaces are trimmed")
+    check(HostLookup.Kind.publicInternet.isRoutableFromInternet && !HostLookup.Kind.privateNetwork.isRoutableFromInternet,
+          "only a public address is routable from the internet")
+}
+
+// MARK: Ghostty themes and the settings that sit beside them
+
+do {
+    var palette = ""
+    for index in 0..<16 { palette += "palette = \(index)=#\(String(0x100000 + index, radix: 16))\n" }
+    let sample = "# a comment\nbackground = #1e1e2e\nforeground = cdd6f4\nfont-family = Menlo\nkeybind = x=y\n" + palette
+    switch GhosttyThemeFile.parse(sample) {
+    case .success(let file):
+        check(file.background == 0x1E1E2E && file.foreground == 0xCDD6F4, "background and foreground")
+        check(file.ansi.count == 16 && file.ansi[3] == 0x100003 && file.ansi[15] == 0x10000F, "sixteen palette colours in order")
+        check(file.isDark, "a dark background is a dark theme")
+    case .failure(let problem):
+        check(false, "a complete Ghostty theme parses: \(problem.message)")
+    }
+    if case .success(let light) = GhosttyThemeFile.parse(sample.replacingOccurrences(of: "#1e1e2e", with: "#ffffff")) {
+        check(!light.isDark, "a white background is a light theme")
+    } else {
+        check(false, "a light theme parses")
+    }
+    if case .success = GhosttyThemeFile.parse(sample + "palette = 200=#ffffff\n") {
+        check(true, "entries past 15 are ignored")
+    } else {
+        check(false, "entries past 15 are ignored, not refused")
+    }
+    let withoutFive = sample.replacingOccurrences(of: "palette = 5=#100005\n", with: "")
+    if case .failure(let problem) = GhosttyThemeFile.parse(withoutFive) {
+        check(problem == .missing("palette entry 5"), "an incomplete palette says which entry is missing")
+    } else {
+        check(false, "a theme without a palette entry is refused")
+    }
+    if case .failure(let problem) = GhosttyThemeFile.parse("foreground = #ffffff\n" + palette) {
+        check(problem == .missing("background colour"), "a theme without a background is refused")
+    } else {
+        check(false, "a theme without a background is refused")
+    }
+    if case .failure(let problem) = GhosttyThemeFile.parse("background = red\n") {
+        check(problem == .badColor("background = red"), "a colour that is not #rrggbb is refused")
+    } else {
+        check(false, "a bad colour is refused")
+    }
+    if case .failure(let problem) = GhosttyThemeFile.parse(String(repeating: "a", count: 70_000)) {
+        check(problem == .tooLarge, "a file too large to be a theme is refused")
+    } else {
+        check(false, "a huge file is refused")
+    }
+    check(GhosttyThemeFile.hex("#ABCDEF") == 0xABCDEF && GhosttyThemeFile.hex("abc") == nil && GhosttyThemeFile.hex("#12345g") == nil,
+          "hex colours")
+
+    check(TerminalPadding.clamp(-5) == 0 && TerminalPadding.clamp(100) == 40 && TerminalPadding.clamp(12) == 12
+            && TerminalPadding.clamp(.nan) == TerminalPadding.defaultHorizontal, "padding is held to its range")
+    check(SplitFocusColor.accent.hex == nil && SplitFocusColor.allCases.filter { $0 != .accent }.allSatisfy { $0.hex != nil },
+          "only the accent has no colour of its own")
+    check(SplitFocusStyle.allCases.count == 4 && SplitFocusStyle(rawValue: "standard") == .standard
+            && SplitFocusStyle(rawValue: "nope") == nil, "focus styles")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

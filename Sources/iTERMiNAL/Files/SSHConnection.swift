@@ -57,6 +57,18 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     var jumpHosts: String
     /// Whether the ssh-agent's keys can be used from the host. See `AgentForwarding`.
     var agentForwarding: AgentForwarding
+    /// A `TerminalType` raw value for this host's `TERM`, or empty to use the
+    /// one chosen for remote sessions in Settings → Terminal. Kept as the
+    /// string so a name from a newer build is read as the default, not lost.
+    var terminalTypeTag: String
+    /// Which address family ssh may use. See `IPFamily`.
+    var ipFamily: IPFamily
+    /// `ssh -C`.
+    var compression: Bool
+    /// `ServerAliveInterval` in seconds; 0 leaves it to `~/.ssh/config`.
+    var keepAliveSeconds: Int
+    /// Forwards applied to every ssh terminal tab on this host. See `PortForward`.
+    var forwards: [PortForward]
 
     init(
         id: UUID = UUID(),
@@ -70,7 +82,12 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         extraArguments: String = "",
         customCommand: String = "",
         jumpHosts: String = "",
-        agentForwarding: AgentForwarding = .sshConfig
+        agentForwarding: AgentForwarding = .sshConfig,
+        terminalTypeTag: String = "",
+        ipFamily: IPFamily = .any,
+        compression: Bool = false,
+        keepAliveSeconds: Int = 0,
+        forwards: [PortForward] = []
     ) {
         self.id = id
         self.name = name
@@ -84,6 +101,11 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         self.customCommand = customCommand
         self.jumpHosts = jumpHosts
         self.agentForwarding = agentForwarding
+        self.terminalTypeTag = terminalTypeTag
+        self.ipFamily = ipFamily
+        self.compression = compression
+        self.keepAliveSeconds = keepAliveSeconds
+        self.forwards = forwards
     }
 
     /// Tolerant decoding so connections saved before transports existed still
@@ -104,6 +126,11 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         // A choice this build does not know — written by a newer one — falls
         // back to the default instead of failing the whole host list.
         agentForwarding = (try? container.decodeIfPresent(AgentForwarding.self, forKey: .agentForwarding)) ?? .sshConfig
+        terminalTypeTag = try container.decodeIfPresent(String.self, forKey: .terminalTypeTag) ?? ""
+        ipFamily = (try? container.decodeIfPresent(IPFamily.self, forKey: .ipFamily)) ?? .any
+        compression = try container.decodeIfPresent(Bool.self, forKey: .compression) ?? false
+        keepAliveSeconds = try container.decodeIfPresent(Int.self, forKey: .keepAliveSeconds) ?? 0
+        forwards = (try? container.decodeIfPresent([PortForward].self, forKey: .forwards)) ?? []
     }
 
     var destination: String {

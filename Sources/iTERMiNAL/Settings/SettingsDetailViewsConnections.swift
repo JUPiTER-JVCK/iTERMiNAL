@@ -22,6 +22,7 @@ struct ConnectionsSettingsView: View {
                 }
                 HStack {
                     Button("Add Host") { addConnection() }
+                    Button("Add This Mac") { addThisMac() }
                     if let selectedID {
                         Button("Remove", role: .destructive) { remove(selectedID) }
                     }
@@ -84,13 +85,23 @@ struct ConnectionsSettingsView: View {
 
                     ConnectionTestRow(connection: binding.wrappedValue)
                 }
+
+                HostOptionsSection(connection: binding)
             }
+
+            QuickConnectSection()
+
+            HostLookupSection()
 
             RemoteServicesSettingsSection()
 
             ProxmoxSettingsSection()
 
             Section("Authentication") {
+                Toggle("Share each ssh tab's sign-in with the file browser", isOn: $settings.shareSignInWithFiles)
+                Text("On, a new ssh tab keeps its connection open, and the file browser, the port scan and forwards use it. A host that wants a password then needs signing in to once, in a tab, and the file browser fills in by itself; closing the tab ends the sharing. The connection is reachable only by this account, through a private folder. Applies to tabs opened from now on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
 
@@ -121,6 +132,16 @@ struct ConnectionsSettingsView: View {
 
     private func addConnection() {
         let connection = SSHConnection(name: "New Host", host: "", username: NSUserName())
+        settings.sshConnections.append(connection)
+        selectedID = connection.id
+    }
+
+    /// This Mac as a host, for trying a connection, a port forward or the
+    /// remote ports list against a machine that is certainly there. It needs
+    /// Remote Login switched on in System Settings → General → Sharing, which
+    /// this does not do.
+    private func addThisMac() {
+        let connection = SSHConnection(name: "This Mac", host: "127.0.0.1", username: NSUserName())
         settings.sshConnections.append(connection)
         selectedID = connection.id
     }

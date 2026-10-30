@@ -77,7 +77,7 @@ enum SessionLaunch {
                 executable: shell.path,
                 args: shell.args,
                 execName: shell.execName,
-                environment: environment(colors: settings.outputColors),
+                environment: environment(colors: settings.outputColors, terminal: settings.localTerminalType),
                 initialDirectory: directory ?? settings.resolvedInitialDirectory
             ))
 
@@ -85,7 +85,16 @@ enum SessionLaunch {
             guard let connection = settings.sshConnections.first(where: { $0.id == id }) else {
                 return .failure(.unknownConnection)
             }
-            return remoteConfiguration(connection, controlPath: controlPath, agentApproved: agentApproved)
+            // The host's own choice, or the one made for remote sessions.
+            let terminal = connection.terminalTypeTag.isEmpty
+                ? settings.remoteTerminalType
+                : TerminalType.resolve(connection.terminalTypeTag)
+            return remoteConfiguration(
+                connection,
+                terminal: terminal,
+                controlPath: controlPath,
+                agentApproved: agentApproved
+            )
 
         case .tool(let tool):
             guard let executable = tool.resolvedExecutable else {
@@ -115,6 +124,7 @@ enum SessionLaunch {
     /// set to ask; every other choice ignores it.
     private static func remoteConfiguration(
         _ connection: SSHConnection,
+        terminal: TerminalType = .default,
         controlPath: String? = nil,
         agentApproved: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
@@ -147,6 +157,10 @@ enum SessionLaunch {
                 // so a `-J` or `-A` written by hand is theirs to keep.
                 args.append(contentsOf: connection.proxyJumpArguments)
                 args.append(contentsOf: connection.agentForwarding.arguments(approved: agentApproved))
+                // Address family, compression and keep-alive, then the forwards:
+                // each only when the host was set up with it.
+                args.append(contentsOf: connection.optionArguments)
+                args.append(contentsOf: connection.forwardArguments)
             }
             if let controlPath {
                 // After the person's own arguments, so a ControlPath they chose
@@ -192,7 +206,7 @@ enum SessionLaunch {
             executable: executable,
             args: args,
             execName: nil,
-            environment: environment(),
+            environment: environment(terminal: terminal),
             initialDirectory: NSHomeDirectory()
         ))
     }
@@ -208,10 +222,18 @@ enum SessionLaunch {
     /// `colors` is for a shell, whose `ls` and `man` print for a person to read:
     /// remote sessions, which have another machine's environment, and the
     /// bundled tools, which draw their own colours, do not get it.
-    static func environment(colors: OutputColors? = nil) -> [String] {
+    ///
+    /// `terminal` is what `TERM` says. `COLORTERM` goes with it only for a type
+    /// that claims colour, and a value inherited from whatever launched the app
+    /// is removed for one that does not, so a vt100 never also says "truecolor".
+    static func environment(colors: OutputColors? = nil, terminal: TerminalType = .default) -> [String] {
         var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "xterm-256color"
-        env["COLORTERM"] = "truecolor"
+        env["TERM"] = terminal.termValue
+        if terminal.advertisesTrueColor {
+            env["COLORTERM"] = "truecolor"
+        } else {
+            env.removeValue(forKey: "COLORTERM")
+        }
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
         env["TERM_PROGRAM"] = "iTERMiNAL"
         // rg, bat and imgcat, last: a person's own copy of any of them wins.

@@ -9,6 +9,14 @@ import AppKit
 /// would mean this app authenticating, storing a password, and owning a
 /// protocol implementation. The system already has a client for both; it gets
 /// the URL.
+enum RemoteTunnelError: LocalizedError {
+    case hostGone
+
+    var errorDescription: String? {
+        "The SSH host this service goes through has been removed. Pick another, or connect directly."
+    }
+}
+
 enum RemoteServiceLauncher {
     /// Opens `service`, reporting anything the user needs to know about.
     ///
@@ -42,6 +50,38 @@ enum RemoteServiceLauncher {
             completion?(nil)
 
         case .vnc, .rdp:
+            // Through a saved host, when the service is set to go that way: the
+            // client is pointed at a port on this Mac that ssh carries across.
+            if let hostID = service.tunnelThrough {
+                guard let connection = settings.sshConnections.first(where: { $0.id == hostID }) else {
+                    completion?(RemoteTunnelError.hostGone)
+                    return
+                }
+                TunnelManager.shared.open(
+                    through: connection,
+                    targetHost: service.host,
+                    targetPort: service.port
+                ) { result in
+                    switch result {
+                    case .success(let tunnel):
+                        // The username is kept; the port is the forward's, and
+                        // the client is told so even if it is the default one.
+                        var components = URLComponents()
+                        components.scheme = service.kind == .vnc ? "vnc" : "rdp"
+                        components.host = "localhost"
+                        components.port = tunnel.localPort
+                        if !service.username.isEmpty { components.user = service.username }
+                        guard let url = components.url else {
+                            completion?(ServiceDiscoveryError.unresolved)
+                            return
+                        }
+                        openExternally(url, kind: service.kind, completion: completion)
+                    case .failure(let failure):
+                        completion?(failure)
+                    }
+                }
+                return
+            }
             guard let url = service.kind.externalURL(
                 host: service.host,
                 port: service.port,
@@ -51,6 +91,16 @@ enum RemoteServiceLauncher {
                 return
             }
             openExternally(url, kind: service.kind, completion: completion)
+        }
+    }
+
+    /// Opens this Mac's own Sharing settings, where Screen Sharing (VNC) and
+    /// Remote Management are switched on. Nothing is changed from here: turning
+    /// on a service that lets others see and control the screen is a decision
+    /// for the person to make in System Settings, not for an app to make for them.
+    static func openSharingSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension") {
+            NSWorkspace.shared.open(url)
         }
     }
 

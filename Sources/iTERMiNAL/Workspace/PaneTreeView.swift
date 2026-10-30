@@ -78,12 +78,36 @@ struct TerminalPaneView: View {
             // it needs divides the gap between panes unevenly. A bar along
             // the focused pane's top edge says the same thing without
             // surrounding the content.
+            //
+            // The look is the person's to choose (Settings → Terminal → Split
+            // panes); the bar stays the default for the reasons above.
+            let style = settings.splitFocusStyle
+            let markColor = settings.splitFocusColor.hex.map { Color(nsColor: NSColor(hex: $0)) }
+                ?? settings.accentColor
             host
                 .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(isFocused ? settings.accentColor : Color.clear)
-                        .frame(height: 2)
-                        .animation(Motion.disclosure, value: isFocused)
+                    if style == .standard {
+                        Rectangle()
+                            .fill(isFocused ? markColor : Color.clear)
+                            .frame(height: 2)
+                            .animation(Motion.disclosure, value: isFocused)
+                    }
+                }
+                .overlay {
+                    if style == .outline {
+                        Rectangle()
+                            .strokeBorder(isFocused ? markColor : Color.clear, lineWidth: 2)
+                            .allowsHitTesting(false)
+                            .animation(Motion.disclosure, value: isFocused)
+                    }
+                }
+                .overlay {
+                    if style == .dimOthers {
+                        Color.black
+                            .opacity(isFocused ? 0 : 0.3)
+                            .allowsHitTesting(false)
+                            .animation(Motion.disclosure, value: isFocused)
+                    }
                 }
         }
     }

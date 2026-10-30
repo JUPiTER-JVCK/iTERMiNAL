@@ -246,7 +246,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             settings: settings,
             directory: isRemote ? nil : currentDirectory,
             shellOverride: shellOverride,
-            controlPath: controlPath,
+            controlPath: controlPath ?? sharedPathForSharing(settings),
             agentApproved: agentApproved ?? false
         ) {
         case .success(let configuration):
@@ -266,6 +266,25 @@ final class TerminalSession: ObservableObject, Identifiable {
             launchError = error.localizedDescription
             isRunning = false
         }
+    }
+
+    /// Where this tab's ssh should listen so the file browser, the port scan and
+    /// the forwards can use its sign-in, when sharing is on (Settings →
+    /// Connections) or Remote Ports is, and nothing else decided it.
+    ///
+    /// Only for an ssh connection, and only when the socket can be made
+    /// privately (`SSHControlSocket.prepare` says so); otherwise the tab is
+    /// exactly what it was. The file browser, the scan and the forwards sign in
+    /// with a key or the agent without it, so this only matters for a host that
+    /// wants a password: signed in to once in a tab, the rest ride on it.
+    private func sharedPathForSharing(_ settings: AppSettings) -> String? {
+        guard settings.shareSignInWithFiles || settings.showRemotePorts,
+              case .remote(let id) = kind,
+              let connection = settings.sshConnections.first(where: { $0.id == id }),
+              connection.transport == .ssh,
+              case .master(let path) = SSHControlSocket.prepare(for: connection, base: NSTemporaryDirectory())
+        else { return nil }
+        return path
     }
 
     /// The saved connection this session is for, when it is an ssh one set to
