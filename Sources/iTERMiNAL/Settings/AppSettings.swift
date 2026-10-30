@@ -151,6 +151,19 @@ final class AppSettings: ObservableObject {
     /// the port scan to use, so a host that wants a password needs signing in
     /// to once, in a tab, and nothing else. See `SSHControlSocket`.
     @Published var shareSignInWithFiles: Bool { didSet { defaults.set(shareSignInWithFiles, forKey: "shareSignInWithFiles") } }
+    /// Forwards kept in Settings and run in the background. See `SavedTunnel`.
+    @Published var savedTunnels: [SavedTunnel] {
+        didSet {
+            if let data = try? JSONEncoder().encode(savedTunnels) {
+                defaults.set(data, forKey: "savedTunnels")
+            }
+        }
+    }
+    /// Whether the HTTP client's Lookup tab may ask a location service about a
+    /// public address. Off: the one place this app sends an address to a third
+    /// party does nothing until asked to be allowed.
+    @Published var httpGeolocationEnabled: Bool { didSet { defaults.set(httpGeolocationEnabled, forKey: "httpGeolocationEnabled") } }
+    @Published var httpGeolocationTemplate: String { didSet { defaults.set(httpGeolocationTemplate, forKey: "httpGeolocationTemplate") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// How a focused split pane is marked, and in what colour.
     @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
@@ -361,6 +374,14 @@ final class AppSettings: ObservableObject {
             importedThemes = []
         }
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
+        if let data = defaults.data(forKey: "savedTunnels"),
+           let decoded = try? JSONDecoder().decode([SavedTunnel].self, from: data) {
+            savedTunnels = decoded
+        } else {
+            savedTunnels = []
+        }
+        httpGeolocationEnabled = defaults.bool(forKey: "httpGeolocationEnabled")
+        httpGeolocationTemplate = defaults.string(forKey: "httpGeolocationTemplate") ?? GeoLookup.defaultTemplate
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
         splitFocusStyleTag = defaults.string(forKey: "splitFocusStyleTag") ?? SplitFocusStyle.standard.rawValue
         splitFocusColorTag = defaults.string(forKey: "splitFocusColorTag") ?? SplitFocusColor.accent.rawValue
@@ -633,6 +654,8 @@ final class AppSettings: ObservableObject {
         localTerminalTypeTag = TerminalType.default.rawValue
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showRemotePorts = false
+        httpGeolocationEnabled = false
+        httpGeolocationTemplate = GeoLookup.defaultTemplate
         shareSignInWithFiles = true
         splitFocusStyleTag = SplitFocusStyle.standard.rawValue
         splitFocusColorTag = SplitFocusColor.accent.rawValue

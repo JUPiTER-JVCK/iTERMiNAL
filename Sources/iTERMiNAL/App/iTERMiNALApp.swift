@@ -53,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.shared.applyAppearance()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
+        // Forwards a person marked "start when iTERMiNAL opens".
+        SavedTunnelRunner.shared.startAutomatic(settings: AppSettings.shared)
         // Not in any shipped build: only the Screenshots workflow defines this.
         #if SCREENSHOTS
         ScreenshotMode.startIfRequested()
@@ -61,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         LocalAPIServer.shared.stop()
+        // A child `ssh -N` is not stopped by its parent exiting.
+        SavedTunnelRunner.shared.stopAll()
         // Notes save on a debounce, so the last thing typed is exactly what a
         // quit would otherwise drop.
         WorkspaceStore.shared.flushNotes()

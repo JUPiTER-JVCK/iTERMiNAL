@@ -4507,5 +4507,89 @@ do {
             && SplitFocusStyle(rawValue: "nope") == nil, "focus styles")
 }
 
+// MARK: Background tunnels and location lookups
+
+do {
+    let host = SSHConnection(name: "n", host: "h", username: "u")
+    let local = PortForward(kind: .local, bindPort: 8080, targetHost: "localhost", targetPort: 80)
+    check(TunnelPlan.savedArguments(for: host, forward: local)
+            == ["-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
+                "-L", "127.0.0.1:8080:localhost:80", "u@h"],
+          "a background tunnel is ssh -N with the forward, signed in without a keyboard")
+    check(TunnelPlan.savedArguments(for: host, forward: PortForward(kind: .local, bindPort: 80, targetHost: "h", targetPort: 1)) == nil,
+          "a rule that is not valid never reaches a command line")
+    check(TunnelPlan.savedArguments(for: host, forward: PortForward(kind: .dynamic, bindPort: 1080, targetHost: "", targetPort: 0))?
+            .suffix(3) == ["-D", "127.0.0.1:1080", "u@h"], "a SOCKS tunnel")
+    let kept = SSHConnection(name: "n", host: "h", username: "u", keepAliveSeconds: 15)
+    let keptArguments = TunnelPlan.savedArguments(for: kept, forward: local) ?? []
+    check(keptArguments.firstIndex(of: "ServerAliveInterval=15").map { index in
+        keptArguments.firstIndex(of: "ServerAliveInterval=30").map { index < $0 } ?? false
+    } == true, "a host's own keep-alive comes first, so it wins")
+    check(TunnelPlan.localListeningPort(of: local) == 8080
+            && TunnelPlan.localListeningPort(of: PortForward(kind: .remote, bindPort: 9000, targetHost: "localhost", targetPort: 22)) == nil
+            && TunnelPlan.localListeningPort(of: PortForward(kind: .dynamic, bindPort: 1080, targetHost: "", targetPort: 0)) == 1080,
+          "only a forward that listens here can be checked here")
+
+    let decoder = JSONDecoder()
+    let bare = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF"}"#
+    if let decoded = try? decoder.decode(SavedTunnel.self, from: Data(bare.utf8)) {
+        check(decoded.connectionID == nil && !decoded.autoStart && decoded.forward.isValid, "a bare record loads with defaults")
+    } else {
+        check(false, "a saved tunnel with only an id still loads")
+    }
+    let tunnel = SavedTunnel(name: "db", connectionID: UUID(), forward: local, autoStart: true)
+    if let data = try? JSONEncoder().encode([tunnel]), let back = try? decoder.decode([SavedTunnel].self, from: data) {
+        check(back == [tunnel], "saved tunnels survive being saved")
+    } else {
+        check(false, "saved tunnels can be saved and read back")
+    }
+
+    // Location lookups: what may be sent, and how the answer is read.
+    func address(_ text: String) -> HostLookup.Address { HostLookup.classify(text)! }
+    check(GeoLookup.url(template: GeoLookup.defaultTemplate, address: address("8.8.8.8"))?.absoluteString == "https://ipwho.is/8.8.8.8",
+          "a public address goes into the service's address")
+    check(GeoLookup.url(template: GeoLookup.defaultTemplate, address: address("192.168.1.5")) == nil
+            && GeoLookup.url(template: GeoLookup.defaultTemplate, address: address("127.0.0.1")) == nil
+            && GeoLookup.url(template: GeoLookup.defaultTemplate, address: address("fe80::1")) == nil
+            && GeoLookup.url(template: GeoLookup.defaultTemplate, address: address("100.64.0.1")) == nil,
+          "a private, loopback, link-local or shared address is never sent")
+    check(GeoLookup.url(template: "http://ipwho.is/{ip}", address: address("8.8.8.8")) == nil, "only over https")
+    check(GeoLookup.url(template: "https://x.example/{ip}/{ip}", address: address("8.8.8.8")) == nil
+            && GeoLookup.url(template: "https://x.example/", address: address("8.8.8.8")) == nil,
+          "the address goes in exactly once")
+    check(GeoLookup.url(template: "https://x.example/lookup?ip={ip}&fields=all", address: address("2001:4860:4860::8888"))?.absoluteString
+            == "https://x.example/lookup?ip=2001:4860:4860::8888&fields=all", "an IPv6 address in a query")
+    check(GeoLookup.serviceHost(template: GeoLookup.defaultTemplate) == "ipwho.is", "the service is named for the button")
+
+    func geo(_ json: String) -> Result<GeoLocation, GeoLookup.Problem> { GeoLookup.parse(Data(json.utf8)) }
+    if case .success(let found) = geo(#"{"success":true,"country":"United States","region":"California","city":"Mountain View","latitude":37.386,"longitude":-122.0838,"timezone":{"id":"America/Los_Angeles"},"connection":{"isp":"Google LLC"}}"#) {
+        check(found.place == "Mountain View, California, United States" && found.timezone == "America/Los_Angeles"
+                && found.organisation == "Google LLC" && found.coordinates == "37.3860, -122.0838", "ipwho.is's shape")
+    } else {
+        check(false, "ipwho.is's answer is read")
+    }
+    if case .success(let found) = geo(#"{"ip":"8.8.8.8","city":"Mountain View","region":"California","country":"US","loc":"37.4056,-122.0775","org":"AS15169 Google LLC","timezone":"America/Los_Angeles"}"#) {
+        check(found.latitude == 37.4056 && found.longitude == -122.0775 && found.organisation == "AS15169 Google LLC", "ipinfo's shape")
+    } else {
+        check(false, "ipinfo's answer is read")
+    }
+    if case .success(let found) = geo(#"{"country_name":"Germany","city":"Berlin","latitude":"52.52","longitude":"13.405","org":"Example"}"#) {
+        check(found.country == "Germany" && found.latitude == 52.52, "ipapi's shape, with numbers written as text")
+    } else {
+        check(false, "ipapi's answer is read")
+    }
+    check(geo(#"{"success":false,"message":"Invalid IP address"}"#) == .failure(.serviceSaid("Invalid IP address")), "a refusal says why")
+    check(geo(#"{"error":true,"reason":"RateLimited"}"#) == .failure(.serviceSaid("RateLimited")), "another service's refusal")
+    check(geo("not json") == .failure(.unreadable) && geo("{}") == .failure(.unreadable) && geo("[1]") == .failure(.unreadable),
+          "an answer with nothing in it is unreadable, not empty")
+    if case .success(let found) = geo(#"{"city":"Bad\u0007City","latitude":999,"longitude":10}"#) {
+        check(found.city == "BadCity" && found.latitude == nil && found.longitude == nil,
+              "control characters are dropped and impossible coordinates are not shown")
+    } else {
+        check(false, "a sloppy answer is still read")
+    }
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

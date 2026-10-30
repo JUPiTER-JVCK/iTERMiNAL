@@ -249,7 +249,7 @@ final class TunnelManager: ObservableObject {
 }
 
 /// Text collected from a pipe on another queue.
-private final class LockedText {
+final class LockedText {
     private let lock = NSLock()
     private var data = Data()
 

@@ -91,6 +91,8 @@ struct ConnectionsSettingsView: View {
 
             QuickConnectSection()
 
+            BackgroundTunnelsSection()
+
             HostLookupSection()
 
             RemoteServicesSettingsSection()

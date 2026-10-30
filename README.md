@@ -766,6 +766,31 @@ for each (up to 8; more are saved but not opened). **Look up a host** shows what
 this Mac's own resolver says about a name or an address; nothing goes to a
 lookup service.
 
+### Background tunnels
+
+**Settings → Connections → Background tunnels** keeps port forwards — local,
+remote or SOCKS5, the same rules a host's tabs can open — running through a
+saved host with no terminal tab open. Each is an `ssh -N` of its own: start and
+stop it from the list, or mark it to start when iTERMiNAL opens. It signs in
+with a key or your agent and never a typed password, so a host that wants one
+shows as failed with the reason (**Set Up Key Login** on the host is the fix).
+It listens on this Mac's loopback only, fails rather than reusing a port that
+is already in use, and ends when you stop it or quit the app; it is not
+restarted if the connection drops, and the list says so.
+
+### Lookup (in the HTTP client)
+
+The HTTP client's **Lookup** tab shows what this Mac's own resolver says about
+a name or an address: the addresses behind a name, the name behind an address,
+and what kind each is (public, private, loopback, link-local, shared
+address space). For a *public* address it can also say where it is — but that
+sends the address to a third-party service, so it is off until you turn on
+**Settings → HTTP Client → IP lookup**, and then happens only when you press
+the button, which names the service (default `ipwho.is`; any https service
+that takes the address in its URL can be put in its place). Only the address
+is sent — never the name you typed — and a private, loopback or reserved
+address is never sent at all.
+
 ### Remote ports
 
 **Settings → Appearance → Status → Show remote ports** (off by default) puts a
