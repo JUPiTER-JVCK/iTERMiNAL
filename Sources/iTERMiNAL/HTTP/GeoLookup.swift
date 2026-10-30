@@ -59,10 +59,13 @@ enum GeoLookup {
         let trimmed = template.trimmingCharacters(in: .whitespaces)
         guard trimmed.lowercased().hasPrefix("https://"),
               trimmed.components(separatedBy: placeholder).count == 2 else { return nil }
-        // The address is digits, hex and `.` or `:` — `HostLookup.classify` only
-        // accepts what `inet_pton` does — but it is encoded all the same, so
-        // nothing about the address can change the URL's shape.
-        guard let encoded = address.text.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        // The address is hex digits, `.` and `:` — `HostLookup.classify` only
+        // accepts what `inet_pton` does — and exactly those are left as they
+        // are; anything else would be encoded, so nothing about the address can
+        // change the URL's shape. (`.urlPathAllowed` is not used: whether it
+        // leaves `:` alone is not something to rely on for an IPv6 address.)
+        let plain = CharacterSet(charactersIn: "0123456789abcdefABCDEF.:")
+        guard let encoded = address.text.addingPercentEncoding(withAllowedCharacters: plain) else { return nil }
         let built = trimmed.replacingOccurrences(of: placeholder, with: encoded)
         guard let url = URL(string: built), url.scheme == "https", let host = url.host, !host.isEmpty else { return nil }
         return url
