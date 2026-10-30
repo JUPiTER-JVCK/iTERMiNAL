@@ -31,6 +31,31 @@ struct HTTPClientSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("IP lookup") {
+                Toggle("Allow location lookups", isOn: $settings.httpGeolocationEnabled)
+                if settings.httpGeolocationEnabled {
+                    TextField("Service", text: $settings.httpGeolocationTemplate,
+                              prompt: Text(GeoLookup.defaultTemplate))
+                        .font(.system(size: 12, design: .monospaced))
+                    if let host = GeoLookup.serviceHost(template: settings.httpGeolocationTemplate),
+                       GeoLookup.url(template: settings.httpGeolocationTemplate,
+                                     address: HostLookup.classify("8.8.8.8")!) != nil {
+                        Text("Asks \(host) where a public address is, when you press Locate in the Lookup tab. The address is sent; nothing else is — not the name you looked up, not your own address beyond what any web request reveals to the service.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("That isn't an https address with {ip} in it, so nothing will be sent.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Button("Use the Default Service") { settings.httpGeolocationTemplate = GeoLookup.defaultTemplate }
+                } else {
+                    Text("The Lookup tab always shows what this Mac's own resolver says about a name or an address. Turning this on adds a button that asks a third-party service where a public address is. Off, no address is ever sent anywhere.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Site explorer") {
                 Toggle("Add links from pages I fetch to the map", isOn: $settings.httpRecordDiscoveredLinks)
                 Text("The explorer (Explore, next to Request) maps a site from what the site itself publishes: its robots.txt, the sitemaps that file names, and the page you enter. With this on, links in any page you fetch are added too — read from the response already in hand, never fetched on their own. It does not guess at paths, probe for common directories, or follow anything off the site being mapped.")

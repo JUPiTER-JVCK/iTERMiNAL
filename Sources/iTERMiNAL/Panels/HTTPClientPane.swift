@@ -4,7 +4,7 @@ import AppKit
 /// Which half of the pane is showing: composing a request, or walking a
 /// site's published paths from a command line.
 enum HTTPPaneMode: String, CaseIterable {
-    case request, explore
+    case request, explore, lookup
 }
 
 /// What the response area is showing: the body as it came, or the response read
@@ -52,6 +52,10 @@ final class HTTPClientModel: ObservableObject, Identifiable {
     /// The command-line site explorer. Not part of what is saved with a
     /// layout: a map is rebuilt by asking, never by reopening the app.
     let explorer = SiteExplorerModel()
+
+    /// The Lookup tab: names, addresses and, if allowed, where an address is.
+    /// Rebuilt by asking, like the explorer.
+    let lookup = IPLookupModel()
 
     /// The response read into lists, tables and queries (the Extract tab).
     /// Like the explorer, it is rebuilt by asking and is not saved with a layout.
@@ -253,6 +257,8 @@ struct HTTPClientPaneView: View {
                 }
             case .explore:
                 SiteExplorerView(explorer: model.explorer)
+            case .lookup:
+                IPLookupView(model: model.lookup)
             }
         }
         .background(theme.background)
@@ -269,11 +275,12 @@ struct HTTPClientPaneView: View {
             Picker("Mode", selection: $model.mode) {
                 Text("Request").tag(HTTPPaneMode.request)
                 Text("Explore").tag(HTTPPaneMode.explore)
+                Text("Lookup").tag(HTTPPaneMode.lookup)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .help("Request: build and send one request · Explore: walk the paths a site publishes, like a directory")
+            .help("Request: build and send one request · Explore: walk the paths a site publishes, like a directory · Lookup: what a name or an address is, and where")
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
