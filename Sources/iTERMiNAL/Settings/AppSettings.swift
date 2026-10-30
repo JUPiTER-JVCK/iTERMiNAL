@@ -133,6 +133,28 @@ final class AppSettings: ObservableObject {
     @Published var cursorAnimationTag: String { didSet { defaults.set(cursorAnimationTag, forKey: "cursorAnimationTag") } }
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
+    /// `TerminalType` raw values for `TERM` in local shells and in remote
+    /// sessions. Strings, so a name from a newer build reads as the default.
+    @Published var localTerminalTypeTag: String { didSet { defaults.set(localTerminalTypeTag, forKey: "localTerminalTypeTag") } }
+    @Published var remoteTerminalTypeTag: String { didSet { defaults.set(remoteTerminalTypeTag, forKey: "remoteTerminalTypeTag") } }
+    /// Themes imported from Ghostty theme files.
+    @Published var importedThemes: [ImportedTerminalTheme] {
+        didSet {
+            if let data = try? JSONEncoder().encode(importedThemes) {
+                defaults.set(data, forKey: "importedThemes")
+            }
+        }
+    }
+    /// Off by default: the globe in the status bar and the scans behind it
+    /// exist only for someone who asked for them.
+    @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
+    /// How a focused split pane is marked, and in what colour.
+    @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
+    @Published var splitFocusColorTag: String { didSet { defaults.set(splitFocusColorTag, forKey: "splitFocusColorTag") } }
+    /// Space around the text inside a terminal. Off uses the built-in padding.
+    @Published var customTerminalPadding: Bool { didSet { defaults.set(customTerminalPadding, forKey: "customTerminalPadding") } }
+    @Published var terminalPaddingHorizontal: Double { didSet { defaults.set(terminalPaddingHorizontal, forKey: "terminalPaddingHorizontal") } }
+    @Published var terminalPaddingVertical: Double { didSet { defaults.set(terminalPaddingVertical, forKey: "terminalPaddingVertical") } }
     @Published var useGPURendering: Bool { didSet { defaults.set(useGPURendering, forKey: "useGPURendering") } }
     /// Colour for what ordinary commands print — see `OutputColors`. On by
     /// default: a shell that prints `ls` in one colour is the surprising one.
