@@ -824,9 +824,8 @@ Appearance** takes any accent color beside the six, and an animation speed from
 0.5× to 2×.
 
 What these cannot do is limited by the terminal engine (SwiftTerm), which has no
-setting for character width, ligatures, a minimum contrast, a hollow block that
-is always on (it draws one only while the terminal is not the focused one), or the
-bold and italic faces. Those would need changes to SwiftTerm, so they are not
+setting for character width, ligatures, a minimum contrast, an always-hollow
+block cursor, or the bold and italic faces. Those would need changes to SwiftTerm, so they are not
 offered rather than offered and ignored. The interface's own text sizes are fixed
 point sizes throughout the views, so there is no global interface scale.
 
