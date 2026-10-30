@@ -10,6 +10,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     private let process = ProcessMetrics.shared
 
     var body: some View {
@@ -44,6 +45,13 @@ struct MainWindowView: View {
         }
         .onAppear { process.start() }
         .onDisappear { process.stop() }
+        // A remote desktop asks for its window here, from wherever it was
+        // started: Settings and the sidebar cannot open a window themselves.
+        .onReceive(NotificationCenter.default.publisher(for: .openRemoteDesktop)) { note in
+            if let id = note.userInfo?["id"] as? UUID {
+                openWindow(value: id)
+            }
+        }
     }
 
     private func contentCard(_ theme: Theme) -> some View {

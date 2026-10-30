@@ -105,6 +105,26 @@ enum RemoteServiceKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// What opens a VNC service.
+enum RemoteViewer: String, Codable, CaseIterable, Identifiable {
+    /// Whatever the Mac has registered for `vnc://`: Screen Sharing on a stock
+    /// one. It does the signing in, so this app never sees a password.
+    case system
+    /// This app's own window. Does no authentication or a VNC password — which
+    /// it asks for each time and never keeps — and not Apple's own sign-in, so
+    /// a Mac with only that turned on needs the system viewer.
+    case builtIn
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System app (Screen Sharing)"
+        case .builtIn: return "Built-in viewer"
+        }
+    }
+}
+
 /// A saved remote endpoint that is not a shell.
 ///
 /// Deliberately separate from `SSHConnection`, which carries transport
@@ -125,6 +145,9 @@ struct RemoteService: Codable, Identifiable, Hashable {
     /// desktop service that is only reachable from that host's network. The
     /// address above is then read as that host sees it. Nil connects directly.
     var tunnelThrough: UUID?
+    /// For VNC: the system's Screen Sharing (or whatever has the `vnc://`
+    /// scheme), or this app's own viewer. See `RemoteViewer`.
+    var viewer: RemoteViewer
 
     init(
         id: UUID = UUID(),
@@ -133,7 +156,8 @@ struct RemoteService: Codable, Identifiable, Hashable {
         host: String,
         port: Int? = nil,
         username: String = "",
-        tunnelThrough: UUID? = nil
+        tunnelThrough: UUID? = nil,
+        viewer: RemoteViewer = .system
     ) {
         self.id = id
         self.name = name
@@ -142,6 +166,7 @@ struct RemoteService: Codable, Identifiable, Hashable {
         self.port = port ?? kind.defaultPort
         self.username = username
         self.tunnelThrough = tunnelThrough
+        self.viewer = viewer
     }
 
     /// Tolerant decoding, matching `SSHConnection`: a record written by a
@@ -155,6 +180,7 @@ struct RemoteService: Codable, Identifiable, Hashable {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? kind.defaultPort
         username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
         tunnelThrough = try container.decodeIfPresent(UUID.self, forKey: .tunnelThrough)
+        viewer = (try? container.decodeIfPresent(RemoteViewer.self, forKey: .viewer)) ?? .system
     }
 
     var subtitle: String {
