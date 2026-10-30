@@ -7,6 +7,7 @@ import AppKit
 struct RemoteServicesSettingsSection: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.openWindow) private var openWindow
     // Observed, not owned: the browser is a singleton that keeps listening
     // while the settings window is closed, so this view must not be the thing
     // that decides its lifetime.
@@ -82,6 +83,18 @@ struct RemoteServicesSettingsSection: View {
                     TextField("Host", text: $service.host, prompt: Text("studio.local"))
                     TextField("Port", value: $service.port, format: .number)
                     TextField("Username (optional)", text: $service.username)
+                    if service.kind == .vnc {
+                        Picker("Open with", selection: $service.viewer) {
+                            ForEach(RemoteViewer.allCases) { viewer in
+                                Text(viewer.label).tag(viewer)
+                            }
+                        }
+                        if service.viewer == .builtIn {
+                            Text("Opens a window in this app. It does no sign-in or a VNC password, asked each time and never saved; macOS Screen Sharing's own sign-in is not supported unless “VNC viewers may control screen with password” is on. The picture is sent uncompressed, so it suits a local network or a tunnel better than a slow link. The connection is not encrypted unless it goes through an SSH host.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if !service.kind.isHandledInApp {
                         Picker("Go through", selection: $service.tunnelThrough) {
                             Text("Connect directly").tag(UUID?.none)
@@ -187,8 +200,18 @@ struct RemoteServicesSettingsSection: View {
     }
 
     private func open(_ service: RemoteService) {
-        RemoteServiceLauncher.open(service, store: store, settings: settings) { error in
-            message = error?.localizedDescription
+        let launch = {
+            RemoteServiceLauncher.open(service, store: store, settings: settings) { error in
+                message = error?.localizedDescription
+            }
+        }
+        // The built-in viewer's window is opened by the main window, which has
+        // to be there to hear it.
+        if service.kind == .vnc, service.viewer == .builtIn {
+            openWindow(id: "main")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: launch)
+        } else {
+            launch()
         }
     }
 }

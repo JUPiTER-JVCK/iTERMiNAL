@@ -49,6 +49,9 @@ enum RemoteServiceLauncher {
             }
             completion?(nil)
 
+        case .vnc where service.viewer == .builtIn:
+            openBuiltInViewer(service, settings: settings, completion: completion)
+
         case .vnc, .rdp:
             // Through a saved host, when the service is set to go that way: the
             // client is pointed at a port on this Mac that ssh carries across.
@@ -91,6 +94,53 @@ enum RemoteServiceLauncher {
                 return
             }
             openExternally(url, kind: service.kind, completion: completion)
+        }
+    }
+
+    /// Connects in this app's own viewer: through a saved SSH host if the
+    /// service is set to go that way, and straight to the address if not. The
+    /// window itself is opened by whoever is listening for the notification
+    /// (the main window), so this works from Settings and the sidebar alike.
+    private static func openBuiltInViewer(
+        _ service: RemoteService,
+        settings: AppSettings,
+        completion: ((Error?) -> Void)?
+    ) {
+        func present(host: String, port: Int, tunneled: Bool) {
+            let session = RemoteDesktopSession(
+                title: service.name.isEmpty ? service.host : service.name,
+                host: host,
+                port: port,
+                isTunneled: tunneled
+            )
+            RemoteDesktopRegistry.shared.add(session)
+            session.start()
+            NotificationCenter.default.post(name: .openRemoteDesktop, object: nil, userInfo: ["id": session.id])
+            EventBus.shared.publish(APIEvent("remote.service.opened", [
+                "kind": service.kind.rawValue,
+                "host": service.host,
+                "viewer": "built-in",
+            ]))
+            completion?(nil)
+        }
+
+        guard !service.host.trimmingCharacters(in: .whitespaces).isEmpty else {
+            completion?(ServiceDiscoveryError.unresolved)
+            return
+        }
+        guard let hostID = service.tunnelThrough else {
+            present(host: service.host, port: service.port, tunneled: false)
+            return
+        }
+        guard let connection = settings.sshConnections.first(where: { $0.id == hostID }) else {
+            completion?(RemoteTunnelError.hostGone)
+            return
+        }
+        TunnelManager.shared.open(through: connection, targetHost: service.host, targetPort: service.port) { result in
+            switch result {
+            case .success(let tunnel): present(host: "127.0.0.1", port: tunnel.localPort, tunneled: true)
+            case .failure(let failure): completion?(failure)
+            }
         }
     }
 
