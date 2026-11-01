@@ -354,6 +354,28 @@ struct CommandPaletteView: View {
             })
         }
 
+        actions.append(PaletteAction(
+            id: "skills.open",
+            title: "Skills",
+            subtitle: "Saved commands and snippets",
+            systemImage: "book"
+        ) {
+            store.detailMode = .skills
+        })
+        // A skill's text goes into the composer's input and no further: Return
+        // is still what sends it.
+        for skill in settings.skills {
+            guard let text = skill.inputText else { continue }
+            actions.append(PaletteAction(
+                id: "skill.use.\(skill.id.uuidString)",
+                title: "Skill: \(skill.displayName)",
+                subtitle: skill.summary,
+                systemImage: "book"
+            ) {
+                store.insertIntoComposer(text)
+            })
+        }
+
         for theme in TerminalTheme.available {
             actions.append(PaletteAction(
                 id: "theme.\(theme.id)",

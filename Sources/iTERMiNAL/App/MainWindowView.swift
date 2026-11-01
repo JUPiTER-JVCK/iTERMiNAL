@@ -248,13 +248,7 @@ struct DetailView: View {
         case .tasks:
             TaskManagerView()
         case .skills:
-            SectionPageView(
-                title: "Skills",
-                subtitle: "Reusable command snippets you can run from the composer or the palette.",
-                icon: "book",
-                emptyTitle: "No skills yet",
-                emptyCaption: "Saved snippets are coming soon."
-            )
+            SkillsView()
         case .terminal:
             terminalSurface
         }

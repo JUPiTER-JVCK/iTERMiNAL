@@ -77,9 +77,11 @@ struct ComposerBar: View {
                 readsShellHistory: settings.composerSuggestFromShellHistory
             )
             handlePendingHelp()
+            handlePendingInsert()
         }
         .onChange(of: store.composerHistory) { _, history in suggestions.setComposerHistory(history) }
         .onChange(of: store.composerHelpRequest) { _, _ in handlePendingHelp() }
+        .onChange(of: store.composerInsertRequest) { _, _ in handlePendingInsert() }
         .onChange(of: settings.composerSuggestFromShellHistory) { _, reads in suggestions.setReadsShellHistory(reads) }
         // A list that is open follows the text, including changes the editor
         // is not told about, such as the field being cleared on send.
@@ -495,6 +497,15 @@ struct ComposerBar: View {
 
     /// A request from the menu or the "+" menu to explain or fix what the
     /// composer's terminal last printed.
+    /// A skill chosen elsewhere: its text goes into the input, after anything
+    /// already typed. Not sent.
+    private func handlePendingInsert() {
+        guard let request = store.composerInsertPending else { return }
+        store.composerInsertHandled = request.id
+        historyIndex = nil
+        text = Skill.insertion(request.text, into: text)
+    }
+
     private func handlePendingHelp() {
         guard let request = store.composerHelpPending else { return }
         store.composerHelpHandled = request.id

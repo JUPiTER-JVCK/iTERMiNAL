@@ -393,6 +393,14 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Markdown preview** — right-click a `.md` file in the file browser, on this
   Mac or on a host, and **Preview Markdown** shows it rendered, in a sheet. It is
   built not to trust the file: see [Markdown preview](#markdown-preview).
+- **Skills** — the Skills page in the sidebar keeps saved commands and snippets:
+  a name, an optional note, and text of up to 4,000 characters, several lines
+  if you like. **Use** on the page, or **Skill: …** in the command palette, puts
+  the text in the composer's input — after anything already typed there, never
+  over it — and nothing more: it is not sent, and Return is still what runs it,
+  with the warnings about risky commands applying as they do to anything typed.
+  Text with a control character in it (an escape, say) is refused. Skills stay
+  on this Mac. Automations, on the page next to it, is still to come.
 - **Quick Look** — right-click a file in the file browser and choose **Quick Look**,
   or select it and press Space, to see it in the system's own Quick Look panel,
   the one Finder uses. A file on this Mac is previewed where it is. A file on a

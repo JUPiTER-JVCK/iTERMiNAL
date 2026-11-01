@@ -5493,6 +5493,61 @@ do {
     }
 }
 
+// MARK: Skills
+
+// A skill is text for the composer's input. What is checked is what goes in: normalised, one
+// plain block with only a tab and a line break as control characters, and added after what is
+// already typed rather than over it; and how a skill reads in a list.
+do {
+    func skill(name: String = "Deploy", note: String = "", text: String) -> Skill {
+        Skill(name: name, note: note, text: text)
+    }
+
+    // The text.
+    check(Skill.normalized("  ls -la \n") == "ls -la", "spaces and line breaks at the ends go")
+    check(Skill.normalized("a\r\nb\r\n") == "a\nb", "CRLF becomes a line break")
+    check(Skill.normalized("\n\n  echo hi") == "echo hi", "so do blank lines before")
+    check(Skill.normalized("a\n\nb") == "a\n\nb", "but not blank lines between")
+    check(Skill.isUsableText("echo hi") && Skill.isUsableText("a\nb\tc"), "a line break and a tab are fine")
+    check(!Skill.isUsableText("echo \u{1B}[2J") && !Skill.isUsableText("a\u{0}b") && !Skill.isUsableText("a\u{7F}") && !Skill.isUsableText("a\rb"),
+          "ESC, NUL, DEL and a bare CR are not")
+    check(skill(text: "kubectl get pods").problem == nil, "a command is fine")
+    check(skill(text: "kubectl get pods").inputText == "kubectl get pods", "and is put in as written")
+    check(skill(text: "  \n ").problem == "A skill needs some text." && skill(text: "").inputText == nil, "none is refused")
+    check(skill(text: "echo \u{1B}[0m").problem?.contains("control character") == true && skill(text: "echo \u{1B}[0m").inputText == nil,
+          "so is a control character, with the reason")
+    check(skill(text: String(repeating: "x", count: Skill.maxTextLength)).problem == nil, "at the limit it is fine")
+    check(skill(text: String(repeating: "x", count: Skill.maxTextLength + 1)).problem?.contains("4000") == true, "one over is refused")
+    check(skill(text: "a\r\nb").inputText == "a\nb", "text pasted with CRLF is put in with line breaks")
+
+    // Added to what is typed.
+    check(Skill.insertion("ls", into: "") == "ls", "an empty input takes it as it is")
+    check(Skill.insertion("ls", into: "   ") == "ls" && Skill.insertion("ls", into: "\n") == "ls", "so does one with only blanks in it")
+    check(Skill.insertion("apt update", into: "sudo") == "sudo apt update", "after a word, with a space between")
+    check(Skill.insertion("apt update", into: "sudo ") == "sudo apt update", "after a space, none is added")
+    check(Skill.insertion("b", into: "a\n") == "a\nb", "after a line break, straight on")
+    check(Skill.insertion("one\ntwo", into: "cd /tmp &&") == "cd /tmp && one\ntwo", "a snippet of several lines keeps them, after the draft")
+
+    // How it reads.
+    check(skill(name: "  Deploy  ", text: "x").displayName == "Deploy", "its name")
+    check(skill(name: "", text: "docker compose up -d\nsecond").displayName == "docker compose up -d", "without a name, the first line")
+    check(skill(name: " ", text: String(repeating: "y", count: 80)).displayName.hasSuffix("…") &&
+          skill(name: " ", text: String(repeating: "y", count: 80)).displayName.count == 40, "cut at forty characters")
+    check(skill(name: "", text: "").displayName == "Untitled skill", "or a stand-in")
+    check(skill(note: "Restart the stack", text: "docker compose restart").summary == "Restart the stack", "a note is the summary")
+    check(skill(text: "docker compose restart\nsecond line").summary == "docker compose restart", "and without one, the first line")
+    check(skill(text: String(repeating: "z", count: 100)).summary.count == 60, "cut at sixty")
+    check(Skill.newName(avoiding: []) == "Skill 1" && Skill.newName(avoiding: ["skill 1", "Skill 3"]) == "Skill 2", "names for new ones")
+
+    // Saved and read back.
+    let saved = [skill(name: "A", note: "n", text: "echo a\necho b"), skill(name: "B", text: "ls")]
+    if let data = try? JSONEncoder().encode(saved), let back = try? JSONDecoder().decode([Skill].self, from: data) {
+        check(back == saved && back.map(\.id) == saved.map(\.id), "skills survive being saved")
+    } else {
+        check(false, "skills can be saved and read back")
+    }
+}
+
 // MARK: Terminal types
 
 do {
