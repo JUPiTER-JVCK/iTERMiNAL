@@ -6394,27 +6394,39 @@ do {
 
     let three = run(log(parts: 3), question: "  why?\n  now ") { count, _, _ in count < 4 ? "note \(count)" : "ANSWER" }
     check(three.calls.count == 4, "three parts take three notes and an answer: \(three.calls.count)")
-    check(three.calls.prefix(3).allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "the first three read a part each")
-    check(three.calls[0].user.contains("part 1 of 3") && three.calls[0].user.contains("part 1 text") && !three.calls[0].user.contains("part 2 text"), "the first has the first part only")
-    check(three.calls[2].user.contains("part 3 of 3") && three.calls[2].user.contains("Question about the whole file: why? now"), "the third, and the question as cleaned")
-    check(three.calls[3].system == LogAnalysis.answerSystemPrompt && three.calls[3].user.contains("[1] note 1") && three.calls[3].user.contains("[3] note 3"),
-          "the last writes the answer from the notes")
+    if three.calls.count == 4 {
+        check(three.calls.prefix(3).allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "the first three read a part each")
+        check(three.calls[0].user.contains("part 1 of 3") && three.calls[0].user.contains("part 1 text") && !three.calls[0].user.contains("part 2 text"), "the first has the first part only")
+        check(three.calls[2].user.contains("part 3 of 3") && three.calls[2].user.contains("Question about the whole file: why? now"), "the third, and the question as cleaned")
+        check(three.calls[3].system == LogAnalysis.answerSystemPrompt && three.calls[3].user.contains("[1] note 1") && three.calls[3].user.contains("[3] note 3"),
+              "the last writes the answer from the notes")
+    }
     check((try? three.outcome?.get()) == "ANSWER", "and is what comes back")
     check(three.progress.map(\.step) == [1, 2, 3, 4] && three.progress.allSatisfy { $0.total == 4 }, "progress counts up to the total")
     check(three.progress.map(\.label) == ["Reading part 1 of 3", "Reading part 2 of 3", "Reading part 3 of 3", "Writing the answer"], "and says what it is doing")
 
-    let seventeen = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : "n\(count)" }
-    check(seventeen.calls.count == 21 && LogAnalysis.requestCount(chunkCount: 17) == 21, "seventeen parts take 21 requests, as the sheet says")
-    check(seventeen.calls[..<17].allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "seventeen notes")
-    check(seventeen.calls[17..<20].allSatisfy { $0.system == LogAnalysis.combineSystemPrompt }, "three rounds of combining")
-    check(seventeen.calls[17].user.contains("[7]") && !seventeen.calls[17].user.contains("[8]"), "the first combines seven notes")
-    check(seventeen.calls[19].user.contains("[3]") && !seventeen.calls[19].user.contains("[4]"), "the third combines the last three")
-    check(seventeen.calls[20].system == LogAnalysis.answerSystemPrompt && seventeen.calls[20].user.contains("[3]"), "and the answer is written from three")
+    // Notes of the longest length, which is what 21 is the count for: they go seven to a group.
+    func longNote(_ count: Int) -> String { String(("n\(count)-" + String(repeating: "x", count: LogAnalysis.noteLimit)).prefix(LogAnalysis.noteLimit)) }
+    let seventeen = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : longNote(count) }
+    check(seventeen.calls.count == 21 && LogAnalysis.requestCount(chunkCount: 17) == 21, "seventeen parts of the longest notes take 21 requests, as the sheet says: \(seventeen.calls.count)")
+    if seventeen.calls.count == 21 {
+        check(seventeen.calls[..<17].allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "seventeen notes")
+        check(seventeen.calls[17..<20].allSatisfy { $0.system == LogAnalysis.combineSystemPrompt }, "three rounds of combining")
+        check(seventeen.calls[17].user.contains("[7]") && !seventeen.calls[17].user.contains("[8]"), "the first combines seven notes")
+        check(seventeen.calls[19].user.contains("[3]") && !seventeen.calls[19].user.contains("[4]"), "the third combines the last three")
+        check(seventeen.calls[20].system == LogAnalysis.answerSystemPrompt && seventeen.calls[20].user.contains("[3]"), "and the answer is written from three")
+    }
     check(seventeen.progress.last?.step == 21 && seventeen.progress.allSatisfy { $0.total == 21 }, "progress ends at 21 of 21")
     check((try? seventeen.outcome?.get()) == "FINAL", "and the answer comes back")
 
+    // Short notes all fit in one group, so fewer requests are made than the sheet allows for.
+    let brief = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : "n\(count)" }
+    check(brief.calls.count == 18 && brief.calls.count <= LogAnalysis.requestCount(chunkCount: 17), "short notes need no round of combining: \(brief.calls.count)")
+    check(brief.progress.last?.step == 18 && brief.progress.allSatisfy { $0.total == 21 }, "and the count on the sheet was an upper bound")
+
     let loud = run(log(parts: 3)) { count, _, _ in count < 4 ? String(repeating: "x", count: 5_000) : "ok" }
-    check(!loud.calls[3].user.contains(String(repeating: "x", count: LogAnalysis.noteLimit + 1)), "a note longer than the limit is cut before it is passed on")
+    check(loud.calls.count == 4 && !loud.calls[loud.calls.count - 1].user.contains(String(repeating: "x", count: LogAnalysis.noteLimit + 1)),
+          "a note longer than the limit is cut before it is passed on")
     let wordy = run(log(parts: 1)) { _, _, _ in String(repeating: "w", count: 30_000) }
     check((try? wordy.outcome?.get())?.count == LogAnalysis.replyLimit, "a very long answer is cut")
 
