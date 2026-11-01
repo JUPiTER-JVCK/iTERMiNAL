@@ -264,6 +264,22 @@ final class WorkspaceStore: ObservableObject {
 
     private static let fallbackNotesID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
+    private var chatModels: [UUID: ComposerChatModel] = [:]
+
+    /// The composer's chat for the space being looked at; each space has its own.
+    var composerChat: ComposerChatModel {
+        let id = currentWorkspace?.id ?? Self.fallbackNotesID
+        if let model = chatModels[id] { return model }
+        let model = ComposerChatModel(workspaceID: id)
+        chatModels[id] = model
+        return model
+    }
+
+    /// Writes any chat message still inside its debounce window.
+    func flushChats() {
+        chatModels.values.forEach { $0.saveNow() }
+    }
+
     /// Writes any note still inside its debounce window. Only notes that were
     /// opened exist as models, so this never creates one.
     func flushNotes() {
@@ -747,6 +763,9 @@ final class WorkspaceStore: ObservableObject {
         workspaces.removeAll { $0 === workspace }
         notesModels[workspace.id] = nil
         NotesModel.deleteFile(for: workspace.id)
+        chatModels[workspace.id]?.cancel()
+        chatModels[workspace.id] = nil
+        ComposerChatModel.deleteFile(for: workspace.id)
         if workspaces.isEmpty {
             bootstrap()
         } else if selectedTab == nil {
@@ -1048,9 +1067,12 @@ final class WorkspaceStore: ObservableObject {
         case terminal(TerminalSession)
         /// The composer's private shell, started on first use.
         case ownShell
+        /// No terminal: what is typed is a message to the AI model.
+        case assistant
     }
 
     var composerDestination: ComposerDestination {
+        if AppSettings.shared.composerTarget == .assistant { return .assistant }
         guard AppSettings.shared.composerTarget == .activeTerminal else { return .ownShell }
         // `focusedSession` falls back to the selected tab's first terminal, so
         // this still resolves when nothing has been clicked into yet — the
@@ -1075,6 +1097,7 @@ final class WorkspaceStore: ObservableObject {
         switch composerDestination {
         case .terminal(let session): return session
         case .ownShell: return composerSession
+        case .assistant: return nil
         }
     }
 
@@ -1082,6 +1105,9 @@ final class WorkspaceStore: ObservableObject {
     func sendFromComposer(_ text: String) {
         let session: TerminalSession
         switch composerDestination {
+        case .assistant:
+            // Not a terminal. The composer sends a chat message itself.
+            return
         case .terminal(let target):
             target.send(text: text)
             session = target
@@ -1493,6 +1519,9 @@ final class WorkspaceStore: ObservableObject {
         // models so each workspace reloads its own.
         flushNotes()
         notesModels.removeAll()
+        flushChats()
+        chatModels.values.forEach { $0.cancel() }
+        chatModels.removeAll()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
         pruneOrphanedTranscripts()

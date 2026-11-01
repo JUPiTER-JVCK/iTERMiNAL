@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Notes save on a debounce, so the last thing typed is exactly what a
         // quit would otherwise drop.
         WorkspaceStore.shared.flushNotes()
+        WorkspaceStore.shared.flushChats()
         WorkspaceStore.shared.saveNow()
         WorkspaceStore.shared.terminateAllSessions()
     }

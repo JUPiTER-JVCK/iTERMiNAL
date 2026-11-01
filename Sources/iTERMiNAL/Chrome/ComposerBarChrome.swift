@@ -82,7 +82,7 @@ struct ContextChipRow: View {
             Menu {
                 Picker("Run commands in", selection: $settings.composerTarget) {
                     ForEach(ComposerTarget.allCases) { target in
-                        Text(target.label).tag(target)
+                        Text(target.label(model: settings.assistantModel)).tag(target)
                     }
                 }
                 .pickerStyle(.inline)
@@ -105,12 +105,16 @@ struct ContextChipRow: View {
     private var destinationIcon: String {
         switch store.composerDestination {
         case .ownShell: return "text.cursor"
+        case .assistant: return "sparkles"
         case .terminal(let session): return session.isRemote ? "network" : "desktopcomputer"
         }
     }
 
     private var destinationText: String {
         switch store.composerDestination {
+        case .assistant:
+            let name = settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "AI assistant" : name
         case .ownShell:
             return "Composer shell"
         case .terminal(let session):

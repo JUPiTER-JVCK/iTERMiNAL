@@ -235,7 +235,7 @@ struct ComposerSettingsView: View {
             Section("Where commands run") {
                 Picker("Run commands in", selection: $settings.composerTarget) {
                     ForEach(ComposerTarget.allCases) { target in
-                        Text(target.label).tag(target)
+                        Text(target.label(model: settings.assistantModel)).tag(target)
                     }
                 }
                 Text(settings.composerTarget.detail)
@@ -256,7 +256,7 @@ struct ComposerSettingsView: View {
                 Text("Applies only to the composer's own session, so trying something in another shell doesn't change what new tabs open as. Changing it restarts that session.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if settings.composerTarget != .ownShell {
+                if settings.composerTarget == .activeTerminal {
                     Text("Only used while \"Run commands in\" is set to the composer's own shell.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

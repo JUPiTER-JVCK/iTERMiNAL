@@ -12,6 +12,13 @@ struct AssistantContext {
     var selection: String?
 }
 
+/// One turn of a conversation, for `AssistantService.chat`.
+struct AssistantMessage: Equatable {
+    /// "user" or "assistant".
+    var role: String
+    var content: String
+}
+
 /// Seam for the AI assistant. The composer routes "@ai …" input here;
 /// a real implementation (cloud API or local model) replaces the null one
 /// without touching the UI.
@@ -23,6 +30,8 @@ protocol AssistantService: AnyObject {
     /// where the terminal helper's instructions would only get in the way.
     /// `temperature` is left to the server's default when nil.
     func complete(system: String, user: String, temperature: Double?) async throws -> String
+    /// A conversation: `messages` in order, ending with the person's latest.
+    func chat(system: String, messages: [AssistantMessage]) async throws -> String
 }
 
 enum AssistantError: LocalizedError {
@@ -61,6 +70,10 @@ final class NullAssistantService: AssistantService {
     }
 
     func complete(system: String, user: String, temperature: Double?) async throws -> String {
+        throw AssistantError.notConfigured
+    }
+
+    func chat(system: String, messages: [AssistantMessage]) async throws -> String {
         throw AssistantError.notConfigured
     }
 }
