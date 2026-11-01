@@ -5,7 +5,7 @@ import Foundation
 /// Foundation-only, like the other pure logic in this app, so what can be
 /// pinned and how pinning behaves is checked in CI rather than by clicking.
 enum RailItem: String, CaseIterable, Identifiable {
-    case terminal, workspaces, connections, tasks, automations, skills
+    case terminal, workspaces, tasks, automations, skills
 
     var id: String { rawValue }
 
@@ -13,7 +13,6 @@ enum RailItem: String, CaseIterable, Identifiable {
         switch self {
         case .terminal: return "Terminal"
         case .workspaces: return "Spaces"
-        case .connections: return "Connect"
         case .tasks: return "Tasks"
         case .automations: return "Automations"
         case .skills: return "Skills"
@@ -25,7 +24,6 @@ enum RailItem: String, CaseIterable, Identifiable {
         switch self {
         case .terminal: return "house"
         case .workspaces: return "rectangle.stack"
-        case .connections: return "network"
         case .tasks: return "list.bullet.rectangle"
         case .automations: return "clock"
         case .skills: return "book"
@@ -33,12 +31,13 @@ enum RailItem: String, CaseIterable, Identifiable {
     }
 
     /// Whether a person can pin it to the rail or take it off. The first
-    /// three are how you get anywhere at all — back to the terminal, to your
-    /// tabs, to another machine — so they are always there; the rest live
+    /// two are how you get anywhere at all — back to the terminal, to your
+    /// tabs — so they are always there (connecting to another machine is the
+    /// globe's menu, bottom right); the rest live
     /// behind the rail's "···" menu until pinned.
     var isPinnable: Bool {
         switch self {
-        case .terminal, .workspaces, .connections: return false
+        case .terminal, .workspaces: return false
         case .tasks, .automations, .skills: return true
         }
     }

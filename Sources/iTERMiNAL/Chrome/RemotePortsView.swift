@@ -139,7 +139,9 @@ final class RemotePortsModel: ObservableObject {
     }
 }
 
-/// The globe in the status bar's right corner, and the list it opens.
+/// The globe in the status bar's right corner, and the menu it opens: Connect
+/// (saved hosts, screen sharing, machines on this network) and, when turned on
+/// in Settings, Listening ports.
 struct RemotePortsButton: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
@@ -165,27 +167,68 @@ struct RemotePortsButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Listening ports on the focused terminal's machine")
+        .help("Connect to a host, and see listening ports")
+        .accessibilityLabel("Connect and listening ports")
         .popover(isPresented: $isOpen, arrowEdge: .top) {
-            RemotePortsPopover(model: model)
+            RemotePortsPopover(model: model, dismiss: { isOpen = false })
                 .environmentObject(store)
-        }
-        .onChange(of: isOpen) { _, open in
-            if open {
-                model.start(store: store)
-            } else {
-                model.stop()
-            }
         }
     }
 }
 
 private struct RemotePortsPopover: View {
+    enum Tab: String {
+        case connect, ports
+    }
+
     @ObservedObject var model: RemotePortsModel
+    let dismiss: () -> Void
     @ObservedObject private var tunnels = TunnelManager.shared
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
+    @AppStorage("globeMenuTab") private var tabTag = Tab.connect.rawValue
+
+    /// Ports are only offered when turned on in Settings; without them there is
+    /// one list and no tabs.
+    private var tab: Tab {
+        settings.showRemotePorts ? (Tab(rawValue: tabTag) ?? .connect) : .connect
+    }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if settings.showRemotePorts {
+                Picker("", selection: $tabTag) {
+                    Text("Connect").tag(Tab.connect.rawValue)
+                    Text("Listening ports").tag(Tab.ports.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            if tab == .connect {
+                ConnectList(dismiss: dismiss)
+            } else {
+                portsContent
+            }
+        }
+        .padding(12)
+        .frame(width: 340)
+        // Scanning runs only while the ports list is what is showing.
+        .onAppear { updateScanning() }
+        .onDisappear { model.stop() }
+        .onChange(of: tabTag) { _, _ in updateScanning() }
+        .onChange(of: settings.showRemotePorts) { _, _ in updateScanning() }
+    }
+
+    private func updateScanning() {
+        if tab == .ports {
+            model.start(store: store)
+        } else {
+            model.stop()
+        }
+    }
+
+    private var portsContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
@@ -264,8 +307,6 @@ private struct RemotePortsPopover: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(width: 340)
     }
 
     private func row(_ port: ListeningPort) -> some View {
@@ -305,6 +346,125 @@ private struct RemotePortsPopover: View {
             Button("Open as HTTPS") { model.open(port, https: true, store: store) }
             Divider()
             Button("Forward and Copy Address") { model.forwardAndCopy(port) }
+        }
+    }
+}
+
+/// Saved SSH/mosh hosts (a new tab), saved screen-sharing endpoints (through the
+/// system's client) and anything the network is advertising.
+private struct ConnectList: View {
+    let dismiss: () -> Void
+
+    @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var discovery = ServiceDiscovery.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    group("Saved hosts") {
+                        if settings.sshConnections.isEmpty {
+                            Text("No saved hosts — add one in Settings → Connections")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                        } else {
+                            ForEach(settings.sshConnections) { connection in
+                                row(icon: "terminal", title: connection.name, detail: connection.subtitle) {
+                                    store.newTab(kind: .remote(connection.id))
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+
+                    if !settings.remoteServices.isEmpty {
+                        group("Screen sharing") {
+                            ForEach(settings.remoteServices) { service in
+                                row(icon: "display", title: service.name, detail: service.subtitle) {
+                                    RemoteServiceLauncher.open(service, store: store, settings: settings)
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+
+                    if !discovery.services.isEmpty {
+                        group("On this network") {
+                            ForEach(discovery.services) { service in
+                                row(icon: "network", title: service.name, detail: service.kind.shortLabel) {
+                                    connect(service)
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 300)
+
+            Divider()
+            // Discovery is started here rather than at launch, so a user who
+            // never asks is never asked for local network access.
+            Button(discovery.isBrowsing ? "Refresh Network Scan" : "Look for Machines on This Network") {
+                discovery.restart()
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+        }
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+            content()
+        }
+    }
+
+    private func row(icon: String, title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .frame(width: 16)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+            }
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Resolves the advertised service to an address, then opens it. The
+    /// lookup is why this is not a one-liner: Bonjour hands out a service
+    /// name, and nothing knows the host behind it until something asks.
+    private func connect(_ service: DiscoveredService) {
+        discovery.resolve(service) { result in
+            guard case .success(let resolved) = result else { return }
+            RemoteServiceLauncher.open(
+                RemoteService(
+                    name: service.name,
+                    kind: service.kind,
+                    host: resolved.host,
+                    port: resolved.port
+                ),
+                store: store,
+                settings: settings
+            )
         }
     }
 }
