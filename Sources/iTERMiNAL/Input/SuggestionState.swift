@@ -12,6 +12,9 @@ struct SuggestionState {
     enum Mode: Equatable {
         case history
         case path
+        /// Flags and subcommands of a tool the table knows, each with a line on
+        /// what it does.
+        case options
     }
 
     /// Text to put into the field: all of it when `range` is nil, otherwise just
@@ -28,6 +31,8 @@ struct SuggestionState {
         let emphasized: Set<Int>
         let isDirectory: Bool
         let replacement: Replacement
+        /// A line on what the row does, for the rows that have one.
+        var detail: String? = nil
     }
 
     /// The keys the editor hands over. `tab` and `historySearch` open or act on
@@ -101,6 +106,17 @@ struct SuggestionState {
             rows = shown
             hiddenCount = hidden
             clampSelection()
+        case .options:
+            guard directory != nil,
+                  let completion = OptionCompleter.complete(text: text, caret: caret),
+                  !completion.candidates.isEmpty else {
+                close()
+                return
+            }
+            let (shown, hidden) = optionRows(completion)
+            rows = shown
+            hiddenCount = hidden
+            clampSelection()
         }
     }
 
@@ -147,8 +163,17 @@ struct SuggestionState {
                 return Outcome(consumed: true, replacement: choose(rows.indices.contains(selected) ? rows[selected] : nil))
             }
             // Otherwise Tab never types a tab into a command line, whether or
-            // not there was anything to complete.
-            return Outcome(consumed: true, replacement: completePath(text: text, caret: caret, directory: directory))
+            // not there was anything to complete. A flag or a subcommand of a
+            // tool the table knows is tried first: a name that happens to start
+            // like one is not what was meant at that spot.
+            switch completeOption(text: text, caret: caret, directory: directory) {
+            case .replace(let replacement):
+                return Outcome(consumed: true, replacement: replacement)
+            case .opened:
+                return Outcome(consumed: true, replacement: nil)
+            case .notApplicable:
+                return Outcome(consumed: true, replacement: completePath(text: text, caret: caret, directory: directory))
+            }
         }
     }
 
@@ -194,6 +219,53 @@ struct SuggestionState {
                 replacement: Replacement(range: nil, text: hit.command)
             )
         }
+    }
+
+    // MARK: Flags and subcommands
+
+    private enum OptionStep {
+        case notApplicable
+        case replace(Replacement)
+        case opened
+    }
+
+    /// Like a shell: one candidate, or what several share, goes straight into
+    /// the text, and the next Tab lists what is left. The exception is a single
+    /// candidate that is already typed in full — it opens the list instead, since
+    /// the line saying what it does is the point.
+    ///
+    /// Only for a command that runs on this Mac (`directory` is nil for a remote
+    /// session): the table describes the tools macOS ships, and a host's are
+    /// often different.
+    private mutating func completeOption(text: String, caret: Int, directory: String?) -> OptionStep {
+        guard directory != nil, let completion = OptionCompleter.complete(text: text, caret: caret) else {
+            return .notApplicable
+        }
+        let range = NSRange(location: completion.range.lowerBound, length: completion.range.count)
+        if completion.matchCount == 1, completion.candidates[0].word != completion.typed {
+            return .replace(Replacement(range: range, text: completion.candidates[0].insertion))
+        }
+        if let shared = completion.sharedInsertion {
+            return .replace(Replacement(range: range, text: shared))
+        }
+        let (shown, hidden) = optionRows(completion)
+        open(.options, rows: shown, hidden: hidden)
+        return .opened
+    }
+
+    private func optionRows(_ completion: OptionCompletion) -> ([Row], Int) {
+        let range = NSRange(location: completion.range.lowerBound, length: completion.range.count)
+        let shown = completion.candidates.prefix(Self.maxRows).enumerated().map { offset, candidate in
+            Row(
+                id: offset,
+                text: candidate.display,
+                emphasized: [],
+                isDirectory: false,
+                replacement: Replacement(range: range, text: candidate.insertion),
+                detail: candidate.detail
+            )
+        }
+        return (shown, max(0, completion.matchCount - shown.count))
     }
 
     // MARK: Paths

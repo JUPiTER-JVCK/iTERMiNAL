@@ -307,7 +307,15 @@ A tour of the app in thirty-four pictures, in five groups.
   esc waves it away); ⌃R searches your history, ↑↓ choose and ↩ puts the choice
   in the input without running it; and ⇥ completes file names — filling in what
   the candidates share first, then listing the rest — for terminals on this
-  Mac, never for a remote session. Suggestions come from what the composer has
+  Mac, never for a remote session. At a flag, or at the subcommand after a tool
+  such as `git`, `docker`, `npm`, `brew` or `cargo`, ⇥ lists what could go
+  there with a line on what each does (`git commit -⇥` shows `-m`, `-a`,
+  `--amend`…). That comes from a short table of about thirty common tools
+  (`git`, `ls`, `grep`, `sed`, `find`, `tar`, `curl`, `ssh`, `docker`, `npm`,
+  `brew`, `cargo`, `swift`, `open`…), written by hand for the versions macOS
+  ships and not read from the tools — nothing is run to find out — so a tool or
+  a flag that is not in it simply gets no completion, and, like file names, it
+  is for terminals on this Mac only. Suggestions come from what the composer has
   run and from the tail of your shell's history file (`~/.zsh_history` or
   `~/.bash_history`, up to 512 KB, read locally); they are held in memory, never
   saved, exported or sent anywhere, and a setting turns the file off. Only

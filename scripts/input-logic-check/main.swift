@@ -620,6 +620,212 @@ do {
     check(broken == nil, "malformed completion for \(broken ?? "")")
 }
 
+// MARK: Completing flags and subcommands
+
+// Tab at a flag or a subcommand of a tool the table knows lists what it could be, each with a
+// line on what it does; at anything else it is the file-name completer's. The table is read
+// from its text, so first that it is sound, then how the line before the caret is read, then
+// what the keys do with it.
+do {
+    // The table.
+    check(CommandSpecs.problems.isEmpty, "the table of tools is sound: \(CommandSpecs.problems)")
+    check(CommandSpecs.toolNames.count >= 25, "the table covers a useful number of tools: \(CommandSpecs.toolNames.count)")
+    for tool in ["git", "ls", "grep", "ssh", "docker", "npm", "brew", "cargo", "curl", "tar"] {
+        check(CommandSpecs.spec(named: tool) != nil, "\(tool) is in the table")
+    }
+    check(CommandSpecs.spec(named: "nonesuch") == nil, "a tool that is not there has no spec")
+    check(CommandSpecs.spec(named: "git")?.subcommand(named: "commit") != nil, "git has a commit subcommand")
+    check(CommandSpecs.spec(named: "ls")?.hasSubcommands == false, "ls has none")
+
+    // How the text is read.
+    let sample = CommandSpecs.parse("""
+    # a comment
+
+    cmd tool
+    opt | -a, --all | Everything
+    opt | -o <file>, --output=<file> | Where to write
+    sub run, r | Run it
+    sopt r | -x | Extra
+    """)
+    check(sample.problems.isEmpty, "a small table reads: \(sample.problems)")
+    if let tool = sample.specs["tool"] {
+        check(tool.options.map(\.names) == [["-a", "--all"], ["-o", "--output="]], "names are split: \(tool.options.map(\.names))")
+        check(tool.options[1].takesSeparateValue && !tool.options[0].takesSeparateValue, "a <value> after a name means the next word")
+        check(tool.options[1].display == "-o <file>, --output=<file>", "the display is what was written")
+        check(tool.options[0].detail == "Everything", "and the description")
+        check(tool.subcommand(named: "r")?.names == ["run", "r"], "a subcommand is found by an alias")
+        check(tool.options(after: tool.subcommand(named: "run")).map(\.names) == [["-x"]], "a sopt names it by any of its names")
+        check(tool.options(after: nil).count == 2, "and the tool's own are kept apart")
+    } else {
+        check(false, "the sample table has its tool")
+    }
+    func problems(_ text: String) -> [String] { CommandSpecs.parse(text).problems }
+    check(problems("# only a comment\n\n").isEmpty, "comments and blank lines are nothing")
+    check(!problems("opt | -a | x").isEmpty, "a flag outside a tool is refused")
+    check(!problems("cmd t\nopt | a | x").isEmpty, "a flag name must start with a dash")
+    check(!problems("cmd t\nsub -x | y").isEmpty, "a subcommand name may not")
+    check(!problems("cmd t\nopt | -a | x\nopt | -a | y").isEmpty, "a flag given twice is refused")
+    check(!problems("cmd t\nopt | -a, --all | x\nopt | --all | y").isEmpty, "so is one given under another spelling")
+    check(!problems("cmd t\nsub a, b | x\nsub b | y").isEmpty, "and a subcommand")
+    check(!problems("cmd t\nopt | -a | Ends with a stop.").isEmpty, "a description has no full stop")
+    check(!problems("cmd t\nopt | -a | " + String(repeating: "x", count: CommandSpecs.maxDetailLength + 1)).isEmpty, "and is one line long")
+    check(problems("cmd t\nopt | -a | " + String(repeating: "x", count: CommandSpecs.maxDetailLength)).isEmpty, "at the limit it is fine")
+    check(!problems("cmd t\nsopt nope | -a | x").isEmpty, "a sopt for a subcommand that is not there is refused")
+    check(!problems("cmd t\ncmd t\nopt | -a | x").isEmpty, "a tool described twice is refused")
+    check(!problems("cmd empty").isEmpty, "a tool with nothing in it is refused")
+    check(!problems("cmd t\nwhat | x | y").isEmpty, "an unknown directive is refused")
+    check(!problems("cmd t\nopt | -a").isEmpty, "a flag with no description is refused")
+
+    // Reading the line before the caret.
+    func complete(_ text: String, caret: Int? = nil) -> OptionCompletion? {
+        OptionCompleter.complete(text: text, caret: caret ?? text.utf16.count)
+    }
+    func words(_ text: String, caret: Int? = nil) -> [String]? {
+        complete(text, caret: caret)?.candidates.map(\.word)
+    }
+    func head(_ text: String, _ count: Int = 3) -> [String]? {
+        words(text).map { Array($0.prefix(count)) }
+    }
+
+    // Subcommands.
+    let subs = words("git ")
+    check(subs?.first == "add" && subs?.contains("commit") == true && subs?.contains("status") == true, "a bare git lists its subcommands")
+    check(complete("git ")?.range == 4..<4 && complete("git ")?.typed == "", "and replaces nothing")
+    check(words("git ch") == ["checkout", "cherry-pick"], "a prefix narrows them: \(String(describing: words("git ch")))")
+    check(complete("git ch")?.sharedInsertion == "che", "and what they share is offered")
+    check(words("git comm") == ["commit"], "one match")
+    check(complete("git comm")?.candidates[0].insertion == "commit ", "is completed with a space after it")
+    check(complete("git comm")?.range == 4..<8 && complete("git comm")?.sharedInsertion == nil, "in place of what was typed")
+    check(words("git commit") == ["commit"] && complete("git commit")?.typed == "commit", "a subcommand typed in full is still offered, for its line")
+    check(words("git foo -") == nil, "after a subcommand it does not know, flags are not guessed")
+    check(words("git add ") == nil && words("git status ") == nil, "after the subcommand come files")
+    check(words("gi") == nil && words("git") == nil && words("") == nil && words("   ") == nil, "the command's own name is not completed")
+    check(words("ls ") == nil && words("ls D") == nil && words("ls") == nil, "a tool without subcommands offers none")
+    check(words("nonesuch -") == nil, "and a tool it does not know offers nothing")
+    check(words("/usr/bin/git sta") == nil && words("./git sta") == nil, "a command given by path is not assumed to be the tool")
+    check(words("\"git\" sta") == nil, "nor is a quoted one")
+    check(words("defaults r") == ["read", "rename", "read-type"] && complete("defaults r")?.sharedInsertion == "re", "defaults has subcommands too")
+    check(words("docker r") == ["run", "restart", "rm", "rmi"], "docker's")
+    check(words("brew un") == ["uninstall", "untap", "unlink", "unpin"], "brew's")
+    check(words("cargo b") == ["build", "bench"], "cargo's")
+    check(words("npm i") == ["install", "init", "info"] && complete("npm i")?.sharedInsertion == "in", "npm's, found by an alias too")
+
+    // Words that run the next one, and where a command starts.
+    check(words("sudo git sta") == ["stash", "status"], "past sudo")
+    check(words("sudo -u root git sta") == nil, "but not past a flag of sudo's own")
+    check(words("FOO=1 git sta") == ["stash", "status"], "past a variable set for the command")
+    check(words("echo hi | git sta") == ["stash", "status"], "after a pipe")
+    check(words("echo hi && ls -")?.first == "-a", "after &&")
+    check(words("git add -A; ls -")?.first == "-a", "after ;")
+    check(words("git add -A\nls -")?.first == "-a", "and after a new line")
+    check(complete("echo 😀 && git sta")?.range == 15..<18, "offsets are UTF-16, as NSRange's are")
+
+    // Flags.
+    check(head("git commit -") == ["-m", "-a", "--amend"], "a flag of the subcommand: \(String(describing: head("git commit -")))")
+    check(words("git commit --am") == ["--amend"], "narrowed")
+    check(words("git commit -m \"x\" --am") == ["--amend"], "past a flag's value")
+    check(words("git commit -m 'a b' -")?.first == "-m", "and a quoted one with a space in")
+    check(head("git -C dir commit -") == ["-m", "-a", "--amend"], "past a flag before the subcommand and its value")
+    check(words("git -") == ["-C", "-c", "--version", "--help", "--no-pager"], "before a subcommand, the tool's own flags")
+    check(words("git -C ") == nil && words("git commit -m ") == nil, "after a flag that takes a value, the value comes")
+    check(words("git commit -m") == ["-m"] && complete("git commit -m")?.typed == "-m", "the flag typed in full is still offered")
+    check(words("git commit -- -") == nil, "after -- nothing is a flag")
+    check(words("git commit --author=ab") == nil && words("git log --author=") == nil, "half way through a value there is nothing to complete")
+    check(words("git log --on") == ["--oneline"], "a long flag")
+    check(words("ls -")?.first == "-a" && words("ls -")?.contains("-l") == true, "a tool with no subcommands")
+    check(words("ls -l") == ["-l"], "typed in full")
+    check(words("ls -la") == nil, "bundled short flags are not guessed at")
+    check(words("curl --c") == ["--connect-timeout", "--compressed"] && complete("curl --c")?.sharedInsertion == "--co", "curl's")
+    check(words("curl -o ") == nil && head("curl -o x -", 2) == ["-s", "-S"], "its value, then more flags")
+    check(words("find . -n") == ["-name", "-newer", "-not"], "find's tests")
+    check(words("find . -name '*.txt' -")?.first == "-name", "past a quoted pattern")
+    check(words("ssh -p") == ["-p"] && head("ssh -p 22 -", 2) == ["-p", "-i"] && head("ssh host -", 2) == ["-p", "-i"], "ssh's, before and after the host")
+    check(words("npm ls -") == ["-g", "--depth="] && words("npm i -")?.first == "-g", "an alias finds its subcommand's flags")
+    check(words("cargo b --re") == ["--release"], "cargo's, by an alias")
+    check(words("docker run -it ubuntu --r") == ["--rm"], "past the image")
+    check(words("swift build -c ") == nil && head("swift build -", 2) == ["-c", "-v"], "swift's")
+    check(words("brew install --") == ["--cask", "--formula", "--verbose", "--HEAD", "--build-from-source"], "brew's")
+    check(complete("npm ls --d")?.candidates[0].insertion == "--depth=", "a flag whose value follows the = gets no space")
+    check(complete("git commit -a")?.candidates[0].insertion == "-a ", "one that takes none gets one")
+
+    // Redirections, quotes and the rest of a line.
+    check(head("ls > out -", 2) == ["-a", "-A"], "a file name after > is not an argument")
+    check(head("ls 2>&1 -", 2) == ["-a", "-A"], "nor is a stream number or an fd")
+    check(words("ls > ou") == nil, "typing the file name after > is not ours")
+    check(words("git 'comm") == nil && words("git \"comm") == nil, "inside an open quote there is nothing to complete")
+    check(words("git $(echo ") == nil && words("git `x") == nil && words("echo \"a $(x\" ") == nil, "a command substitution is more than this reads")
+    check(words("ls # git ") == nil, "a comment is not a command line")
+    check(words("git \\\n ")?.first == "add", "a continued line is the same line")
+    check(words("git $HOME") == nil, "a variable is not completed")
+
+    // The caret need not be at the end.
+    check(complete("git comm status", caret: 8)?.range == 4..<8, "the word is the part before the caret")
+    check(complete("git comm status", caret: 8)?.candidates[0].insertion == "commit", "and no second space is added before one that is there")
+    check(complete("git  x", caret: 4)?.typed == "", "between words there is nothing typed")
+
+    // What the keys do.
+    func press(_ s: inout SuggestionState, _ key: SuggestionState.Key, _ text: String,
+               directory: String? = NSTemporaryDirectory()) -> SuggestionState.Outcome {
+        s.handle(key, text: text, caret: text.utf16.count, directory: directory)
+    }
+    var s = SuggestionState()
+    var o = press(&s, .tab, "git comm")
+    check(o.consumed && s.mode == nil && o.replacement == SuggestionState.Replacement(range: NSRange(location: 4, length: 4), text: "commit "),
+          "Tab completes a single match in place")
+    o = press(&s, .tab, "git ch")
+    check(o.replacement == SuggestionState.Replacement(range: NSRange(location: 4, length: 2), text: "che") && s.mode == nil,
+          "and what several share")
+    o = press(&s, .tab, "git sta")
+    check(o.consumed && o.replacement == nil && s.mode == .options, "or opens a list when they share nothing more")
+    check(s.rows.map(\.text) == ["stash", "status"], "of the matches: \(s.rows.map(\.text))")
+    check(s.rows.map(\.detail) == ["Set uncommitted changes aside", "Show what has changed"], "each with its line")
+    check(s.selected == 0 && s.hiddenCount == 0, "the first is chosen")
+    _ = press(&s, .down, "git sta")
+    check(s.selected == 1, "down moves")
+    o = press(&s, .tab, "git sta")
+    check(o.replacement == SuggestionState.Replacement(range: NSRange(location: 4, length: 3), text: "status ") && s.mode == nil,
+          "Tab with a list open chooses the row")
+    o = press(&s, .tab, "git commit")
+    check(o.replacement == nil && s.mode == .options && s.rows.map(\.text) == ["commit"],
+          "a subcommand typed in full opens the list, for its line")
+    o = press(&s, .accept, "git commit")
+    check(o.replacement == SuggestionState.Replacement(range: NSRange(location: 4, length: 6), text: "commit ") && s.mode == nil,
+          "and Return chooses it")
+
+    o = press(&s, .tab, "ls -")
+    check(s.mode == .options && s.rows.first?.text == "-a" && s.rows.first?.detail == "Include entries that start with a dot",
+          "flags are listed with theirs")
+    check(s.rows.count == SuggestionState.maxRows && s.hiddenCount > 0, "no more rows than the list holds, and it says there are more")
+    s.refresh(text: "ls -l", caret: 5, directory: NSTemporaryDirectory())
+    check(s.mode == .options && s.rows.map(\.text) == ["-l"] && s.hiddenCount == 0, "the list follows what is typed")
+    s.refresh(text: "ls -lz", caret: 6, directory: NSTemporaryDirectory())
+    check(s.mode == nil, "and closes when nothing matches")
+    _ = press(&s, .tab, "ls -")
+    s.refresh(text: "ls -", caret: 4, directory: nil)
+    check(s.mode == nil, "a remote session closes it")
+    _ = press(&s, .tab, "ls -")
+    s.refresh(text: "ls -x y", caret: 7, directory: NSTemporaryDirectory())
+    check(s.mode == nil, "so does moving on to something that is not a flag")
+    _ = press(&s, .tab, "git sta")
+    _ = press(&s, .dismiss, "git sta")
+    check(s.mode == nil, "Escape closes it")
+
+    o = press(&s, .tab, "git sta", directory: nil)
+    check(o.consumed && o.replacement == nil && s.mode == nil, "a remote session's tools are not the ones in the table")
+    o = press(&s, .tab, "ls -la")
+    check(o.consumed && o.replacement == nil && s.mode == nil, "a word that is not in the table does nothing, and never types a tab")
+
+    // And a file name still gets its completion.
+    let dir = NSTemporaryDirectory() + "option-check-\(UUID().uuidString)"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    _ = FileManager.default.createFile(atPath: dir + "/notes.txt", contents: Data())
+    o = press(&s, .tab, "cat note", directory: dir)
+    check(o.replacement?.text == "notes.txt" && s.mode == nil, "an argument of a tool in the table is still a file name: \(String(describing: o.replacement))")
+    o = press(&s, .tab, "git add note", directory: dir)
+    check(o.replacement?.text == "notes.txt", "after the subcommand too")
+}
+
 // MARK: Suggestion state
 
 do {

@@ -151,6 +151,8 @@ jobs:
             Sources/iTERMiNAL/Input/AutoPairing.swift \
             Sources/iTERMiNAL/Input/CommandNotes.swift \
             Sources/iTERMiNAL/Input/SuggestionState.swift \
+            Sources/iTERMiNAL/Input/CommandSpecs.swift \
+            Sources/iTERMiNAL/Input/OptionCompleter.swift \
             Sources/iTERMiNAL/Chrome/ShellHistory.swift \
             Sources/iTERMiNAL/AI/SecretRedactor.swift \
             Sources/iTERMiNAL/AI/ContextSanitizer.swift \

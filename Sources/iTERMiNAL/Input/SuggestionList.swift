@@ -58,7 +58,7 @@ struct SuggestionList: View {
         )
         .onHover { suggestions.pointerInside = $0 }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(mode == .history ? "Command history" : "File completions")
+        .accessibilityLabel(panelLabel(for: mode))
     }
 
     private func rowView(_ row: ComposerSuggestions.Row, mode: ComposerSuggestions.Mode) -> some View {
@@ -75,7 +75,17 @@ struct SuggestionList: View {
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Spacer(minLength: 0)
+                .layoutPriority(1)
+            Spacer(minLength: 12)
+            // What a flag or subcommand does. It gives way first when the
+            // row is too narrow for both.
+            if let detail = row.detail {
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
         .padding(.horizontal, 10)
         .frame(height: 26)
@@ -93,8 +103,16 @@ struct SuggestionList: View {
         .onTapGesture { suggestions.choose(row) }
         .animation(reduceMotion ? nil : Motion.suggestion, value: suggestions.selected)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(row.text)
+        .accessibilityLabel(row.detail.map { "\(row.text), \($0)" } ?? row.text)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func panelLabel(for mode: ComposerSuggestions.Mode) -> String {
+        switch mode {
+        case .history: return "Command history"
+        case .path: return "File completions"
+        case .options: return "Flag and subcommand completions"
+        }
     }
 
     /// The row's text with what the search matched in bold — weight, not
