@@ -134,8 +134,8 @@ enum RailNavigation {
 }
 
 /// The icon rail down the left edge: the three destinations that are always
-/// there, a "···" menu for the rest, and — under a rule — whichever of those
-/// you've pinned.
+/// there, whichever of the rest you've pinned under a rule, and at the bottom a
+/// "···" menu for the rest and the terminal dock.
 struct SidebarRail: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -163,15 +163,6 @@ struct SidebarRail: View {
             .help("Connect to a saved host or a machine on this network")
             .accessibilityLabel("Connect")
 
-            RailButton(icon: "ellipsis", title: "More", isActive: moreOpen) {
-                moreOpen.toggle()
-            }
-            .popover(isPresented: $moreOpen, arrowEdge: .trailing) {
-                RailMoreMenu(dismiss: { moreOpen = false })
-                    .environmentObject(store)
-                    .environmentObject(settings)
-            }
-
             if !pinned.isEmpty {
                 Rectangle()
                     .fill(theme.surfaceBorder)
@@ -183,6 +174,16 @@ struct SidebarRail: View {
             }
 
             Spacer(minLength: 0)
+
+            // Just above the dock, at the bottom of the rail.
+            RailButton(icon: "ellipsis", title: "More", isActive: moreOpen) {
+                moreOpen.toggle()
+            }
+            .popover(isPresented: $moreOpen, arrowEdge: .trailing) {
+                RailMoreMenu(dismiss: { moreOpen = false })
+                    .environmentObject(store)
+                    .environmentObject(settings)
+            }
 
             // The bottom left of the frame: the terminal dock, the one panel
             // that is always a keystroke away, so it gets a button where the

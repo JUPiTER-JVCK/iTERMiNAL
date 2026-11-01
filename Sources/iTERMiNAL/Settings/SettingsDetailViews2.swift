@@ -173,14 +173,18 @@ struct ComposerSettingsView: View {
             Section("Size") {
                 HStack {
                     Text("Width")
-                    Slider(value: $settings.composerWidth, in: 420...1200, step: 10)
+                        .frame(width: 140, alignment: .leading)
+                    // A coarse step keeps the tick marks sparse and evenly
+                    // spaced; at 10 pt they ran together into a solid comb.
+                    Slider(value: $settings.composerWidth, in: 400...1200, step: 50)
                     Text("\(Int(settings.composerWidth)) pt")
                         .monospacedDigit()
                         .frame(width: 56, alignment: .trailing)
                 }
                 HStack {
                     Text("Transcript height")
-                    Slider(value: $settings.composerTranscriptHeight, in: 100...560, step: 10)
+                        .frame(width: 140, alignment: .leading)
+                    Slider(value: $settings.composerTranscriptHeight, in: 100...550, step: 50)
                     Text("\(Int(settings.composerTranscriptHeight)) pt")
                         .monospacedDigit()
                         .frame(width: 56, alignment: .trailing)

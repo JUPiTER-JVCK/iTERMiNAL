@@ -43,6 +43,10 @@ struct ComposerBar: View {
     @State private var inputFocused = false
     /// What `CommandNotes` found in the line typed, a moment after typing stops.
     @State private var notes: [String] = []
+    /// Whether the tray under the card is out, set by the arrow beside "+" and
+    /// remembered across launches. Hidden until asked for: the card is the part
+    /// that is always wanted.
+    @AppStorage("composerTrayOpen") private var trayShown = false
 
     var body: some View {
         Group {
@@ -184,6 +188,17 @@ struct ComposerBar: View {
     // MARK: Expanded
 
     private var expandedCard: some View {
+        VStack(spacing: 0) {
+            cardStack
+            if trayShown {
+                ComposerStatusTray(theme: Theme.current(for: colorScheme))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? nil : Motion.panel, value: trayShown)
+    }
+
+    private var cardStack: some View {
         let theme = Theme.current(for: colorScheme)
         return VStack(spacing: 8) {
             if let banner = ai.banner {
@@ -212,7 +227,6 @@ struct ComposerBar: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 gripBar(theme: theme)
-                ContextChipRow()
 
                 if store.composerHasRun, let session = store.composerSession {
                     // The composer's own shell. Identity is tied to the
@@ -273,6 +287,22 @@ struct ComposerBar: View {
                             .environmentObject(store)
                             .environmentObject(settings)
                     }
+
+                    // Shows and hides the tray under the card, which holds the
+                    // workspace and run-in chips.
+                    Button {
+                        trayShown.toggle()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .rotationEffect(.degrees(trayShown ? 180 : 0))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(trayShown ? "Hide workspace and destination" : "Show workspace and destination")
+                    .accessibilityLabel(trayShown ? "Hide status tray" : "Show status tray")
 
                     Spacer()
 
@@ -651,5 +681,39 @@ private struct PressScaleButtonStyle: ButtonStyle {
                 .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
                 .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
         }
+    }
+}
+
+/// The strip that slides out beneath the card: the workspace and where
+/// commands run (and that destination's branch), and the terminal dock.
+private struct ComposerStatusTray: View {
+    let theme: Theme
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ContextChipRow()
+            Button {
+                store.toggleBottomDock()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "rectangle.bottomthird.inset.filled")
+                    Text("Terminal dock")
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Show or hide the terminal dock (⌘J)")
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(theme.textSecondary)
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .frame(maxWidth: .infinity)
+        .background(
+            UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14, style: .continuous)
+                .fill(theme.surface)
+        )
+        .padding(.horizontal, 14)
     }
 }

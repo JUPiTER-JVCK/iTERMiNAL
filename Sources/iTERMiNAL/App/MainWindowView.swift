@@ -200,9 +200,13 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            if settings.showSystemMetrics || settings.showRemotePorts {
+            if settings.showStatusBar || settings.showSystemMetrics || settings.showRemotePorts {
                 FadedDivider()
-                DetailBottomStrip(showMetrics: settings.showSystemMetrics, showPorts: settings.showRemotePorts)
+                DetailBottomStrip(
+                    showStatus: settings.showStatusBar,
+                    showMetrics: settings.showSystemMetrics,
+                    showPorts: settings.showRemotePorts
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -292,8 +296,9 @@ struct DetailView: View {
     }
 }
 
-/// The strip along the window's bottom: the machine's vital signs at the right,
-/// and, when it is turned on, the Remote Ports globe at the left.
+/// The strip along the window's bottom: the focused terminal's status at the
+/// left, and at the right the machine's vital signs and, when it is turned on,
+/// the Remote Ports globe after them.
 ///
 /// A strip rather than a floating card: that corner is exactly where a terminal
 /// writes its newest output, and something hovering over it would cover the one
@@ -301,20 +306,23 @@ struct DetailView: View {
 ///
 /// One line, not the sidebar's two — the detail column has the width for it.
 private struct DetailBottomStrip: View {
+    let showStatus: Bool
     let showMetrics: Bool
     let showPorts: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Opposite the machine's figures, so the two never share a corner:
-            // the ports list opens upward from the left, the numbers stay put
-            // on the right.
-            if showPorts {
-                RemotePortsButton()
+        HStack(spacing: 14) {
+            // Where the globe used to be: what the focused terminal is doing.
+            if showStatus {
+                StatusBarReadout()
             }
             Spacer(minLength: 12)
             if showMetrics {
                 SystemMetricsReadout()
+            }
+            // Last, past the network figure, in the bottom-right corner.
+            if showPorts {
+                RemotePortsButton()
             }
         }
         .padding(.horizontal, 14)
@@ -562,13 +570,12 @@ private struct LandingView: View {
                 .padding(.top, 6)
             }
 
-            // An adaptive grid so the cards reflow from four across to two
-            // when the dock and the right panel take the width, the way the
-            // reference app does.
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 12)],
-                spacing: 12
-            ) {
+            // Cards of one width, wrapped to the room there is and centred row
+            // by row, so the group sits under the heading whether it is one
+            // row of five or two rows when the dock and right panel take the
+            // width. An adaptive grid packs from the left and leaves its
+            // leftover space on the right, which read as off-centre.
+            CenteredWrapLayout(itemWidth: 170, spacing: 12) {
                 SuggestionCard(icon: "terminal", tint: settings.accentColor, title: "Open a new terminal") {
                     store.openTab()
                 }
@@ -582,6 +589,22 @@ private struct LandingView: View {
                 SuggestionCard(icon: "folder", tint: Color(hex: 0xF97316), title: "Explore your files") {
                     store.togglePanel(.files)
                 }
+                // The panels the cards above don't cover: notes, the two
+                // bundled tools and the HTTP client.
+                Menu {
+                    ForEach([SidePanel.notes, .http, .superfile, .btop]) { panel in
+                        Button {
+                            store.openPanel(panel)
+                        } label: {
+                            Label(panel.title, systemImage: panel.icon)
+                        }
+                    }
+                } label: {
+                    SuggestionCardFace(icon: "square.grid.2x2", tint: Color(hex: 0x14B8A6), title: "More panels")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
             }
             .frame(maxWidth: 940)
             .padding(.horizontal, 24)
@@ -657,38 +680,94 @@ private struct SuggestionCard: View {
     let title: String
     let action: () -> Void
 
+    var body: some View {
+        Button(action: action) {
+            SuggestionCardFace(icon: icon, tint: tint, title: title)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// How a landing card looks, with no opinion on what clicking it does — so a
+/// plain button and a menu can both wear it.
+private struct SuggestionCardFace: View {
+    let icon: String
+    let tint: Color
+    let title: String
+
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        Button(action: action) {
-            // Icon pinned to the top, title to the bottom — the reference
-            // app's card anatomy, and the inverse of what this used to do.
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 15))
-                    .foregroundStyle(tint)
-                Spacer(minLength: 8)
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.textPrimary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-            .elevated(
-                cornerRadius: 12,
-                radius: hovering ? 14 : 8,
-                y: hovering ? 5 : 2,
-                fill: hovering ? theme.surfaceHover : theme.surface
-            )
-            .animation(Motion.disclosure, value: hovering)
-            .contentShape(Rectangle())
+        // Icon pinned to the top, title to the bottom — the reference
+        // app's card anatomy, and the inverse of what this used to do.
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15))
+                .foregroundStyle(tint)
+            Spacer(minLength: 8)
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.textPrimary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
+        .elevated(
+            cornerRadius: 12,
+            radius: hovering ? 14 : 8,
+            y: hovering ? 5 : 2,
+            fill: hovering ? theme.surfaceHover : theme.surface
+        )
+        .animation(Motion.disclosure, value: hovering)
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
+    }
+}
+
+/// Lays children out at one width, wrapping to the room offered, with each row
+/// centred on its own.
+private struct CenteredWrapLayout: Layout {
+    let itemWidth: CGFloat
+    let spacing: CGFloat
+
+    private func rows(_ subviews: Subviews, width: CGFloat) -> [[Int]] {
+        let perRow = max(1, Int((width + spacing) / (itemWidth + spacing)))
+        return stride(from: 0, to: subviews.count, by: perRow).map {
+            Array($0..<min($0 + perRow, subviews.count))
+        }
+    }
+
+    private func height(of index: Int, _ subviews: Subviews) -> CGFloat {
+        subviews[index].sizeThatFits(ProposedViewSize(width: itemWidth, height: nil)).height
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? CGFloat(subviews.count) * (itemWidth + spacing)
+        let wrapped = rows(subviews, width: width)
+        let heights = wrapped.map { $0.map { height(of: $0, subviews) }.max() ?? 0 }
+        let total = heights.reduce(0, +) + spacing * CGFloat(max(0, wrapped.count - 1))
+        return CGSize(width: width, height: total)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(subviews, width: bounds.width) {
+            let rowWidth = CGFloat(row.count) * itemWidth + CGFloat(row.count - 1) * spacing
+            var x = bounds.midX - rowWidth / 2
+            let rowHeight = row.map { height(of: $0, subviews) }.max() ?? 0
+            for index in row {
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: itemWidth, height: rowHeight)
+                )
+                x += itemWidth + spacing
+            }
+            y += rowHeight + spacing
+        }
     }
 }
 

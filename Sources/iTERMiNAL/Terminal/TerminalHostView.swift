@@ -223,10 +223,16 @@ final class TerminalContainerView: NSView {
     func syncBackground() {
         hideScroller()
         guard let terminalView = terminal as? TerminalView else { return }
-        layer?.backgroundColor = terminalView.nativeBackgroundColor.cgColor
+        // `nativeBackgroundColor` is always opaque; the see-through-ness lives in
+        // `backgroundOpacity`. The padding has to be painted at that opacity too,
+        // or it stays solid and shows as a dark frame round a lighter terminal.
+        let opacity = BackgroundOpacity.clamped(Double(terminalView.backgroundOpacity))
+        let paint = terminalView.nativeBackgroundColor.withAlphaComponent(CGFloat(opacity))
+        layer?.backgroundColor = paint.cgColor
         syncBackdrop(
-            translucent: BackgroundOpacity.isTranslucent(Double(terminalView.backgroundOpacity)),
-            background: terminalView.nativeBackgroundColor
+            translucent: BackgroundOpacity.isTranslucent(opacity),
+            background: terminalView.nativeBackgroundColor,
+            paint: paint
         )
     }
 
@@ -245,7 +251,7 @@ final class TerminalContainerView: NSView {
     /// the terminal included, and the terminal tints only itself — so the padding
     /// gets a tint of its own, the same colour at the same opacity, or it would
     /// show the desktop untinted beside the terminal as a frame.
-    private func syncBackdrop(translucent: Bool, background: NSColor) {
+    private func syncBackdrop(translucent: Bool, background: NSColor, paint: NSColor) {
         guard translucent else {
             backdrop?.removeFromSuperview()
             backdrop = nil
@@ -283,7 +289,7 @@ final class TerminalContainerView: NSView {
             ringTint = tint
         }
         tint.hole = terminal.frame
-        tint.color = background
+        tint.color = paint
     }
 
     /// `color` as 0xRRGGBB in sRGB. A colour that has no sRGB form reads as
