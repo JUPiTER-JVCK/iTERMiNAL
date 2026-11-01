@@ -1313,9 +1313,12 @@ struct TerminalDockView: View {
                     if !settings.sshConnections.isEmpty {
                         Section("Connect") {
                             ForEach(settings.sshConnections) { connection in
-                                Button("\(connection.name) — \(connection.subtitle)") {
+                                Button(connection.hasHost
+                                    ? "\(connection.name) — \(connection.subtitle)"
+                                    : "\(connection.name) — no host set (Settings → Connections)") {
                                     store.newDockSession(kind: .remote(connection.id))
                                 }
+                                .disabled(!connection.hasHost)
                             }
                         }
                     }
