@@ -43,6 +43,10 @@ struct ComposerBar: View {
     @State private var inputFocused = false
     /// What `CommandNotes` found in the line typed, a moment after typing stops.
     @State private var notes: [String] = []
+    /// Whether the tray under the card is out. Follows `inputFocused`, but lets
+    /// go a moment late, so a click on something in the tray — which takes the
+    /// focus off the input — still lands before the tray slides away.
+    @State private var trayShown = false
 
     var body: some View {
         Group {
@@ -184,6 +188,25 @@ struct ComposerBar: View {
     // MARK: Expanded
 
     private var expandedCard: some View {
+        VStack(spacing: 0) {
+            cardStack
+            if trayShown {
+                ComposerStatusTray(theme: Theme.current(for: colorScheme))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? nil : Motion.panel, value: trayShown)
+        .task(id: inputFocused) {
+            if inputFocused {
+                trayShown = true
+            } else {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if !Task.isCancelled { trayShown = false }
+            }
+        }
+    }
+
+    private var cardStack: some View {
         let theme = Theme.current(for: colorScheme)
         return VStack(spacing: 8) {
             if let banner = ai.banner {
@@ -650,6 +673,73 @@ private struct PressScaleButtonStyle: ButtonStyle {
             configuration.label
                 .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
                 .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
+        }
+    }
+}
+
+/// The strip that slides out beneath the card while the input is in use: where
+/// the focused terminal is, and the two things most often wanted next — its
+/// files, and the terminal dock.
+private struct ComposerStatusTray: View {
+    let theme: Theme
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        HStack(spacing: 16) {
+            if let session = store.focusedSession, !session.kind.isTool {
+                TrayDirectory(session: session)
+            }
+            Spacer(minLength: 8)
+            Button {
+                store.toggleBottomDock()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "rectangle.bottomthird.inset.filled")
+                    Text("Terminal dock")
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Show or hide the terminal dock (⌘J)")
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(theme.textSecondary)
+        .lineLimit(1)
+        .padding(.horizontal, 16)
+        .frame(height: 30)
+        .frame(maxWidth: .infinity)
+        .background(
+            UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14, style: .continuous)
+                .fill(theme.surface)
+        )
+        .padding(.horizontal, 14)
+    }
+}
+
+/// Directory and branch for the tray. Its own view so it redraws when the
+/// session's directory changes, which a read through the store would not.
+private struct TrayDirectory: View {
+    @ObservedObject var session: TerminalSession
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button {
+                store.openPanel(.files)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder")
+                    Text(session.abbreviatedDirectory).truncationMode(.middle)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Open this folder in Files")
+
+            if let branch = session.gitBranch, !session.isRemote {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch")
+                    Text(branch).truncationMode(.tail)
+                }
+            }
         }
     }
 }
