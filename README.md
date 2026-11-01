@@ -408,6 +408,10 @@ A tour of the app in thirty-four pictures, in five groups.
   terminal itself) are on the `PATH` of every local terminal, after whatever you
   have installed yourself, so yours is the one that runs. See
   [Command-line tools](#command-line-tools).
+- **Open a folder from Finder or the Dock** — drop it on the Dock icon, choose
+  iTERMiNAL under Open With, or use Services → New iTERMiNAL Tab at Folder; each
+  folder gets a tab and nothing is run. See
+  [Opening folders from Finder and the Dock](#opening-folders-from-finder-and-the-dock).
 - **Proxmox VE** — list the VMs and containers on a cluster over its API, open
   a guest's console in the browser panel, and save a guest as an SSH host. The
   API token's secret half stays in the keychain; a self-signed certificate is
@@ -578,6 +582,43 @@ those commands already read, to each **local** shell.
   [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
   (`brew install zsh-syntax-highlighting`, then the `source` line Homebrew
   prints, in your `.zshrc`).
+
+## Opening folders from Finder and the Dock
+
+Two ways to get a tab in a folder without opening the app and typing `cd`:
+
+- **Drop a folder on the Dock icon**, or choose iTERMiNAL under **Open With** in
+  Finder. Each folder gets a tab. A file that reaches it, as with
+  `open -a iTERMiNAL notes.txt`, gets a tab in the folder it is in, the rule the
+  file browser already follows.
+- **Services → New iTERMiNAL Tab at Folder**, for a folder selected in Finder.
+  It also takes a path written out as text: select `~/Projects/app` in any app
+  and it is offered. A line is one path; quotes around it and a leading `~` are
+  understood, and anything that is not an absolute path to something that exists
+  is left out.
+
+Neither runs anything. The tab is an ordinary new tab, started in that folder,
+and what you type there is up to you.
+
+Some limits, so none of them is a surprise:
+
+- **At most 8 tabs from one request.** A tab is a shell, which is a process;
+  selecting a few hundred files and choosing the service should not start a few
+  hundred. When some are left out, an alert says how many.
+- iTERMiNAL is listed under Open With as an *alternate* handler for folders. It
+  does not become what folders open with: that stays Finder, and the build checks
+  the rank it ships with.
+- macOS decides where a Service appears and whether it is switched on. It is
+  registered from the app's Info.plist, so it can take a first launch from
+  `/Applications`, or logging out and in, to show up; **System Settings →
+  Keyboard → Keyboard Shortcuts → Services** is where to look if it does not.
+- A button in Finder's toolbar is not part of this: it needs a Finder extension,
+  which is a separate piece of the app that does not exist yet.
+
+The pure part (which folders, how many, a file standing for its folder, what is
+ignored) is checked in CI. What macOS does with the Info.plist entries — whether
+the Dock icon lights up, where the Service shows — was not exercised on a Mac
+when this was written.
 
 ## Ghostty configuration
 
@@ -1121,7 +1162,8 @@ with HTTP Client) have no shortcut; the command palette finds every action.
 Sources/
 ├── iTERMiNAL/
 │   ├── App/         entry point, window scene, menu commands; ScreenshotMode takes the
-│   │                README pictures (compiled in only by the Screenshots workflow)
+│   │                README pictures (compiled in only by the Screenshots workflow);
+│   │                folders opened from Finder, the Dock and the Services menu
 │   ├── Chrome/      window frame (top bar, icon rail), workspaces panel,
 │   │                composer, command palette, themes
 │   ├── Terminal/    TerminalEngine protocol + SwiftTerm implementation,

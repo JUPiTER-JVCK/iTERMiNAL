@@ -4487,6 +4487,71 @@ do {
     check(EditorChoice.custom.candidates.isEmpty, "a custom command has no program to look for")
 }
 
+// MARK: Opening folders from outside the window
+
+// What a folder dropped on the Dock icon, chosen under Open With, or sent from the
+// Services menu comes to: the folders to open, each once, in the order asked; a file
+// standing for the folder it is in; anything odd ignored; and no more than the limit.
+// What a path is on disk is handed in, so none of this touches the machine it runs on.
+do {
+    let disk: [String: OpenFolders.Kind] = [
+        "/Users/me/work": .folder, "/Users/me/work/notes.txt": .file, "/Users/me/other": .folder,
+        "/Users/me/My Projects": .folder, "/": .folder, "/top.txt": .file,
+    ]
+    func plan(_ paths: [String]) -> OpenFolders.Plan { OpenFolders.plan(for: paths) { disk[$0] ?? .missing } }
+
+    check(plan(["/Users/me/work"]) == OpenFolders.Plan(folders: ["/Users/me/work"], leftOut: 0), "a folder opens as itself")
+    check(plan(["/Users/me/work/notes.txt"]).folders == ["/Users/me/work"], "a file opens the folder it is in")
+    check(plan(["/top.txt"]).folders == ["/"], "a file at the top opens the top")
+    check(plan(["/Users/me/My Projects"]).folders == ["/Users/me/My Projects"], "spaces are only spaces")
+    check(plan(["/Users/me/work/"]).folders == ["/Users/me/work"], "a trailing slash is dropped")
+    check(plan(["/Users/me/work//"]).folders == ["/Users/me/work"] && plan(["//"]).folders == ["/"] && plan(["/"]).folders == ["/"],
+          "so are several, and the top stays the top")
+    check(plan(["/Users/me/other", "/Users/me/work", "/Users/me/other"]).folders == ["/Users/me/other", "/Users/me/work"],
+          "each once, in the order asked")
+    check(plan(["/Users/me/work", "/Users/me/work/notes.txt"]).folders == ["/Users/me/work"], "a folder and a file in it are one tab")
+    check(plan([]) == OpenFolders.Plan(folders: [], leftOut: 0), "nothing asked, nothing opened")
+
+    let odd = ["", "work", "./work", "../work", "~/work", "/Users/me/missing", "/Users/me/work\n", "/Users/me/wor\u{0}k",
+               "/Users/me/work\t", "/Users/me/work\u{7F}", "/Users/me/work\u{1B}[0m", "file:///Users/me/work"]
+    for path in odd {
+        check(plan([path]).folders.isEmpty, "\(path.debugDescription) opens nothing")
+    }
+    check(plan(odd + ["/Users/me/work"]).folders == ["/Users/me/work"], "and does not stop the good ones")
+
+    check(OpenFolders.tidy("/a/../b/") == "/a/../b" && OpenFolders.tidy("/é/ü") == "/é/ü",
+          "nothing is resolved, and any letters will do")
+    check(OpenFolders.tidy("a") == nil && OpenFolders.tidy("") == nil, "a path has to start at the top")
+
+    // How many at once.
+    let many = (0..<12).map { "/m/\($0)" }
+    let big = OpenFolders.plan(for: many) { _ in .folder }
+    check(big.folders == Array(many.prefix(OpenFolders.limit)) && big.leftOut == 12 - OpenFolders.limit,
+          "no more than the limit open, and the rest are counted: \(big)")
+    let exact = OpenFolders.plan(for: Array(many.prefix(OpenFolders.limit))) { _ in .folder }
+    check(exact.folders.count == OpenFolders.limit && exact.leftOut == 0, "exactly the limit is fine")
+    let repeated = Array(many.prefix(OpenFolders.limit)) + Array(many.prefix(OpenFolders.limit)) + ["relative", ""]
+    check(OpenFolders.plan(for: repeated) { _ in .folder } == exact, "repeats and unusable paths do not count against it")
+    check(OpenFolders.limit >= 1 && OpenFolders.limit <= 20, "the limit is a handful")
+
+    // Paths written out as text, as a selection in another app gives them.
+    let home = "/Users/me"
+    func paths(_ text: String) -> [String] { OpenFolders.paths(inText: text, home: home) }
+    check(paths("/Users/me/work") == ["/Users/me/work"], "a path written out")
+    check(paths("  /Users/me/work \n") == ["/Users/me/work"], "with the space around it taken off")
+    check(paths("/a\n/b\r\n/c\r/d") == ["/a", "/b", "/c", "/d"], "one to a line, whichever way the line ends")
+    check(paths("/a\n\n   \n/b") == ["/a", "/b"], "blank lines are nothing")
+    check(paths("\"/Users/me/My Projects\"") == ["/Users/me/My Projects"] && paths("'/a b'") == ["/a b"], "quotes around a line come off")
+    check(paths("\"/a") == ["\"/a"] && paths("\"/a'") == ["\"/a'"], "quotes that are not a pair stay")
+    check(paths("~") == ["/Users/me"] && paths("~/work") == ["/Users/me/work"], "~ is home")
+    check(paths("~you/work") == ["~you/work"], "another account's home is not guessed")
+    check(paths("").isEmpty && paths("\n\n").isEmpty, "no text, no paths")
+    let lines = (0..<(OpenFolders.maxLines + 20)).map { "/l\($0)" }.joined(separator: "\n")
+    check(paths(lines).count == OpenFolders.maxLines, "only so many lines are read")
+    check(plan(paths("~/work\n~/work/notes.txt\nnot a path\n\"/Users/me/other\"")).folders == ["/Users/me/work", "/Users/me/other"],
+          "text goes through the same rules as files")
+}
+
 // MARK: Tab order
 
 do {

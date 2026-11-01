@@ -217,6 +217,7 @@ jobs:
             Sources/iTERMiNAL/Terminal/TerminalDrop.swift \
             Sources/iTERMiNAL/Security/SecureInputState.swift \
             Sources/iTERMiNAL/Workspace/TabOrder.swift \
+            Sources/iTERMiNAL/App/OpenFolders.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
@@ -395,6 +396,29 @@ jobs:
             fail=1
           fi
           echo "version: $got_short (build $got_bundle)"
+
+          # Finder and the Services menu reach the app through Info.plist entries
+          # that XcodeGen writes from project.yml, so they are read back from the
+          # built bundle: a key that did not make it would leave the feature
+          # quietly absent. The rank is the one that matters most. Alternate lists
+          # the app under Open With; Default or Owner would make it what folders
+          # open with.
+          for expected in \
+            "NSServices.0.NSMessage=openTabAtFolder" \
+            "NSServices.0.NSPortName=iTERMiNAL" \
+            "NSServices.0.NSSendFileTypes.0=public.folder" \
+            "NSServices.0.NSRequiredContext.NSTextContent=FilePath" \
+            "CFBundleDocumentTypes.0.LSItemContentTypes.0=public.folder" \
+            "CFBundleDocumentTypes.0.LSHandlerRank=Alternate"
+          do
+            key="${expected%%=*}"
+            want="${expected#*=}"
+            got=$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null || echo "")
+            if [ "$got" != "$want" ]; then
+              echo "::error::Info.plist $key is '$got', expected '$want'"
+              fail=1
+            fi
+          done
 
           # The bundled tools, checked in the bundle rather than in Vendor/:
           # a copy phase that silently skipped, or dropped the executable bit,
