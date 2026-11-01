@@ -693,12 +693,18 @@ final class AppSettings: ObservableObject {
     }
 
     func resolvedTerminalFont() -> NSFont {
+        resolvedTerminalFont(name: terminalFontName, size: terminalFontSize)
+    }
+
+    /// The font for a given family and size: a terminal drawn with a profile's
+    /// own choice asks for it here.
+    func resolvedTerminalFont(name: String, size points: Double) -> NSFont {
         // Fonts the person imported are registered the first time this is
         // asked, before the name below is looked up.
         _ = ImportedFonts.shared
-        let size = CGFloat(terminalFontSize)
+        let size = CGFloat(points)
         var font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        if !terminalFontName.isEmpty, let chosen = NSFont(name: terminalFontName, size: size) {
+        if !name.isEmpty, let chosen = NSFont(name: name, size: size) {
             font = chosen
         }
         return SymbolsFont.withFallback(font)
@@ -718,7 +724,11 @@ final class AppSettings: ObservableObject {
     var splitFocusColor: SplitFocusColor { SplitFocusColor(rawValue: splitFocusColorTag) ?? .accent }
 
     func resolvedTerminalTheme(darkMode: Bool) -> TerminalTheme {
-        TerminalTheme.theme(id: terminalThemeID, darkMode: darkMode)
+        resolvedTerminalTheme(id: terminalThemeID, darkMode: darkMode)
+    }
+
+    func resolvedTerminalTheme(id: String, darkMode: Bool) -> TerminalTheme {
+        TerminalTheme.theme(id: id, darkMode: darkMode)
     }
 
     /// The shell binary, launch args, and argv[0] override for new sessions.

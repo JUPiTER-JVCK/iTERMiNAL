@@ -57,6 +57,11 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     var jumpHosts: String
     /// Whether the ssh-agent's keys can be used from the host. See `AgentForwarding`.
     var agentForwarding: AgentForwarding
+    /// A profile (see `TerminalProfile`) whose theme and font this host's
+    /// terminal tabs are drawn with. Only those two apply to a host: its shell,
+    /// variables and startup command are for shells on this Mac. Nil follows
+    /// Settings → Terminal, and so does a profile that is no longer here.
+    var profileID: UUID?
     /// A `TerminalType` raw value for this host's `TERM`, or empty to use the
     /// one chosen for remote sessions in Settings → Terminal. Kept as the
     /// string so a name from a newer build is read as the default, not lost.
@@ -88,6 +93,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         customCommand: String = "",
         jumpHosts: String = "",
         agentForwarding: AgentForwarding = .sshConfig,
+        profileID: UUID? = nil,
         terminalTypeTag: String = "",
         ipFamily: IPFamily = .any,
         compression: Bool = false,
@@ -107,6 +113,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         self.customCommand = customCommand
         self.jumpHosts = jumpHosts
         self.agentForwarding = agentForwarding
+        self.profileID = profileID
         self.terminalTypeTag = terminalTypeTag
         self.ipFamily = ipFamily
         self.compression = compression
@@ -133,6 +140,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         // A choice this build does not know — written by a newer one — falls
         // back to the default instead of failing the whole host list.
         agentForwarding = (try? container.decodeIfPresent(AgentForwarding.self, forKey: .agentForwarding)) ?? .sshConfig
+        profileID = (try? container.decodeIfPresent(UUID.self, forKey: .profileID)) ?? nil
         terminalTypeTag = try container.decodeIfPresent(String.self, forKey: .terminalTypeTag) ?? ""
         ipFamily = (try? container.decodeIfPresent(IPFamily.self, forKey: .ipFamily)) ?? .any
         compression = try container.decodeIfPresent(Bool.self, forKey: .compression) ?? false
