@@ -42,6 +42,10 @@ struct ITerminalApp: App {
                 .preferredColorScheme(settings.preferredColorScheme)
         }
         .defaultSize(width: 1024, height: 720)
+        // Opened only by `openWindow(value:)`, so it claims no external events —
+        // and a folder sent to the app from Finder or the Dock is one, which
+        // `AppDelegate.application(_:open:)` answers by opening tabs.
+        .handlesExternalEvents(matching: [])
 
         Settings {
             SettingsRootView()
@@ -64,10 +68,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
         // Forwards a person marked "start when iTERMiNAL opens".
         SavedTunnelRunner.shared.startAutomatic(settings: AppSettings.shared)
+        // The Services menu's "New iTERMiNAL Tab at Folder".
+        FinderIntegration.shared.register()
         // Not in any shipped build: only the Screenshots workflow defines this.
         #if SCREENSHOTS
         ScreenshotMode.startIfRequested()
         #endif
+    }
+
+    // A folder dropped on the Dock icon, chosen under Open With in Finder, or
+    // given to `open -a iTERMiNAL`. Each gets a tab; a file gets its folder.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        FinderIntegration.shared.open(urls: urls)
     }
 
     // Secure keyboard input is held only while this is the active app.

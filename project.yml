@@ -57,6 +57,44 @@ targets:
           iTERMiNAL looks for machines on your network advertising screen
           sharing, SSH or file sharing, so you can connect without typing an
           address. It advertises nothing about this Mac.
+        # Folders can be opened in iTERMiNAL from outside it: dropped on the Dock
+        # icon, chosen under Finder's Open With, or sent from the Services menu.
+        #
+        # Alternate, not Default or Owner: this lists the app as a choice and
+        # never makes it what a folder opens with, which stays Finder. The
+        # build checks the rank it ends up with (Verify bundle contents).
+        # Declared the way other terminals declare it. `fold` is the old
+        # four-letter type code for a folder, listed because they list it.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Folders
+            CFBundleTypeRole: Viewer
+            CFBundleTypeOSTypes:
+              - fold
+            LSItemContentTypes:
+              - public.folder
+            LSHandlerRank: Alternate
+        # The Services menu entry, "New iTERMiNAL Tab at Folder". AppKit sends
+        # NSMessage to the object set as `NSApp.servicesProvider`
+        # (FinderIntegration), and NSPortName is the app's own name.
+        #
+        # Declared the way other terminals declare it, who say they took it from
+        # Terminal.app: Finder's right-click Services submenu is reported to
+        # match on the selection's text (its path), so NSRequiredContext and
+        # the plain-text type are what put the entry there. The same
+        # declaration lets a path selected as text in any app offer it, which
+        # the handler reads too. Not checked on a Mac.
+        NSServices:
+          - NSMenuItem:
+              default: New iTERMiNAL Tab at Folder
+            NSMessage: openTabAtFolder
+            NSPortName: iTERMiNAL
+            NSRequiredContext:
+              NSTextContent: FilePath
+            NSSendFileTypes:
+              - public.folder
+            NSSendTypes:
+              - NSFilenamesPboardType
+              - public.plain-text
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         # Scope the ATS exception to web-view content only, so the browser
