@@ -8,6 +8,7 @@ import Darwin
 //   iterminalctl browser.open url=localhost:3000
 //   iterminalctl browser.click selector="#submit"
 //   iterminalctl browser.screenshot path=~/shot.png
+//   iterminalctl exec web1 uptime
 //
 // The app must have the API enabled (Settings → Security). Authentication
 // uses the token file the app writes alongside the socket, readable only by
@@ -34,6 +35,15 @@ func usage() -> Never {
     Usage:
       iterminalctl <command> [key=value ...] [--raw] [--follow] [--socket PATH] [--token VALUE]
 
+    Run a command on a saved host, with no terminal:
+      iterminalctl exec [--timeout SECONDS] HOST COMMAND [ARG ...]
+      iterminalctl exec web1 uptime
+      iterminalctl exec web1 ls "my folder"        (several words: each is quoted for the host)
+      iterminalctl exec web1 "df -h | head -5"     (one word: used as written, so it can be a pipeline)
+    The host must be ticked "Allow scripted commands" in Settings → Connections; it is off
+    for every host. Output goes to standard output and standard error as the command wrote
+    it, and the exit status is the command's (124 if it timed out, 125 if it could not run).
+
     Examples:
       iterminalctl help
       iterminalctl tab.create directory=~/code
@@ -59,6 +69,50 @@ guard !arguments.isEmpty else { usage() }
 var command: String?
 var params: [String: Any] = [:]
 var explicitToken: String?
+
+// `exec` is its own small grammar, not key=value.
+var execMode = false
+if arguments.first == "exec" {
+    execMode = true
+    var rest = Array(arguments.dropFirst())
+    while let first = rest.first, first.hasPrefix("-"), first != "--" {
+        rest.removeFirst()
+        switch first {
+        case "--help", "-h":
+            usage()
+        case "--raw":
+            rawOutput = true
+        case "--timeout":
+            guard let value = rest.first, let seconds = Double(value) else { fail("--timeout needs a number of seconds") }
+            rest.removeFirst()
+            params["timeout"] = seconds
+        case "--socket":
+            guard let value = rest.first else { fail("--socket needs a path") }
+            rest.removeFirst()
+            socketPath = value
+        case "--token":
+            guard let value = rest.first else { fail("--token needs a value") }
+            rest.removeFirst()
+            explicitToken = value
+        default:
+            fail("Unknown option \(first) for exec")
+        }
+    }
+    guard !rest.isEmpty else { usage() }
+    let host = rest.removeFirst()
+    if rest.first == "--" { rest.removeFirst() }
+    guard !rest.isEmpty else { fail("exec needs a command: iterminalctl exec HOST COMMAND [ARG ...]") }
+    command = "host.exec"
+    params["host"] = host
+    // One word is a command line as written; several are the words of one
+    // command, which the app quotes for the host's shell.
+    if rest.count == 1 {
+        params["command"] = rest[0]
+    } else {
+        params["argv"] = rest
+    }
+    arguments = []
+}
 
 var index = 0
 while index < arguments.count {
@@ -211,6 +265,21 @@ func readFrame() -> [String: Any]? {
     }
 }
 
+/// Passes a finished `exec` through: what the command wrote, where it wrote it,
+/// and its own exit status.
+func finishExec(_ result: [String: Any]) -> Never {
+    if let output = result["stdout"] as? String { FileHandle.standardOutput.write(Data(output.utf8)) }
+    if let errors = result["stderr"] as? String { FileHandle.standardError.write(Data(errors.utf8)) }
+    if (result["stdoutTruncated"] as? Bool) == true || (result["stderrTruncated"] as? Bool) == true {
+        FileHandle.standardError.write(Data("iterminalctl: output was cut short\n".utf8))
+    }
+    if (result["timedOut"] as? Bool) == true {
+        FileHandle.standardError.write(Data("iterminalctl: timed out\n".utf8))
+        exit(124)
+    }
+    exit(Int32(truncatingIfNeeded: (result["exit"] as? Int) ?? 125))
+}
+
 func render(_ result: [String: Any]) {
     if result.isEmpty {
         print("ok")
@@ -236,9 +305,16 @@ if rawOutput {
         print(text)
     }
 } else if (response["ok"] as? Bool) == true {
+    if execMode { finishExec(response["result"] as? [String: Any] ?? [:]) }
     render(response["result"] as? [String: Any] ?? [:])
 } else {
-    fail(response["error"] as? String ?? "The command failed")
+    let message = response["error"] as? String ?? "The command failed"
+    if execMode {
+        // Not 1: a command can exit 1 itself.
+        FileHandle.standardError.write(Data((message + "\n").utf8))
+        exit(125)
+    }
+    fail(message)
 }
 
 // Subscriptions keep the socket open and print each pushed event until the

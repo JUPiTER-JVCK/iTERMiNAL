@@ -5,6 +5,7 @@ import AppKit
 /// does and doesn't do with the user's data.
 struct SecuritySettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var scriptedLog = ScriptedCommandLog.shared
     @State private var installMessage: String?
     @State private var tokenMessage: String?
 
@@ -66,6 +67,42 @@ struct SecuritySettingsView: View {
                         Text("Copies the bundled iterminalctl into ~/.local/bin.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if settings.localAPIEnabled || !scriptedLog.entries.isEmpty {
+                Section("Scripted commands on hosts") {
+                    Text("A script with the API token can run a command on a host — with no terminal — only if you ticked “Allow scripted commands” for that host in Settings → Connections. Every one, and every refusal, is listed here until you quit. Commands are masked and cut short.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if scriptedLog.entries.isEmpty {
+                        Text("None since iTERMiNAL started.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(scriptedLog.entries) { entry in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(entry.host).font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                    Text(entry.time.formatted(date: .omitted, time: .standard))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if !entry.command.isEmpty {
+                                    Text(entry.command)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .lineLimit(2)
+                                        .textSelection(.enabled)
+                                }
+                                Text(entry.result)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Button("Clear List") { scriptedLog.clear() }
                     }
                 }
             }

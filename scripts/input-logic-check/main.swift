@@ -5817,6 +5817,138 @@ do {
     check(QuickLookPolicy.safeFileName(longOddExt) == "preview", "a long extension is not kept")
 }
 
+// MARK: Scripted commands on hosts
+
+// A script may run a command on a saved host only if that host has been ticked for it, and
+// then only within limits. What is checked: that a host is out of reach by default and stays
+// so across saving, loading and importing; the command line that results from a command or
+// from words; the time limit; how ssh's own failure is told from the command's status; the
+// cap on output; and what is said back and noted.
+do {
+    func connection(allow: Bool = true, name: String = "web1", host: String = "web1.example.com",
+                    transport: SSHTransport = .ssh, jumpHosts: String = "") -> SSHConnection {
+        SSHConnection(name: name, host: host, username: "deploy", transport: transport, jumpHosts: jumpHosts, allowScriptedCommands: allow)
+    }
+
+    // Off unless ticked.
+    check(!SSHConnection(name: "n", host: "h", username: "u").allowScriptedCommands, "a new host does not allow scripted commands")
+    let blocked = ScriptedCommand.refusal(for: connection(allow: false))
+    check(blocked?.contains("web1 doesn't allow scripted commands") == true && blocked?.contains("Settings → Connections") == true,
+          "an unticked host is refused, and told where to tick it: \(String(describing: blocked))")
+    check(ScriptedCommand.refusal(for: connection(allow: false, name: "", host: "10.0.0.5"))?.contains("10.0.0.5 doesn't allow") == true, "by address when it has no name")
+    check(ScriptedCommand.refusal(for: connection()) == nil, "a ticked ssh host is fine")
+    check(ScriptedCommand.refusal(for: connection(transport: .mosh))?.contains("doesn't connect with ssh") == true, "a mosh host is not")
+    check(ScriptedCommand.refusal(for: connection(transport: .custom))?.contains("doesn't connect with ssh") == true, "nor a custom command")
+    check(ScriptedCommand.refusal(for: connection(host: "  "))?.contains("no address") == true, "nor one without an address")
+    check(ScriptedCommand.refusal(for: connection(jumpHosts: "bad host")) != nil, "nor one whose jump hosts are wrong: never direct instead")
+    check(ScriptedCommand.refusal(for: connection(allow: false, transport: .mosh))?.contains("doesn't allow scripted commands") == true, "and being unticked is said first")
+
+    // The flag in saved data.
+    let id = UUID().uuidString
+    let bare = #"{"id":"\#(id)","name":"n","host":"h"}"#
+    let ticked = #"{"id":"\#(id)","name":"n","host":"h","allowScriptedCommands":true}"#
+    if let a = try? JSONDecoder().decode(SSHConnection.self, from: Data(bare.utf8)),
+       let b = try? JSONDecoder().decode(SSHConnection.self, from: Data(ticked.utf8)) {
+        check(!a.allowScriptedCommands, "a host saved before this existed is not allowed")
+        check(b.allowScriptedCommands, "and one saved with the flag is")
+    } else {
+        check(false, "hosts with and without the flag can be read")
+    }
+    let kept = connection()
+    if let data = try? JSONEncoder().encode(kept), let back = try? JSONDecoder().decode(SSHConnection.self, from: data) {
+        check(back == kept && back.allowScriptedCommands, "the flag survives being saved")
+    } else {
+        check(false, "a ticked host can be saved and read back")
+    }
+
+    // The command line.
+    func line(_ command: String? = nil, _ words: [String]? = nil) -> String? {
+        if case .success(let text) = ScriptedCommand.commandLine(command: command, arguments: words) { return text }
+        return nil
+    }
+    func problem(_ command: String? = nil, _ words: [String]? = nil) -> ScriptedCommand.Problem? {
+        if case .failure(let found) = ScriptedCommand.commandLine(command: command, arguments: words) { return found }
+        return nil
+    }
+    check(problem() == .missing && problem("ls", ["ls"]) == .both, "a command or words, one of them")
+    check(problem("  \n") == .empty && problem(nil, []) == .empty && problem(nil, [""]) == .empty, "none is none")
+    check(line("uptime") == "uptime" && line("  df -h | head -5\n") == "df -h | head -5", "a command is used as written, trimmed")
+    check(line("set -e\necho a\tb") == "set -e\necho a\tb", "a few lines, and a tab, are fine")
+    check(problem("echo \u{1B}[0m") == .controlCharacter && problem("a\rb") == .controlCharacter && problem("a\u{0}b") == .controlCharacter, "other control characters are not")
+    check(line(String(repeating: "x", count: ScriptedCommand.maxLength)) != nil, "at the limit it is fine")
+    check(problem(String(repeating: "x", count: ScriptedCommand.maxLength + 1)) == .tooLong, "one over is not")
+    check(line(nil, ["ls", "-la", "/var/log"]) == "ls -la /var/log", "plain words are left plain")
+    check(line(nil, ["ls", "my folder"]) == "ls 'my folder'", "a word with a space is quoted")
+    check(line(nil, ["echo", "it's"]) == #"echo 'it'\''s'"#, "so is a quote in it")
+    check(line(nil, ["echo", "$HOME", "a;b", "`id`"]) == "echo '$HOME' 'a;b' '`id`'", "nothing in a word is read by the host's shell")
+    check(line(nil, ["printf", ""]) == "printf ''", "an empty word stays one")
+    check(line(nil, ["echo", "a\nb"]) == "echo 'a\nb'", "a line break in a word is kept inside its quotes")
+    check(problem(nil, ["echo", "\u{1B}"]) == .controlCharacter, "an escape in a word is refused")
+    check(problem(nil, Array(repeating: "x", count: ScriptedCommand.maxArguments + 1)) == .tooManyWords, "too many words")
+    check(line(nil, Array(repeating: "x", count: ScriptedCommand.maxArguments)) != nil, "and the most that is allowed")
+    check(problem(nil, ["echo", String(repeating: "y", count: ScriptedCommand.maxLength)]) == .tooLong, "words that quote to too much")
+    check(ScriptedCommand.Problem.tooLong.message.contains("4000") && ScriptedCommand.Problem.both.message.contains("not both"), "problems have words")
+
+    // The time limit.
+    check(ScriptedCommand.timeout(nil) == 30 && ScriptedCommand.timeout(0) == 30 && ScriptedCommand.timeout(-5) == 30, "none given is thirty seconds")
+    check(ScriptedCommand.timeout(.nan) == 30 && ScriptedCommand.timeout(.infinity) == 30, "so is nonsense")
+    check(ScriptedCommand.timeout(0.2) == 1 && ScriptedCommand.timeout(5) == 5, "never under a second")
+    check(ScriptedCommand.timeout(500) == 120 && ScriptedCommand.timeout(120) == 120, "or over two minutes")
+
+    // What ssh said and what the command did.
+    let ran = ScriptedCommand.outcome(status: 0, output: "up 3 days\n", errorOutput: "", timedOut: false)
+    check(ran.kind == .ran(exit: 0) && ran.output == "up 3 days\n" && !ran.outputTruncated, "a command that ran")
+    check(ScriptedCommand.outcome(status: 3, output: "", errorOutput: "no such file", timedOut: false).kind == .ran(exit: 3), "and failed by itself is its status, not an error")
+    let refused = ScriptedCommand.outcome(status: 255, output: "", errorOutput: "ssh: connect to host web1 port 22: Connection refused", timedOut: false)
+    if case .failed(let reason, let needsSignIn) = refused.kind {
+        check(reason.contains("Connection refused") && !needsSignIn, "255 is ssh failing, with the line that says why: \(reason)")
+    } else {
+        check(false, "255 is a failure of ssh")
+    }
+    let denied = ScriptedCommand.outcome(status: 255, output: "", errorOutput: "deploy@web1: Permission denied (publickey).", timedOut: false)
+    if case .failed(_, let needsSignIn) = denied.kind {
+        check(needsSignIn, "a refused sign-in says a terminal tab would fix it")
+    } else {
+        check(false, "a refused sign-in is a failure of ssh")
+    }
+    let slow = ScriptedCommand.outcome(status: 15, output: "partial", errorOutput: "", timedOut: true)
+    check(slow.kind == .timedOut && slow.output == "partial", "a timeout keeps what was read")
+    let loud = ScriptedCommand.outcome(status: 0, output: String(repeating: "o", count: ScriptedCommand.maxOutputCharacters + 1),
+                                       errorOutput: String(repeating: "e", count: ScriptedCommand.maxOutputCharacters), timedOut: false)
+    check(loud.output.count == ScriptedCommand.maxOutputCharacters && loud.outputTruncated, "output is cut at the limit, and says so")
+    check(loud.errorOutput.count == ScriptedCommand.maxOutputCharacters && !loud.errorTruncated, "at the limit exactly is not cut")
+    if case .failed(let reason, _) = ScriptedCommand.notStarted("Couldn't start ssh.").kind { check(reason == "Couldn't start ssh.", "a process that did not start") }
+
+    // What goes back, and what is noted.
+    if case .success(let result) = ScriptedCommand.reply(for: ran, milliseconds: 420) {
+        check(result["exit"] as? Int == 0 && result["stdout"] as? String == "up 3 days\n" && result["stderr"] as? String == "", "the result has the status and both outputs")
+        check(result["timedOut"] as? Bool == false && result["stdoutTruncated"] as? Bool == false && result["durationMs"] as? Int == 420, "and how it went")
+    } else {
+        check(false, "a command that ran has a result")
+    }
+    if case .success(let result) = ScriptedCommand.reply(for: slow, milliseconds: 30_000) {
+        check(result["timedOut"] as? Bool == true && result["exit"] == nil && result["stdout"] as? String == "partial", "a timeout has no status, and what was read")
+    } else {
+        check(false, "a timeout has a result")
+    }
+    if case .failure(let failure) = ScriptedCommand.reply(for: denied, milliseconds: 100) {
+        check(failure.message.contains("Permission denied") && failure.message.contains("terminal tab"), "a refused sign-in is an error with advice: \(failure.message)")
+    } else {
+        check(false, "a failure of ssh is an error")
+    }
+    if case .failure(let failure) = ScriptedCommand.reply(for: refused, milliseconds: 100) {
+        check(failure.message.contains("Connection refused") && !failure.message.contains("terminal tab"), "other failures have no sign-in advice")
+    } else {
+        check(false, "a refused connection is an error")
+    }
+    let noted = ScriptedCommand.excerpt(of: "deploy --password=hunter2\nsystemctl restart app")
+    check(!noted.contains("hunter2") && noted.contains("[redacted]") && noted.contains(" ⏎ ") && !noted.contains("\n"), "a noted command is masked and on one line: \(noted)")
+    check(ScriptedCommand.excerpt(of: String(repeating: "c", count: 500)).count == ScriptedCommand.excerptLength && ScriptedCommand.excerpt(of: String(repeating: "c", count: 500)).hasSuffix("…"), "and short")
+    check(ScriptedCommand.excerpt(of: "uptime") == "uptime", "a short one is as it was")
+    check(ScriptedCommand.summary(of: ran) == "exit 0" && ScriptedCommand.summary(of: ScriptedCommand.outcome(status: 2, output: "", errorOutput: "", timedOut: false)) == "exit 2", "the note says how it ended")
+    check(ScriptedCommand.summary(of: slow) == "timed out" && ScriptedCommand.summary(of: refused).hasPrefix("didn't run: "), "including when it did not")
+}
+
 // MARK: Listening ports
 
 do {
