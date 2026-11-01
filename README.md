@@ -1418,7 +1418,10 @@ and the composer's **+** menu.
   Send does not turn the setting on.
 - **Nothing runs.** A fenced command in a reply gets **Insert**, which puts it
   in the input to review — one undo step, nothing sent until you press Return —
-  and **Copy**. Code in other languages gets Copy only. A command that deletes
+  and **Copy**. Code in other languages gets Copy only. Every code block also has
+  **Save…**: a save panel asks where, the file is plain text with a newline at
+  the end and a name from the block's language (`script.sh`, `script.py`…), and
+  it is **not made executable** — that, and reading it first, are yours. A command that deletes
   recursively, uses `sudo`, pipes a download into a shell, overwrites a file,
   force-pushes, or similar carries a short plain warning. No warning does not
   mean safe; it only reads for a few well-known dangers.
