@@ -570,7 +570,7 @@ private struct LandingView: View {
                 spacing: 12
             ) {
                 SuggestionCard(icon: "terminal", tint: settings.accentColor, title: "Open a new terminal") {
-                    store.newTab()
+                    store.openTab()
                 }
                 SuggestionCard(icon: "rectangle.split.2x1", tint: Color(hex: 0x3B82F6), title: "Start with split panes") {
                     store.newTab()

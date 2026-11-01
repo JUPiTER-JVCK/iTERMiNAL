@@ -26,6 +26,7 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            ProfilesSection()
             Section("Editor") {
                 Picker("Editor", selection: $settings.editorChoiceTag) {
                     ForEach(EditorChoice.allCases) { choice in

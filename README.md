@@ -393,6 +393,17 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Markdown preview** — right-click a `.md` file in the file browser, on this
   Mac or on a host, and **Preview Markdown** shows it rendered, in a sheet. It is
   built not to trust the file: see [Markdown preview](#markdown-preview).
+- **Profiles** — Settings → General → Profiles. A profile is a named way to start a
+  local shell: which shell and its arguments, extra environment variables, the
+  folder it starts in, and optionally one command typed once the shell is up.
+  Choose one for new tabs, or open a tab with a particular one from the command
+  palette (**New Tab with Profile: …**) or its **Open a Tab** button. A profile's
+  startup command is typed only when you open a tab yourself — ⌘T, New Tab, the
+  palette — and never when a workspace is restored at launch, when a tab is
+  reopened from Recents, or in a split; a split of a profile's tab uses the same
+  shell and environment. Deleting a profile leaves its tabs as ordinary ones.
+  Profiles are not part of an exported archive (see
+  [Backup and restore](#backup-and-restore)).
 - **Quick Look** — right-click a file in the file browser and choose **Quick Look**,
   or select it and press Space, to see it in the system's own Quick Look panel,
   the one Finder uses. A file on this Mac is previewed where it is. A file on a
@@ -1772,8 +1783,12 @@ hosts the way you would read an `ssh_config` someone sent you) and non-secret
 preferences. It deliberately leaves out secrets — the API token stays in the
 keychain, SSH has no passwords to carry — and machine-local paths such as
 `composerShell`, so importing on another Mac cannot point the app at a shell
-that isn't there. Terminal scrollback is excluded too: transcripts stay in
-their own 0600 files on this Mac.
+that isn't there. Profiles are left out for the same reason, and a stronger one:
+a profile's shell, its variables (`ZDOTDIR`, `BASH_ENV`) and its startup command
+can each make a program run when a tab opens, and nothing that arrives by
+import should. A tab in a snapshot remembers its profile by id; on a Mac without
+that profile it opens as an ordinary tab. Terminal scrollback is excluded too:
+transcripts stay in their own 0600 files on this Mac.
 
 There is no background sync and nothing leaves the machine unless you export
 it. An earlier version offered iCloud through CloudKit; it needed an Apple

@@ -216,6 +216,7 @@ jobs:
             Sources/iTERMiNAL/Remote/RFB.swift \
             Sources/iTERMiNAL/Remote/RFBAuth.swift \
             Sources/iTERMiNAL/Terminal/TerminalType.swift \
+            Sources/iTERMiNAL/Terminal/TerminalProfile.swift \
             Sources/iTERMiNAL/Terminal/GhosttyThemeFile.swift \
             Sources/iTERMiNAL/Terminal/ShellIntegration.swift \
             Sources/iTERMiNAL/Terminal/ShellIntegrationFiles.swift \

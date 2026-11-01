@@ -288,7 +288,7 @@ struct CommandPaletteView: View {
     private func allActions() -> [PaletteAction] {
         var actions: [PaletteAction] = [
             PaletteAction(id: "tab.new", title: "New Terminal Tab", subtitle: "Open a shell", systemImage: "plus.square", shortcut: "⌘T") {
-                store.newTab()
+                store.openTab()
             },
             PaletteAction(id: "workspace.new", title: "New Workspace", subtitle: "Group of tabs", systemImage: "folder.badge.plus", shortcut: "⇧⌘N") {
                 store.newWorkspace()
@@ -342,6 +342,18 @@ struct CommandPaletteView: View {
         ]
 
         actions.append(contentsOf: moreMenuActions())
+
+        // One for each profile, to open a tab with it whatever the default is.
+        for profile in settings.profiles {
+            actions.append(PaletteAction(
+                id: "profile.tab.\(profile.id.uuidString)",
+                title: "New Tab with Profile: \(profile.displayName)",
+                subtitle: profile.summary,
+                systemImage: "person.crop.square"
+            ) {
+                store.openTab(profile: profile)
+            })
+        }
 
         for connection in settings.sshConnections {
             actions.append(PaletteAction(

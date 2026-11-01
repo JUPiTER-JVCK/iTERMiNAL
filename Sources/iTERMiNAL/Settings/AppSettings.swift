@@ -379,6 +379,21 @@ final class AppSettings: ObservableObject {
         didSet { persistRemoteServices() }
     }
 
+    // MARK: Profiles
+
+    /// Named ways to start a local shell (see `TerminalProfile`). Kept on this
+    /// Mac: they are not in an exported archive, and a reset leaves them alone,
+    /// like the saved connections.
+    @Published var profiles: [TerminalProfile] {
+        didSet { persistProfiles() }
+    }
+
+    /// The profile a new terminal tab opens with, as a UUID string; empty for
+    /// none, which is the settings in General.
+    @Published var defaultProfileID: String {
+        didSet { defaults.set(defaultProfileID, forKey: "defaultProfileID") }
+    }
+
     private init() {
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         restoreSession = defaults.object(forKey: "restoreSession") as? Bool ?? true
@@ -537,6 +552,14 @@ final class AppSettings: ObservableObject {
             remoteServices = []
         }
 
+        if let data = defaults.data(forKey: "terminalProfiles"),
+           let decoded = try? JSONDecoder().decode([TerminalProfile].self, from: data) {
+            profiles = decoded
+        } else {
+            profiles = []
+        }
+        defaultProfileID = defaults.string(forKey: "defaultProfileID") ?? ""
+
         // `didSet` doesn't fire during init, so reconcile the login item with
         // the stored preference on every launch.
         applyLaunchAtLogin()
@@ -558,6 +581,23 @@ final class AppSettings: ObservableObject {
                 && $0.port == port
                 && $0.isPinned
         }?.pinnedFingerprint
+    }
+
+    private func persistProfiles() {
+        if let data = try? JSONEncoder().encode(profiles) {
+            defaults.set(data, forKey: "terminalProfiles")
+        }
+    }
+
+    /// The profile with this id, if it is still here.
+    func profile(withID id: UUID?) -> TerminalProfile? {
+        guard let id else { return nil }
+        return profiles.first { $0.id == id }
+    }
+
+    /// The profile new terminal tabs open with, if one is chosen and still here.
+    var defaultProfile: TerminalProfile? {
+        profile(withID: UUID(uuidString: defaultProfileID))
     }
 
     private func persistProxmoxHosts() {
@@ -717,6 +757,7 @@ final class AppSettings: ObservableObject {
         restoreSession = true
         shellPath = ""
         loginShell = true
+        defaultProfileID = ""
         editorChoiceTag = EditorChoice.automatic.rawValue
         editorCustomCommand = ""
         defaultDirectory = ""

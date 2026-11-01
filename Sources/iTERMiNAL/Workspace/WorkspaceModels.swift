@@ -217,7 +217,9 @@ struct TabSnapshot: Codable {
 }
 
 indirect enum PaneSnapshot: Codable {
-    case terminal(directory: String?, connection: String?)
+    /// `profile` is the id of the profile the shell was opened with. Optional so
+    /// layouts saved before profiles existed still decode.
+    case terminal(directory: String?, connection: String?, profile: String?)
     case browser(url: String?)
     case files(path: String?, connection: String?)
     /// The builder's URL field, the same as `browser`'s — not an explored
@@ -240,7 +242,8 @@ extension PaneNode {
         case .terminal(let session):
             return .terminal(
                 directory: session.currentDirectory,
-                connection: session.kind.connectionID?.uuidString
+                connection: session.kind.connectionID?.uuidString,
+                profile: session.profileID?.uuidString
             )
         case .browser(let browser):
             return .browser(url: browser.urlText)
@@ -255,13 +258,19 @@ extension PaneNode {
 
     static func restore(_ snapshot: PaneSnapshot) -> PaneNode {
         switch snapshot {
-        case .terminal(let directory, let connection):
+        case .terminal(let directory, let connection, let profile):
             // A remote pane restores as a remote pane and redials on launch.
             let kind: SessionKind = connection
                 .flatMap { UUID(uuidString: $0) }
                 .map { SessionKind.remote($0) } ?? .localShell
+            // The shell comes back with the profile it had — but not its
+            // startup command, which only opening a tab yourself runs.
             return PaneNode(content: .terminal(
-                TerminalSession(kind: kind, initialDirectory: directory)
+                TerminalSession(
+                    kind: kind,
+                    initialDirectory: directory,
+                    profileID: profile.flatMap { UUID(uuidString: $0) }
+                )
             ))
         case .browser(let url):
             return PaneNode(content: .browser(BrowserModel(initialURL: url)))

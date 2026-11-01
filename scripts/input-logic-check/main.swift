@@ -5468,6 +5468,103 @@ do {
     }
 }
 
+// MARK: Terminal profiles
+
+// A profile is a named way to start a shell. What is checked here is what can be checked
+// without a shell: which variables are accepted and in what order they are set, which
+// startup commands are typed (one plain line, and nothing else), where a start folder
+// resolves to, and how a profile is summed up and named.
+do {
+    func profile(_ build: (inout TerminalProfile) -> Void = { _ in }) -> TerminalProfile {
+        var made = TerminalProfile(name: "Work")
+        build(&made)
+        return made
+    }
+
+    // Variable names and values.
+    for name in ["PATH", "_x", "a1", "Abc_9", "X"] {
+        check(TerminalProfile.isValidVariableName(name), "\(name) is a variable name")
+    }
+    for name in ["", "1a", "a-b", "a b", "a=b", "é", "a.b", "$x", "9"] {
+        check(!TerminalProfile.isValidVariableName(name), "\(name.debugDescription) is not")
+    }
+    check(TerminalProfile.isUsableValue("") && TerminalProfile.isUsableValue("a b=c") && TerminalProfile.isUsableValue("tab\there"),
+          "an empty value, a space, an = and a tab are fine")
+    check(!TerminalProfile.isUsableValue("a\nb") && !TerminalProfile.isUsableValue("a\rb") && !TerminalProfile.isUsableValue("a\u{0}b"),
+          "a line break or NUL is not")
+
+    // The environment a profile adds.
+    let withVariables = profile {
+        $0.variables = [
+            ProfileVariable(name: "A", value: "1"),
+            ProfileVariable(name: " B ", value: "2"),
+            ProfileVariable(name: "1bad", value: "x"),
+            ProfileVariable(name: "C", value: "l1\nl2"),
+            ProfileVariable(name: "A", value: "3"),
+            ProfileVariable(name: "", value: ""),
+        ]
+    }
+    let env = withVariables.environment
+    check(env.map(\.name) == ["B", "A"] && env.map(\.value) == ["2", "3"],
+          "invalid ones are left out, names are trimmed, and a name given twice takes its last value: \(env)")
+    let problems = withVariables.variableProblems
+    check(problems.count == 2, "two rows are reported: \(problems.count)")
+    check(problems[withVariables.variables[2].id]?.contains("letters, digits") == true, "a bad name says what a name is")
+    check(problems[withVariables.variables[3].id]?.contains("line break") == true, "a bad value says why")
+    check(problems[withVariables.variables[5].id] == nil && problems[withVariables.variables[0].id] == nil, "an empty row and a good one are not reported")
+    check(profile().environment.isEmpty && profile().variableProblems.isEmpty, "a profile with none adds none")
+
+    // The startup command.
+    check(profile { $0.startupCommand = "nvm use" }.startupLine == "nvm use\r", "a command is typed with Return")
+    check(profile { $0.startupCommand = "  ls -la  " }.startupLine == "ls -la\r", "without the spaces round it")
+    check(profile { $0.startupCommand = "ls\n" }.startupLine == "ls\r", "a trailing line break from a paste is forgiven")
+    check(profile { $0.startupCommand = "" }.startupLine == nil && profile { $0.startupCommand = "   " }.startupLine == nil, "none is none")
+    check(profile { $0.startupCommand = "" }.startupProblem == nil, "and not a problem")
+    let twoLines = profile { $0.startupCommand = "echo a\necho b" }
+    check(twoLines.startupLine == nil && twoLines.startupProblem == "A startup command is a single line.", "two lines are refused, with a reason")
+    check(profile { $0.startupCommand = "echo \u{1B}[2J" }.startupLine == nil, "so is a control character")
+    check(profile { $0.startupCommand = "echo \u{7F}" }.startupLine == nil, "and DEL")
+    check(profile { $0.startupCommand = "echo\tit" }.startupLine == nil, "and a tab, which would complete rather than type")
+    check(profile { $0.startupCommand = String(repeating: "x", count: TerminalProfile.maxStartupLength) }.startupLine != nil, "at the limit it is fine")
+    let tooLong = profile { $0.startupCommand = String(repeating: "x", count: TerminalProfile.maxStartupLength + 1) }
+    check(tooLong.startupLine == nil && tooLong.startupProblem?.contains("500") == true, "one over is refused")
+
+    // Where it starts and which shell.
+    let home = NSHomeDirectory()
+    check(profile { $0.startDirectory = "/tmp" }.resolvedStartDirectory { $0 == "/tmp" } == "/tmp", "a folder that exists")
+    check(profile { $0.startDirectory = "  /tmp " }.resolvedStartDirectory { $0 == "/tmp" } == "/tmp", "with spaces round it")
+    check(profile { $0.startDirectory = "/nope" }.resolvedStartDirectory { $0 == "/tmp" } == nil, "one that does not is none")
+    check(profile { $0.startDirectory = "" }.resolvedStartDirectory { _ in true } == nil, "none written is none")
+    check(profile { $0.startDirectory = "~/work" }.resolvedStartDirectory { $0 == home + "/work" } == home + "/work", "~ is expanded")
+    check(profile { $0.shellPath = "" }.shellOverride == nil && profile { $0.shellPath = "  " }.shellOverride == nil, "no shell means the default")
+    check(profile { $0.shellPath = " /bin/bash " }.shellOverride == "/bin/bash", "a shell is trimmed")
+
+    // How it reads in a list.
+    check(profile().summary == "Same as the default", "an empty profile says so")
+    let full = profile {
+        $0.shellPath = "/opt/homebrew/bin/fish"
+        $0.startDirectory = "~/work"
+        $0.variables = [ProfileVariable(name: "A", value: "1"), ProfileVariable(name: "B", value: "2")]
+        $0.startupCommand = "nvm use"
+    }
+    check(full.summary == "fish · ~/work · 2 variables · runs a command", "a full one: \(full.summary)")
+    check(profile { $0.variables = [ProfileVariable(name: "A", value: "1")] }.summary == "1 variable", "one variable is singular")
+    check(!twoLines.summary.contains("command"), "a command that would not be typed is not claimed")
+    check(profile { $0.name = "  Work  " }.displayName == "Work" && profile { $0.name = " " }.displayName == "Untitled profile", "its name, or a stand-in")
+    check(TerminalProfile.newName(avoiding: []) == "Profile 1", "the first new name")
+    check(TerminalProfile.newName(avoiding: ["Profile 1"]) == "Profile 2", "the next")
+    check(TerminalProfile.newName(avoiding: ["profile 1", "Profile 3"]) == "Profile 2", "the first gap, whatever the case")
+    check(TerminalProfile.newName(avoiding: ["Profile 2"]) == "Profile 1", "and one that was freed")
+
+    // Saved and read back, and what an older save had.
+    let saved = full
+    if let data = try? JSONEncoder().encode([saved]), let back = try? JSONDecoder().decode([TerminalProfile].self, from: data) {
+        check(back == [saved] && back[0].id == saved.id, "profiles survive being saved")
+    } else {
+        check(false, "profiles can be saved and read back")
+    }
+}
+
 // MARK: Tab order
 
 do {
