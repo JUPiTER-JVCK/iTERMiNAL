@@ -148,6 +148,7 @@ jobs:
             Sources/iTERMiNAL/Input/FuzzyMatcher.swift \
             Sources/iTERMiNAL/Input/CommandHistoryIndex.swift \
             Sources/iTERMiNAL/Input/PathCompleter.swift \
+            Sources/iTERMiNAL/Input/FileSearch.swift \
             Sources/iTERMiNAL/Input/AutoPairing.swift \
             Sources/iTERMiNAL/Input/CommandNotes.swift \
             Sources/iTERMiNAL/Input/SuggestionState.swift \

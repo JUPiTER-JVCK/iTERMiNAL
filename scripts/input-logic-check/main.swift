@@ -5076,6 +5076,132 @@ do {
           "text goes through the same rules as files")
 }
 
+// MARK: Finding a file from the palette
+
+// The files under a folder, found without going where nobody means to search, and ranked for
+// what was typed: a match in the name above one in the folders, the shorter path first on a tie.
+do {
+    // Which folders may be walked at all.
+    check(FileSearch.isSearchable(root: "/Users/me/work", home: "/Users/me"), "a project folder is searched")
+    check(FileSearch.isSearchable(root: "/Users/me/Documents/proj", home: "/Users/me"), "a project inside Documents is searched")
+    check(FileSearch.isSearchable(root: "/Users/meow", home: "/Users/me"), "a name that merely starts like the home folder is searched")
+    check(FileSearch.isSearchable(root: "/tmp/x", home: "/Users/me"), "a folder elsewhere is searched")
+    check(!FileSearch.isSearchable(root: "/Users/me", home: "/Users/me"), "the home folder is not walked")
+    check(!FileSearch.isSearchable(root: "/Users/me/", home: "/Users/me"), "nor with a slash on the end")
+    check(!FileSearch.isSearchable(root: "/Users", home: "/Users/me"), "nor a folder that holds it")
+    check(!FileSearch.isSearchable(root: "/", home: "/Users/me"), "nor the top of the disk")
+    check(!FileSearch.isSearchable(root: "relative/path", home: "/Users/me"), "a relative path is not a folder to walk")
+    check(!FileSearch.isSearchable(root: "", home: "/Users/me"), "nor an empty one")
+
+    // What was typed.
+    check(FileSearch.parse("readme").text == "readme" && !FileSearch.parse("readme").filesOnly, "plain text looks in both")
+    check(FileSearch.parse("/").text == "" && FileSearch.parse("/").filesOnly, "a lone slash asks for files and has no text yet")
+    check(FileSearch.parse("/read me").text == "read me" && FileSearch.parse("/read me").filesOnly, "a leading slash asks for files only")
+    check(FileSearch.parse("  /abc ").text == "abc" && FileSearch.parse("  /abc ").filesOnly, "spaces around it do not matter")
+    check(FileSearch.parse("a/b").text == "a/b" && !FileSearch.parse("a/b").filesOnly, "a slash further in is part of a path")
+    check(FileSearch.parse("//x").text == "/x", "only the first slash is the mode")
+
+    // Words.
+    check(FileSearch.thousands(20_000) == "20,000", "20000 reads 20,000")
+    check(FileSearch.thousands(999) == "999" && FileSearch.thousands(1_000) == "1,000", "thousands: edges")
+    check(FileSearch.thousands(1_234_567) == "1,234,567" && FileSearch.thousands(0) == "0", "thousands: millions and zero")
+    check(FileSearch.truncationTitle == "Only the first 20,000 files were searched", "the note says how far the search went")
+
+    // Where a path splits.
+    check(FileSearch.split("a/b/c.txt") == ("a/b", "c.txt"), "a path splits into folder and name")
+    check(FileSearch.split("c.txt") == ("", "c.txt"), "a file at the top has no folder")
+
+    // Ranking, with no disk involved.
+    let files = [
+        "README.md", "docs/readme_old.md", "src/Chrome/CommandPalette.swift", "src/Chrome/Composer.swift",
+        "src/main.swift", "notes.txt", "Makefile", "a/b/palette_notes.txt", "x/chrome_notes.txt",
+    ]
+    let readme = FileSearch.rank(query: "readme", in: files)
+    check(readme.map(\.path) == ["README.md", "docs/readme_old.md"], "readme finds both, the shorter path first: \(readme.map(\.path))")
+    check(FileSearch.rank(query: "READ ME", in: files) == readme, "case and spaces in the query do not matter")
+    let chrome = FileSearch.rank(query: "chrome", in: files)
+    check(chrome.first?.path == "x/chrome_notes.txt", "a match in the name comes before one in the folders: \(chrome.map(\.path))")
+    check(Set(chrome.map(\.path)) == ["x/chrome_notes.txt", "src/Chrome/CommandPalette.swift", "src/Chrome/Composer.swift"],
+          "a match in the folders is found too: \(chrome.map(\.path))")
+    let composer = FileSearch.rank(query: "composer", in: files).first
+    check(composer?.name == "Composer.swift" && composer?.folder == "src/Chrome", "a hit knows its name and its folder")
+    check(FileSearch.rank(query: "readme", in: files).first?.folder == "", "a file at the top has an empty folder")
+    check(FileSearch.rank(query: "r", in: files).isEmpty, "one character matches too much to list")
+    check(FileSearch.rank(query: "", in: files).isEmpty && FileSearch.rank(query: "   ", in: files).isEmpty, "an empty query lists nothing")
+    check(FileSearch.rank(query: "zzzz", in: files).isEmpty, "nothing that matches is nothing")
+    check(FileSearch.rank(query: "ab", in: files, limit: 0).isEmpty, "a limit of none lists none")
+    let tied = FileSearch.rank(query: "xt", in: ["b/x.txt", "a/x.txt", "x.txt"])
+    check(tied.map(\.path) == ["x.txt", "a/x.txt", "b/x.txt"], "equal names go shortest path first, then in order: \(tied.map(\.path))")
+    let many = (0..<50).map { "dir/file\($0).txt" }
+    check(FileSearch.rank(query: "file", in: many).count == FileSearch.maxResults, "no more than the limit are listed")
+    check(FileSearch.rank(query: "file", in: many, limit: 5).count == 5, "and a smaller limit is kept")
+    check(FileSearch.rank(query: "日本", in: ["docs/日本語.md", "other.txt"]).map(\.path) == ["docs/日本語.md"], "a name that is not ASCII is found")
+
+    // Walking a real folder.
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory.appendingPathComponent("iterminal-filesearch-\(UUID().uuidString)", isDirectory: true)
+    defer { try? fm.removeItem(at: base) }
+    func put(_ path: String, _ text: String = "x") throws {
+        let url = base.appendingPathComponent(path)
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+    do {
+        try put("README.md"); try put("notes.txt"); try put(".env")
+        try put(".hidden/secret.txt"); try put(".git/config")
+        try put("node_modules/pkg/index.js"); try put("build/out.o")
+        try put("src/main.swift"); try put("src/Chrome/CommandPalette.swift"); try put("src/Chrome/Composer.swift")
+        try put("docs/readme_old.md")
+        try put("a/b/c/d/e/f/deep6.txt"); try put("a/b/c/d/e/f/g/toodeep.txt")
+        check(fm.createFile(atPath: base.path + "/odd\nname.txt", contents: Data("x".utf8)), "a file with a newline in its name can be made")
+        try fm.createSymbolicLink(atPath: base.appendingPathComponent("link-to-dir").path, withDestinationPath: "src")
+        try fm.createSymbolicLink(atPath: base.appendingPathComponent("loop").path, withDestinationPath: ".")
+        try fm.createSymbolicLink(atPath: base.appendingPathComponent("link-to-file").path, withDestinationPath: "README.md")
+        try fm.createSymbolicLink(atPath: base.appendingPathComponent("broken-link").path, withDestinationPath: "nowhere")
+
+        let scan = FileSearch.scan(root: base.path)
+        let found = Set(scan.files)
+        check(scan.root == base.path && !scan.truncated, "the scan names its folder and is whole")
+        check(found == [
+            ".env", "README.md", "notes.txt", "link-to-file", "src/main.swift", "docs/readme_old.md",
+            "src/Chrome/CommandPalette.swift", "src/Chrome/Composer.swift", "a/b/c/d/e/f/deep6.txt",
+        ], "the scan lists what is there and nothing else: \(scan.files)")
+        check(!found.contains(".hidden/secret.txt") && !found.contains(".git/config"), "a folder starting with a dot is not entered")
+        check(!found.contains("node_modules/pkg/index.js") && !found.contains("build/out.o"), "generated folders are not entered")
+        check(!found.contains("a/b/c/d/e/f/g/toodeep.txt"), "the walk stops six folders down")
+        check(!found.contains(where: { $0.hasPrefix("link-to-dir") || $0.hasPrefix("loop") }), "a link to a folder is not followed")
+        check(!found.contains("broken-link"), "a link that goes nowhere is not a file")
+        check(!found.contains(where: { $0.contains("\n") }), "a name with a control character is left out")
+        if let top = scan.files.firstIndex(of: "README.md"), let nested = scan.files.firstIndex(of: "src/main.swift"),
+           let deeper = scan.files.firstIndex(of: "src/Chrome/Composer.swift") {
+            check(top < nested && nested < deeper, "shallower files come first")
+        } else {
+            check(false, "the scan listed the files to compare the order of")
+        }
+
+        // The limits.
+        check(FileSearch.scan(root: base.path, maxFiles: 3).files == [".env", "README.md", "link-to-file"],
+              "at the limit the top of the tree is kept: \(FileSearch.scan(root: base.path, maxFiles: 3).files)")
+        check(FileSearch.scan(root: base.path, maxFiles: 3).truncated, "and the scan says it stopped")
+        check(!FileSearch.scan(root: base.path, maxFiles: 9).truncated && FileSearch.scan(root: base.path, maxFiles: 9).files.count == 9,
+              "exactly the limit is not truncated")
+        check(FileSearch.scan(root: base.path, maxFiles: 8).truncated, "one over is")
+        check(FileSearch.scan(root: base.path, maxDepth: 0).files == [".env", "README.md", "link-to-file", "notes.txt"],
+              "depth 0 is the folder itself: \(FileSearch.scan(root: base.path, maxDepth: 0).files)")
+        check(Set(FileSearch.scan(root: base.path, maxDepth: 1).files) ==
+              [".env", "README.md", "link-to-file", "notes.txt", "src/main.swift", "docs/readme_old.md"],
+              "depth 1 adds the folders next to it: \(FileSearch.scan(root: base.path, maxDepth: 1).files)")
+        check(FileSearch.scan(root: base.path + "/").root == base.path, "a slash on the end of the folder is dropped")
+        check(FileSearch.scan(root: base.path + "/nonexistent") == FileScan(root: base.path + "/nonexistent", files: [], truncated: false),
+              "a folder that is not there has no files")
+
+        // And what the ranking makes of it.
+        check(FileSearch.rank(query: "composer", in: scan.files).first?.path == "src/Chrome/Composer.swift", "a scanned file is found by name")
+    } catch {
+        check(false, "the test folder could not be made: \(error)")
+    }
+}
+
 // MARK: Tab order
 
 do {

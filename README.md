@@ -438,6 +438,15 @@ A tour of the app in thirty-four pictures, in five groups.
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K (or ⌘P), fuzzy search over every command in the
   menus, your saved hosts, the themes, the workspaces and the tabs that are open.
+  It also finds files: type two or more characters of a name and the files under
+  the focused terminal's folder follow the commands (start with `/` to search
+  files alone), and Return opens one in your editor, in a new tab beside it. The
+  search lists at most 20,000 files, six folders down, and does not go into
+  folders that start with a dot or are generated or vendored (`node_modules`,
+  `build`, `dist`, `target`, `Pods`, `DerivedData`, `venv`, `Library`…); when it
+  stops short, the palette says so. It does not search your home folder or the
+  top of the disk (macOS would ask to allow Desktop, Documents and Downloads), or
+  a remote tab.
 - **Gentle motion** — panels, the dock, banners and the sidebar's sections
   move on springs, and hover and selection in the sidebar, toolbar and dock
   fade instead of flashing. With Reduce Motion on (System Settings →

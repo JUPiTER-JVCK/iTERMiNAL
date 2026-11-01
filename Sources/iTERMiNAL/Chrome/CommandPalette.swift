@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct PaletteAction: Identifiable {
     let id: String
@@ -38,6 +39,15 @@ struct CommandPaletteView: View {
     @State private var query = ""
     @State private var selectedIndex = 0
     @FocusState private var searchFocused: Bool
+    /// The files under the focused terminal's folder, listed once when the
+    /// palette opens. Nil until that finishes, or when there is nothing to
+    /// search (a remote tab, or a folder `FileSearch` will not walk).
+    @State private var fileScan: FileScan?
+    @State private var fileHits: [FileHit] = []
+    /// The text `fileHits` was ranked for. Rows for any other text are still on
+    /// screen for a moment while a keystroke is ranked, and are not run.
+    @State private var fileHitsText = ""
+    @State private var rankTask: Task<Void, Never>?
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -46,12 +56,15 @@ struct CommandPaletteView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
                     .foregroundStyle(theme.textSecondary)
-                TextField("Run a command…", text: $query)
+                TextField("Run a command, or / to find a file…", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .focused($searchFocused)
                     .onSubmit(runSelected)
-                    .onChange(of: query) { _, _ in selectedIndex = 0 }
+                    .onChange(of: query) { _, _ in
+                        selectedIndex = 0
+                        updateFileHits()
+                    }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -90,14 +103,103 @@ struct CommandPaletteView: View {
             }
         }
         .onExitCommand { dismiss() }
-        .onAppear { searchFocused = true }
+        .onAppear {
+            searchFocused = true
+            startFileScan()
+        }
+        .onDisappear { rankTask?.cancel() }
     }
 
     private var matches: [PaletteAction] {
         let actions = allActions()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return actions }
-        return actions.filter { Self.matches(query: trimmed, in: $0.title + " " + $0.subtitle) }
+        // A leading "/" asks for files alone; otherwise the files follow the
+        // actions, which have the first say.
+        let found = FileSearch.parse(trimmed).filesOnly
+            ? []
+            : actions.filter { Self.matches(query: trimmed, in: $0.title + " " + $0.subtitle) }
+        return found + fileActions()
+    }
+
+    // MARK: Files
+
+    /// Lists the focused terminal's folder, off the main thread. A remote tab
+    /// is not searched: the folder its session reports is this Mac's, not the
+    /// host's.
+    private func startFileScan() {
+        guard let session = store.focusedSession, !session.isRemote else { return }
+        session.refreshDirectoryFromProcess()
+        let root = session.currentDirectory
+        guard FileSearch.isSearchable(root: root, home: NSHomeDirectory()) else { return }
+        Task.detached(priority: .userInitiated) {
+            let scan = FileSearch.scan(root: root)
+            await MainActor.run {
+                fileScan = scan
+                updateFileHits()
+            }
+        }
+    }
+
+    /// Ranks the files for the query as it stands, after a short pause for the
+    /// keystrokes still arriving, and off the main thread.
+    private func updateFileHits() {
+        rankTask?.cancel()
+        let text = currentFileText
+        guard let files = fileScan?.files, text.count >= FileSearch.minQueryLength else {
+            fileHits = []
+            fileHitsText = text
+            return
+        }
+        rankTask = Task {
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+            let hits = await Task.detached(priority: .userInitiated) {
+                FileSearch.rank(query: text, in: files)
+            }.value
+            guard !Task.isCancelled else { return }
+            fileHits = hits
+            fileHitsText = text
+        }
+    }
+
+    /// What is being looked for among the files, as typed now.
+    private var currentFileText: String {
+        FileSearch.parse(query).text
+    }
+
+    private func fileActions() -> [PaletteAction] {
+        guard let scan = fileScan, currentFileText.count >= FileSearch.minQueryLength else { return [] }
+        var rows = fileHits.map { hit in
+            PaletteAction(
+                id: "file.\(hit.path)",
+                title: hit.name,
+                subtitle: hit.folder.isEmpty ? "Edit in terminal" : "Edit in terminal · \(hit.folder)",
+                systemImage: "doc.text"
+            ) {
+                openFile(scan.root + "/" + hit.path)
+            }
+        }
+        if scan.truncated {
+            rows.append(PaletteAction(
+                id: "files.truncated",
+                title: FileSearch.truncationTitle,
+                subtitle: FileSearch.truncationSubtitle,
+                systemImage: "info.circle"
+            ) {})
+        }
+        return rows
+    }
+
+    /// The File pane's "Edit in Terminal": the editor chosen in Settings, in a
+    /// new tab beside the file. Only said aloud when it cannot be done.
+    private func openFile(_ path: String) {
+        guard let problem = store.editFile(at: path) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Couldn't open the file"
+        alert.informativeText = problem
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func runSelected() {
@@ -106,6 +208,9 @@ struct CommandPaletteView: View {
     }
 
     private func run(_ action: PaletteAction) {
+        // A file row ranked for what was typed a keystroke ago is not what was
+        // asked for; the right ones arrive within a moment.
+        if action.id.hasPrefix("file."), fileHitsText != currentFileText { return }
         dismiss()
         // Let the sheet close before the action mutates the window behind it.
         DispatchQueue.main.async { action.perform() }
