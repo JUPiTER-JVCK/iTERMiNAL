@@ -5891,7 +5891,7 @@ do {
 
     // The time limit.
     check(ScriptedCommand.timeout(nil) == 30 && ScriptedCommand.timeout(0) == 30 && ScriptedCommand.timeout(-5) == 30, "none given is thirty seconds")
-    check(ScriptedCommand.timeout(.nan) == 30 && ScriptedCommand.timeout(.infinity) == 30, "so is nonsense")
+    check(ScriptedCommand.timeout(Double.nan) == 30 && ScriptedCommand.timeout(Double.infinity) == 30, "so is nonsense")
     check(ScriptedCommand.timeout(0.2) == 1 && ScriptedCommand.timeout(5) == 5, "never under a second")
     check(ScriptedCommand.timeout(500) == 120 && ScriptedCommand.timeout(120) == 120, "or over two minutes")
 

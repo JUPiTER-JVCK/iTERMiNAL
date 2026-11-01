@@ -33,7 +33,7 @@ enum ScriptedCommand {
 
     // MARK: The command
 
-    enum Problem: Equatable {
+    enum Problem: Error, Equatable {
         case missing, both, empty, tooLong, tooManyWords, controlCharacter
 
         var message: String {
