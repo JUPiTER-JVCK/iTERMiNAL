@@ -246,18 +246,28 @@ final class WorkspaceStore: ObservableObject {
     /// backing store rather than `lazy` so quitting can flush a pending write
     /// without *creating* the model — reading a `lazy var` to ask whether it
     /// exists is what would create it.
-    private var notesModel: NotesModel?
+    private var notesModels: [UUID: NotesModel] = [:]
+
+    /// The note of the workspace being looked at; each workspace has its own.
+    /// The first workspace adopts the pre-per-workspace `Notes.txt`.
     var panelNotes: NotesModel {
-        if let notesModel { return notesModel }
-        let model = NotesModel()
-        notesModel = model
+        let workspace = currentWorkspace
+        let id = workspace?.id ?? Self.fallbackNotesID
+        if let model = notesModels[id] { return model }
+        let model = NotesModel(
+            workspaceID: id,
+            adoptLegacy: workspace != nil && workspace === workspaces.first
+        )
+        notesModels[id] = model
         return model
     }
 
-    /// Writes any note still inside its debounce window. No-op when the panel
-    /// was never opened.
+    private static let fallbackNotesID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+    /// Writes any note still inside its debounce window. Only notes that were
+    /// opened exist as models, so this never creates one.
     func flushNotes() {
-        notesModel?.saveNow()
+        notesModels.values.forEach { $0.saveNow() }
     }
 
     // MARK: Bundled tools
@@ -520,6 +530,7 @@ final class WorkspaceStore: ObservableObject {
         let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
         let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
+        scheduleSave()
         EventBus.shared.publish(APIEvent("workspace.created", [
             "workspace": workspace.id.uuidString,
             "name": workspace.name,
@@ -734,6 +745,8 @@ final class WorkspaceStore: ObservableObject {
     func deleteWorkspace(_ workspace: Workspace) {
         workspace.tabs.forEach { $0.root.allSessions().forEach { $0.terminate() } }
         workspaces.removeAll { $0 === workspace }
+        notesModels[workspace.id] = nil
+        NotesModel.deleteFile(for: workspace.id)
         if workspaces.isEmpty {
             bootstrap()
         } else if selectedTab == nil {
@@ -1476,6 +1489,10 @@ final class WorkspaceStore: ObservableObject {
     /// live-session guard it needed to avoid killing shells mid-build.
     func applySnapshot(_ snapshot: AppStateSnapshot) {
         terminateAllSessions()
+        // Notes are not in a snapshot; keep what is on disk, drop the cached
+        // models so each workspace reloads its own.
+        flushNotes()
+        notesModels.removeAll()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
         pruneOrphanedTranscripts()
