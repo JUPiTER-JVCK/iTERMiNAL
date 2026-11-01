@@ -5303,6 +5303,23 @@ do {
     }
 }
 
+// MARK: Exit status of a process
+
+// SwiftTerm passes on the raw wait status. These are the values real processes
+// gave (an `exit 3` is 768, an ssh that lost its connection 65280).
+do {
+    let cases: [(Int32?, Int32?)] = [
+        (0, 0), (256, 1), (512, 2), (768, 3), (65280, 255), (32512, 127), (9, 137), (15, 143), (1, 129), (6, 134),
+        (139, 139), (0x8B, 139), (0x7F, nil), (0x137F, nil), (nil, nil), (-1, nil), (Int32.min, nil),
+    ]
+    for (status, expected) in cases {
+        check(ExitStatus.code(fromWaitStatus: status) == expected, "\(String(describing: status)) is \(String(describing: expected)), not \(String(describing: ExitStatus.code(fromWaitStatus: status)))")
+    }
+    for status in stride(from: Int32(0), through: 70_000, by: 7) {
+        if let code = ExitStatus.code(fromWaitStatus: status) { check(code >= 0 && code <= 255 + 127, "\(status) gave \(code)") }
+    }
+}
+
 // MARK: Port forwards and host options
 
 do {

@@ -792,7 +792,7 @@ iterminalctl subscribe events=session.exited,tab.created
 
 | Event | Fires when |
 | --- | --- |
-| `session.started` / `session.exited` | a session launches or its process ends |
+| `session.started` / `session.exited` | a session launches or its process ends; `exitCode` is the code a shell's `$?` would show (`128 + signal` for a process a signal ended, `-1` if unknown) |
 | `session.directory` / `session.title` | the shell reports a new cwd or title |
 | `session.activity` | a session repaints (debounced to 4/sec) |
 | `session.attention` | bell / OSC 9 / 777 from a pane (debounced ~1s; separate from activity) |

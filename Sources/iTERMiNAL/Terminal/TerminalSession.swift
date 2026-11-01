@@ -836,10 +836,13 @@ extension TerminalSession: TerminalEngineDelegate {
 
     func engineProcessTerminated(exitCode: Int32?) {
         isRunning = false
-        lastExitCode = exitCode
+        // What the engine hands over is the raw wait status; what is shown and
+        // published is the exit code, as a shell's `$?` has it.
+        let code = ExitStatus.code(fromWaitStatus: exitCode)
+        lastExitCode = code
         EventBus.shared.publish(APIEvent("session.exited", [
             "session": id.uuidString,
-            "exitCode": exitCode ?? -1,
+            "exitCode": code ?? -1,
             "remote": isRemote,
         ]))
         // The last of what ssh printed is still on its way from the pty, and the

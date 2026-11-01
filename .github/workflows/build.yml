@@ -204,6 +204,7 @@ jobs:
             Sources/iTERMiNAL/Remote/HostShorthand.swift \
             Sources/iTERMiNAL/Remote/HostLookup.swift \
             Sources/iTERMiNAL/Terminal/AutoReconnect.swift \
+            Sources/iTERMiNAL/Terminal/ExitStatus.swift \
             Sources/iTERMiNAL/Remote/SavedTunnel.swift \
             Sources/iTERMiNAL/HTTP/GeoLookup.swift \
             Sources/iTERMiNAL/Remote/RFB.swift \
