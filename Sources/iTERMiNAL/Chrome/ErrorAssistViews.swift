@@ -168,6 +168,7 @@ struct AssistReplyView: View {
                     case .code(let language, let code):
                         CodeBlockView(
                             code: code,
+                            language: language,
                             isShell: AssistReply.isShell(language: language),
                             theme: theme,
                             onInsert: onInsert
@@ -182,12 +183,14 @@ struct AssistReplyView: View {
 
 private struct CodeBlockView: View {
     let code: String
+    let language: String?
     let isShell: Bool
     let theme: Theme
     let onInsert: (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var copied = false
+    @State private var saveNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -217,6 +220,8 @@ private struct CodeBlockView: View {
                         .help("Put this in the input to review. It doesn't run until you press Return.")
                 }
                 ChipButton(title: copied ? "Copied" : "Copy", theme: theme) { copy() }
+                ChipButton(title: saveNote ?? "Save…", theme: theme) { save() }
+                    .help("Save this as a file. It is written as plain text and not made executable.")
                 Spacer(minLength: 0)
             }
         }
@@ -228,6 +233,22 @@ private struct CodeBlockView: View {
                 .fill(Color(hex: Theme.inputFieldHex(for: colorScheme)))
         )
         .accessibilityElement(children: .contain)
+    }
+
+    /// A save panel, so where it goes and what it is called is the person's; the
+    /// panel itself asks before replacing a file.
+    private func save() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = ScriptFile.suggestedName(forLanguage: language)
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try Data(ScriptFile.contents(of: code).utf8).write(to: url, options: .atomic)
+            saveNote = "Saved"
+        } catch {
+            saveNote = "Couldn't save"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
     }
 
     private func copy() {

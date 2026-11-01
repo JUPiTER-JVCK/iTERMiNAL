@@ -5835,6 +5835,29 @@ do {
     check(selected.command == nil && selected.workingDirectory == nil && selected.gitBranch == nil, "a selection carries no command or folder of its own")
 }
 
+// MARK: Saving a code block
+
+// A reply's code block saved as a file: a name from its language, a trailing
+// newline, and nothing else added.
+do {
+    let names: [(String?, String)] = [
+        (nil, "script.sh"), ("", "script.sh"), ("bash", "script.sh"), ("SH", "script.sh"), ("zsh", "script.zsh"), ("fish", "script.fish"),
+        ("python", "script.py"), ("py", "script.py"), ("JavaScript", "script.js"), ("ts", "script.ts"), ("yaml", "script.yml"),
+        ("json", "script.json"), ("rust", "script.rs"), ("c++", "script.cpp"), ("brainfuck", "script.txt"), ("../../etc/passwd", "script.txt"),
+        ("sh; rm -rf ~", "script.txt"),
+    ]
+    for (language, expected) in names {
+        check(ScriptFile.suggestedName(forLanguage: language) == expected, "\(String(describing: language)) is saved as \(expected), not \(ScriptFile.suggestedName(forLanguage: language))")
+    }
+    for language in ["sh", "python", "weird", "a/b", nil] as [String?] {
+        let name = ScriptFile.suggestedName(forLanguage: language)
+        check(!name.contains("/") && !name.contains("..") && name.hasPrefix("script."), "\(name) is a plain file name")
+    }
+    check(ScriptFile.contents(of: "echo hi") == "echo hi\n" && ScriptFile.contents(of: "echo hi\n") == "echo hi\n" && ScriptFile.contents(of: "") == "\n",
+          "a newline at the end, once")
+    check(ScriptFile.contents(of: "a\nb") == "a\nb\n" && !ScriptFile.contents(of: "echo hi").hasPrefix("#!"), "and no shebang or header added")
+}
+
 // MARK: Local model presets
 
 do {
