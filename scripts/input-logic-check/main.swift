@@ -4764,6 +4764,171 @@ do {
           "a Ghostty install's terminfo is searched")
 }
 
+// MARK: SSH keys
+
+// The public half of a key and what the agent says it holds. The first lines are
+// what the system's own ssh-keygen and ssh-add printed, copied, so the reading is
+// tested against the real thing; the rest is what must be refused, and the commands
+// written for a tab, which are made only from names that were checked, are quoted,
+// and are never run from here.
+do {
+    let hashes = [
+        "0kM/FikOXCUaXgXwgayL9cZwr9LK8lRPg23nzv9P0+0", "+TTeHeOkcUDbbYFDHR8FYwRX+XV662t6g1XRBsqAqQU",
+        "HMjFK4D0K4r0CSQ1iO0y5FQdKCkHIoOSjxIAS/ijPzg", "vwjekhL+aEG5Jlkk8Kr0njIMqYdLh9ZTPFbSIksRNU4",
+    ]
+    check(hashes.allSatisfy { $0.count == 43 }, "the sample hashes are 43 characters, as SHA256 gives")
+    let ed = "256 SHA256:\(hashes[0]) me@laptop (ED25519)"
+    let rsa = "3072 SHA256:\(hashes[1]) work laptop (2023) (RSA)"
+    let ecdsa = "384 SHA256:\(hashes[2]) ecdsa key (ECDSA)"
+    let bare = "256 SHA256:\(hashes[3]) no comment (ED25519)"
+    let edPrint = SSHKeys.Fingerprint(bits: 256, hash: "SHA256:\(hashes[0])", comment: "me@laptop", type: "ED25519")
+    let rsaPrint = SSHKeys.Fingerprint(bits: 3072, hash: "SHA256:\(hashes[1])", comment: "work laptop (2023)", type: "RSA")
+
+    check(SSHKeys.parseFingerprint(ed) == edPrint, "ed25519, as ssh-keygen prints it")
+    check(SSHKeys.parseFingerprint(rsa) == rsaPrint, "a comment may have spaces and brackets of its own")
+    check(SSHKeys.parseFingerprint(ecdsa) == SSHKeys.Fingerprint(bits: 384, hash: "SHA256:\(hashes[2])", comment: "ecdsa key", type: "ECDSA"),
+          "ecdsa")
+    check(SSHKeys.parseFingerprint(bare)?.comment == "", "\"no comment\" is no comment")
+    check(SSHKeys.parseFingerprint(ed + "\n") == edPrint && SSHKeys.parseFingerprint("  " + ed + " \r\n") == edPrint,
+          "line ends and padding are not part of it")
+    check(SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) token (ED25519-SK)")?.type == "ED25519-SK"
+            && SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) id (ED25519-CERT)")?.type == "ED25519-CERT",
+          "security-key and certificate types")
+    check(SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) (ED25519)")?.comment == "", "a type with no comment before it")
+    check(SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) a\tb\u{1B}c (ED25519)")?.comment == "a b c",
+          "control characters in a comment become spaces")
+    check(SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) \(String(repeating: "x", count: 1000)) (RSA)") == nil,
+          "a line of more than a thousand bytes is not one an ssh tool wrote")
+    check(SSHKeys.parseFingerprint("256 SHA256:\(hashes[0]) \(String(repeating: "x", count: 600)) (RSA)")?.comment.count == 200,
+          "and a long comment is cut at 200 characters")
+
+    let badLines = [
+        "", "garbage", "256 SHA256:\(hashes[0])", "256 SHA256:short comment (ED25519)",
+        "256 MD5:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99 comment (RSA)",
+        "0 SHA256:\(hashes[0]) c (RSA)", "256000 SHA256:\(hashes[0]) c (RSA)", "-256 SHA256:\(hashes[0]) c (RSA)",
+        "+256 SHA256:\(hashes[0]) c (RSA)", "25x SHA256:\(hashes[0]) c (RSA)",
+        "256 SHA256:\(hashes[0])= c (RSA)", "256 SHA256:\(hashes[0])A c (RSA)", "256 SHA256:\(String(hashes[0].dropLast())) c (RSA)",
+        "256 SHA256:\(hashes[0].dropLast())! c (RSA)", "256 sha256:\(hashes[0]) c (RSA)",
+        "256 SHA256:\(hashes[0]) c", "256 SHA256:\(hashes[0]) c (ed25519)", "256 SHA256:\(hashes[0]) c ()",
+        "256 SHA256:\(hashes[0]) c (ED25519", "256 SHA256:\(hashes[0]) c (ED 25519)",
+        "256 SHA256:\(hashes[0]) c (\(String(repeating: "A", count: 25)))",
+    ]
+    for line in badLines {
+        check(SSHKeys.parseFingerprint(line) == nil, "\(line.prefix(60).debugDescription) is not a fingerprint")
+    }
+
+    // The agent: its exit status, and its words.
+    check(SSHKeys.agentState(status: 0, output: ed + "\n" + rsa + "\n", errorOutput: "") == .keys([edPrint, rsaPrint]), "an agent with two keys")
+    check(SSHKeys.agentState(status: 0, output: "", errorOutput: "") == .failed
+            && SSHKeys.agentState(status: 0, output: "not what it says\n", errorOutput: "") == .failed,
+          "a success that lists nothing readable is not read as keys")
+    check(SSHKeys.agentState(status: 1, output: "The agent has no identities.\n", errorOutput: "") == .empty, "an agent with nothing in it")
+    check(SSHKeys.agentState(status: 1, output: "", errorOutput: "") == .failed
+            && SSHKeys.agentState(status: 1, output: "", errorOutput: "something else went wrong") == .failed,
+          "status 1 for another reason is not an empty agent")
+    check(SSHKeys.agentState(status: 2, output: "", errorOutput: "Could not open a connection to your authentication agent.") == .unreachable
+            && SSHKeys.agentState(status: 2, output: "", errorOutput: "Error connecting to agent: No such file or directory") == .unreachable,
+          "no agent, or none answering")
+    check(SSHKeys.agentState(status: 255, output: ed, errorOutput: "") == .failed && SSHKeys.agentState(status: -1, output: "", errorOutput: "") == .failed,
+          "any other status is a failure")
+    let held = SSHKeys.AgentState.keys([edPrint])
+    check(SSHKeys.isLoaded(edPrint, in: held) == true && SSHKeys.isLoaded(rsaPrint, in: held) == false
+            && SSHKeys.isLoaded(edPrint, in: .empty) == false && SSHKeys.isLoaded(edPrint, in: .unreachable) == nil
+            && SSHKeys.isLoaded(edPrint, in: .failed) == nil,
+          "a key is in the agent by its hash; with no answer from the agent, nothing is claimed")
+
+    // Which keys there are.
+    let files = ["id_ed25519", "id_ed25519.pub", "id_rsa.pub", "Zed.pub", "alpha.pub", "known_hosts", "config", "id_ed25519-cert.pub",
+                 ".pub", "..pub", "...pub", "a b.pub", "x\ny.pub", "a/b.pub", "notes.txt", "pub"]
+    let listed = SSHKeys.listing(fileNames: files) { $0 == "id_ed25519" ? .ok : .missing }
+    check(listed.entries.map { $0.name } == ["a b", "alpha", "id_ed25519", "id_rsa", "Zed"] && listed.omitted == 0,
+          "the .pub files, in name order, without certificates or odd names: \(listed.entries.map { $0.name })")
+    check(listed.entries.first { $0.name == "id_ed25519" }?.privateKey == .ok && listed.entries.first { $0.name == "id_rsa" }?.privateKey == .missing
+            && listed.entries.first?.publicFile == "a b.pub",
+          "each with what its private file is")
+    let crowd = (0..<60).map { String(format: "k%02d.pub", $0) }
+    let crowded = SSHKeys.listing(fileNames: crowd) { _ in .ok }
+    check(crowded.entries.count == SSHKeys.maxEntries && crowded.omitted == 60 - SSHKeys.maxEntries
+            && crowded.entries.first?.name == "k00" && crowded.entries.last?.name == "k49", "only so many are read, and the rest are counted")
+    check(SSHKeys.listing(fileNames: []) { _ in .ok } == SSHKeys.Listing(entries: [], omitted: 0), "no files, no keys")
+
+    check(SSHKeys.privateKey(isFile: true, mode: 0o100600) == .ok && SSHKeys.privateKey(isFile: true, mode: 0o100400) == .ok,
+          "a private key only its owner can read is fine")
+    check(SSHKeys.privateKey(isFile: true, mode: 0o100644) == .tooOpen(mode: 0o644) && SSHKeys.privateKey(isFile: true, mode: 0o100640) == .tooOpen(mode: 0o640)
+            && SSHKeys.privateKey(isFile: true, mode: 0o100604) == .tooOpen(mode: 0o604) && SSHKeys.privateKey(isFile: true, mode: 0o100660) == .tooOpen(mode: 0o660),
+          "one a group or anyone can read or write is not, which is what ssh says too")
+    check(SSHKeys.privateKey(isFile: false, mode: 0o100600) == .missing, "and no file is no key")
+
+    // A key to copy.
+    let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIO3mNTPILbNHB3HEVGT08ZWCy0qRsxy4Jd/19y9uT4Sz"
+    let keyLine = "ssh-ed25519 \(blob) me@laptop"
+    check(SSHKeys.publicKeyLine(from: keyLine + "\n") == keyLine && SSHKeys.publicKeyLine(from: "\r\n\n  " + keyLine + "  \r\nsecond line\n") == keyLine,
+          "the first line that isn't blank")
+    check(SSHKeys.publicKeyLine(from: "ssh-ed25519 \(blob) \n") == "ssh-ed25519 \(blob)", "a key with no comment has a space after it in the file; not in the copy")
+    check(SSHKeys.publicKeyLine(from: "ecdsa-sha2-nistp256 \(blob)") != nil && SSHKeys.publicKeyLine(from: "sk-ssh-ed25519@openssh.com \(blob) k") != nil
+            && SSHKeys.publicKeyLine(from: "ssh-rsa \(blob) k") != nil, "other key types")
+    for text in ["", "\n\n", "hello", "ssh-ed25519", "ssh-foo \(blob)", "ssh-ed25519 short", "ssh-ed25519 \(blob)!!",
+                 "ssh-ed25519 \(blob) c\u{1B}[31m", "command=\"x\" ssh-ed25519 \(blob)", "-----BEGIN OPENSSH PRIVATE KEY-----",
+                 "ssh-ed25519 " + String(repeating: "A", count: SSHKeys.maxPublicFileBytes)] {
+        check(SSHKeys.publicKeyLine(from: text) == nil, "\(text.prefix(40).debugDescription) is not a key to copy")
+    }
+
+    // Commands for a tab.
+    check(SSHKeys.addToAgentCommand(keyName: "id_ed25519") == "ssh-add --apple-use-keychain ~/.ssh/id_ed25519", "adding a key to the agent")
+    check(SSHKeys.addToAgentCommand(keyName: "my key") == "ssh-add --apple-use-keychain ~/'.ssh/my key'", "a name with a space is quoted, the ~ is not")
+    check(SSHKeys.addToAgentCommand(keyName: "it's") == "ssh-add --apple-use-keychain ~/'.ssh/it'\\''s'", "and a quote in it")
+    check(SSHKeys.addToAgentCommand(keyName: "$(rm -rf ~)") == "ssh-add --apple-use-keychain ~/'.ssh/$(rm -rf ~)'", "and what a shell would run is only text")
+    check(SSHKeys.fixPermissionsCommand(keyName: "id_rsa") == "chmod 600 ~/.ssh/id_rsa", "closing a private key")
+
+    let none: Set<String> = []
+    check(SSHKeys.generateCommand(kind: .ed25519, name: "id_ed25519", comment: "me@mac", existing: none) == .success("ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C me@mac"),
+          "a new ed25519 key")
+    check(SSHKeys.generateCommand(kind: .rsa, name: "id_rsa", comment: "", existing: none) == .success("ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa"),
+          "a new RSA key, with no comment given, none put on")
+    check(SSHKeys.generateCommand(kind: .ed25519, name: " work ", comment: " work laptop ", existing: none) == .success("ssh-keygen -t ed25519 -f ~/.ssh/work -C 'work laptop'"),
+          "padding is dropped and a comment with a space is quoted")
+    check(SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: "x; rm -rf ~ #", existing: none) == .success("ssh-keygen -t ed25519 -f ~/.ssh/k -C 'x; rm -rf ~ #'"),
+          "a comment that is a command is only a comment")
+    check(SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: "it's", existing: none) == .success("ssh-keygen -t ed25519 -f ~/.ssh/k -C 'it'\\''s'"),
+          "with a quote in it")
+    let names: [(String, SSHKeys.GenerateProblem)] = [
+        ("", .emptyName), ("   ", .emptyName), (String(repeating: "a", count: 65), .nameTooLong), ("bad name", .nameCharacters), ("-rf", .nameCharacters),
+        (".hidden", .nameCharacters), ("a/b", .nameCharacters), ("../x", .nameCharacters), ("x.pub", .nameCharacters), ("X.PUB", .nameCharacters),
+        ("ünï", .nameCharacters), ("a\nb", .nameCharacters), ("a;b", .nameCharacters), ("a$b", .nameCharacters),
+    ]
+    for (name, problem) in names {
+        check(SSHKeys.generateCommand(kind: .ed25519, name: name, comment: "", existing: none) == .failure(problem), "\(name.debugDescription) is refused as \(problem)")
+    }
+    check(SSHKeys.generateCommand(kind: .ed25519, name: "id_ed25519", comment: "", existing: ["id_ed25519"]) == .failure(.nameExists)
+            && SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: "", existing: ["k.pub"]) == .failure(.nameExists),
+          "a name that is taken, as a private file or as a public one, is refused: nothing is ever overwritten")
+    check(SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: String(repeating: "x", count: 201), existing: none) == .failure(.commentTooLong)
+            && SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: "a\nb", existing: none) == .failure(.commentCharacters)
+            && SSHKeys.generateCommand(kind: .ed25519, name: "k", comment: "a\u{1B}b", existing: none) == .failure(.commentCharacters),
+          "a comment that is too long or has a control character is refused")
+    check(SSHKeys.generateCommand(kind: .ed25519, name: String(repeating: "a", count: 64), comment: String(repeating: "x", count: 200), existing: none) != .failure(.nameTooLong),
+          "the longest name and comment are fine")
+    for problem in [SSHKeys.GenerateProblem.emptyName, .nameTooLong, .nameCharacters, .nameExists, .commentTooLong, .commentCharacters] {
+        check(!problem.message.isEmpty, "\(problem) has words")
+    }
+
+    check(SSHKeys.suggestedName(for: .ed25519, existing: []) == "id_ed25519" && SSHKeys.suggestedName(for: .rsa, existing: []) == "id_rsa", "the usual names, when free")
+    check(SSHKeys.suggestedName(for: .ed25519, existing: ["id_ed25519"]) == "id_ed25519_2"
+            && SSHKeys.suggestedName(for: .ed25519, existing: ["id_ed25519.pub"]) == "id_ed25519_2"
+            && SSHKeys.suggestedName(for: .ed25519, existing: ["id_ed25519", "id_ed25519_2", "id_ed25519_3.pub"]) == "id_ed25519_4",
+          "and the next number when not")
+    check(SSHKeys.defaultComment(user: "gotti", computerName: "Gotti's MacBook Pro") == "gotti@Gottis-MacBook-Pro", "a comment from the user and the computer's name")
+    check(SSHKeys.defaultComment(user: "john_doe", computerName: "Mac mini") == "john_doe@Mac-mini"
+            && SSHKeys.defaultComment(user: "a.b", computerName: "x  y") == "a.b@x-y" && SSHKeys.defaultComment(user: "u", computerName: "-Box-") == "u@Box",
+          "underscores stay, spaces become one dash, dashes at the ends go")
+    check(SSHKeys.defaultComment(user: "", computerName: nil) == "me@mac" && SSHKeys.defaultComment(user: " ", computerName: "  ") == "me@mac"
+            && SSHKeys.defaultComment(user: "$(x)", computerName: "'\"") == "x@mac",
+          "and something when there is nothing usable")
+    for kind in SSHKeys.KeyKind.allCases {
+        check(!kind.label.isEmpty && kind.options.hasPrefix("-t ") && !kind.defaultName.isEmpty, "\(kind) is described")
+    }
+}
+
 // MARK: Port forwards and host options
 
 do {

@@ -368,7 +368,9 @@ A tour of the app in thirty-four pictures, in five groups.
   [When a host can't be reached](#when-a-host-cant-be-reached) — and one that
   wants a password can be browsed through a terminal tab you sign in to, without
   this app ever being given the password: see
-  [A host that wants a password](#a-host-that-wants-a-password).
+  [A host that wants a password](#a-host-that-wants-a-password). Your keys are
+  listed under Settings → Connections, with their fingerprints and whether the
+  agent holds them: see [SSH keys](#ssh-keys).
 - **Edit in Terminal** — right-click a file in the file browser, on this Mac, and
   the menu has **Edit in Terminal**: a new terminal tab in the file's folder,
   with the file open in your editor. Settings → General → Editor chooses which:
@@ -834,6 +836,41 @@ That is a choice of *when* to forward: never, per connection, or always. A
 prompt for each *use* of a key — what some clients offer as per-request
 approval — is not built; see [Considered and left out](#considered-and-left-out).
 The file browser does not forward the agent: it has no use for it.
+
+### SSH keys
+
+**Settings → Connections → SSH keys** lists the public keys in `~/.ssh` and says
+which of them the ssh-agent holds. For each key it shows the type and size, the
+SHA256 fingerprint, the comment, whether the agent has it, and whether its
+private file is beside it and private enough for ssh to use (ssh refuses a key
+that others can read or write). A key's menu copies its public key or its
+fingerprint, shows the file in Finder, and offers **Add to Agent…**, and
+**Generate New Key…** makes a new one.
+
+What it does and does not do, on purpose:
+
+- **Private keys are never opened.** Keys are listed from their `.pub` files. A
+  private file is only `stat`ed — is it there, and with what permissions — and
+  never read. The fingerprint comes from the system's own `ssh-keygen -l`, the
+  agent's contents from `ssh-add -l`, and neither can ask for a passphrase.
+- **No passphrase passes through this app.** *Add to Agent…* types
+  `ssh-add --apple-use-keychain ~/.ssh/<key>` into a new terminal tab, and
+  *Generate New Key…* types an `ssh-keygen` line, and both stop there, the way
+  *Set Up Key Login…* does: Return is yours, and `ssh-add` or `ssh-keygen` asks
+  for the passphrase itself, in the tab. A name that is already taken, with or
+  without `.pub`, is refused when the line is built, and `ssh-keygen` would ask
+  before overwriting in any case. A key whose permissions are too open gets *Make Private Key Private…*, which
+  types `chmod 600` the same way.
+- **"In agent" means the agent this app was started with.** It asks whatever
+  `SSH_AUTH_SOCK` the app inherited, which from the Dock is the system's agent.
+  A shell whose `.zshrc` points `SSH_AUTH_SOCK` somewhere else, at 1Password's
+  agent say, is talking to a different one. No agent answering is shown as that,
+  never as an empty one.
+- **Only `.pub` files are listed**, at most 50, and not certificates
+  (`-cert.pub`). A key with no `.pub` beside it does not appear. A `.pub` with
+  no private file is listed and says so without calling it a fault, because a
+  key in a hardware token has none.
+- Deleting, renaming and changing a key's passphrase are not done here.
 
 ### Screen sharing, and what the network is advertising
 

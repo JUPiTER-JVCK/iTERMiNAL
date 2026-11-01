@@ -197,6 +197,7 @@ jobs:
             Sources/iTERMiNAL/Files/SSHControlSocket.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
             Sources/iTERMiNAL/Files/PortForward.swift \
+            Sources/iTERMiNAL/Files/SSHKeys.swift \
             Sources/iTERMiNAL/Remote/ListeningPorts.swift \
             Sources/iTERMiNAL/Remote/TunnelPlan.swift \
             Sources/iTERMiNAL/Remote/HostShorthand.swift \
