@@ -254,7 +254,7 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     /// What a right-click here offers beyond copy and paste. Splitting acts on
     /// the focused pane of the selected tab, which a right-click has just made
-    /// this one — so it only belongs to a terminal that is a pane. A bundled
+    /// this one (as does closing it) — so it only belongs to a terminal that is a pane. A bundled
     /// tool sits in a side panel and a dock terminal in the dock; "split" there
     /// would divide something the person was not pointing at.
     private func contextMenuActions() -> [TerminalMenuAction] {
@@ -269,6 +269,9 @@ final class TerminalSession: ObservableObject, Identifiable {
             },
             TerminalMenuAction(title: "New Tab", key: "t") {
                 store.openTab()
+            },
+            TerminalMenuAction(title: "Close Pane", key: "w", modifiers: [.command, .shift]) {
+                store.closeFocusedPane()
             },
         ]
     }
