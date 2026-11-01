@@ -3,8 +3,6 @@ import Foundation
 /// OpenAI chat-completions client that also talks to compatible servers
 /// (Groq, local proxies, Ollama at `/v1`, etc.). No tool calling in v1.
 final class OpenAICompatibleAssistant: AssistantService {
-    static let apiKeyAccount = "assistant.apiKey"
-
     private let settings: AppSettings
     private let urlSession: URLSession
 
@@ -16,7 +14,7 @@ final class OpenAICompatibleAssistant: AssistantService {
     var isConfigured: Bool {
         let base = settings.assistantBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else { return false }
-        let key = (KeychainStore.get(Self.apiKeyAccount) ?? "")
+        let key = (KeychainStore.get(AssistantDestination.keyAccount(forBaseURL: base)) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return true }
         // Ollama and similar local servers often need no key (or a dummy).
@@ -42,7 +40,7 @@ final class OpenAICompatibleAssistant: AssistantService {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let key = (KeychainStore.get(Self.apiKeyAccount) ?? "")
+        let key = (KeychainStore.get(AssistantDestination.keyAccount(forBaseURL: base)) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty {
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -54,7 +52,7 @@ final class OpenAICompatibleAssistant: AssistantService {
                 .init(role: "system", content: system),
                 .init(role: "user", content: user),
             ],
-            temperature: temperature
+            temperature: AssistantDestination.temperature(temperature, forBaseURL: base)
         )
         request.httpBody = try JSONEncoder().encode(body)
 

@@ -19,6 +19,7 @@
 //     Sources/iTERMiNAL/AI/AssistReply.swift \
 //     Sources/iTERMiNAL/AI/CommandRisk.swift \
 //     Sources/iTERMiNAL/AI/AssistantDestination.swift \
+//     Sources/iTERMiNAL/AI/AssistantProvider.swift \
 //     Sources/iTERMiNAL/AI/ErrorHelp.swift \
 //     scripts/input-logic-check/main.swift
 //   ./input-logic-check
@@ -1162,6 +1163,56 @@ do {
     check(AssistantDestination.describe(baseURL: "not a url") == .init(name: "the configured assistant endpoint", staysOnThisMac: false), "an unreadable URL is not trusted")
     check(AssistantDestination.describe(baseURL: "").staysOnThisMac == false, "an empty URL is not trusted")
     check(AssistantDestination.describe(baseURL: "  https://api.groq.com/openai/v1 \n").name == "api.groq.com", "whitespace is ignored")
+
+    // Providers: each fixed address maps back to its own preset, and anything
+    // else is Custom.
+    for provider in AssistantProvider.allCases {
+        if let url = provider.baseURL {
+            check(AssistantProvider.matching(baseURL: url) == provider, "\(provider) finds itself by its address")
+        }
+    }
+    check(AssistantProvider.matching(baseURL: "https://api.anthropic.com/v1") == .claude, "Claude's address is the Claude preset")
+    check(AssistantProvider.matching(baseURL: "https://api.groq.com/openai/v1") == .custom, "another host is Custom")
+    check(AssistantProvider.matching(baseURL: "https://api.anthropic.com/v1/") == .custom, "a trailing slash is not the preset's own address")
+    check(AssistantProvider.matching(baseURL: "") == .custom, "an empty address is Custom")
+    check(AssistantProvider.custom.baseURL == nil && AssistantProvider.custom.defaultModel == nil, "Custom fixes neither")
+    check(AssistantDestination.describe(baseURL: AssistantProvider.claude.baseURL ?? "").name == "api.anthropic.com", "Claude's address is named for what it is")
+    check(AssistantProvider.claude.keysPage?.host == "platform.claude.com" && AssistantProvider.openai.keysPage == nil, "only Claude has a keys page to point at")
+
+    // Choosing a provider swaps another provider's stock model, and nothing else.
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "gpt-4o-mini") == "claude-haiku-5-5", "OpenAI's stock model becomes Claude's")
+    check(AssistantProvider.openai.model(afterSwitchingFrom: "claude-haiku-5-5") == "gpt-4o-mini", "and back again")
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "  gpt-4o-mini\n") == "claude-haiku-5-5", "whitespace around a stock model does not hide it")
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "") == "claude-haiku-5-5" && AssistantProvider.claude.model(afterSwitchingFrom: "  ") == "claude-haiku-5-5", "an empty model is filled")
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "claude-sonnet-5-5") == nil, "a model the person chose is kept")
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "my-fine-tune") == nil, "so is one nobody ships")
+    check(AssistantProvider.claude.model(afterSwitchingFrom: "claude-haiku-5-5") == nil, "already on the stock model: nothing to change")
+    check(AssistantProvider.ollama.model(afterSwitchingFrom: "gpt-4o-mini") == nil && AssistantProvider.custom.model(afterSwitchingFrom: "gpt-4o-mini") == nil, "a provider with no stock model leaves the field alone")
+
+    // A key is kept per provider where the provider is a different company:
+    // Anthropic's own item, and everything else on the one it always used.
+    check(AssistantDestination.keyAccount(forBaseURL: "https://api.anthropic.com/v1") == "assistant.apiKey.anthropic", "Claude has its own key")
+    check(AssistantDestination.keyAccount(forBaseURL: "  HTTPS://API.Anthropic.com/v1/ \n") == "assistant.apiKey.anthropic", "however the address is cased or padded")
+    check(AssistantDestination.keyAccount(forBaseURL: "https://api.openai.com/v1") == "assistant.apiKey", "OpenAI keeps the item it always had")
+    check(AssistantDestination.keyAccount(forBaseURL: "http://127.0.0.1:11434/v1") == "assistant.apiKey", "so does a local server")
+    check(AssistantDestination.keyAccount(forBaseURL: "https://api.groq.com/openai/v1") == "assistant.apiKey", "and a custom one")
+    check(AssistantDestination.keyAccount(forBaseURL: "https://api.anthropic.com.evil.example/v1") == "assistant.apiKey", "a host that merely starts with Anthropic's does not get Anthropic's key")
+    check(AssistantDestination.keyAccount(forBaseURL: "https://proxy.example/api.anthropic.com/v1") == "assistant.apiKey", "nor a path that names it")
+    check(AssistantDestination.keyAccount(forBaseURL: "") == "assistant.apiKey" && AssistantDestination.keyAccount(forBaseURL: "not a url") == "assistant.apiKey", "an unreadable address uses the default item")
+    check(AssistantProvider.allCases.compactMap { $0.baseURL }.filter { AssistantDestination.keyAccount(forBaseURL: $0) == "assistant.apiKey.anthropic" } == [AssistantProvider.claude.baseURL ?? ""], "of the presets, only Claude's address uses Claude's key")
+
+    // A temperature below 1 is dropped for Anthropic's host and no other.
+    let anthropic = "https://api.anthropic.com/v1"
+    check(AssistantDestination.temperature(0, forBaseURL: anthropic) == nil, "Anthropic is not sent temperature 0")
+    check(AssistantDestination.temperature(0.7, forBaseURL: anthropic) == nil, "nor 0.7")
+    check(AssistantDestination.temperature(1, forBaseURL: anthropic) == 1, "1 is its default and is accepted")
+    check(AssistantDestination.temperature(nil, forBaseURL: anthropic) == nil, "no temperature stays none")
+    check(AssistantDestination.temperature(0, forBaseURL: "  HTTPS://API.Anthropic.com/v1/ \n") == nil, "the host is matched however it is cased or padded")
+    check(AssistantDestination.temperature(0, forBaseURL: "https://api.openai.com/v1") == 0, "OpenAI is still sent temperature 0")
+    check(AssistantDestination.temperature(0, forBaseURL: "http://127.0.0.1:11434/v1") == 0, "so is a local server")
+    check(AssistantDestination.temperature(0, forBaseURL: "https://api.anthropic.com.evil.example/v1") == 0, "a host that merely starts with Anthropic's is not Anthropic")
+    check(AssistantDestination.temperature(0, forBaseURL: "https://proxy.example/api.anthropic.com/v1") == 0, "nor a path that names it")
+    check(AssistantDestination.temperature(0, forBaseURL: "not a url") == 0 && AssistantDestination.temperature(0, forBaseURL: "") == 0, "an unreadable address changes nothing")
 
     let key = "AKIAIOSFODNN7EXAMPLE"
     let request = ErrorHelpRequest.make(

@@ -398,7 +398,7 @@ A tour of the app in thirty-four pictures, in five groups.
   cursor, scrollback, GPU), Composer, Panels, Connections, Security, AI, HTTP
   Client, Backup, Shortcuts, and Advanced, all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
-  endpoint (OpenAI, Ollama, or any `/v1` proxy). Keys stay in the keychain;
+  endpoint (OpenAI, Claude, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY. When a
   command you ran from the composer prints something that reads like an error,
   an **Explain / Fix it** offer appears; a suggested command goes into the
@@ -1166,6 +1166,28 @@ and the composer's **+** menu.
 2. Pick a model (default `gpt-4o-mini`).
 3. Paste an API key and click **Save Key** (stored in the keychain as
    `assistant.apiKey`, never in preferences or export snapshots).
+
+### Claude (Anthropic)
+
+1. Preset **Claude (Anthropic)** (base URL `https://api.anthropic.com/v1`).
+2. Pick a model (default `claude-haiku-5-5`). Choosing the preset swaps in this
+   default only when the field still holds another provider's stock model; a
+   name you typed is kept.
+3. Create an API key in the [Claude Console](https://platform.claude.com/settings/keys),
+   paste it, and click **Save Key**. It is kept in the keychain as
+   `assistant.apiKey.anthropic`, separate from the item above, so a key saved
+   for another provider is never sent to Anthropic when you switch presets, and
+   a Claude key is never sent anywhere else. Switching shows that provider's
+   own key status; a half-typed key is dropped.
+
+This is an API key, not a Claude.ai account sign-in: iTERMiNAL does not log in
+to a Claude subscription. It talks to Anthropic's OpenAI-compatible endpoint,
+which Anthropic describes as meant for testing and comparing models rather than
+long-term use. That endpoint refuses a `temperature` below 1 on current models,
+so for `api.anthropic.com` the page reader's **Ask…** leaves the field out
+instead of sending 0, and no longer asks for repeatable answers there.
+A key that is not scoped to a workspace also needs an `anthropic-workspace-id`
+header, which iTERMiNAL cannot send; use a key scoped to a workspace.
 
 ### Ollama (local)
 

@@ -53,7 +53,8 @@ struct PreferencesArchive: Codable {
     /// composer fields above — older archives predate them.
     ///
     /// The API key is deliberately absent: it lives in the keychain under
-    /// `assistant.apiKey` and never enters an export, which is what the Backup
+    /// `assistant.apiKey` (or `assistant.apiKey.anthropic`) and never enters an
+    /// export, which is what the Backup
     /// pane's "no secrets" promise rests on. The context switches travel so a
     /// second Mac does not silently start sending more than the first did.
     var assistantBaseURL: String?
