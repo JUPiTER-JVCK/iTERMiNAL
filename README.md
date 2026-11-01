@@ -385,6 +385,13 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Markdown preview** — right-click a `.md` file in the file browser, on this
   Mac or on a host, and **Preview Markdown** shows it rendered, in a sheet. It is
   built not to trust the file: see [Markdown preview](#markdown-preview).
+- **Quick Look** — right-click a file in the file browser and choose **Quick Look**,
+  or select it and press Space, to see it in the system's own Quick Look panel,
+  the one Finder uses. A file on this Mac is previewed where it is. A file on a
+  host is fetched to a temporary copy first — up to 50 MB; a bigger one is left
+  for **Download to Downloads** — and the copy is deleted when the panel closes.
+  Folders and anything that is not a plain file are not previewed. Nothing is
+  opened or run.
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open

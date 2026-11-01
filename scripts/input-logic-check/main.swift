@@ -5438,6 +5438,53 @@ do {
     }
 }
 
+// MARK: Quick Look in the file browser
+
+// What is handed to the system's previewer: files, never folders; any local file as it
+// is; a remote one only if it is small enough to be worth fetching to look at. And the
+// name the fetched copy is given: one component, nothing odd in it, the extension kept.
+do {
+    let cap = QuickLookPolicy.maxRemoteBytes
+
+    check(QuickLookPolicy.refusal(isDirectory: true, isRemote: false, size: nil) == .folder, "a local folder is not previewed")
+    check(QuickLookPolicy.refusal(isDirectory: true, isRemote: true, size: 10) == .folder, "a remote folder is not previewed")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: false, size: 5_000_000_000) == nil, "a big local file is previewed in place")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: false, size: nil) == nil, "a local file of unknown size is previewed")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: true, size: 0) == nil, "an empty remote file may be previewed")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: true, size: cap) == nil, "a remote file at the limit is fetched")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: true, size: cap + 1) == .tooLarge(cap + 1), "a remote file one byte over is not")
+    check(QuickLookPolicy.refusal(isDirectory: false, isRemote: true, size: nil) == nil, "a remote file of unknown size is allowed")
+
+    check(QuickLookPolicy.megabytes(50_000_000) == "50 MB", "fifty million bytes is 50 MB")
+    check(QuickLookPolicy.megabytes(50_000_001) == "51 MB", "a byte over the limit reads as over")
+    check(QuickLookPolicy.megabytes(1) == "1 MB", "a few bytes round up to 1 MB")
+    check(QuickLookPolicy.megabytes(0) == "0 MB", "nothing is 0 MB")
+    check(QuickLookPolicy.megabytes(-5) == "0 MB", "a negative size is not shown as one")
+
+    let tooBig = QuickLookPolicy.message(.tooLarge(120_000_000), name: "dump.sql")
+    check(tooBig.contains("dump.sql") && tooBig.contains("120 MB") && tooBig.contains("50 MB"), "the message names the file and both sizes")
+    check(tooBig.contains("Download"), "the message says what to do instead")
+    check(QuickLookPolicy.message(.folder, name: "src") == "Quick Look shows files, not folders.", "the folder message")
+
+    check(QuickLookPolicy.safeFileName("report.pdf") == "report.pdf", "an ordinary name is kept")
+    check(QuickLookPolicy.safeFileName("my notes (final).txt") == "my notes (final).txt", "spaces and brackets are kept")
+    check(QuickLookPolicy.safeFileName(".env") == ".env", "a dotfile is kept")
+    check(QuickLookPolicy.safeFileName("日本語.md") == "日本語.md", "a name that is not ASCII is kept")
+    check(QuickLookPolicy.safeFileName("../../etc/passwd") == "passwd", "a path is cut to its last part")
+    check(QuickLookPolicy.safeFileName("a/b/c.png") == "c.png", "folders in front of the name go")
+    check(QuickLookPolicy.safeFileName("..") == "preview", "two dots are not a name")
+    check(QuickLookPolicy.safeFileName(".") == "preview", "one dot is not a name")
+    check(QuickLookPolicy.safeFileName("") == "preview", "an empty name is not a name")
+    check(QuickLookPolicy.safeFileName("/") == "preview", "a bare slash is not a name")
+    check(QuickLookPolicy.safeFileName("bad\u{0}name\n.txt") == "bad_name_.txt", "control characters become underscores")
+    let long = String(repeating: "x", count: 300) + ".jpeg"
+    check(QuickLookPolicy.safeFileName(long) == "preview.jpeg", "a name too long for a file system keeps its extension")
+    let longNoExt = String(repeating: "y", count: 300)
+    check(QuickLookPolicy.safeFileName(longNoExt) == "preview", "and without one it is just preview")
+    let longOddExt = String(repeating: "z", count: 300) + "." + String(repeating: "e", count: 40)
+    check(QuickLookPolicy.safeFileName(longOddExt) == "preview", "a long extension is not kept")
+}
+
 // MARK: Listening ports
 
 do {
