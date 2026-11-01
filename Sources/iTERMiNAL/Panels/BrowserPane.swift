@@ -37,6 +37,25 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     @Published private(set) var canGoForward = false
     @Published private(set) var pageTitle = ""
 
+    /// What the page is told this browser is. Changing it reloads, since a
+    /// site only reads it when it is asked for the page.
+    @Published var userAgent: BrowserUserAgent = .defaultAgent {
+        didSet {
+            guard userAgent != oldValue else { return }
+            webView.customUserAgent = userAgent.string
+            if hasNavigated { webView.reload() }
+        }
+    }
+
+    /// Whether pages may run scripts. Applied per navigation, so it takes
+    /// effect on the reload that follows.
+    @Published var javaScriptEnabled = true {
+        didSet {
+            guard javaScriptEnabled != oldValue else { return }
+            if hasNavigated { webView.reload() }
+        }
+    }
+
     let webView: WKWebView
 
     /// Follows the page's own title. A page names itself when its `<title>` is
@@ -51,7 +70,11 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
     /// `autoLoad: false` produces an empty tab — used by the panel's "new
     /// tab", which should land on the empty state rather than the homepage.
     init(initialURL: String? = nil, autoLoad: Bool = true) {
-        webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        // Puts "Inspect Element" in the page's right-click menu.
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isInspectable = true
         urlText = initialURL ?? (autoLoad ? AppSettings.shared.browserHomepage : "")
         super.init()
         webView.navigationDelegate = self
@@ -342,6 +365,16 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
 }
 
 extension BrowserModel: WKNavigationDelegate {
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        preferences.allowsContentJavaScript = javaScriptEnabled
+        decisionHandler(.allow, preferences)
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
         syncNavigationState()
@@ -648,6 +681,8 @@ private struct BrowserNavigationRow: View {
     @ObservedObject var model: BrowserModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var confirmClearData = false
+    @State private var showSource = false
+    @State private var showConsole = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -729,6 +764,28 @@ private struct BrowserNavigationRow: View {
 
                 Divider()
 
+                Menu("Developer") {
+                    Button("Show Web Inspector") { model.showWebInspector() }
+                    Button("JavaScript Console…") { showConsole = true }
+                    Button("View Page Source…") { showSource = true }
+
+                    Divider()
+
+                    Picker("User Agent", selection: $model.userAgent) {
+                        ForEach(BrowserUserAgent.allCases) { agent in
+                            Text(agent.title).tag(agent)
+                        }
+                    }
+                    Toggle("JavaScript", isOn: $model.javaScriptEnabled)
+
+                    Divider()
+
+                    Button("Hard Reload (Ignore Cache)") { model.hardReload() }
+                    Button("Copy Screenshot") { model.copyScreenshotToPasteboard() }
+                }
+
+                Divider()
+
                 Button("Clear Browsing Data…") { confirmClearData = true }
             } label: {
                 Image(systemName: "ellipsis")
@@ -740,6 +797,8 @@ private struct BrowserNavigationRow: View {
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .sheet(isPresented: $showSource) { BrowserSourceSheet(model: model) }
+        .sheet(isPresented: $showConsole) { BrowserConsoleSheet(model: model) }
         // Clearing is irreversible and hits every site, so it asks first.
         .confirmationDialog(
             "Clear browsing data?",
