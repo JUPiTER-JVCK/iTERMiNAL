@@ -100,6 +100,7 @@ final class ComposerAIController: ObservableObject {
         _ kind: ErrorHelpKind,
         offer: ErrorOffer?,
         selection: String? = nil,
+        typed: String? = nil,
         store: WorkspaceStore,
         settings: AppSettings
     ) {
@@ -112,7 +113,16 @@ final class ComposerAIController: ObservableObject {
 
         let command: String?
         let output: String
-        if let selection {
+        if kind == .explainCommand {
+            // What is in the input field, which has not been run: no output, and
+            // nothing taken from the screen.
+            command = typed
+            output = ""
+            guard !(typed ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                banner = .failure("There's no command typed to explain.")
+                return
+            }
+        } else if let selection {
             // What the person selected, and only that: no command, and no
             // screen capture of a terminal they may not have been looking at.
             command = nil
@@ -139,7 +149,7 @@ final class ComposerAIController: ObservableObject {
                 command = nil
             }
         }
-        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard kind == .explainCommand || !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             banner = .failure(selection != nil ? "There's no text selected." : "There's no output to look at yet.")
             return
         }
@@ -158,7 +168,9 @@ final class ComposerAIController: ObservableObject {
             gitBranch: settings.assistantIncludeGitBranch && selection == nil ? session?.gitBranch : nil,
             workspaceName: settings.assistantIncludeWorkspace ? store.currentWorkspace?.name : nil
         )
-        if settings.assistantIncludeRecentOutput {
+        // Typed text is not "recent output", so the switch for output does not
+        // stand in for agreeing to send it: it is always asked.
+        if settings.assistantIncludeRecentOutput && kind != .explainCommand {
             send(request, store: store, settings: settings)
         } else {
             banner = .consent(request)
@@ -185,7 +197,7 @@ final class ComposerAIController: ObservableObject {
         context.workspaceName = request.workspaceName
         if request.kind == .explainSelection {
             context.selection = request.output
-        } else {
+        } else if request.kind != .explainCommand {
             context.recentOutput = request.output
         }
         context.lastCommand = request.command

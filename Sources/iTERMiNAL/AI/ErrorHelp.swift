@@ -6,6 +6,9 @@ enum ErrorHelpKind: Equatable {
     /// Text the person selected in a terminal and asked about. It need not be an
     /// error, so it is not asked "what went wrong".
     case explainSelection
+    /// A command typed and not yet run. There is no output to look at: the
+    /// question is what the command would do.
+    case explainCommand
 }
 
 /// What the failure watcher noticed: the command, what it printed, and what
@@ -89,6 +92,10 @@ struct ErrorHelpRequest: Equatable {
             return "Explain what the selected text above means, in a few short sentences. "
                 + "If it is an error, give the most likely cause. "
                 + "Only suggest a command if it helps."
+        case .explainCommand:
+            return "Explain what the command above would do, part by part, in a few short sentences. "
+                + "Say plainly if anything in it is destructive or hard to undo. "
+                + "The command has not been run; do not claim that it has."
         }
     }
 
@@ -102,7 +109,10 @@ struct ErrorHelpRequest: Equatable {
     var contents: [String] {
         var items: [String] = []
         if command != nil { items.append("the command") }
-        items.append(lineCount == 1 ? "1 line of \(textNoun)" : "\(lineCount) lines of \(textNoun)")
+        // A command that has not run has no output to count.
+        if kind != .explainCommand {
+            items.append(lineCount == 1 ? "1 line of \(textNoun)" : "\(lineCount) lines of \(textNoun)")
+        }
         if workingDirectory != nil { items.append("the working directory") }
         if gitBranch != nil { items.append("the git branch") }
         if workspaceName != nil { items.append("the workspace name") }
@@ -130,7 +140,9 @@ struct ErrorHelpRequest: Equatable {
         if let gitBranch { sections.append("Git branch:\n\(gitBranch)") }
         if let workspaceName { sections.append("Workspace:\n\(workspaceName)") }
         if let command { sections.append("Command:\n\(command)") }
-        sections.append("\(kind == .explainSelection ? "Selected text" : "Output"):\n\(output)")
+        if kind != .explainCommand {
+            sections.append("\(kind == .explainSelection ? "Selected text" : "Output"):\n\(output)")
+        }
         // The question asked of the assistant, which goes with it.
         sections.append("Request:\n\(prompt)")
         return sections.joined(separator: "\n\n")
