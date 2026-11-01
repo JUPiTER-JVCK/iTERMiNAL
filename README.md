@@ -411,6 +411,14 @@ A tour of the app in thirty-four pictures, in five groups.
   for **Download to Downloads** — and the copy is deleted when the panel closes.
   Folders and anything that is not a plain file are not previewed. Nothing is
   opened or run.
+- **Skills** — the Skills page in the sidebar keeps saved commands and snippets:
+  a name, an optional note, and text of up to 4,000 characters, several lines
+  if you like. **Use** on the page, or **Skill: …** in the command palette, puts
+  the text in the composer's input — after anything already typed there, never
+  over it — and nothing more: it is not sent, and Return is still what runs it,
+  with the warnings about risky commands applying as they do to anything typed.
+  Text with a control character in it (an escape, say) is refused. Skills stay
+  on this Mac. Automations, on the page next to it, is still to come.
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open

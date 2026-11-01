@@ -254,6 +254,12 @@ final class AppSettings: ObservableObject {
     /// itself has run is always used. On by default, as the landing screen
     /// already reads the same file; it is read here, held in memory, and never
     /// saved, exported or sent anywhere.
+    /// Saved commands and snippets (see `Skill`). They are text for the
+    /// composer's input and nothing more. Kept on this Mac.
+    @Published var skills: [Skill] {
+        didSet { persistSkills() }
+    }
+
     @Published var composerSuggestFromShellHistory: Bool {
         didSet { defaults.set(composerSuggestFromShellHistory, forKey: "composerSuggestFromShellHistory") }
     }
@@ -496,6 +502,12 @@ final class AppSettings: ObservableObject {
         composerOpacity = defaults.object(forKey: "composerOpacity") as? Double ?? 1.0
         composerVibrancy = defaults.bool(forKey: "composerVibrancy")
         composerSuggestFromShellHistory = defaults.object(forKey: "composerSuggestFromShellHistory") as? Bool ?? true
+        if let data = defaults.data(forKey: "skills"),
+           let decoded = try? JSONDecoder().decode([Skill].self, from: data) {
+            skills = decoded
+        } else {
+            skills = []
+        }
         composerAutoClose = defaults.object(forKey: "composerAutoClose") as? Bool ?? false
         composerShowNotes = defaults.object(forKey: "composerShowNotes") as? Bool ?? true
 
@@ -563,6 +575,12 @@ final class AppSettings: ObservableObject {
         // `didSet` doesn't fire during init, so reconcile the login item with
         // the stored preference on every launch.
         applyLaunchAtLogin()
+    }
+
+    private func persistSkills() {
+        if let data = try? JSONEncoder().encode(skills) {
+            defaults.set(data, forKey: "skills")
+        }
     }
 
     private func persistConnections() {

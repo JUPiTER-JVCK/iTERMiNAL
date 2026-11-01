@@ -194,6 +194,21 @@ final class WorkspaceStore: ObservableObject {
     var composerFocusHandled = 0
     var composerFocusPending: Bool { composerFocusRequest != composerFocusHandled }
 
+    /// A skill's text on its way into the composer's input. Handled the way
+    /// focus and help are: the composer may not exist yet when it is made, so it
+    /// is kept until the view takes it.
+    struct ComposerInsertRequest: Equatable {
+        let id: Int
+        let text: String
+    }
+    @Published private(set) var composerInsertRequest: ComposerInsertRequest?
+    var composerInsertHandled = 0
+    private var composerInsertCounter = 0
+    var composerInsertPending: ComposerInsertRequest? {
+        guard let request = composerInsertRequest, request.id != composerInsertHandled else { return nil }
+        return request
+    }
+
     /// A request, from a menu or the composer's "+" menu, for the assistant to
     /// look at what the composer's terminal last printed. Handled the way focus
     /// is: the composer may not exist yet when it is made, so it is kept until
@@ -965,6 +980,14 @@ final class WorkspaceStore: ObservableObject {
         AppSettings.shared.composerEnabled = true
         AppSettings.shared.composerCollapsed = false
         composerFocusRequest += 1
+    }
+
+    /// Puts `text` in the composer's input and the caret there. It is added to
+    /// what is already in the input, never sent: only Return sends.
+    func insertIntoComposer(_ text: String) {
+        focusComposer()
+        composerInsertCounter += 1
+        composerInsertRequest = ComposerInsertRequest(id: composerInsertCounter, text: text)
     }
 
     /// Asks the composer's assistant to explain, or suggest a fix for, what the
