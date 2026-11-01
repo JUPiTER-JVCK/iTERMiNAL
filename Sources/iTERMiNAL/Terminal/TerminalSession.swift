@@ -113,19 +113,30 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// browser shares. Held so a reconnect makes the same offer.
     private let controlPath: String?
 
+    /// The profile this session was opened with, by id. It is looked up when
+    /// the shell starts, so a profile edited in Settings applies to the next
+    /// shell and one that has been deleted is simply not applied.
+    let profileID: UUID?
+
     init(
         id: UUID = UUID(),
         kind: SessionKind = .localShell,
         initialDirectory: String? = nil,
         shellOverride: String? = nil,
-        controlPath: String? = nil
+        controlPath: String? = nil,
+        profileID: UUID? = nil
     ) {
         let settings = AppSettings.shared
         self.id = id
         self.kind = kind
         self.shellOverride = shellOverride
         self.controlPath = controlPath
-        self.currentDirectory = initialDirectory ?? settings.resolvedInitialDirectory
+        self.profileID = profileID
+        // Where a folder was asked for, else the profile's, else the default. A
+        // restored shell is given the folder it was in, so it keeps that.
+        self.currentDirectory = initialDirectory
+            ?? settings.profile(withID: profileID)?.resolvedStartDirectory(exists: { SessionLaunch.isFolder($0) })
+            ?? settings.resolvedInitialDirectory
 
         let options = TerminalOptions(
             cursorStyle: CursorStyle(tagName: settings.cursorStyleTag) ?? .steadyBlock,
@@ -257,7 +268,7 @@ final class TerminalSession: ObservableObject, Identifiable {
                 store.splitFocusedPane(.vertical, kind: .terminal)
             },
             TerminalMenuAction(title: "New Tab", key: "t") {
-                store.newTab()
+                store.openTab()
             },
         ]
     }
@@ -396,7 +407,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             shellOverride: shellOverride,
             controlPath: controlPath ?? sharedPathForSharing(settings),
             agentApproved: agentApproved ?? false,
-            unattended: unattended
+            unattended: unattended,
+            profile: settings.profile(withID: profileID)
         ) {
         case .success(let configuration):
             launchError = nil

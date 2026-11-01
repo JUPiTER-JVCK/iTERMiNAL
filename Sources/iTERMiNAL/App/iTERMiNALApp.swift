@@ -114,7 +114,7 @@ struct AppCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Terminal Tab") {
-                WorkspaceStore.shared.newTab()
+                WorkspaceStore.shared.openTab()
             }
             .keyboardShortcut("t", modifiers: .command)
 

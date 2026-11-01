@@ -509,12 +509,37 @@ final class WorkspaceStore: ObservableObject {
         newTab(in: workspace)
     }
 
+    /// A terminal tab the person asked for — ⌘T, the New Tab button, the palette,
+    /// a context menu — with `profile`, or the default profile if one is chosen
+    /// in Settings, or neither.
+    ///
+    /// This is the one place a profile's startup command is typed. A tab made
+    /// any other way — restored at launch, reopened from Recents, made for a
+    /// file, a host or the scripting API, or a split — gets the profile's shell,
+    /// environment and folder but not the command, so nothing runs that the
+    /// person did not just ask for.
+    @discardableResult
+    func openTab(profile: TerminalProfile? = nil) -> WorkspaceTab {
+        let chosen = profile ?? AppSettings.shared.defaultProfile
+        let tab = newTab(profileID: chosen?.id)
+        if let line = chosen?.startupLine, let session = tab.root.firstTerminal() {
+            // Held by the terminal and arrives anyway, but a shell that clears
+            // its input as it starts would lose it, so give it a moment, as
+            // `newTab(directory:running:)` does.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak session] in
+                session?.send(text: line)
+            }
+        }
+        return tab
+    }
+
     @discardableResult
     func newTab(
         in workspace: Workspace? = nil,
         directory: String? = nil,
         kind: SessionKind = .localShell,
-        controlPath: String? = nil
+        controlPath: String? = nil,
+        profileID: UUID? = nil
     ) -> WorkspaceTab {
         let target: Workspace
         if let workspace {
@@ -527,7 +552,17 @@ final class WorkspaceStore: ObservableObject {
             target = created
         }
 
-        let session = TerminalSession(kind: kind, initialDirectory: directory, controlPath: controlPath)
+        // A local shell opens with the profile asked for, else the default one.
+        // Without a profile, or for a host, nothing changes from before.
+        let profileForShell: UUID? = kind == .localShell
+            ? (profileID ?? AppSettings.shared.defaultProfile?.id)
+            : nil
+        let session = TerminalSession(
+            kind: kind,
+            initialDirectory: directory,
+            controlPath: controlPath,
+            profileID: profileForShell
+        )
         session.startIfNeeded()
         let tab = WorkspaceTab(root: PaneNode(content: .terminal(session)))
         target.tabs.append(tab)
@@ -715,9 +750,12 @@ final class WorkspaceStore: ObservableObject {
         switch kind {
         case .terminal:
             let sessionKind: SessionKind = connection.map { .remote($0) } ?? .localShell
+            // A split of a shell opened from a profile uses the same profile —
+            // its shell, environment and folder rules, not its startup command.
             let session = TerminalSession(
                 kind: sessionKind,
-                initialDirectory: sessionKind.isRemote ? nil : focusedSession?.currentDirectory
+                initialDirectory: sessionKind.isRemote ? nil : focusedSession?.currentDirectory,
+                profileID: sessionKind.isRemote ? nil : focusedSession?.profileID
             )
             session.startIfNeeded()
             newContent = .terminal(session)

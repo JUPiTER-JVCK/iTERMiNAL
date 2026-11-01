@@ -69,11 +69,14 @@ enum SessionLaunch {
         shellOverride: String? = nil,
         controlPath: String? = nil,
         agentApproved: Bool = false,
-        unattended: Bool = false
+        unattended: Bool = false,
+        profile: TerminalProfile? = nil
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         switch kind {
         case .localShell:
-            let shell = settings.resolvedShell(override: shellOverride)
+            // The composer's choice of shell for this session comes first, then
+            // the profile's, then the one in Settings.
+            let shell = settings.resolvedShell(override: shellOverride ?? profile?.shellOverride)
             // Only zsh, which is what the hooks are written for, and only when
             // asked. If the folder for the wrapper files cannot be made safely,
             // the shell starts the ordinary way rather than not at all.
@@ -86,14 +89,17 @@ enum SessionLaunch {
             }
             return .success(TerminalLaunchConfiguration(
                 executable: shell.path,
-                args: shell.args,
+                args: shell.args + tokenize(profile?.shellArguments ?? ""),
                 execName: shell.execName,
                 environment: environment(
                     colors: settings.outputColors,
                     terminal: settings.localTerminalType,
+                    adding: profile?.environment ?? [],
                     adjusting: integration
                 ),
-                initialDirectory: directory ?? settings.resolvedInitialDirectory,
+                initialDirectory: directory
+                    ?? profile?.resolvedStartDirectory(exists: { Self.isFolder($0) })
+                    ?? settings.resolvedInitialDirectory,
                 shellIntegration: integration != nil
             ))
 
@@ -251,9 +257,14 @@ enum SessionLaunch {
     /// `terminal` is what `TERM` says. `COLORTERM` goes with it only for a type
     /// that claims colour, and a value inherited from whatever launched the app
     /// is removed for one that does not, so a vt100 never also says "truecolor".
+    ///
+    /// `adding` is a profile's variables. They go on after everything above but
+    /// before shell integration, which keeps the last word on the few variables
+    /// it needs to hook the shell.
     static func environment(
         colors: OutputColors? = nil,
         terminal: TerminalType = .default,
+        adding extra: [(name: String, value: String)] = [],
         adjusting integration: ShellIntegration.EnvironmentChange? = nil
     ) -> [String] {
         var env = ProcessInfo.processInfo.environment
@@ -275,6 +286,7 @@ enum SessionLaunch {
             // run after this — so a person's `.zshrc` has the last word.
             for (name, value) in colors.environment(inheriting: env) { env[name] = value }
         }
+        for (name, value) in extra { env[name] = value }
         if let integration {
             for name in integration.remove { env.removeValue(forKey: name) }
             for (name, value) in integration.set { env[name] = value }
@@ -317,6 +329,11 @@ enum SessionLaunch {
             tokens.append(current)
         }
         return tokens
+    }
+
+    static func isFolder(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     /// Looks for a binary in the usual Homebrew/system locations, then PATH.
