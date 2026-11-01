@@ -145,7 +145,13 @@ struct PreferencesArchive: Codable {
         frameGap = settings.frameGap
         frameShowsBorder = settings.frameShowsBorder
         uiFontDesign = settings.uiFontDesign.rawValue
-        connections = settings.sshConnections
+        // Whether scripts may run commands on a host is this Mac's decision and
+        // stays here: an archive says false for every host.
+        connections = settings.sshConnections.map { connection in
+            var copy = connection
+            copy.allowScriptedCommands = false
+            return copy
+        }
     }
 
     func apply(to settings: AppSettings) {
@@ -244,7 +250,15 @@ struct PreferencesArchive: Codable {
         if let uiFontDesign, let design = FrameFontDesign(rawValue: uiFontDesign) {
             settings.uiFontDesign = design
         }
-        settings.sshConnections = connections
+        // And a snapshot cannot turn it on, whatever it says -- not even for a
+        // host with the id of one that was allowed here, since the address
+        // that id now points at is the snapshot's to choose. Importing turns it
+        // off for every host; it is a checkbox per host to turn back on.
+        settings.sshConnections = connections.map { connection in
+            var copy = connection
+            copy.allowScriptedCommands = false
+            return copy
+        }
     }
 }
 

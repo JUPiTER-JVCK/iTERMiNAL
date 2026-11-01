@@ -70,6 +70,11 @@ struct ConnectionsSettingsView: View {
                         Text(Self.agentCaption(binding.wrappedValue.agentForwarding))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        Toggle("Allow scripted commands", isOn: binding.allowScriptedCommands)
+                        Text("Lets a script that has the API token run a command on this host with no terminal (iterminalctl exec). Off unless you turn it on, host by host. It never asks for a password, never forwards your agent, and each one is listed in Settings → Security.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if binding.wrappedValue.transport == .custom {

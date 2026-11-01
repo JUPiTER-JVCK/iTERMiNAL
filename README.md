@@ -809,6 +809,7 @@ iterminalctl browser.fill selector="#email" value=me@example.com
 iterminalctl browser.click selector="#submit"
 iterminalctl browser.wait selector=".result" timeout=15
 iterminalctl browser.screenshot path=~/shot.png
+iterminalctl exec web1 uptime
 ```
 
 | Command | Parameters |
@@ -821,6 +822,7 @@ iterminalctl browser.screenshot path=~/shot.png
 | `browser.open` / `newTab` / `navigate` / `eval` / `click` / `fill` / `text` / `html` / `wait` / `screenshot` | `url`, `selector`, `value`, `script`, `timeout`, `path`, `pane` |
 | `files.list` | `path`, `connection`, `hidden` |
 | `connection.list` | — |
+| `host.exec` | `host`, and `command` (a line, used as written) or `argv` (a list of words, each quoted for the host), `timeout` — see [Running a command on a host](#running-a-command-on-a-host) |
 | `terminal.reconnect` | `session` |
 | `subscribe` / `unsubscribe` | `events` |
 
@@ -833,6 +835,47 @@ can speak it:
 // response
 {"id":"1","ok":true,"result":{"session":"…"}}
 ```
+
+### Running a command on a host
+
+`iterminalctl exec web1 uptime` (or the `host.exec` command) runs one command
+on a saved host and brings back its output and exit status, with no terminal tab
+involved. It reaches further than anything else the API does, so it is held back
+in every way there is:
+
+- **A host must be ticked.** *Allow scripted commands*, per host, in Settings →
+  Connections. It is off for every host, including every host you already have,
+  and an imported snapshot cannot turn it on: importing switches it off for all of
+  them. The API itself is off until you enable it, and needs its token.
+- **It never asks for anything.** It runs `ssh` the way the port scan does, with
+  no keyboard and `BatchMode`, so it cannot prompt and never sees a password. A
+  host whose key is not yet trusted fails rather than being trusted by a script.
+  It signs in with a key or your agent, or rides the connection a terminal tab to
+  the same host has left open — which is how a host that wants a password can be
+  used: sign in in a tab and leave it.
+- **No agent forwarding, no port forwards, no terminal, nothing on its standard
+  input.** Only ssh hosts, with their jump hosts; mosh and custom-command hosts
+  are refused.
+- **Bounded.** At most 3 at once; 30 seconds unless `timeout=` asks for more, and
+  never more than 120; 200,000 characters of each of the output and the error
+  output are sent back, with a flag saying when that cut anything.
+- **Listed.** Settings → Security shows each one, and each refusal, until you
+  quit: the host, the command (masked, on one line, cut short) and how it ended.
+  Nothing is written to disk.
+
+With one word after the host, `iterminalctl exec web1 "df -h | head -5"` runs it
+as a line, pipeline and all. With several, `iterminalctl exec web1 ls "my folder"`
+treats them as the words of one command and quotes each, so nothing in one is
+expanded by the host's shell. Output goes to standard output and standard error as
+the command wrote it, and the exit status is the command's — 124 if it timed out
+and 125 if it could not be run at all (the reason is on standard error). An exit
+status of 255 from the command itself cannot be told from ssh's own failure,
+which is how ssh is.
+
+Anything that can read the API token can use this on the hosts you ticked, as it
+can already type into any terminal. Ticking a host is saying that is acceptable
+for that host; the token is in your keychain and the socket is readable only by
+you.
 
 ### Event stream
 
@@ -863,6 +906,7 @@ iterminalctl subscribe events=session.exited,tab.created
 | `composer.session.created` | the composer started a shell of its own |
 | `dock.session.moved` | a running shell was moved from a pane into the dock |
 | `http.sent` | an HTTP client pane's request finished — status on success, error on failure |
+| `host.exec` | a scripted command on a host finished — `host`, and `exit` if it ran (never the command) |
 
 From an unfocused pane (or while the app is in the background), try:
 

@@ -69,6 +69,11 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     var keepAliveSeconds: Int
     /// Forwards applied to every ssh terminal tab on this host. See `PortForward`.
     var forwards: [PortForward]
+    /// Whether the scripting API may run a command on this host without a
+    /// terminal (`host.exec`; see `ScriptedCommand`). Off unless it is turned on
+    /// here, host by host. Never carried in an exported archive, and cleared on
+    /// import: a snapshot someone else made does not get to say so.
+    var allowScriptedCommands: Bool
 
     init(
         id: UUID = UUID(),
@@ -87,7 +92,8 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         ipFamily: IPFamily = .any,
         compression: Bool = false,
         keepAliveSeconds: Int = 0,
-        forwards: [PortForward] = []
+        forwards: [PortForward] = [],
+        allowScriptedCommands: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -106,6 +112,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         self.compression = compression
         self.keepAliveSeconds = keepAliveSeconds
         self.forwards = forwards
+        self.allowScriptedCommands = allowScriptedCommands
     }
 
     /// Tolerant decoding so connections saved before transports existed still
@@ -131,6 +138,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         compression = try container.decodeIfPresent(Bool.self, forKey: .compression) ?? false
         keepAliveSeconds = try container.decodeIfPresent(Int.self, forKey: .keepAliveSeconds) ?? 0
         forwards = (try? container.decodeIfPresent([PortForward].self, forKey: .forwards)) ?? []
+        allowScriptedCommands = try container.decodeIfPresent(Bool.self, forKey: .allowScriptedCommands) ?? false
     }
 
     var destination: String {

@@ -12,6 +12,9 @@ final class APIRouter {
 
     private var store: WorkspaceStore { WorkspaceStore.shared }
     private var settings: AppSettings { AppSettings.shared }
+    /// `host.exec` commands that have started and not finished. Touched on the
+    /// main queue only, like everything here.
+    private var runningScriptedCommands = 0
 
     static let commands: [String] = [
         "help", "ping", "app.info",
@@ -21,6 +24,7 @@ final class APIRouter {
         "tab.list", "tab.create", "tab.select", "tab.close",
         "pane.list", "pane.split", "pane.close",
         "terminal.send", "terminal.capture", "terminal.reconnect",
+        "host.exec",
         "browser.open", "browser.navigate", "browser.eval", "browser.click",
         "browser.fill", "browser.text", "browser.html", "browser.wait",
         "browser.screenshot",
@@ -81,6 +85,51 @@ final class APIRouter {
             }
             let tab = store.newTab(in: workspace, directory: request.string("directory"), kind: kind)
             ok(["tab": Self.describe(tab, workspaceName: workspace?.name)])
+
+        // MARK: Commands on a host, without a terminal
+
+        case "host.exec":
+            // Held back in every way `ScriptedCommand` lists: a host has to be
+            // ticked for it in Settings, and nothing here prompts or forwards.
+            guard let identifier = request.string("host") else {
+                return fail("host.exec needs host: the name of a saved connection.")
+            }
+            guard let connection = settings.connection(withID: identifier) else {
+                return fail("No saved connection named \(identifier).")
+            }
+            if let refusal = ScriptedCommand.refusal(for: connection) {
+                ScriptedCommandLog.shared.recordRefusal(host: connection.name, reason: refusal)
+                return fail(refusal)
+            }
+            let words = (request.params["argv"] as? [Any])?.compactMap { $0 as? String }
+            if let given = request.params["argv"] as? [Any], words?.count != given.count {
+                return fail("argv is a list of strings.")
+            }
+            let line: String
+            switch ScriptedCommand.commandLine(command: request.string("command"), arguments: words) {
+            case .failure(let problem):
+                return fail(problem.message)
+            case .success(let text):
+                line = text
+            }
+            guard runningScriptedCommands < ScriptedCommand.maxConcurrent else {
+                return fail("Too many scripted commands are running at once. Try again in a moment.")
+            }
+            runningScriptedCommands += 1
+            let timeout = ScriptedCommand.timeout((request.params["timeout"] as? NSNumber)?.doubleValue)
+            ScriptedCommandRunner.run(connection: connection, commandLine: line, timeout: timeout) { [weak self] outcome, milliseconds in
+                self?.runningScriptedCommands -= 1
+                ScriptedCommandLog.shared.record(host: connection.name, command: line, outcome: outcome)
+                var event: [String: Any] = ["host": connection.name]
+                if case .ran(let exit) = outcome.kind { event["exit"] = exit }
+                EventBus.shared.publish(APIEvent("host.exec", event))
+                switch ScriptedCommand.reply(for: outcome, milliseconds: milliseconds) {
+                case .success(let result):
+                    ok(result)
+                case .failure(let failure):
+                    fail(failure.message)
+                }
+            }
 
         case "connection.list":
             ok(["connections": settings.sshConnections.map { connection in
