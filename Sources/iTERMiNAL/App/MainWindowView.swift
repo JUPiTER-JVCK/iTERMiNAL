@@ -292,8 +292,8 @@ struct DetailView: View {
     }
 }
 
-/// The strip along the window's bottom: the machine's vital signs at the right,
-/// and, when it is turned on, the Remote Ports globe last, at the right.
+/// The strip along the window's bottom, all at the right: the machine's vital
+/// signs and, when it is turned on, the Remote Ports globe after them.
 ///
 /// A strip rather than a floating card: that corner is exactly where a terminal
 /// writes its newest output, and something hovering over it would cover the one
