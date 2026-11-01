@@ -12,7 +12,9 @@ struct SidebarView: View {
 
     @State private var query = ""
     @State private var searchVisible = false
-    @State private var expandedWorkspaces: Set<UUID> = []
+    /// Spaces whose folder the person has closed. Tracked as the exception so
+    /// every space, including one created later, starts open.
+    @State private var collapsedWorkspaces: Set<UUID> = []
     /// Workspaces whose "Show more" has been used, listing every tab rather
     /// than the first few.
     @State private var showAllWorkspaces: Set<UUID> = []
@@ -75,7 +77,7 @@ struct SidebarView: View {
         // shut, and the capture cannot click them open.
         #if SCREENSHOTS
         .onReceive(NotificationCenter.default.publisher(for: .screenshotsExpandSidebar)) { _ in
-            expandedWorkspaces = Set(store.workspaces.map(\.id))
+            collapsedWorkspaces = []
         }
         #endif
     }
@@ -231,7 +233,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func workspaceGroup(_ workspace: Workspace, theme: Theme) -> some View {
         let tabs = matching(workspace.tabs)
-        let isExpanded = expandedWorkspaces.contains(workspace.id) || !query.isEmpty
+        let isExpanded = !collapsedWorkspaces.contains(workspace.id) || !query.isEmpty
         let visible = visibleTabs(tabs, in: workspace, isExpanded: isExpanded)
 
         WorkspaceFolderRow(
@@ -239,13 +241,13 @@ struct SidebarView: View {
             isExpanded: isExpanded,
             onToggle: {
                 withAnimation(Motion.disclosure) {
-                    if expandedWorkspaces.contains(workspace.id) {
-                        _ = expandedWorkspaces.remove(workspace.id)
+                    if collapsedWorkspaces.contains(workspace.id) {
+                        _ = collapsedWorkspaces.remove(workspace.id)
+                    } else {
+                        _ = collapsedWorkspaces.insert(workspace.id)
                         // Closing resets "Show more", so reopening starts
                         // short again rather than dumping the full list.
                         _ = showAllWorkspaces.remove(workspace.id)
-                    } else {
-                        _ = expandedWorkspaces.insert(workspace.id)
                     }
                 }
             },
