@@ -131,8 +131,8 @@ final class TerminalContainerView: NSView {
     /// solid, so a terminal at 100% costs nothing extra.
     private var backdrop: NSVisualEffectView?
 
-    /// The padding around a see-through terminal, tinted the way the terminal
-    /// tints itself. Nil while the background is solid.
+    /// The tint over the frost, across the padding and the terminal. Nil while
+    /// the background is solid.
     private var ringTint: RingTintView?
 
     init(terminal: NSView) {
@@ -200,7 +200,6 @@ final class TerminalContainerView: NSView {
         if terminal.frame != frame {
             terminal.frame = frame
         }
-        ringTint?.hole = terminal.frame
     }
 
     /// A drag that pauses gets the terminal caught up without waiting for the
@@ -222,11 +221,11 @@ final class TerminalContainerView: NSView {
     /// puts a frosted copy of the desktop under it while it is see-through.
     func syncBackground() {
         hideScroller()
-        guard let terminalView = terminal as? TerminalView else { return }
-        // `nativeBackgroundColor` is always opaque; the see-through-ness lives in
-        // `backgroundOpacity`. The padding has to be painted at that opacity too,
-        // or it stays solid and shows as a dark frame round a lighter terminal.
-        let opacity = BackgroundOpacity.clamped(Double(terminalView.backgroundOpacity))
+        guard let terminalView = terminal as? InstrumentedTerminalView else { return }
+        // `nativeBackgroundColor` is always opaque; the see-through-ness is the
+        // requested opacity, which this container paints over the whole area
+        // (see `syncBackdrop`).
+        let opacity = BackgroundOpacity.clamped(Double(terminalView.requestedBackgroundOpacity))
         let paint = terminalView.nativeBackgroundColor.withAlphaComponent(CGFloat(opacity))
         layer?.backgroundColor = paint.cgColor
         syncBackdrop(
@@ -248,9 +247,9 @@ final class TerminalContainerView: NSView {
     /// and the bars, panels and sheets stay solid.
     ///
     /// The frost is one rectangle behind the whole container, the padding round
-    /// the terminal included, and the terminal tints only itself — so the padding
-    /// gets a tint of its own, the same colour at the same opacity, or it would
-    /// show the desktop untinted beside the terminal as a frame.
+    /// the terminal included, and one tint covers all of it. The terminal leaves
+    /// its own default background clear, so there is a single paint across the
+    /// padding and the terminal and no seam between them.
     private func syncBackdrop(translucent: Bool, background: NSColor, paint: NSColor) {
         guard translucent else {
             backdrop?.removeFromSuperview()
@@ -288,7 +287,6 @@ final class TerminalContainerView: NSView {
             addSubview(tint, positioned: .above, relativeTo: view)
             ringTint = tint
         }
-        tint.hole = terminal.frame
         tint.color = paint
     }
 
@@ -309,26 +307,19 @@ final class TerminalContainerView: NSView {
     }
 }
 
-/// The tint over the frost where the terminal is not: the padding round it. A
-/// frame is filled and the terminal's own is cut out of it, so the terminal is
-/// tinted once, by itself, and the padding once, by this.
+/// The tint over the frost: one fill across the padding and the terminal, so
+/// both are exactly the same shade.
 private final class RingTintView: NSView {
     var color: NSColor = .clear {
         didSet { if color != oldValue { needsDisplay = true } }
-    }
-    var hole: NSRect = .zero {
-        didSet { if hole != oldValue { needsDisplay = true } }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(rect: bounds)
-        path.append(NSBezierPath(rect: hole))
-        path.windingRule = .evenOdd
         color.setFill()
         // A path composites over what is under it; `NSRect.fill()` would copy.
-        path.fill()
+        NSBezierPath(rect: bounds).fill()
     }
 }
 

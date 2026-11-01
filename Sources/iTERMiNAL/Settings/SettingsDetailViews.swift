@@ -8,7 +8,7 @@ struct GeneralSettingsView: View {
         Form {
             Section("Startup") {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                Toggle("Restore workspaces on launch", isOn: $settings.restoreSession)
+                Toggle("Restore spaces on launch", isOn: $settings.restoreSession)
             }
             Section("Shell") {
                 Picker("Shell", selection: $settings.shellPath) {
@@ -142,7 +142,7 @@ struct AppearanceSettingsView: View {
                 FramePreview()
 
                 Toggle("Translucent frame", isOn: $settings.sidebarTranslucent)
-                Text("Off by default, matching the flat chrome of the app this one is modelled on. On, the top bar, the icon rail and the workspaces panel pick up the desktop behind them the way most macOS apps do.")
+                Text("Off by default, matching the flat chrome of the app this one is modelled on. On, the top bar, the icon rail and the spaces panel pick up the desktop behind them the way most macOS apps do.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

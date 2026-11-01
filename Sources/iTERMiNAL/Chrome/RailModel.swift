@@ -12,7 +12,7 @@ enum RailItem: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .terminal: return "Terminal"
-        case .workspaces: return "Workspaces"
+        case .workspaces: return "Spaces"
         case .connections: return "Connect"
         case .tasks: return "Tasks"
         case .automations: return "Automations"

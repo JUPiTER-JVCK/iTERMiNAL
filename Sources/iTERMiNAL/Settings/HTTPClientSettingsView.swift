@@ -6,6 +6,33 @@ import AppKit
 /// Saved collections are a later milestone and have no settings here yet.
 struct HTTPClientSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @State private var ipinfoToken = ""
+    @State private var hasSavedToken = KeychainStore.get(IPLookupModel.ipinfoTokenAccount) != nil
+
+    private func saveIPinfoToken() {
+        let trimmed = ipinfoToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if KeychainStore.set(trimmed, for: IPLookupModel.ipinfoTokenAccount) {
+            ipinfoToken = ""
+            hasSavedToken = true
+        }
+    }
+
+    private func removeIPinfoToken() {
+        _ = KeychainStore.delete(IPLookupModel.ipinfoTokenAccount)
+        hasSavedToken = KeychainStore.get(IPLookupModel.ipinfoTokenAccount) != nil
+    }
+
+    private func chooseMMDB() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an .mmdb database (IPinfo Lite, GeoLite2, DB-IP)."
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.ipLookupMMDBPath = url.path
+        }
+    }
 
     var body: some View {
         Form {
@@ -32,28 +59,48 @@ struct HTTPClientSettingsView: View {
             }
 
             Section("IP lookup") {
-                Toggle("Allow location lookups", isOn: $settings.httpGeolocationEnabled)
-                if settings.httpGeolocationEnabled {
-                    TextField("Service", text: $settings.httpGeolocationTemplate,
-                              prompt: Text(GeoLookup.defaultTemplate))
-                        .font(.system(size: 12, design: .monospaced))
-                    if let host = GeoLookup.serviceHost(template: settings.httpGeolocationTemplate),
-                       GeoLookup.url(template: settings.httpGeolocationTemplate,
-                                     address: HostLookup.classify("8.8.8.8")!) != nil {
-                        Text("Asks \(host) where a public address is, when you press Locate in the Lookup tab. The address is sent; nothing else is — not the name you looked up, not your own address beyond what any web request reveals to the service.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Label("That isn't an https address with {ip} in it, so nothing will be sent.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
+                Picker("Look addresses up with", selection: $settings.ipLookupProviderTag) {
+                    ForEach(GeoProvider.allCases) { provider in
+                        Text(provider.title).tag(provider.rawValue)
                     }
-                    Button("Use the Default Service") { settings.httpGeolocationTemplate = GeoLookup.defaultTemplate }
-                } else {
-                    Text("The Lookup tab always shows what this Mac's own resolver says about a name or an address. Turning this on adds a button that asks a third-party service where a public address is. Off, no address is ever sent anywhere.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Text(settings.ipLookupProvider.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    SecureField("IPinfo token", text: $ipinfoToken)
+                        .font(.system(size: 12, design: .monospaced))
+                    Button("Save") { saveIPinfoToken() }
+                        .disabled(ipinfoToken.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if hasSavedToken {
+                        Button("Remove") { removeIPinfoToken() }
+                    }
+                }
+                Text(hasSavedToken
+                     ? "A token is saved in the Keychain. It is sent to ipinfo.io only, as the lookup's credential."
+                     : "A free token from ipinfo.io is needed for IPinfo Lite. It is kept in the Keychain, never in preferences or an exported snapshot.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Text("MMDB file")
+                    Spacer()
+                    Text(settings.ipLookupMMDBPath.isEmpty
+                         ? "None chosen"
+                         : (settings.ipLookupMMDBPath as NSString).abbreviatingWithTildeInPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Button("Choose…") { chooseMMDB() }
+                    if !settings.ipLookupMMDBPath.isEmpty {
+                        Button("Clear") { settings.ipLookupMMDBPath = "" }
+                    }
+                }
+                Text("Only a public address is ever looked up; private, local and reserved ones are never sent anywhere. The Lookup tab always shows what this Mac's own resolver says.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Site explorer") {

@@ -35,7 +35,7 @@ struct ProfilesSection: View {
                 Label("Add Profile", systemImage: "plus")
             }
 
-            Text("A profile applies to new terminals. Its startup command is typed only when you open a tab yourself — ⌘T, New Tab, the palette or Open a Tab here — never when a workspace is restored, and not in a split. Profiles stay on this Mac and are not part of an exported archive.")
+            Text("A profile applies to new terminals. Its startup command is typed only when you open a tab yourself — ⌘T, New Tab, the palette or Open a Tab here — never when a space is restored, and not in a split. Profiles stay on this Mac and are not part of an exported archive.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

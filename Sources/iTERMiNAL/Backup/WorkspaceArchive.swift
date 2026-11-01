@@ -281,7 +281,7 @@ enum WorkspaceArchiveIO {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "iTERMiNAL-workspaces.\(fileExtension)"
         panel.prompt = "Export"
-        panel.message = "Workspaces and preferences. Secrets are not included."
+        panel.message = "Spaces and preferences. Secrets are not included."
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let archive = WorkspaceArchive(

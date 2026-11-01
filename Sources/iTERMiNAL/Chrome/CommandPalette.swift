@@ -290,7 +290,7 @@ struct CommandPaletteView: View {
             PaletteAction(id: "tab.new", title: "New Terminal Tab", subtitle: "Open a shell", systemImage: "plus.square", shortcut: "⌘T") {
                 store.openTab()
             },
-            PaletteAction(id: "workspace.new", title: "New Workspace", subtitle: "Group of tabs", systemImage: "folder.badge.plus", shortcut: "⇧⌘N") {
+            PaletteAction(id: "workspace.new", title: "New Space", subtitle: "Group of tabs", systemImage: "folder.badge.plus", shortcut: "⇧⌘N") {
                 store.newWorkspace()
             },
             PaletteAction(id: "split.right", title: "Split Right", subtitle: "Terminal beside this one", systemImage: "rectangle.split.2x1", shortcut: "⌘D") {
@@ -323,7 +323,7 @@ struct CommandPaletteView: View {
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()
             },
-            PaletteAction(id: "sidebar.toggle", title: "Toggle Sidebar", subtitle: "Show or hide the workspaces panel", systemImage: "sidebar.left", shortcut: "⌃⌘S") {
+            PaletteAction(id: "sidebar.toggle", title: "Toggle Sidebar", subtitle: "Show or hide the spaces panel", systemImage: "sidebar.left", shortcut: "⌃⌘S") {
                 withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
             },
             PaletteAction(id: "sidebar.pin", title: settings.railPanelPinned ? "Unpin Sidebar" : "Pin Sidebar", subtitle: settings.railPanelPinned ? "Float the panel over the content" : "Keep the panel beside the content", systemImage: settings.railPanelPinned ? "pin.slash" : "pin") {
@@ -428,7 +428,7 @@ struct CommandPaletteView: View {
 
         actions.append(PaletteAction(
             id: "state.export",
-            title: "Export Workspaces…",
+            title: "Export Spaces…",
             subtitle: "Portable snapshot",
             systemImage: "square.and.arrow.up"
         ) {
@@ -437,7 +437,7 @@ struct CommandPaletteView: View {
 
         actions.append(PaletteAction(
             id: "state.import",
-            title: "Import Workspaces…",
+            title: "Import Spaces…",
             subtitle: "Replace current layout",
             systemImage: "square.and.arrow.down"
         ) {
@@ -451,7 +451,7 @@ struct CommandPaletteView: View {
             let count = workspace.tabs.count
             actions.append(PaletteAction(
                 id: "workspace.goto.\(workspace.id.uuidString)",
-                title: "Go to Workspace: \(workspace.name)",
+                title: "Go to Space: \(workspace.name)",
                 subtitle: count == 1 ? "1 tab" : "\(count) tabs",
                 systemImage: "folder"
             ) {

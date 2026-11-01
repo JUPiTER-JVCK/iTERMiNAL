@@ -162,7 +162,15 @@ final class SwiftTermEngine: TerminalEngine {
         // opaque, and it redraws. Text, the cursor and cells with a colour of
         // their own stay solid whatever it is.
         terminalView.nativeBackgroundColor = appearance.background
-        terminalView.backgroundOpacity = CGFloat(BackgroundOpacity.clamped(Double(appearance.backgroundAlpha)))
+        let requested = CGFloat(BackgroundOpacity.clamped(Double(appearance.backgroundAlpha)))
+        terminalView.requestedBackgroundOpacity = requested
+        // While see-through, the container tints the padding and the terminal
+        // as one surface; the terminal leaves its own default background
+        // clear. Painting each separately gave two tints that never matched
+        // (its renderer composites differently from a plain fill), which
+        // showed as a frame of another shade round the terminal. Text, the
+        // cursor and cells with a colour of their own stay solid.
+        terminalView.backgroundOpacity = requested < 1 ? 0 : 1
         terminalView.caretColor = appearance.cursorColor ?? appearance.foreground
         terminalView.caretTextColor = appearance.cursorTextColor
         if let selection = appearance.selectionColor ?? defaultSelectionColor {

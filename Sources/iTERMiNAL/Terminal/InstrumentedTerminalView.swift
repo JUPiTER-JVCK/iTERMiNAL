@@ -11,6 +11,12 @@ import SwiftTerm
 /// outside the module; those signals come through `processDelegate` and a
 /// mouse monitor instead. OSC 9 / 777 are hooked via `registerOscHandler`.
 final class InstrumentedTerminalView: LocalProcessTerminalView {
+    /// How see-through the person asked the background to be. SwiftTerm's own
+    /// `backgroundOpacity` is held at 0 while this is below 1, and the
+    /// container paints the whole area — padding and terminal alike — in one
+    /// pass, so the two can never be tinted differently.
+    var requestedBackgroundOpacity: CGFloat = 1
+
     var onActivity: (() -> Void)?
     var onInput: (() -> Void)?
     var onLink: ((String) -> Void)?

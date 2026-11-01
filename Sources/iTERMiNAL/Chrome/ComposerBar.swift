@@ -301,7 +301,7 @@ struct ComposerBar: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(trayShown ? "Hide workspace and destination" : "Show workspace and destination")
+                    .help(trayShown ? "Hide space and destination" : "Show space and destination")
                     .accessibilityLabel(trayShown ? "Hide status tray" : "Show status tray")
 
                     Spacer()

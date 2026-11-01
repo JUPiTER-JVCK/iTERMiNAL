@@ -12,7 +12,9 @@ struct SidebarView: View {
 
     @State private var query = ""
     @State private var searchVisible = false
-    @State private var expandedWorkspaces: Set<UUID> = []
+    /// Spaces whose folder the person has closed. Tracked as the exception so
+    /// every space, including one created later, starts open.
+    @State private var collapsedWorkspaces: Set<UUID> = []
     /// Workspaces whose "Show more" has been used, listing every tab rather
     /// than the first few.
     @State private var showAllWorkspaces: Set<UUID> = []
@@ -61,7 +63,7 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .alert("Rename Workspace", isPresented: isRenamingWorkspace, presenting: renamingWorkspace) { workspace in
+        .alert("Rename Space", isPresented: isRenamingWorkspace, presenting: renamingWorkspace) { workspace in
             TextField("Name", text: $renameText)
             Button("Rename") {
                 if !renameText.isEmpty {
@@ -75,7 +77,7 @@ struct SidebarView: View {
         // shut, and the capture cannot click them open.
         #if SCREENSHOTS
         .onReceive(NotificationCenter.default.publisher(for: .screenshotsExpandSidebar)) { _ in
-            expandedWorkspaces = Set(store.workspaces.map(\.id))
+            collapsedWorkspaces = []
         }
         #endif
     }
@@ -84,7 +86,7 @@ struct SidebarView: View {
 
     private func header(theme: Theme) -> some View {
         HStack(spacing: 8) {
-            Text("Workspaces")
+            Text("Spaces")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
@@ -118,7 +120,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .help(settings.railPanelPinned ? "Unpin — float over the content" : "Pin — keep beside the content")
-            .accessibilityLabel(settings.railPanelPinned ? "Unpin workspaces panel" : "Pin workspaces panel")
+            .accessibilityLabel(settings.railPanelPinned ? "Unpin spaces panel" : "Pin spaces panel")
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 12)
@@ -172,7 +174,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func projectsSection(theme: Theme) -> some View {
         SidebarSectionHeader(
-            title: "Projects",
+            title: "Workspaces",
             isExpanded: $settings.projectsExpanded,
             showsDot: store.workspaces.contains { workspace in
                 workspace.tabs.contains { tab in
@@ -197,7 +199,7 @@ struct SidebarView: View {
                     .font(.system(size: 10))
             }
             .buttonStyle(.plain)
-            .help("New workspace")
+            .help("New space")
         }
 
         if settings.projectsExpanded {
@@ -231,7 +233,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func workspaceGroup(_ workspace: Workspace, theme: Theme) -> some View {
         let tabs = matching(workspace.tabs)
-        let isExpanded = expandedWorkspaces.contains(workspace.id) || !query.isEmpty
+        let isExpanded = !collapsedWorkspaces.contains(workspace.id) || !query.isEmpty
         let visible = visibleTabs(tabs, in: workspace, isExpanded: isExpanded)
 
         WorkspaceFolderRow(
@@ -239,13 +241,13 @@ struct SidebarView: View {
             isExpanded: isExpanded,
             onToggle: {
                 withAnimation(Motion.disclosure) {
-                    if expandedWorkspaces.contains(workspace.id) {
-                        _ = expandedWorkspaces.remove(workspace.id)
+                    if collapsedWorkspaces.contains(workspace.id) {
+                        _ = collapsedWorkspaces.remove(workspace.id)
+                    } else {
+                        _ = collapsedWorkspaces.insert(workspace.id)
                         // Closing resets "Show more", so reopening starts
                         // short again rather than dumping the full list.
                         _ = showAllWorkspaces.remove(workspace.id)
-                    } else {
-                        _ = expandedWorkspaces.insert(workspace.id)
                     }
                 }
             },
@@ -616,9 +618,9 @@ private struct WorkspaceFolderRow: View {
             if hovering {
                 Menu {
                     Button("New Tab Here", action: onNewTab)
-                    Button("Rename Workspace…", action: onRename)
+                    Button("Rename Space…", action: onRename)
                     Divider()
-                    Button("Delete Workspace", role: .destructive, action: onDelete)
+                    Button("Delete Space", role: .destructive, action: onDelete)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 10))

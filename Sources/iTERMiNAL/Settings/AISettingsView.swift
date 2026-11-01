@@ -102,7 +102,7 @@ struct AISettingsView: View {
             Section("Context") {
                 Toggle("Include working directory", isOn: $settings.assistantIncludeCwd)
                 Toggle("Include git branch", isOn: $settings.assistantIncludeGitBranch)
-                Toggle("Include workspace name", isOn: $settings.assistantIncludeWorkspace)
+                Toggle("Include space name", isOn: $settings.assistantIncludeWorkspace)
                 Toggle("Include recent terminal output", isOn: $settings.assistantIncludeRecentOutput)
                 Text("Only the fields switched on above are sent with a prompt, and full scrollback never is — only what is on screen, trimmed to the last 6,000 characters. Explain and Fix it ask first when this is off.")
                     .font(.caption)

@@ -67,11 +67,11 @@ struct ContextChipRow: View {
                     Button(workspace.name) { store.newTab(in: workspace) }
                 }
                 Divider()
-                Button("New Workspace") { store.newWorkspace() }
+                Button("New Space") { store.newWorkspace() }
             } label: {
                 ComposerChip(
                     icon: "folder",
-                    text: store.currentWorkspace?.name ?? "Workspace",
+                    text: store.currentWorkspace?.name ?? "Space",
                     theme: theme
                 )
             }

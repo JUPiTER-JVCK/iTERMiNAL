@@ -200,11 +200,18 @@ final class AppSettings: ObservableObject {
             }
         }
     }
-    /// Whether the HTTP client's Lookup tab may ask a location service about a
-    /// public address. Off: the one place this app sends an address to a third
-    /// party does nothing until asked to be allowed.
-    @Published var httpGeolocationEnabled: Bool { didSet { defaults.set(httpGeolocationEnabled, forKey: "httpGeolocationEnabled") } }
-    @Published var httpGeolocationTemplate: String { didSet { defaults.set(httpGeolocationTemplate, forKey: "httpGeolocationTemplate") } }
+    /// Which service, if any, the HTTP client's Lookup tab asks about a public
+    /// address (`GeoProvider`'s raw value). Disabled until one is chosen: the
+    /// choice is the person's consent to send addresses to that service.
+    @Published var ipLookupProviderTag: String { didSet { defaults.set(ipLookupProviderTag, forKey: "ipLookupProviderTag") } }
+    /// The `.mmdb` file the Local MMDB provider reads. A path only; the file
+    /// is never copied.
+    @Published var ipLookupMMDBPath: String { didSet { defaults.set(ipLookupMMDBPath, forKey: "ipLookupMMDBPath") } }
+
+    var ipLookupProvider: GeoProvider {
+        get { GeoProvider(rawValue: ipLookupProviderTag) ?? .disabled }
+        set { ipLookupProviderTag = newValue.rawValue }
+    }
     @Published var showStatusBar: Bool { didSet { defaults.set(showStatusBar, forKey: "showStatusBar") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// How a focused split pane is marked, and in what colour.
@@ -455,8 +462,8 @@ final class AppSettings: ObservableObject {
         } else {
             savedTunnels = []
         }
-        httpGeolocationEnabled = defaults.bool(forKey: "httpGeolocationEnabled")
-        httpGeolocationTemplate = defaults.string(forKey: "httpGeolocationTemplate") ?? GeoLookup.defaultTemplate
+        ipLookupProviderTag = defaults.string(forKey: "ipLookupProviderTag") ?? GeoProvider.disabled.rawValue
+        ipLookupMMDBPath = defaults.string(forKey: "ipLookupMMDBPath") ?? ""
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
         autoReconnect = defaults.object(forKey: "autoReconnect") as? Bool ?? false
         cursorColorHex = defaults.string(forKey: "cursorColorHex") ?? ""
@@ -810,8 +817,8 @@ final class AppSettings: ObservableObject {
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showStatusBar = true
         showRemotePorts = false
-        httpGeolocationEnabled = false
-        httpGeolocationTemplate = GeoLookup.defaultTemplate
+        ipLookupProviderTag = GeoProvider.disabled.rawValue
+        ipLookupMMDBPath = ""
         shareSignInWithFiles = true
         autoReconnect = false
         cursorColorHex = ""

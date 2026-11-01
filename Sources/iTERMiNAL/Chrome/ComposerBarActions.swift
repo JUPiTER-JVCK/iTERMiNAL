@@ -65,7 +65,7 @@ struct ComposerActionsPopover: View {
             ComposerActionRow(
                 icon: "plus.square",
                 title: "New terminal",
-                detail: "A shell in the current workspace",
+                detail: "A shell in the current space",
                 shortcut: "⌘T"
             ) {
                 store.newTab()

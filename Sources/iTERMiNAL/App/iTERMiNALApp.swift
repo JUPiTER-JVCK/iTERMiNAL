@@ -118,7 +118,7 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: .command)
 
-            Button("New Workspace") {
+            Button("New Space") {
                 WorkspaceStore.shared.newWorkspace()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
