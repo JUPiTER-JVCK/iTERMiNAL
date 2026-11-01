@@ -106,6 +106,10 @@ struct ConnectionsSettingsView: View {
                 Text("On, a new ssh tab keeps its connection open, and the file browser, the port scan and forwards use it. A host that wants a password then needs signing in to once, in a tab, and the file browser fills in by itself; closing the tab ends the sharing. The connection is reachable only by this account, through a private folder. Applies to tabs opened from now on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Reconnect a dropped ssh session by itself", isOn: $settings.autoReconnect)
+                Text(Self.autoReconnectCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
 
@@ -118,6 +122,13 @@ struct ConnectionsSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// What automatic reconnecting does and does not do, from the same numbers
+    /// the code uses.
+    private static var autoReconnectCaption: String {
+        let policy = AutoReconnect.standard
+        return "When an ssh session that had been up for \(Int(policy.minUptime)) seconds or more loses its connection, it is started again after a wait that begins near \(Int(policy.firstDelay)) seconds and doubles each time, up to \(policy.maxAttempts) tries, with Stop and Reconnect Now while it waits. Each try runs ssh with BatchMode, so it signs in with a key or the agent or not at all: it cannot stop at a password prompt or ask whether to trust a host, and if ssh's last words say the sign-in was refused or the host key does not match, it stops there instead of trying again. A session you ended (~. or closing the tab), mosh, a custom command, and a host set to ask before forwarding the agent are left for you to Reconnect."
     }
 
     /// What each choice does, in a line, under the picker.

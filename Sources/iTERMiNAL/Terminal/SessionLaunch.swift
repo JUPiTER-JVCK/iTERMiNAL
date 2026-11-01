@@ -68,7 +68,8 @@ enum SessionLaunch {
         directory: String?,
         shellOverride: String? = nil,
         controlPath: String? = nil,
-        agentApproved: Bool = false
+        agentApproved: Bool = false,
+        unattended: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         switch kind {
         case .localShell:
@@ -108,7 +109,8 @@ enum SessionLaunch {
                 connection,
                 terminal: terminal,
                 controlPath: controlPath,
-                agentApproved: agentApproved
+                agentApproved: agentApproved,
+                unattended: unattended
             )
 
         case .tool(let tool):
@@ -137,11 +139,16 @@ enum SessionLaunch {
 
     /// `agentApproved` is the answer to "forward your agent?" for a connection
     /// set to ask; every other choice ignores it.
+    ///
+    /// `unattended` is for a reconnect that nobody is at the keyboard for (see
+    /// `AutoReconnect`): ssh is told not to prompt and not to wait long to
+    /// connect, ahead of everything else so that is the value it keeps.
     private static func remoteConfiguration(
         _ connection: SSHConnection,
         terminal: TerminalType = .default,
         controlPath: String? = nil,
-        agentApproved: Bool = false
+        agentApproved: Bool = false,
+        unattended: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         var executable: String
         var args: [String] = []
@@ -155,6 +162,9 @@ enum SessionLaunch {
                 return .failure(.missingExecutable("ssh"))
             }
             executable = path
+            if unattended, connection.transport == .ssh {
+                args.append(contentsOf: AutoReconnect.unattendedArguments)
+            }
             if connection.port != 22 {
                 args.append(contentsOf: ["-p", String(connection.port)])
             }

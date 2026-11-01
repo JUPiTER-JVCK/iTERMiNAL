@@ -4518,6 +4518,130 @@ do {
     check(FontImport.sampleText.contains("\u{F07B}") && FontImport.sampleText.contains("Il1"), "the sample shows a symbol and look-alike letters")
 }
 
+// MARK: Reconnecting a dropped ssh session
+
+// When a session that ended is started again by itself, and when it must not be. The
+// messages are what OpenSSH really printed in each case, copied from runs against a
+// local sshd; the statuses are what waitpid gave for them, which is what SwiftTerm hands
+// over undecoded (an exit with code 255 arrives as 255 << 8 = 65280, `exit 3` as 768).
+do {
+    // 255, as waitpid reports it and as a decoder would.
+    check(AutoReconnect.isConnectionError(terminationStatus: 65280) && AutoReconnect.isConnectionError(terminationStatus: 255),
+          "exit 255 is a lost connection, however it is written")
+    let notLost: [Int32?] = [nil, 0, 1, 256, 768, 65024, 254, 9, 15, 65281, -1, 65535 + 1]
+    for status in notLost {
+        check(!AutoReconnect.isConnectionError(terminationStatus: status), "\(String(describing: status)) is not a lost connection")
+    }
+
+    // Which connections.
+    let host = SSHConnection(name: "box", host: "example.com", username: "me")
+    var mosh = host; mosh.transport = .mosh
+    var custom = host; custom.transport = .custom
+    check(AutoReconnect.isEligible(host) && !AutoReconnect.isEligible(mosh) && !AutoReconnect.isEligible(custom),
+          "plain ssh, not mosh or a custom command")
+    for choice in AgentForwarding.allCases {
+        var connection = host; connection.agentForwarding = choice
+        check(AutoReconnect.isEligible(connection) == (choice != .ask), "agent forwarding \(choice): only a host that asks is left to the person")
+    }
+
+    // Why it ended, from the last of what ssh printed.
+    let userClose = "root@vm:~# Connection to 127.0.0.1 closed."
+    let serverClose = "root@vm:~# Connection to 127.0.0.1 closed by remote host.\nConnection to 127.0.0.1 closed."
+    let aliveTimeout = "Last login: Sun Nov  1 02:09:05 2026 from 127.0.0.1\nroot@vm:~# Timeout, server 127.0.0.1 not responding."
+    let refused = "ssh: connect to host 127.0.0.1 port 2299: Connection refused"
+    let noResolve = "ssh: Could not resolve hostname no-such-host.invalid: Name or service not known"
+    let timedOut = "ssh: connect to host 10.255.255.1 port 22: Connection timed out"
+    let denied = "Warning: Permanently added '[127.0.0.1]:2222' (ED25519) to the list of known hosts.\nroot@127.0.0.1: Permission denied (publickey)."
+    let changedKey = "Offending ED25519 key in /Users/me/.ssh/known_hosts:1\n  remove with:\n  ssh-keygen -f '/Users/me/.ssh/known_hosts' -R '[127.0.0.1]:2222'\nHost key for [127.0.0.1]:2222 has changed and you have requested strict checking.\nHost key verification failed."
+    let cases: [(String, AutoReconnect.Cause, String)] = [
+        (userClose, .userDisconnected, "~. says only that the connection was closed"),
+        ("Connection to 2001:db8::1 closed.", .userDisconnected, "whatever the host is called"),
+        (serverClose, .lost, "the other end closing it says so first"),
+        (aliveTimeout, .lost, "a server that stopped answering"),
+        ("client_loop: send disconnect: Broken pipe", .lost, "a broken pipe"),
+        ("client_loop: send disconnect: Connection reset by peer", .lost, "a reset"),
+        ("packet_write_wait: Connection to 192.0.2.1 port 22: Broken pipe", .lost, "a write that could not finish"),
+        (refused, .lost, "nothing listening yet"),
+        (noResolve, .lost, "no name service yet"),
+        (timedOut, .lost, "no route yet"),
+        ("", .lost, "no words at all"),
+        (denied, .needsAttention, "a refused sign-in"),
+        (changedKey, .needsAttention, "a host key that changed"),
+        ("Host key verification failed.", .needsAttention, "a host key it cannot ask about"),
+        ("Too many authentication failures", .needsAttention, "too many keys offered"),
+        ("Permissions 0644 for '/Users/me/.ssh/id_rsa' are too open.", .needsAttention, "a key ssh will not use"),
+        ("Load key \"/Users/me/.ssh/id\": invalid format", .needsAttention, "a key that cannot be loaded"),
+    ]
+    for (output, expected, why) in cases {
+        let got = AutoReconnect.cause(ofOutput: AutoReconnect.tail(of: output), connection: host)
+        check(got == expected, "\(why): \(got), not \(expected)")
+    }
+
+    check(AutoReconnect.tail(of: "a\n\n  b  \n\n\nc\n") == "a\nb\nc", "the tail leaves out blank lines and padding")
+    check(AutoReconnect.tail(of: "1\n2\n3\n4\n5\n6\n7") == "3\n4\n5\n6\n7" && AutoReconnect.tail(of: "") == "" && AutoReconnect.tail(of: " \n ") == "",
+          "and keeps the last five")
+
+    // The wait before each try.
+    let waits = (1...8).map { AutoReconnect.delay(forAttempt: $0, jitterSample: 0.5) }
+    check(waits == [2, 4, 8, 16, 32, 60, 60, 60], "twice as long each time, to a minute: \(waits)")
+    check(AutoReconnect.delay(forAttempt: 1, jitterSample: 0) == 1.5 && AutoReconnect.delay(forAttempt: 1, jitterSample: 1) == 2.5
+            && AutoReconnect.delay(forAttempt: 4, jitterSample: 0) == 12 && AutoReconnect.delay(forAttempt: 4, jitterSample: 1) == 20,
+          "moved by a quarter either way, so tabs to one host do not all knock at once")
+    check(AutoReconnect.delay(forAttempt: 1, jitterSample: .nan) == 2 && AutoReconnect.delay(forAttempt: 1, jitterSample: -9) == 1.5
+            && AutoReconnect.delay(forAttempt: 1, jitterSample: 9) == 2.5 && AutoReconnect.delay(forAttempt: 0, jitterSample: 0.5) == 2
+            && AutoReconnect.delay(forAttempt: 1_000_000, jitterSample: 0.5) == 60,
+          "and nothing odd put in makes a wait odd")
+
+    // What to do.
+    func decide(_ status: Int32?, ran: TimeInterval, tries: Int, _ cause: AutoReconnect.Cause = .lost, sample: Double = 0.5) -> AutoReconnect.Decision {
+        AutoReconnect.decide(terminationStatus: status, ranFor: ran, attemptsSoFar: tries, cause: cause, jitterSample: sample)
+    }
+    check(decide(65280, ran: 3600, tries: 0) == .retry(after: 2, attempt: 1), "a session that was up for an hour and dropped: try again")
+    check(decide(65280, ran: 29.9, tries: 0) == .stop(.neverConnected) && decide(65280, ran: 30, tries: 0) == .retry(after: 2, attempt: 1),
+          "up for half a minute counts as having worked; less does not")
+    check(decide(65280, ran: 0, tries: 0) == .stop(.neverConnected), "one that never got going is not tried again")
+    check(decide(65280, ran: 2, tries: 1) == .retry(after: 4, attempt: 2) && decide(65280, ran: 2, tries: 5) == .retry(after: 60, attempt: 6),
+          "a try that failed quickly is followed by the next, further out")
+    check(decide(65280, ran: 2, tries: 6) == .stop(.gaveUp), "after six it stops")
+    check(decide(65280, ran: 120, tries: 4) == .retry(after: 2, attempt: 1), "a try that held and then dropped is a new drop, counted from one")
+    for status in notLost {
+        check(decide(status, ran: 3600, tries: 0) == .stop(.notAConnectionError), "\(String(describing: status)) ends it for good")
+    }
+    check(decide(0, ran: 3600, tries: 0, .needsAttention) == .stop(.notAConnectionError), "an ordinary exit is that, whatever was printed")
+    check(decide(65280, ran: 3600, tries: 0, .userDisconnected) == .stop(.disconnectedByUser), "~. is the person's")
+    check(decide(65280, ran: 3600, tries: 0, .needsAttention) == .stop(.needsAttention)
+            && decide(65280, ran: 2, tries: 2, .needsAttention) == .stop(.needsAttention), "a refusal is never tried again, early or late")
+
+    // However it goes, it ends.
+    var tries = 0
+    var waited: TimeInterval = 0
+    var decision = decide(65280, ran: 3600, tries: tries)
+    var guardCount = 0
+    while case .retry(let after, let attempt) = decision, guardCount < 50 {
+        waited += after
+        tries = attempt
+        guardCount += 1
+        decision = decide(65280, ran: 2, tries: tries)
+    }
+    check(tries == AutoReconnect.standard.maxAttempts && decision == .stop(.gaveUp) && waited == 122,
+          "tries that all fail: \(tries) of them over \(waited) s, then \(decision)")
+    let small = AutoReconnect.Policy(maxAttempts: 2, firstDelay: 1, maxDelay: 3, minUptime: 10, jitter: 0)
+    check(AutoReconnect.decide(terminationStatus: 65280, ranFor: 20, attemptsSoFar: 0, cause: .lost, policy: small, jitterSample: 0.9) == .retry(after: 1, attempt: 1)
+            && AutoReconnect.decide(terminationStatus: 65280, ranFor: 1, attemptsSoFar: 1, cause: .lost, policy: small, jitterSample: 0.9) == .retry(after: 2, attempt: 2)
+            && AutoReconnect.decide(terminationStatus: 65280, ranFor: 1, attemptsSoFar: 2, cause: .lost, policy: small, jitterSample: 0.9) == .stop(.gaveUp)
+            && AutoReconnect.delay(forAttempt: 3, policy: small, jitterSample: 0.3) == 3,
+          "the numbers are the policy's")
+
+    // What each try says to ssh, and what the person is told.
+    check(AutoReconnect.unattendedArguments == ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"], "no prompts, and no long wait to connect")
+    check(AutoReconnect.StopReason.needsAttention.note != nil && AutoReconnect.StopReason.gaveUp.note?.contains("\(AutoReconnect.standard.maxAttempts)") == true
+            && AutoReconnect.StopReason.notAConnectionError.note == nil && AutoReconnect.StopReason.neverConnected.note == nil
+            && AutoReconnect.StopReason.disconnectedByUser.note == nil, "only the stops worth explaining are explained")
+    let standard = AutoReconnect.standard
+    check(standard.maxAttempts >= 1 && standard.maxAttempts <= 10 && standard.minUptime >= 10 && standard.maxDelay <= 300 && standard.jitter < 0.5,
+          "the standard policy is modest")
+}
+
 // MARK: Bundled tools on PATH
 
 do {

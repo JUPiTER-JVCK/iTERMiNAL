@@ -189,6 +189,9 @@ final class AppSettings: ObservableObject {
         }
     }
     @Published var shareSignInWithFiles: Bool { didSet { defaults.set(shareSignInWithFiles, forKey: "shareSignInWithFiles") } }
+    /// Starts a dropped `ssh` session again by itself, within the limits in
+    /// `AutoReconnect`. Off: a dropped session waits for Reconnect.
+    @Published var autoReconnect: Bool { didSet { defaults.set(autoReconnect, forKey: "autoReconnect") } }
     /// Forwards kept in Settings and run in the background. See `SavedTunnel`.
     @Published var savedTunnels: [SavedTunnel] {
         didSet {
@@ -432,6 +435,7 @@ final class AppSettings: ObservableObject {
         httpGeolocationEnabled = defaults.bool(forKey: "httpGeolocationEnabled")
         httpGeolocationTemplate = defaults.string(forKey: "httpGeolocationTemplate") ?? GeoLookup.defaultTemplate
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
+        autoReconnect = defaults.object(forKey: "autoReconnect") as? Bool ?? false
         cursorColorHex = defaults.string(forKey: "cursorColorHex") ?? ""
         cursorTextColorHex = defaults.string(forKey: "cursorTextColorHex") ?? ""
         selectionColorHex = defaults.string(forKey: "selectionColorHex") ?? ""
@@ -737,6 +741,7 @@ final class AppSettings: ObservableObject {
         httpGeolocationEnabled = false
         httpGeolocationTemplate = GeoLookup.defaultTemplate
         shareSignInWithFiles = true
+        autoReconnect = false
         cursorColorHex = ""
         cursorTextColorHex = ""
         selectionColorHex = ""
