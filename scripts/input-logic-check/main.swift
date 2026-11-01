@@ -4831,7 +4831,11 @@ do {
     check(AssistantProvider.lmstudio.model(afterSwitchingFrom: "gpt-4o-mini") == nil, "choosing it leaves a model name alone")
     let addresses = AssistantProvider.allCases.compactMap { $0.baseURL }
     check(Set(addresses).count == addresses.count, "no two presets share an address")
-    check(!AssistantProvider.allCases.map(\.label).contains { $0.lowercased().contains("llama") }, "there is no llama.cpp preset: its default port differs between builds")
+    // Matched on "llama.cpp", not "llama": "Ollama" contains the shorter word.
+    check(!AssistantProvider.allCases.map(\.label).contains { $0.lowercased().contains("llama.cpp") || $0.lowercased().contains("llama-server") },
+          "there is no llama.cpp preset: its default port differs between builds")
+    check(!addresses.contains { $0.contains(":8080/") || $0.contains(":9931/") },
+          "and no preset guesses a port llama-server might be listening on")
 }
 
 print("\(checks - failures)/\(checks) checks passed")
