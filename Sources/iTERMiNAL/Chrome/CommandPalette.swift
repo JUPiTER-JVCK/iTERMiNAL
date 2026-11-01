@@ -290,7 +290,7 @@ struct CommandPaletteView: View {
             PaletteAction(id: "tab.new", title: "New Terminal Tab", subtitle: "Open a shell", systemImage: "plus.square", shortcut: "⌘T") {
                 store.openTab()
             },
-            PaletteAction(id: "workspace.new", title: "New Workspace", subtitle: "Group of tabs", systemImage: "folder.badge.plus", shortcut: "⇧⌘N") {
+            PaletteAction(id: "workspace.new", title: "New Space", subtitle: "Group of tabs", systemImage: "folder.badge.plus", shortcut: "⇧⌘N") {
                 store.newWorkspace()
             },
             PaletteAction(id: "split.right", title: "Split Right", subtitle: "Terminal beside this one", systemImage: "rectangle.split.2x1", shortcut: "⌘D") {
