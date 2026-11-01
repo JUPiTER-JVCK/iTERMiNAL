@@ -6406,8 +6406,8 @@ do {
     check(three.progress.map(\.label) == ["Reading part 1 of 3", "Reading part 2 of 3", "Reading part 3 of 3", "Writing the answer"], "and says what it is doing")
 
     // Notes of the longest length, which is what 21 is the count for: they go seven to a group.
-    func longNote(_ count: Int) -> String { String(("n\(count)-" + String(repeating: "x", count: LogAnalysis.noteLimit)).prefix(LogAnalysis.noteLimit)) }
-    let seventeen = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : longNote(count) }
+    func paddedNote(_ count: Int) -> String { String(("n\(count)-" + String(repeating: "x", count: LogAnalysis.noteLimit)).prefix(LogAnalysis.noteLimit)) }
+    let seventeen = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : paddedNote(count) }
     check(seventeen.calls.count == 21 && LogAnalysis.requestCount(chunkCount: 17) == 21, "seventeen parts of the longest notes take 21 requests, as the sheet says: \(seventeen.calls.count)")
     if seventeen.calls.count == 21 {
         check(seventeen.calls[..<17].allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "seventeen notes")
