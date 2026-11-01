@@ -263,7 +263,11 @@ struct ComposerBar: View {
                     .buttonStyle(.plain)
                     .help("Add a terminal, split, or panel")
                     .popover(isPresented: $showActions, arrowEdge: .top) {
-                        ComposerActionsPopover(isPresented: $showActions)
+                        ComposerActionsPopover(isPresented: $showActions, typedCommand: text) {
+                            withAnimation(Motion.banner) {
+                                ai.requestHelp(.explainCommand, offer: nil, typed: text, store: store, settings: settings)
+                            }
+                        }
                             .environmentObject(store)
                             .environmentObject(settings)
                     }

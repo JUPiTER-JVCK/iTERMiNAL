@@ -1400,6 +1400,13 @@ The same two actions work any time, for any terminal, without any detection:
 **Explain last output** (⌥⌘E) and **Suggest a fix** (⌥⌘X) in the Terminal menu
 and the composer's **+** menu.
 
+- **Explain what I typed.** The composer's **+** menu also has **Explain what I
+  typed**, for a command in the input that you have not run: it asks what the
+  command would do, part by part, and whether anything in it is destructive. It
+  sends only the command (values that look like secrets masked) and, if the
+  switches in Settings → AI allow, the folder, branch and workspace name — no
+  terminal output. It **always asks first**, even with "Include recent terminal
+  output" on, since typed text is not output; the command is not run.
 - **What is sent.** From the offer: the command and only the new text that
   appeared after it was sent. From the menu: what is on screen, and the command
   last sent to that terminal from the composer if it is still there. Either way, control sequences are stripped, values that look like

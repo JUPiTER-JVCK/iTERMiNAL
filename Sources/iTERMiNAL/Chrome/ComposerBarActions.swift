@@ -12,6 +12,10 @@ import AppKit
 /// which is why this is a popover over hand-built rows.
 struct ComposerActionsPopover: View {
     @Binding var isPresented: Bool
+    /// What is typed in the composer, and what to do to explain it. The row is
+    /// off while nothing is typed.
+    var typedCommand: String = ""
+    var explainTyped: () -> Void = {}
 
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -34,6 +38,18 @@ struct ComposerActionsPopover: View {
             ) {
                 store.requestComposerHelp(.explain)
             }
+
+            ComposerActionRow(
+                icon: "text.magnifyingglass",
+                title: "Explain what I typed",
+                detail: typedCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Type a command first — it is not run"
+                    : "Ask what this command would do — it is not run",
+                shortcut: nil
+            ) {
+                explainTyped()
+            }
+            .disabled(typedCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             ComposerActionRow(
                 icon: "wrench.and.screwdriver",

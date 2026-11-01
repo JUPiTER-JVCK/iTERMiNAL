@@ -5835,6 +5835,33 @@ do {
     check(selected.command == nil && selected.workingDirectory == nil && selected.gitBranch == nil, "a selection carries no command or folder of its own")
 }
 
+// MARK: Explaining a typed command
+
+// A command that has not run has no output: it is asked about differently, never
+// described as output, and masked like anything else that is sent.
+do {
+    let secret = "AKIAIOSFODNN7EXAMPLE"
+    let request = ErrorHelpRequest.make(
+        kind: .explainCommand, command: "aws s3 rm s3://b --recursive --key \(secret)", rawOutput: "",
+        baseURL: "https://api.openai.com/v1", workingDirectory: "/Users/me/work"
+    )
+    let others: [ErrorHelpKind] = [.explain, .fix, .explainSelection]
+    let prompts = others.map { ErrorHelpRequest.make(kind: $0, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt }
+    check(!prompts.contains(request.prompt), "a typed command has its own question")
+    check(request.prompt.contains("would do") && request.prompt.contains("not been run") && !request.prompt.contains("went wrong"),
+          "which says it has not run: \(request.prompt)")
+    check(request.prompt.contains("destructive"), "and asks about what cannot be undone")
+    check(request.contents == ["the command", "the working directory"], "the sheet lists the command, not output: \(request.contents)")
+    check(!request.preview.contains("Output:") && !request.preview.contains("Selected text:") && request.preview.contains("Command:\n"),
+          "the preview has no output section")
+    check(!request.preview.contains(secret) && request.command?.contains(secret) == false, "a key in the command is masked before it is shown or sent")
+    check(request.consentMessage.contains("the command") && !request.consentMessage.contains("lines of") && request.consentMessage.contains("api.openai.com"),
+          "the question names what and where: \(request.consentMessage)")
+    check(request.lineCount == 0 && request.output.isEmpty, "there is no output in it")
+    check(ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "a\nb", baseURL: "https://a.b").contents == ["2 lines of output"],
+          "the other kinds are unchanged")
+}
+
 // MARK: Local model presets
 
 do {
