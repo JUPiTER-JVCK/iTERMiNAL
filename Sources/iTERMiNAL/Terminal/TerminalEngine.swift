@@ -22,6 +22,8 @@ struct TerminalAppearance: Equatable {
     var cursorTextColor: NSColor? = nil
     var selectionColor: NSColor? = nil
     var boldAsBright: Bool = true
+    /// Whether Option sends Escape plus the key. SwiftTerm's own default is on.
+    var optionAsMeta: Bool = true
     /// Multiplier on the cell height; 1 is the font's own.
     var lineSpacing: CGFloat = 1
 }
@@ -45,6 +47,8 @@ protocol TerminalEngine: AnyObject {
     var onAttention: ((TerminalAttention) -> Void)? { get set }
     /// A link the user clicked inside the terminal.
     var onLinkActivated: ((String) -> Void)? { get set }
+    /// What the terminal takes when files or text are dropped on it.
+    var dropPolicy: TerminalDrop.Policy { get set }
 
     func start(_ configuration: TerminalLaunchConfiguration)
     func send(text: String)

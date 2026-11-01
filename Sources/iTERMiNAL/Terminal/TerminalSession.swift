@@ -61,6 +61,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         var cursorTextColorHex: String
         var selectionColorHex: String
         var boldAsBright: Bool
+        var optionAsMeta: Bool
         var lineSpacing: Double
     }
     private var appliedStyling: StylingInputs?
@@ -98,6 +99,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         )
         engine = SwiftTermEngine(options: options)
         engine.delegate = self
+        // A path on this Mac means nothing to a remote shell, and a bundled
+        // tool draws its own screen: neither is typed into by a drop.
+        engine.dropPolicy = kind.isTool ? .nothing : (kind.isRemote ? .textOnly : .filesAndText)
         engine.onFocusGained = { [weak self] in
             guard let self else { return }
             WorkspaceStore.shared.noteFocused(session: self)
@@ -360,6 +364,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             cursorTextColorHex: settings.cursorTextColorHex,
             selectionColorHex: settings.selectionColorHex,
             boldAsBright: settings.boldAsBright,
+            optionAsMeta: settings.optionAsMeta,
             lineSpacing: settings.terminalLineSpacing
         )
         guard inputs != appliedStyling else { return }
@@ -377,6 +382,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             cursorTextColor: kind.isTool ? nil : settings.colorOverride(inputs.cursorTextColorHex),
             selectionColor: settings.colorOverride(inputs.selectionColorHex),
             boldAsBright: inputs.boldAsBright,
+            // A bundled tool keeps the keyboard it was built against.
+            optionAsMeta: kind.isTool ? true : inputs.optionAsMeta,
             lineSpacing: kind.isTool ? 1 : CGFloat(inputs.lineSpacing)
         ))
         let active = engine.setGPUAcceleration(settings.useGPURendering)

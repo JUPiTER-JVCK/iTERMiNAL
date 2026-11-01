@@ -70,6 +70,13 @@ struct SecuritySettingsView: View {
                 }
             }
 
+            Section("Keyboard") {
+                Toggle("Secure Keyboard Entry", isOn: $settings.secureKeyboardEntry)
+                Text("While iTERMiNAL is the active app, macOS keeps other apps from reading what you type in it — the protection a password field gets. It is released when you switch to another app and when you quit. While it is on, tools that watch the keyboard, such as text expanders and some window-management and accessibility utilities, cannot see keystrokes made here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("How your data is handled") {
                 Text("""
                 • The API socket is created with owner-only permissions inside a private folder, and every request must present a token kept in your keychain.
