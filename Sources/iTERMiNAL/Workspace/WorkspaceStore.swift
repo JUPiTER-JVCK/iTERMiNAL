@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
@@ -161,6 +162,8 @@ final class WorkspaceStore: ObservableObject {
     /// copes with a sheet that is still on its way out; set directly only to
     /// close it.
     @Published var showKeyboardShortcuts = false
+    /// A log file being analyzed, in a sheet of its own (see `LogAnalysis`).
+    @Published var logAnalysisTarget: LogAnalysisTarget?
     /// How many closed sessions the Recents list keeps. An entry pushed off
     /// the end takes its transcript with it, so anything that rebuilds this
     /// list has to respect the same cap.
@@ -917,6 +920,25 @@ final class WorkspaceStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.showKeyboardShortcuts = true
         }
+    }
+
+    /// Opens the sheet that reads the log at `path` and asks the assistant about
+    /// it. Nothing is read or sent until the sheet is up, and nothing is sent
+    /// until the person has seen where it goes and pressed Analyze.
+    func analyzeLog(at path: String) {
+        logAnalysisTarget = LogAnalysisTarget(path: path)
+    }
+
+    /// Asks which file, then analyzes it.
+    func chooseLogToAnalyze() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Analyze"
+        panel.message = "Choose a log file. Nothing is sent until you have seen where it goes."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        analyzeLog(at: url.path)
     }
 
     /// Brings the composer forward and puts the caret in it — un-hiding and

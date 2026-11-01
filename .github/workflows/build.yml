@@ -165,6 +165,7 @@ jobs:
             Sources/iTERMiNAL/AI/AssistantProvider.swift \
             Sources/iTERMiNAL/AI/LocalModels.swift \
             Sources/iTERMiNAL/AI/ErrorHelp.swift \
+            Sources/iTERMiNAL/AI/LogAnalysis.swift \
             Sources/iTERMiNAL/HTTP/HTTPMessage.swift \
             Sources/iTERMiNAL/HTTP/HTTPResponseFormatter.swift \
             Sources/iTERMiNAL/HTTP/HTTPRedaction.swift \
