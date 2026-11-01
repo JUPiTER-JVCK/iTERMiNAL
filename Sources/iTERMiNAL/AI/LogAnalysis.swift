@@ -57,7 +57,7 @@ enum LogAnalysis {
 
     // MARK: Reading
 
-    enum ReadProblem: Equatable {
+    enum ReadProblem: Error, Equatable {
         case notAFile, unreadable, empty, binary
 
         var message: String {
