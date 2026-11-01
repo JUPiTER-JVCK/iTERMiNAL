@@ -7,41 +7,20 @@ struct AISettingsView: View {
 
     @State private var apiKeyDraft = ""
     @State private var keyMessage: String?
-    @State private var providerPreset: ProviderPreset = .openai
-
-    private enum ProviderPreset: String, CaseIterable, Identifiable {
-        case openai, ollama, custom
-
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .openai: return "OpenAI"
-            case .ollama: return "Ollama (local)"
-            case .custom: return "Custom"
-            }
-        }
-
-        var baseURL: String? {
-            switch self {
-            case .openai: return "https://api.openai.com/v1"
-            case .ollama: return "http://127.0.0.1:11434/v1"
-            case .custom: return nil
-            }
-        }
-    }
+    @State private var providerPreset: AssistantProvider = .openai
 
     var body: some View {
         Form {
             Section("Provider") {
-                Picker("Preset", selection: $providerPreset) {
-                    ForEach(ProviderPreset.allCases) { preset in
+                // The setter, not an onChange, does the work: only a pick made
+                // here rewrites the address and model. Syncing the picker to a
+                // URL that was loaded or edited must not touch either.
+                Picker("Preset", selection: Binding(
+                    get: { providerPreset },
+                    set: { choose($0) }
+                )) {
+                    ForEach(AssistantProvider.allCases) { preset in
                         Text(preset.label).tag(preset)
-                    }
-                }
-                .onChange(of: providerPreset) { _, preset in
-                    if let url = preset.baseURL {
-                        settings.assistantBaseURL = url
                     }
                 }
 
@@ -50,19 +29,23 @@ struct AISettingsView: View {
                     .onChange(of: settings.assistantBaseURL) { _, newValue in
                         // Keep the preset in sync when the URL was edited
                         // elsewhere or loaded from preferences.
-                        if newValue == ProviderPreset.openai.baseURL {
-                            providerPreset = .openai
-                        } else if newValue == ProviderPreset.ollama.baseURL {
-                            providerPreset = .ollama
-                        } else if providerPreset != .custom {
-                            providerPreset = .custom
-                        }
+                        providerPreset = AssistantProvider.matching(baseURL: newValue)
                     }
 
                 TextField("Model", text: $settings.assistantModel)
                 Text("OpenAI-compatible chat completions at `{base}/chat/completions`. Point the base URL at Ollama or any compatible proxy for local models.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if providerPreset == .claude {
+                    Text("Claude is reached through Anthropic's OpenAI-compatible endpoint, with an API key from the Claude Console — a Claude.ai account login is not used. Anthropic describes that endpoint as meant for testing and comparison rather than long-term use.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let keysPage = providerPreset.keysPage {
+                        Link("Get an API key in the Claude Console", destination: keysPage)
+                            .font(.caption)
+                    }
+                }
             }
 
             Section("API key") {
@@ -86,7 +69,7 @@ struct AISettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("The key is write-only: it lives in the keychain under `assistant.apiKey` and is never stored in preferences or export snapshots.")
+                    Text(keyHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -130,25 +113,48 @@ struct AISettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            if settings.assistantBaseURL == ProviderPreset.ollama.baseURL {
-                providerPreset = .ollama
-            } else if settings.assistantBaseURL == ProviderPreset.openai.baseURL {
-                providerPreset = .openai
-            } else {
-                providerPreset = .custom
-            }
+            providerPreset = AssistantProvider.matching(baseURL: settings.assistantBaseURL)
         }
     }
 
+    /// A pick from the preset menu: the address it fixes, and a model that
+    /// provider accepts when the field still holds another provider's stock one.
+    private func choose(_ provider: AssistantProvider) {
+        providerPreset = provider
+        // A key typed for the provider just left must not be saved under the
+        // one just chosen, and its "saved"/"cleared" note is no longer true.
+        apiKeyDraft = ""
+        keyMessage = nil
+        if let url = provider.baseURL {
+            settings.assistantBaseURL = url
+        }
+        if let model = provider.model(afterSwitchingFrom: settings.assistantModel) {
+            settings.assistantModel = model
+        }
+    }
+
+    /// The keychain item for the address in use: Claude's has its own, so a key
+    /// saved for another provider is neither shown as set here nor sent there.
+    private var keyAccount: String {
+        AssistantDestination.keyAccount(forBaseURL: settings.assistantBaseURL)
+    }
+
+    /// Built as a `String` first so the account name inside the backticks is
+    /// still read as Markdown code.
+    private var keyHelp: LocalizedStringKey {
+        let text = "The key is write-only: it lives in the keychain under `\(keyAccount)` and is never stored in preferences or export snapshots."
+        return LocalizedStringKey(text)
+    }
+
     private var hasSavedKey: Bool {
-        let key = KeychainStore.get(OpenAICompatibleAssistant.apiKeyAccount) ?? ""
+        let key = KeychainStore.get(keyAccount) ?? ""
         return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func saveKey() {
         let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if KeychainStore.set(trimmed, for: OpenAICompatibleAssistant.apiKeyAccount) {
+        if KeychainStore.set(trimmed, for: keyAccount) {
             apiKeyDraft = ""
             keyMessage = "Key saved."
         } else {
@@ -161,7 +167,7 @@ struct AISettingsView: View {
         // the result left the Status row still reading "Key saved in keychain"
         // right below it, and the user believing a credential was revoked when
         // a locked keychain had refused.
-        let deleted = KeychainStore.delete(OpenAICompatibleAssistant.apiKeyAccount)
+        let deleted = KeychainStore.delete(keyAccount)
         apiKeyDraft = ""
         keyMessage = deleted ? "Key cleared." : "Couldn't remove the key from your keychain."
     }

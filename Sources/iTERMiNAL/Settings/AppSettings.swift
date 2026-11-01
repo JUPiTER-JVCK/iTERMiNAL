@@ -270,7 +270,8 @@ final class AppSettings: ObservableObject {
 
     // MARK: Assistant
     /// OpenAI-compatible API root (no trailing `/chat/completions` required).
-    /// Non-secret; the API key lives in the keychain under `assistant.apiKey`.
+    /// Non-secret; the API key lives in the keychain under `assistant.apiKey`
+    /// (`assistant.apiKey.anthropic` when this is Anthropic's address).
     @Published var assistantBaseURL: String { didSet { defaults.set(assistantBaseURL, forKey: "assistantBaseURL") } }
     @Published var assistantModel: String { didSet { defaults.set(assistantModel, forKey: "assistantModel") } }
     @Published var assistantIncludeCwd: Bool { didSet { defaults.set(assistantIncludeCwd, forKey: "assistantIncludeCwd") } }
