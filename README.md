@@ -348,7 +348,8 @@ A tour of the app in thirty-four pictures, in five groups.
   data", and drivable from the API (navigate, click, fill, read text, wait for
   a selector, screenshot) for testing a web UI from an agent.
 - **Remote sessions and files** — SSH/Mosh terminal sessions to saved hosts
-  (with reconnect), plus a Finder-style file pane that browses this Mac or any
+  (with reconnect, and an opt-in automatic one: see
+  [Reconnecting a dropped session](#reconnecting-a-dropped-session)), plus a Finder-style file pane that browses this Mac or any
   saved host over SFTP, with upload, download, and drag-and-drop. A saved host
   can be reached **through jump hosts** — a bastion, or several in a row — by
   the terminal and the file browser alike, and has a choice about **forwarding
@@ -794,6 +795,55 @@ rectangle that doesn't lie inside the screen is refused.
   there; RDP still opens in the system's app.
 - Command is the remote machine's Super key and Option its Alt; keys held when
   the window loses focus are released.
+
+### Reconnecting a dropped session
+
+A terminal tab to a saved `ssh` host that loses its connection shows a banner
+with **Reconnect**. **Settings → Connections → Reconnect a dropped ssh session
+by itself**, off until you turn it on, presses it for you, under rules built so
+that a failure is never retried in a loop, an account is not locked out, and
+nothing asks for an answer with nobody there:
+
+- **Only a lost connection.** ssh exits with status 255 when the connection goes
+  wrong. The remote shell's own exit status, or a signal, is the end of a
+  session and is left alone.
+- **Only one that had been up for 30 seconds.** A session that drops within
+  seconds of starting never worked, and starting it again only fails again; that
+  is left to the banner.
+- **Not one you ended.** `~.` — which ssh reports as plain "Connection to host
+  closed.", where a drop from the other end says "closed by remote host" first —
+  closing the tab or the pane, and Stop are yours.
+- **Never a refused sign-in or a changed host key.** When a session ends, the
+  last lines ssh printed are read with the rules the file browser already uses
+  for its own failures. If they say the sign-in was refused, too many keys were
+  offered, an identity file cannot be used, or the host key does not match, it
+  stops there and says so: trying again is how an account gets locked out.
+- **With nobody at the keyboard, nothing to answer.** Each try runs ssh with
+  `-o BatchMode=yes -o ConnectTimeout=15`, ahead of everything else on the
+  command line — ssh keeps the first value it is given for an option, so a
+  `BatchMode=no` in the host's extra arguments cannot undo it. ssh signs in with
+  a key or the agent or not at all: it cannot stop at a password or passphrase
+  prompt or at "are you sure you want to continue connecting", and a try gives
+  up connecting after fifteen seconds. A host that wants a password is left
+  to the banner's Reconnect.
+- **Limited, and spread out.** Six tries, waiting about 2, 4, 8, 16, 32 and 60
+  seconds, each moved by up to a quarter either way so that a dozen tabs to one
+  host do not all knock at once. A try that stays up for 30 seconds has worked,
+  and its own end is a new drop, counted from one. After the sixth failure it
+  gives up and says so in the banner.
+- While it waits, the banner counts down, with **Reconnect Now** (which signs in
+  the ordinary way, prompts and all) and **Stop**.
+- **Not for** mosh, which roams by itself; a custom command, which is yours; or
+  a host set to ask before forwarding the agent, because that question cannot be
+  put to an empty chair. Those wait for Reconnect, which asks.
+
+Three things worth knowing. A host that lets a try stay up for 30 seconds and
+then drops it is reconnected each time: that is the feature, and Stop ends it.
+The decision reads what ssh printed last, so a program
+that prints "Permission denied (publickey)." as it dies can stop a reconnect that
+would have worked, and Reconnect is then one click away. And a try runs the same
+host, user, key and options in the same tab: the screen keeps what was on it, and
+whatever was running on the host is gone — which is what `tmux` there is for.
 
 ### Terminal type, transport options and port forwards
 

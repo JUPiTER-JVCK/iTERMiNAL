@@ -70,6 +70,26 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// launch only; Restart launches again.
     private var launchedAt: Date?
 
+    // MARK: Automatic reconnect (see `AutoReconnect`)
+
+    /// A reconnect that is waiting for its turn: which try it is, out of how
+    /// many, and when it starts. Nil when none is.
+    struct ReconnectPlan: Equatable {
+        let attempt: Int
+        let total: Int
+        let at: Date
+    }
+    @Published private(set) var reconnectPlan: ReconnectPlan?
+    /// Why automatic reconnecting stopped, when the person would want to know.
+    /// Cleared by the next launch.
+    @Published private(set) var reconnectNote: String?
+    /// Tries made in the current run of them; 0 for a session the person started.
+    private var reconnectAttempts = 0
+    private var reconnectWork: DispatchWorkItem?
+    /// Set when the person ended the session — closed it, or stopped it — so
+    /// the end that follows is not a drop to retry. A launch clears it.
+    private var endedByUser = false
+
     /// A shell for this session alone, overriding the global setting. The
     /// composer uses it so switching to bash there leaves every other terminal
     /// on whatever the user configured.
@@ -232,14 +252,26 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// connection drops or a launch failed.
     func reconnect() {
         guard !isRunning else { return }
+        cancelAutoReconnect()
+        reconnectAttempts = 0
+        endedByUser = false
         launch()
+    }
+
+    /// Stops a reconnect that is counting down, from its banner.
+    func stopAutoReconnect() {
+        guard reconnectPlan != nil else { return }
+        cancelAutoReconnect()
+        reconnectAttempts = 0
+        reconnectNote = "Automatic reconnecting was stopped."
     }
 
     /// `agentApproved` is nil on the first call. A connection set to ask whether
     /// to forward the agent puts the question and comes back here with the
     /// answer; anything else carries straight on.
-    private func launch(agentApproved: Bool? = nil) {
+    private func launch(agentApproved: Bool? = nil, unattended: Bool = false) {
         let settings = AppSettings.shared
+        reconnectNote = nil
         if agentApproved == nil, let connection = connectionThatAsksAboutAgent(settings) {
             guard !awaitingAgentAnswer else { return }
             awaitingAgentAnswer = true
@@ -256,7 +288,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             directory: isRemote ? nil : currentDirectory,
             shellOverride: shellOverride,
             controlPath: controlPath ?? sharedPathForSharing(settings),
-            agentApproved: agentApproved ?? false
+            agentApproved: agentApproved ?? false,
+            unattended: unattended
         ) {
         case .success(let configuration):
             launchError = nil
@@ -433,9 +466,70 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     func terminate() {
+        // Before the guard: a tab closed while it waits to reconnect must not.
+        endedByUser = true
+        cancelAutoReconnect()
         guard hasStarted, isRunning else { return }
         engine.terminate()
         isRunning = false
+    }
+
+    // MARK: Automatic reconnect
+
+    /// Called when the process has ended. Starts it again after a wait if
+    /// `AutoReconnect` says so; every rule about when not to is there.
+    private func considerAutoReconnect(terminationStatus: Int32?, ranFor: TimeInterval) {
+        // One already waiting is the answer to this end too.
+        guard reconnectPlan == nil else { return }
+        guard AppSettings.shared.autoReconnect, !endedByUser,
+              let connection, AutoReconnect.isEligible(connection) else {
+            reconnectAttempts = 0
+            return
+        }
+        // What ssh printed last says whether a retry could work.
+        let tail = AutoReconnect.tail(of: engine.captureScrollback(maxBytes: 4_096))
+        let decision = AutoReconnect.decide(
+            terminationStatus: terminationStatus,
+            ranFor: ranFor,
+            attemptsSoFar: reconnectAttempts,
+            cause: AutoReconnect.cause(ofOutput: tail, connection: connection),
+            jitterSample: Double.random(in: 0..<1)
+        )
+        switch decision {
+        case .retry(let delay, let attempt):
+            reconnectAttempts = attempt
+            reconnectNote = nil
+            reconnectPlan = ReconnectPlan(
+                attempt: attempt,
+                total: AutoReconnect.standard.maxAttempts,
+                at: Date().addingTimeInterval(delay)
+            )
+            let work = DispatchWorkItem { [weak self] in self?.runAutoReconnect() }
+            reconnectWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        case .stop(let reason):
+            reconnectAttempts = 0
+            reconnectNote = reason.note
+        }
+    }
+
+    /// The wait is over. Checked again because the person may have turned it
+    /// off, closed the tab or reconnected by hand in the meantime.
+    private func runAutoReconnect() {
+        reconnectWork = nil
+        guard reconnectPlan != nil else { return }
+        reconnectPlan = nil
+        guard !isRunning, !endedByUser, AppSettings.shared.autoReconnect,
+              let connection, AutoReconnect.isEligible(connection) else { return }
+        // `agentApproved` is given, so nothing is asked; a connection that asks
+        // is not eligible, and was checked again just above.
+        launch(agentApproved: false, unattended: true)
+    }
+
+    private func cancelAutoReconnect() {
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        reconnectPlan = nil
     }
 
     // MARK: Attention
@@ -638,5 +732,14 @@ extension TerminalSession: TerminalEngineDelegate {
             "exitCode": exitCode ?? -1,
             "remote": isRemote,
         ]))
+        // The last of what ssh printed is still on its way from the pty, and the
+        // decision reads it, so the decision waits a moment for it.
+        let launched = launchedAt
+        let ranFor = launched.map { Date().timeIntervalSince($0) } ?? 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            // Not if it has been started again, or ended, in that moment.
+            guard let self, !self.isRunning, self.launchedAt == launched else { return }
+            self.considerAutoReconnect(terminationStatus: exitCode, ranFor: ranFor)
+        }
     }
 }

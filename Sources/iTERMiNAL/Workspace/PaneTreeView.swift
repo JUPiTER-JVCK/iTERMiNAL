@@ -124,11 +124,18 @@ private struct SessionStatusBanner: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 11))
-            Text(session.launchError ?? "Session \(note).")
+            message
                 .font(.system(size: 11))
                 .lineLimit(2)
             Spacer(minLength: 8)
-            Button(session.isRemote ? "Reconnect" : "Restart") {
+            if session.reconnectPlan != nil {
+                Button("Stop") {
+                    session.stopAutoReconnect()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+            }
+            Button(session.reconnectPlan != nil ? "Reconnect Now" : (session.isRemote ? "Reconnect" : "Restart")) {
                 session.reconnect()
             }
             .buttonStyle(.plain)
@@ -139,5 +146,24 @@ private struct SessionStatusBanner: View {
         .padding(.vertical, 7)
         .background(theme.surface.opacity(0.96))
         .overlay(alignment: .bottom) { FadedDivider() }
+    }
+
+    /// While a reconnect is waiting, the count down to it; otherwise what
+    /// happened to the session, and why it was not started again if that is
+    /// worth saying.
+    @ViewBuilder
+    private var message: some View {
+        if let plan = session.reconnectPlan {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = max(0, Int(plan.at.timeIntervalSince(context.date).rounded(.up)))
+                Text("Connection lost. Reconnecting in \(seconds) s — try \(plan.attempt) of \(plan.total).")
+            }
+        } else if let error = session.launchError {
+            Text(error)
+        } else if let why = session.reconnectNote {
+            Text("Session \(note). \(why)")
+        } else {
+            Text("Session \(note).")
+        }
     }
 }
