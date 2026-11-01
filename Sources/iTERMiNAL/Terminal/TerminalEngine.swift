@@ -7,6 +7,10 @@ struct TerminalLaunchConfiguration {
     var execName: String?
     var environment: [String]
     var initialDirectory: String?
+    /// Whether the shell was started with the hooks that report each command's
+    /// start and exit status (see `ShellIntegration`). Marks from any other
+    /// session are ignored.
+    var shellIntegration = false
 }
 
 /// Visual properties the UI pushes into the terminal view whenever the theme

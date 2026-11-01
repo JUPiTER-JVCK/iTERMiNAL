@@ -34,6 +34,16 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// True after a bell / OSC attention while this pane was not in front of
     /// the user. Cleared when the session (or its tab) becomes focused.
     @Published private(set) var needsAttention = false
+    /// What the last command did, when this shell reports it (Settings →
+    /// Terminal → Shell integration). Cleared when the next command starts.
+    @Published private(set) var lastCommandResult: CommandResult?
+
+    struct CommandResult: Equatable {
+        let exitCode: Int?
+        /// How long it ran, when its start was seen.
+        let seconds: Double?
+        let finishedAt: Date
+    }
 
     let engine: SwiftTermEngine
     /// Coalesces rapid bells / identical OSC text to about one event per
@@ -42,6 +52,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var lastAttentionAt = Date.distantPast
     private var lastAttentionFingerprint: String?
     private var hasStarted = false
+    /// Whether this shell was started with the integration hooks. Marks are
+    /// believed only if so: anything a program prints can look like one.
+    private var shellIntegrationActive = false
+    private var commandTracker = ShellIntegration.CommandTracker()
     /// Set while the question about forwarding the agent is on screen, so a
     /// second start cannot put a second copy of it up.
     private var awaitingAgentAnswer = false
@@ -135,6 +149,12 @@ final class TerminalSession: ObservableObject, Identifiable {
                 self?.noteCommand(command)
             }
         }
+        engine.onShellMark = { [weak self] mark in
+            // Same queue caveat as the callbacks above.
+            DispatchQueue.main.async {
+                self?.noteShellMark(mark)
+            }
+        }
         engine.onLinkActivated = { [weak self] link in
             guard let self else { return }
             EventBus.shared.publish(APIEvent("session.link", [
@@ -214,6 +234,40 @@ final class TerminalSession: ObservableObject, Identifiable {
         return currentDirectory
     }
 
+    /// "exit 1" after a command that failed, for the sidebar. Nil after one that
+    /// succeeded, while one is running, and for a shell that does not report.
+    var failedCommandNote: String? {
+        guard let code = lastCommandResult?.exitCode, code != 0 else { return nil }
+        return "exit \(code)"
+    }
+
+    /// A mark from the shell's own hooks.
+    private func noteShellMark(_ mark: ShellIntegration.Mark) {
+        guard shellIntegrationActive else { return }
+        // A command is starting: whatever the last one did is no longer the news.
+        if case .commandStart = mark { lastCommandResult = nil }
+        let now = Date()
+        guard let finished = commandTracker.handle(mark, at: now) else { return }
+        lastCommandResult = CommandResult(exitCode: finished.exitCode, seconds: finished.seconds, finishedAt: now)
+        announceIfLong(finished)
+    }
+
+    /// Says so when a command that ran for a long time ends where nobody is
+    /// looking — by the same route as a bell, so it follows Settings → Terminal →
+    /// Notifications (off, in-app marks, or system banners as well).
+    private func announceIfLong(_ finished: ShellIntegration.Finished) {
+        let settings = AppSettings.shared
+        guard settings.notifyLongCommands,
+              let seconds = finished.seconds,
+              seconds >= Double(settings.longCommandSeconds) else { return }
+        // A command finishing in the pane you are watching needs no announcing.
+        guard !(WorkspaceStore.shared.focusedSessionID == id && NSApp.isActive) else { return }
+        noteAttention(.osc777(
+            title: "\(lastCommand ?? "Command") finished",
+            body: ShellIntegration.summary(exitCode: finished.exitCode, seconds: seconds)
+        ))
+    }
+
     /// Short status for the sidebar: nil while healthy.
     var statusNote: String? {
         if launchError != nil { return "failed" }
@@ -260,6 +314,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         ) {
         case .success(let configuration):
             launchError = nil
+            shellIntegrationActive = configuration.shellIntegration
+            commandTracker = ShellIntegration.CommandTracker()
+            lastCommandResult = nil
             engine.start(configuration)
             launchedAt = Date()
             isRunning = true

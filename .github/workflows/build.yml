@@ -207,6 +207,8 @@ jobs:
             Sources/iTERMiNAL/Remote/RFBAuth.swift \
             Sources/iTERMiNAL/Terminal/TerminalType.swift \
             Sources/iTERMiNAL/Terminal/GhosttyThemeFile.swift \
+            Sources/iTERMiNAL/Terminal/ShellIntegration.swift \
+            Sources/iTERMiNAL/Terminal/ShellIntegrationFiles.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
             Sources/iTERMiNAL/Terminal/BackgroundOpacity.swift \
             Sources/iTERMiNAL/Terminal/TerminalLinks.swift \
@@ -219,6 +221,16 @@ jobs:
             Sources/iTERMiNAL/Workspace/TabOrder.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
+
+      # The zsh files the app points ZDOTDIR at run inside someone's own shell, so a
+      # mistake in them is a broken terminal, not a failed test. Here they run in the
+      # runner's real zsh, on a pseudo-terminal, through every case that matters:
+      # the harness built above writes them exactly as the app does.
+      - name: Check shell integration
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/input-logic-check" --write-shell-integration "$RUNNER_TEMP/zsh-integration"
+          python3 scripts/shell-integration-check/check.py "$RUNNER_TEMP/zsh-integration"
 
       # imgcat is a shell script, so its output is read here the way the
       # terminal engine reads an inline image, on the Mac's own base64 and sh.

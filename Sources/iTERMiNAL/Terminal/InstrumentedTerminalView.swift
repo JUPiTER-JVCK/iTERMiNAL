@@ -19,6 +19,10 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// Reports a finished command line, for naming the tab after what it is
     /// doing rather than after its directory.
     var onCommand: ((String) -> Void)?
+    /// A mark from a shell started with the integration hooks (OSC 633): a prompt
+    /// is about to be drawn, a command starts, a command ended with a status.
+    /// Called on whichever queue SwiftTerm parses on.
+    var onShellMark: ((ShellIntegration.Mark) -> Void)?
     /// What the app adds to the right-click menu beneath the editing items —
     /// splitting the pane, opening a tab. Asked each time the menu opens, so it
     /// can reflect the moment.
@@ -245,6 +249,17 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
                 title: title.isEmpty ? nil : title,
                 body: body.isEmpty ? nil : body
             ))
+        }
+    }
+
+    /// Reads OSC 633 from a shell started with the integration hooks. SwiftTerm
+    /// handles OSC 133 itself and leaves this code alone, so registering for it
+    /// displaces nothing. The handler is stored on this terminal's own parser,
+    /// so, as above, it holds `self` weakly.
+    func installShellMarkHandler() {
+        getTerminal().registerOscHandler(code: ShellIntegration.oscCode) { [weak self] data in
+            guard let mark = ShellIntegration.parse(data) else { return }
+            self?.onShellMark?(mark)
         }
     }
 

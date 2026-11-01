@@ -18,6 +18,11 @@ final class SwiftTermEngine: TerminalEngine {
     var onLinkActivated: ((String) -> Void)?
     /// Called with each command line the shell is given.
     var onCommand: ((String) -> Void)?
+    /// Called with each mark from a shell started with the integration hooks.
+    var onShellMark: ((ShellIntegration.Mark) -> Void)? {
+        get { terminalView.onShellMark }
+        set { terminalView.onShellMark = newValue }
+    }
     /// What the app adds to the right-click menu, beneath the editing items.
     var contextMenuActions: (() -> [TerminalMenuAction])? {
         get { terminalView.contextMenuActions }
@@ -84,6 +89,7 @@ final class SwiftTermEngine: TerminalEngine {
             self?.onAttention?(attention)
         }
         terminalView.installAttentionOSCHandlers()
+        terminalView.installShellMarkHandler()
         // Files and text can be dropped on a terminal; what is accepted is
         // `dropPolicy`, which stays `.nothing` until the session sets it.
         terminalView.registerForDraggedTypes([.fileURL, .string])

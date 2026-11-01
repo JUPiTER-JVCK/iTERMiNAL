@@ -73,12 +73,27 @@ enum SessionLaunch {
         switch kind {
         case .localShell:
             let shell = settings.resolvedShell(override: shellOverride)
+            // Only zsh, which is what the hooks are written for, and only when
+            // asked. If the folder for the wrapper files cannot be made safely,
+            // the shell starts the ordinary way rather than not at all.
+            var integration: ShellIntegration.EnvironmentChange?
+            if settings.shellIntegration, ShellIntegration.isZsh(path: shell.path),
+               case .success(let wrapper) = ShellIntegrationFiles.installZsh() {
+                integration = ShellIntegration.zshEnvironment(
+                    wrapperDirectory: wrapper, inheriting: ProcessInfo.processInfo.environment
+                )
+            }
             return .success(TerminalLaunchConfiguration(
                 executable: shell.path,
                 args: shell.args,
                 execName: shell.execName,
-                environment: environment(colors: settings.outputColors, terminal: settings.localTerminalType),
-                initialDirectory: directory ?? settings.resolvedInitialDirectory
+                environment: environment(
+                    colors: settings.outputColors,
+                    terminal: settings.localTerminalType,
+                    adjusting: integration
+                ),
+                initialDirectory: directory ?? settings.resolvedInitialDirectory,
+                shellIntegration: integration != nil
             ))
 
         case .remote(let id):
@@ -226,7 +241,11 @@ enum SessionLaunch {
     /// `terminal` is what `TERM` says. `COLORTERM` goes with it only for a type
     /// that claims colour, and a value inherited from whatever launched the app
     /// is removed for one that does not, so a vt100 never also says "truecolor".
-    static func environment(colors: OutputColors? = nil, terminal: TerminalType = .default) -> [String] {
+    static func environment(
+        colors: OutputColors? = nil,
+        terminal: TerminalType = .default,
+        adjusting integration: ShellIntegration.EnvironmentChange? = nil
+    ) -> [String] {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = terminal.termValue
         if terminal.advertisesTrueColor {
@@ -245,6 +264,10 @@ enum SessionLaunch {
             // Only what is not set already, and the shell's own startup files
             // run after this — so a person's `.zshrc` has the last word.
             for (name, value) in colors.environment(inheriting: env) { env[name] = value }
+        }
+        if let integration {
+            for name in integration.remove { env.removeValue(forKey: name) }
+            for (name, value) in integration.set { env[name] = value }
         }
         return env.map { "\($0.key)=\($0.value)" }
     }

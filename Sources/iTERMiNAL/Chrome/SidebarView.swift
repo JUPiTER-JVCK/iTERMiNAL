@@ -780,6 +780,11 @@ private struct SessionRowContent: View {
                     Text(note)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                } else if let failed = session.failedCommandNote {
+                    Text(failed)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.red.opacity(0.85))
+                        .monospacedDigit()
                 } else {
                     Text(RelativeTime.short(since: session.lastActivityAt))
                         .font(.system(size: 10))
