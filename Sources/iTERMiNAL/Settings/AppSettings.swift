@@ -205,6 +205,7 @@ final class AppSettings: ObservableObject {
     /// party does nothing until asked to be allowed.
     @Published var httpGeolocationEnabled: Bool { didSet { defaults.set(httpGeolocationEnabled, forKey: "httpGeolocationEnabled") } }
     @Published var httpGeolocationTemplate: String { didSet { defaults.set(httpGeolocationTemplate, forKey: "httpGeolocationTemplate") } }
+    @Published var showStatusBar: Bool { didSet { defaults.set(showStatusBar, forKey: "showStatusBar") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// How a focused split pane is marked, and in what colour.
     @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
@@ -446,6 +447,7 @@ final class AppSettings: ObservableObject {
         } else {
             importedThemes = []
         }
+        showStatusBar = defaults.object(forKey: "showStatusBar") as? Bool ?? true
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
         if let data = defaults.data(forKey: "savedTunnels"),
            let decoded = try? JSONDecoder().decode([SavedTunnel].self, from: data) {
@@ -806,6 +808,7 @@ final class AppSettings: ObservableObject {
         terminalThemeID = "auto"
         localTerminalTypeTag = TerminalType.default.rawValue
         remoteTerminalTypeTag = TerminalType.default.rawValue
+        showStatusBar = true
         showRemotePorts = false
         httpGeolocationEnabled = false
         httpGeolocationTemplate = GeoLookup.defaultTemplate

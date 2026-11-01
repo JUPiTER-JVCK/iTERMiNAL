@@ -200,9 +200,13 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            if settings.showSystemMetrics || settings.showRemotePorts {
+            if settings.showStatusBar || settings.showSystemMetrics || settings.showRemotePorts {
                 FadedDivider()
-                DetailBottomStrip(showMetrics: settings.showSystemMetrics, showPorts: settings.showRemotePorts)
+                DetailBottomStrip(
+                    showStatus: settings.showStatusBar,
+                    showMetrics: settings.showSystemMetrics,
+                    showPorts: settings.showRemotePorts
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -292,8 +296,9 @@ struct DetailView: View {
     }
 }
 
-/// The strip along the window's bottom, all at the right: the machine's vital
-/// signs and, when it is turned on, the Remote Ports globe after them.
+/// The strip along the window's bottom: the focused terminal's status at the
+/// left, and at the right the machine's vital signs and, when it is turned on,
+/// the Remote Ports globe after them.
 ///
 /// A strip rather than a floating card: that corner is exactly where a terminal
 /// writes its newest output, and something hovering over it would cover the one
@@ -301,11 +306,16 @@ struct DetailView: View {
 ///
 /// One line, not the sidebar's two — the detail column has the width for it.
 private struct DetailBottomStrip: View {
+    let showStatus: Bool
     let showMetrics: Bool
     let showPorts: Bool
 
     var body: some View {
         HStack(spacing: 14) {
+            // Where the globe used to be: what the focused terminal is doing.
+            if showStatus {
+                StatusBarReadout()
+            }
             Spacer(minLength: 12)
             if showMetrics {
                 SystemMetricsReadout()

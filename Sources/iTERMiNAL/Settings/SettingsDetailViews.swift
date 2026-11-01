@@ -200,6 +200,11 @@ struct AppearanceSettingsView: View {
 
             EffectsSection()
             Section("Status") {
+                Toggle("Status bar", isOn: $settings.showStatusBar)
+                Text("A line at the bottom left of the window about the focused terminal: who and where you are, the current directory, the git branch, and whether the last command failed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("System monitor", isOn: $settings.showSystemMetrics)
                 Text("Live CPU, memory, GPU and network for this Mac, in a strip along the bottom right of the window. Hover the numbers for detail. Off stops the sampling as well as hiding the strip.")
                     .font(.caption)
