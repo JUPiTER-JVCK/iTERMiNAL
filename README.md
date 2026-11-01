@@ -230,6 +230,21 @@ A tour of the app in thirty-four pictures, in five groups.
   the screen, so it is safe while a program is running. A program that has
   switched on mouse reporting does not receive the right button (the terminal
   engine never reported it), so the menu takes nothing from it.
+- **Drop onto a terminal** — drag files from Finder onto a local terminal and
+  their paths are typed at the prompt, each one quoted as a single word, with a
+  space after and never a Return, so nothing runs. Drag text and it goes in the
+  way ⌘V would: framed as a bracketed paste when the program asked for that, and
+  refused when it has several lines and the program did not (they would run one
+  by one). Control characters are removed from text first, so it cannot end the
+  paste early. A remote session takes text only — a path on this Mac means
+  nothing there — and a bundled tool such as btop takes nothing. A file name
+  with a control character in it is refused, as is a drop of more than 100 files
+  or 64 KB of text, and a bare UUID is ignored because that is how a tab is
+  dragged in the sidebar.
+- **Option as Meta** — Settings → Terminal → Keyboard. On, the default, Option
+  sends Escape plus the key, so Option-B and Option-F move by word in zsh and
+  bash. Off, Option types the character your layout gives it, such as `@` or
+  `€`. A bundled tool keeps the default.
 - **Colored output** — `ls` prints folders, links and programs in color, and
   `man` pages (and anything read through `less`) get colored headings, options
   and placeholders, with no shell plugin to install: the app gives each local
@@ -982,6 +997,11 @@ to `ssh`, never to iTERMiNAL. **Try Again** afterwards.
   constant time.
 - **Secrets live only in the keychain** — never in preferences, the saved
   layout, or exported snapshots.
+- **Secure Keyboard Entry is there, and off.** Settings → Security, or Terminal
+  → Secure Keyboard Entry, turns on macOS's secure input, which keeps other apps
+  from reading what you type here. It is held only while iTERMiNAL is the active
+  app and is released when you switch away or quit; while it is on, tools that
+  watch the keyboard, such as text expanders, cannot see keystrokes made here.
 - **The assistant sends only what you switch on.** Working directory, git
   branch and workspace name travel by default; the visible terminal screen
   does not, and has to be turned on in Settings → AI — except that Explain /

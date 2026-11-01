@@ -1273,6 +1273,138 @@ do {
     check(ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt.contains("fenced code block"), "fix asks for a fenced command")
 }
 
+// MARK: Drops onto a terminal
+
+// What a drop may type into a shell: paths quoted as single words and never
+// ending in Return; text with anything a terminal would act on removed, kept
+// from closing a bracketed paste early, and refused when it would run line by
+// line.
+do {
+    func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+    func occurrences(of needle: [UInt8], in haystack: [UInt8]) -> Int {
+        guard !needle.isEmpty, haystack.count >= needle.count else { return 0 }
+        var count = 0
+        for start in 0...(haystack.count - needle.count) where Array(haystack[start..<(start + needle.count)]) == needle {
+            count += 1
+        }
+        return count
+    }
+
+    // Paths.
+    check(TerminalDrop.typedPaths(["/Users/me/a.txt"]) == "/Users/me/a.txt ", "a plain path is typed as it is, with a space after")
+    check(TerminalDrop.typedPaths(["/Users/me/my file.txt", "/tmp/b"]) == "'/Users/me/my file.txt' /tmp/b ", "a path with a space is one quoted word: \(String(describing: TerminalDrop.typedPaths(["/Users/me/my file.txt", "/tmp/b"])))")
+    check(TerminalDrop.typedPaths(["/tmp/it's"]) == "'/tmp/it'\\''s' ", "an apostrophe is closed, escaped and reopened")
+    check(TerminalDrop.typedPaths(["/tmp/$(rm -rf ~)"]) == "'/tmp/$(rm -rf ~)' ", "a command substitution in a name is quoted, not run")
+    check(TerminalDrop.typedPaths(["/tmp/a`b`"]) == "'/tmp/a`b`' ", "backticks in a name are quoted")
+    check(TerminalDrop.typedPaths([]) == nil, "no paths, nothing typed")
+    check(TerminalDrop.typedPaths(["a.txt"]) == nil && TerminalDrop.typedPaths(["-rf"]) == nil && TerminalDrop.typedPaths([""]) == nil,
+          "a path that is not absolute is refused, so it can never read as an option")
+    check(TerminalDrop.typedPaths(["/tmp/a\nrm -rf ~"]) == nil && TerminalDrop.typedPaths(["/tmp/a\rb"]) == nil, "a line break in a name is refused")
+    check(TerminalDrop.typedPaths(["/tmp/a\u{1B}[2Jb"]) == nil && TerminalDrop.typedPaths(["/tmp/a\u{9B}b"]) == nil, "an escape, 7-bit or 8-bit, in a name is refused")
+    check(TerminalDrop.typedPaths(["/tmp/ok", "/tmp/bad\n"]) == nil, "one unsafe name refuses the whole drop")
+    for paths in [["/a"], ["/a b", "/c"], ["/it's"]] {
+        let typed = TerminalDrop.typedPaths(paths) ?? ""
+        check(!typed.contains("\n") && !typed.contains("\r") && typed.hasSuffix(" "), "paths never end a line: \(typed.debugDescription)")
+    }
+    check(TerminalDrop.typedPaths(Array(repeating: "/tmp/f", count: TerminalDrop.maxPaths)) != nil, "the most files allowed are typed")
+    check(TerminalDrop.typedPaths(Array(repeating: "/tmp/f", count: TerminalDrop.maxPaths + 1)) == nil, "one more is refused")
+
+    // Line breaks and control characters.
+    check(TerminalDrop.sanitized("a\r\nb\nc\rd") == "a\rb\rc\rd", "each kind of line break becomes one CR: \(TerminalDrop.sanitized("a\r\nb\nc\rd").debugDescription)")
+    check(TerminalDrop.sanitized("a\r\r\nb") == "a\r\rb", "a lone CR before a CRLF stays its own break")
+    check(TerminalDrop.sanitized("a\u{07}b\u{00}c\u{7F}d") == "abcd", "bell, NUL and DEL are removed")
+    check(TerminalDrop.sanitized("a\tb") == "a\tb", "Tab is kept")
+    check(TerminalDrop.sanitized("a\u{9B}b\u{85}c") == "abc", "8-bit control characters are removed")
+    check(TerminalDrop.sanitized("日本語 🎉 é") == "日本語 🎉 é", "CJK, emoji and accents are untouched")
+
+    // Text with bracketed paste off: it would run as it arrives.
+    check(TerminalDrop.textPayload("ls -la", bracketedPasteMode: false) == bytes("ls -la"), "one line is typed as it is")
+    check(TerminalDrop.textPayload("ls -la\n", bracketedPasteMode: false) == bytes("ls -la"), "a trailing line break is dropped, so it does not run")
+    check(TerminalDrop.textPayload("ls -la\r\n\r\n", bracketedPasteMode: false) == bytes("ls -la"), "so are several")
+    check(TerminalDrop.textPayload("a\nb", bracketedPasteMode: false) == nil, "two lines are refused when the shell would run them one by one")
+    check(TerminalDrop.textPayload("a\u{1B}[31mb", bracketedPasteMode: false) == bytes("a[31mb"), "an escape is removed")
+    for sample in ["x", "a\u{1B}b", "tab\there", "日本語"] {
+        let payload = TerminalDrop.textPayload(sample, bracketedPasteMode: false) ?? []
+        check(!payload.contains(0x1B) && !payload.contains(0x0D) && !payload.contains(0x0A), "unbracketed text carries no ESC or line break: \(sample.debugDescription)")
+    }
+
+    // Text with bracketed paste on: framed, lines kept together.
+    check(TerminalDrop.textPayload("a\nb", bracketedPasteMode: true) == TerminalDrop.pasteStart + bytes("a\rb") + TerminalDrop.pasteEnd,
+          "lines are framed as a paste and joined with CR")
+    check(TerminalDrop.textPayload("a\r\nb", bracketedPasteMode: true) == TerminalDrop.pasteStart + bytes("a\rb") + TerminalDrop.pasteEnd, "CRLF is one break")
+    check(TerminalDrop.pasteStart == bytes("\u{1B}[200~") && TerminalDrop.pasteEnd == bytes("\u{1B}[201~"), "the markers are ESC [ 200 ~ and ESC [ 201 ~")
+    let hostile = TerminalDrop.textPayload("x\u{1B}[201~rm -rf ~\n", bracketedPasteMode: true) ?? []
+    check(occurrences(of: TerminalDrop.pasteEnd, in: hostile) == 1 && hostile.suffix(6) == TerminalDrop.pasteEnd[...],
+          "text cannot close the paste early: \(String(decoding: hostile, as: UTF8.self).debugDescription)")
+    check(occurrences(of: TerminalDrop.pasteStart, in: hostile) == 1, "nor open another")
+
+    // What is not text to type.
+    check(TerminalDrop.textPayload("", bracketedPasteMode: true) == nil && TerminalDrop.textPayload(" \n\t ", bracketedPasteMode: false) == nil, "nothing to type")
+    check(TerminalDrop.textPayload("3F2504E0-4F89-41D3-9A0C-0305E82C3301", bracketedPasteMode: false) == nil
+            && TerminalDrop.textPayload("  3f2504e0-4f89-41d3-9a0c-0305e82c3301\n", bracketedPasteMode: true) == nil,
+          "a bare UUID is a tab being dragged, and is not typed")
+    check(TerminalDrop.textPayload("id 3F2504E0-4F89-41D3-9A0C-0305E82C3301", bracketedPasteMode: false) != nil, "a UUID inside a sentence is text")
+    check(TerminalDrop.textPayload(String(repeating: "a", count: TerminalDrop.maxTextBytes), bracketedPasteMode: false) != nil, "text at the limit is typed")
+    check(TerminalDrop.textPayload(String(repeating: "a", count: TerminalDrop.maxTextBytes + 1), bracketedPasteMode: false) == nil, "text over it is refused")
+    check(TerminalDrop.textPayload("日本語 🎉", bracketedPasteMode: false) == bytes("日本語 🎉"), "CJK and emoji are sent as UTF-8")
+}
+
+// MARK: Secure keyboard entry bookkeeping
+
+// The system switch counts, so an enable is made once and undone once, and
+// a call that failed leaves the state telling the truth.
+do {
+    var state = SecureInputState()
+    var calls: [SecureInputState.Action] = []
+    func step(_ wanted: Bool, succeeding: Bool = true) {
+        state.update(wanted: wanted) { action in
+            calls.append(action)
+            return succeeding
+        }
+    }
+
+    check(!state.engaged, "it starts off")
+    step(false)
+    check(calls.isEmpty && !state.engaged, "off and wanted off makes no call")
+    step(true)
+    check(calls == [.enable] && state.engaged, "turning on enables once")
+    step(true); step(true)
+    check(calls == [.enable], "wanted on again makes no second enable")
+    step(false)
+    check(calls == [.enable, .disable] && !state.engaged, "turning off disables once")
+    step(false)
+    check(calls == [.enable, .disable], "wanted off again makes no second disable")
+
+    // An enable that fails leaves nothing outstanding, and is tried again.
+    calls = []
+    step(true, succeeding: false)
+    check(calls == [.enable] && !state.engaged, "a failed enable is not recorded as on")
+    step(false)
+    check(calls == [.enable], "so there is nothing to disable")
+    step(true)
+    check(calls == [.enable, .enable] && state.engaged, "and it is tried again")
+
+    // A disable that fails is kept, so the next pass retries it.
+    calls = []
+    step(false, succeeding: false)
+    check(calls == [.disable] && state.engaged, "a failed disable still counts as on")
+    step(false)
+    check(calls == [.disable, .disable] && !state.engaged, "and is retried until it works")
+
+    // Any run of changes leaves enables and disables in step.
+    var fresh = SecureInputState()
+    var enables = 0, disables = 0
+    var balanced = true
+    for wanted in [true, true, false, true, false, false, true, false, true, true, false] {
+        fresh.update(wanted: wanted) { action in
+            if action == .enable { enables += 1 } else { disables += 1 }
+            return true
+        }
+        if enables - disables != (fresh.engaged ? 1 : 0) { balanced = false }
+    }
+    check(balanced, "enables minus disables is always the one outstanding, or none")
+}
+
 // MARK: Assistant output is never run
 
 // The assistant's words reach the terminal only by a person pressing Return in

@@ -157,6 +157,18 @@ final class AppSettings: ObservableObject {
     @Published var selectionColorHex: String { didSet { defaults.set(selectionColorHex, forKey: "selectionColorHex") } }
     /// Whether bold text in the eight dark ANSI colours is drawn in the bright ones.
     @Published var boldAsBright: Bool { didSet { defaults.set(boldAsBright, forKey: "boldAsBright") } }
+    /// Whether Option sends Escape plus the key (Meta), as shells and editors
+    /// expect, or types the character the keyboard layout gives it.
+    @Published var optionAsMeta: Bool { didSet { defaults.set(optionAsMeta, forKey: "optionAsMeta") } }
+    /// macOS secure keyboard input while this app is the active one. The
+    /// setting is applied the moment it changes, so a menu item, the settings
+    /// page and a reset all agree.
+    @Published var secureKeyboardEntry: Bool {
+        didSet {
+            defaults.set(secureKeyboardEntry, forKey: "secureKeyboardEntry")
+            SecureKeyboardEntry.shared.refresh(enabled: secureKeyboardEntry)
+        }
+    }
     /// Multiplier on the terminal's line height. See `VisualRange`.
     @Published var terminalLineSpacing: Double { didSet { defaults.set(terminalLineSpacing, forKey: "terminalLineSpacing") } }
     /// The accent when `accentID` is "custom", as "#RRGGBB".
@@ -406,6 +418,8 @@ final class AppSettings: ObservableObject {
         cursorTextColorHex = defaults.string(forKey: "cursorTextColorHex") ?? ""
         selectionColorHex = defaults.string(forKey: "selectionColorHex") ?? ""
         boldAsBright = defaults.object(forKey: "boldAsBright") as? Bool ?? true
+        optionAsMeta = defaults.object(forKey: "optionAsMeta") as? Bool ?? true
+        secureKeyboardEntry = defaults.object(forKey: "secureKeyboardEntry") as? Bool ?? false
         terminalLineSpacing = VisualRange.clamp(
             defaults.object(forKey: "terminalLineSpacing") as? Double ?? 1, to: VisualRange.lineSpacing)
         customAccentHex = defaults.string(forKey: "customAccentHex") ?? FrameStyle.hexString(0x10A37F)
@@ -704,6 +718,8 @@ final class AppSettings: ObservableObject {
         cursorTextColorHex = ""
         selectionColorHex = ""
         boldAsBright = true
+        optionAsMeta = true
+        secureKeyboardEntry = false
         terminalLineSpacing = 1
         animationSpeed = 1
         splitFocusStyleTag = SplitFocusStyle.standard.rawValue

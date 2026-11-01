@@ -70,7 +70,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    // Secure keyboard input is held only while this is the active app.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        SecureKeyboardEntry.shared.refresh(enabled: AppSettings.shared.secureKeyboardEntry)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        SecureKeyboardEntry.shared.refresh(enabled: AppSettings.shared.secureKeyboardEntry)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        SecureKeyboardEntry.shared.release()
         LocalAPIServer.shared.stop()
         // A child `ssh -N` is not stopped by its parent exiting.
         SavedTunnelRunner.shared.stopAll()
@@ -151,6 +161,10 @@ struct AppCommands: Commands {
                 settings.terminalFontSize = 13
             }
             .keyboardShortcut("0", modifiers: .command)
+
+            Divider()
+
+            Toggle("Secure Keyboard Entry", isOn: $settings.secureKeyboardEntry)
 
             Divider()
 

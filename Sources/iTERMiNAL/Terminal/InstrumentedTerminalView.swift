@@ -24,6 +24,15 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// can reflect the moment.
     var contextMenuActions: (() -> [TerminalMenuAction])?
 
+    /// What a drop onto this terminal may carry. Nothing until the session
+    /// says otherwise; see `TerminalDrop`.
+    var dropPolicy: TerminalDrop.Policy = .nothing
+
+    /// Whether the drag now over this view would be accepted. Worked out once,
+    /// as it enters, because AppKit asks again with every mouse move and text
+    /// can be long.
+    private var dragIsAcceptable = false
+
     /// What has been typed since the last Enter.
     private var lineBuffer: [UInt8] = []
     /// Cleared when something happens that makes the buffer stop matching what
@@ -128,6 +137,70 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
                 cellWidth: size.width, cellHeight: size.height,
                 cols: terminal.cols, rows: terminal.rows) else { return nil }
         return terminal.link(at: .screen(Position(col: cell.col, row: cell.row)), mode: .explicitAndImplicit)
+    }
+
+    // MARK: Drops
+
+    /// What a drop would type into the shell, or nil when this terminal takes
+    /// none of it. Files win over text when a drag carries both, as in Finder.
+    private enum DropContent {
+        case typed(String)
+        case bytes([UInt8])
+    }
+
+    private func dropContent(from sender: NSDraggingInfo) -> DropContent? {
+        guard dropPolicy != .nothing else { return nil }
+        let pasteboard = sender.draggingPasteboard
+        let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        if !urls.isEmpty {
+            // A drag of files is files or nothing. A path on this Mac is no use
+            // to a remote shell, and the plain-text form such a drag can also
+            // carry is just a file's name — not what the person dragged — so
+            // it is never tried. A set of paths with one unsafe name is
+            // likewise refused whole.
+            guard dropPolicy == .filesAndText else { return nil }
+            // `filePathURL` turns a file-reference URL (some apps drag those)
+            // into the real path; for an ordinary file URL it is the same one.
+            // It belongs to `NSURL`, not Swift's `URL`, hence the bridge.
+            let paths = urls.map { (($0 as NSURL).filePathURL ?? $0).path }
+            return TerminalDrop.typedPaths(paths).map(DropContent.typed)
+        }
+        if let text = pasteboard.string(forType: .string),
+           let payload = TerminalDrop.textPayload(text, bracketedPasteMode: getTerminal().bracketedPasteMode) {
+            return .bytes(payload)
+        }
+        return nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragIsAcceptable = dropContent(from: sender) != nil
+        return dragIsAcceptable ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragIsAcceptable ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dragIsAcceptable = false
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { dragIsAcceptable = false }
+        guard let content = dropContent(from: sender) else {
+            NSSound.beep()
+            return false
+        }
+        switch content {
+        case .typed(let line):
+            send(txt: line)
+        case .bytes(let payload):
+            send(data: payload[...])
+        }
+        window?.makeFirstResponder(self)
+        return true
     }
 
     /// BEL — SwiftTerm exposes this as an open TerminalDelegate method.

@@ -176,6 +176,12 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Keyboard") {
+                Toggle("Option key acts as Meta", isOn: $settings.optionAsMeta)
+                Text("On, Option sends Escape followed by the key, which is what shells and editors read as Meta: Option-B and Option-F move by word in zsh and bash. Off, Option types the character your keyboard layout gives it — @, € or ø on layouts that put them there. Open terminals pick the change up as they come into view; a bundled tool such as btop keeps the default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Notifications") {
                 Picker("Pane attention", selection: $attention.mode) {
                     ForEach(AttentionSettings.Mode.allCases) { mode in

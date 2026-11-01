@@ -42,6 +42,11 @@ final class SwiftTermEngine: TerminalEngine {
 
     var view: NSView { terminalView }
 
+    var dropPolicy: TerminalDrop.Policy {
+        get { terminalView.dropPolicy }
+        set { terminalView.dropPolicy = newValue }
+    }
+
     /// PID of the shell running in the PTY, or 0 when nothing is running.
     /// Used to read the shell's working directory straight from the kernel,
     /// which is the only way to track `cd` in a shell that doesn't emit OSC 7.
@@ -79,6 +84,9 @@ final class SwiftTermEngine: TerminalEngine {
             self?.onAttention?(attention)
         }
         terminalView.installAttentionOSCHandlers()
+        // Files and text can be dropped on a terminal; what is accepted is
+        // `dropPolicy`, which stays `.nothing` until the session sets it.
+        terminalView.registerForDraggedTypes([.fileURL, .string])
 
         clickMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -151,6 +159,7 @@ final class SwiftTermEngine: TerminalEngine {
         }
         let brightChanged = terminalView.useBrightColors != appearance.boldAsBright
         terminalView.useBrightColors = appearance.boldAsBright
+        terminalView.optionAsMetaKey = appearance.optionAsMeta
         // Set only when it changed: the setter rebuilds the font's cell metrics.
         let spacing = max(0.5, min(appearance.lineSpacing, 3))
         if abs(terminalView.lineSpacing - spacing) > 0.001 {
