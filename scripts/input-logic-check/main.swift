@@ -4456,6 +4456,256 @@ do {
     check(CursorAnimation(rawValue: "teleport") == nil, "a name from a newer build reads as nothing, for the caller to default")
 }
 
+// MARK: Markdown to HTML
+
+// What a README or a notes file comes to, and what a hostile one cannot become. The
+// expected output of each case below was produced by a reference implementation in
+// Python, which was also fuzzed with 30,000 random documents; the rule they share is
+// that every character of the output is escaped text or a tag the converter wrote
+// itself, from a short list, properly nested, with attributes from a short list.
+do {
+    let cases: [(String, String, String)] = [
+        ("# Hi", "<h1 id=\"hi\">Hi</h1>", "heading"),
+        ("###### Six\n####### Seven", "<h6 id=\"six\">Six</h6><p>####### Seven</p>", "six levels, not seven"),
+        ("## Closed ##", "<h2 id=\"closed\">Closed</h2>", "closing hashes"),
+        ("#NoSpace", "<p>#NoSpace</p>", "a # needs a space"),
+        ("a\nb", "<p>a b</p>", "lines join"),
+        ("a  \nb", "<p>a<br>b</p>", "two spaces make a break"),
+        ("a\\\nb", "<p>a<br>b</p>", "a backslash makes a break"),
+        ("*a* **b** ***c*** ~~d~~ `e`", "<p><em>a</em> <strong>b</strong> <em><strong>c</strong></em> <del>d</del> <code>e</code></p>", "inline styles"),
+        ("snake_case_word and 2 * 3 * 4", "<p>snake_case_word and 2 * 3 * 4</p>", "intraword underscores and spaced stars stay text"),
+        ("_a_ __b__", "<p><em>a</em> <strong>b</strong></p>", "underscore emphasis"),
+        ("a*b*c", "<p>a<em>b</em>c</p>", "star emphasis inside a word"),
+        ("**unclosed", "<p>**unclosed</p>", "an unclosed run is text"),
+        ("*a **b** c*", "<p><em>a <strong>b</strong> c</em></p>", "nested"),
+        ("[t](https://e.com)", "<p><a href=\"https://e.com\">t</a></p>", "link"),
+        ("[t](https://e.com \"ti\")", "<p><a href=\"https://e.com\" title=\"ti\">t</a></p>", "link with a title"),
+        ("[t](#top)", "<p><a href=\"#top\">t</a></p>", "fragment link"),
+        ("[t](mailto:a@b.c)", "<p><a href=\"mailto:a@b.c\">t</a></p>", "mailto"),
+        ("[t](docs/x.md)", "<p><span class=\"link\" title=\"docs/x.md\">t</span></p>", "a relative address is not a link"),
+        ("[t](javascript:alert(1))", "<p><span class=\"link\" title=\"javascript:alert(1)\">t</span></p>", "javascript is not a link"),
+        ("![alt text](https://x.y/p.png)", "<p><span class=\"image\">Image: alt text</span></p>", "an image is a caption"),
+        ("![](https://x.y/p.png)", "<p><span class=\"image\">Image</span></p>", "an image with no alt"),
+        ("<https://e.com/a>", "<p><a href=\"https://e.com/a\">https://e.com/a</a></p>", "angle autolink"),
+        ("see https://e.com/a_b. ok", "<p>see <a href=\"https://e.com/a_b\">https://e.com/a_b</a>. ok</p>", "bare address, trailing dot left out"),
+        ("(https://e.com/x)", "<p>(<a href=\"https://e.com/x\">https://e.com/x</a>)</p>", "bare address in brackets"),
+        ("\\*not em\\*", "<p>*not em*</p>", "escaped stars"),
+        ("a <b> & c", "<p>a &lt;b&gt; &amp; c</p>", "a tag in the source is text"),
+        ("```\n<b>&\n```", "<pre><code>&lt;b&gt;&amp;</code></pre>", "fence is escaped"),
+        ("~~~\na\n~~~~", "<pre><code>a</code></pre>", "tilde fence closed by a longer one"),
+        ("```\nunterminated", "<pre><code>unterminated</code></pre>", "unterminated fence"),
+        ("```js\nlet x = 1\n```", "<pre><code>let x = 1</code></pre>", "info string ignored"),
+        ("    code\n    more", "<pre><code>code\nmore</code></pre>", "indented code"),
+        ("---\n\n* * *\n\n___", "<hr><hr><hr>", "rules"),
+        ("Title\n===\n\nSub\n---", "<h1 id=\"title\">Title</h1><h2 id=\"sub\">Sub</h2>", "setext"),
+        ("> a\n> b", "<blockquote><p>a b</p></blockquote>", "quote"),
+        ("> a\nlazy", "<blockquote><p>a lazy</p></blockquote>", "lazy quote line"),
+        ("> a\n>\n> b", "<blockquote><p>a</p><p>b</p></blockquote>", "quote with two paragraphs"),
+        ("- a\n- b", "<ul><li>a</li><li>b</li></ul>", "bullets"),
+        ("1. a\n2. b", "<ol><li>a</li><li>b</li></ol>", "numbers"),
+        ("3. a\n4. b", "<ol start=\"3\"><li>a</li><li>b</li></ol>", "numbers from 3"),
+        ("- a\n  - b\n- c", "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>", "nested"),
+        ("- a\n\n- b", "<ul><li><p>a</p></li><li><p>b</p></li></ul>", "loose list"),
+        ("- a\n  b", "<ul><li>a b</li></ul>", "item continues"),
+        ("- a\nlazy", "<ul><li>a lazy</li></ul>", "lazy item line"),
+        ("- [ ] a\n- [x] b", "<ul><li><span class=\"task\">\u{2610}</span> a</li><li><span class=\"task\">\u{2611}</span> b</li></ul>", "tasks"),
+        ("* a\n+ b", "<ul><li>a</li></ul><ul><li>b</li></ul>", "different bullets are different lists"),
+        ("| a | b |\n|---|--:|\n| 1 | 2 |", "<table><thead><tr><th>a</th><th style=\"text-align:right\">b</th></tr></thead><tbody><tr><td>1</td><td style=\"text-align:right\">2</td></tr></tbody></table>", "table"),
+        ("a | b\n---|---\n1 | 2\n\npara", "<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table><p>para</p>", "table then paragraph"),
+        ("| a |\n|---|\n| x \\| y |", "<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>x | y</td></tr></tbody></table>", "escaped pipe"),
+        ("a | b\n---", "<h2 id=\"a--b\">a | b</h2>", "setext wins over one-cell look"),
+        ("# Usage\n\n# Usage", "<h1 id=\"usage\">Usage</h1><h1 id=\"usage-1\">Usage</h1>", "ids are unique"),
+        ("# A *b* `c`", "<h1 id=\"a-b-c\">A <em>b</em> <code>c</code></h1>", "id from text"),
+        ("", "", "empty"),
+        ("\n\n  \n", "", "blank"),
+        ("a\r\nb\rc", "<p>a b c</p>", "line ends"),
+        ("`a`` b", "<p>`a`` b</p>", "unmatched backticks"),
+        ("`` a`b ``", "<p><code>a`b</code></p>", "double backtick span"),
+        ("[a](http://x.y/(b))", "<p><a href=\"http://x.y/(b)\">a</a></p>", "balanced parens in an address"),
+        ("[a](<http://x.y/a b>)", "<p><span class=\"link\" title=\"http://x.y/a b\">a</span></p>", "angle address with a space"),
+        ("[*em* link](https://e.com)", "<p><a href=\"https://e.com\"><em>em</em> link</a></p>", "markup inside link text"),
+        ("[a [b](https://x.y) c](https://e.com)", "<p><a href=\"https://e.com\">a [b](https://x.y) c</a></p>", "no nested links"),
+        ("1986\\. A great year", "<p>1986. A great year</p>", "escaped dot"),
+        ("2019. was a year", "<ol start=\"2019\"><li>was a year</li></ol>", "a year at the start of a line is a list, as in CommonMark"),
+    ]
+    for (markdown, expected, why) in cases {
+        let got = MarkdownHTML.render(markdown)
+        check(got == expected, "\(why): \(markdown.debugDescription) gave \(got.debugDescription)")
+    }
+
+    let page = MarkdownHTML.page("# T", title: "A <b> & \"c\"")
+    check(page.hasPrefix("<!doctype html>") && page.hasSuffix("</article></body></html>")
+            && page.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>") && page.contains("<h1 id=\"t\">T</h1>")
+            && page.contains("Content-Security-Policy") && page.contains("default-src 'none'") && !page.contains("<script"),
+          "a page has its policy, an escaped title and the document, and no script")
+
+    for name in ["README.md", "notes.MD", "a.markdown", "x.mdown", "x.mkd", "x.mkdn", "x.mdwn", "dir.name/readme.md"] {
+        check(MarkdownHTML.isMarkdownFile(named: name), "\(name) is a Markdown file")
+    }
+    for name in ["", "md", "a.mdx", "a.md.txt", "a.txt", "markdown", "a.md ", "a.m d"] {
+        check(!MarkdownHTML.isMarkdownFile(named: name), "\(name.debugDescription) is not")
+    }
+
+    // The shape of any output, checked the same way for every document below.
+    let allowedTags: Set<String> = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "ul", "ol", "li", "blockquote", "pre", "code",
+                                    "em", "strong", "del", "a", "table", "thead", "tbody", "tr", "th", "td", "span"]
+    let voidTags: Set<String> = ["br", "hr"]
+    let allowedAttributes: Set<String> = ["href", "id", "title", "start", "class", "style"]
+    func problem(in html: String) -> String? {
+        let chars = Array(html)
+        var stack: [String] = []
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if c == ">" { return "a raw > in text at \(i)" }
+            if c != "<" {
+                i += 1
+                continue
+            }
+            var j = i + 1
+            var closing = false
+            if j < chars.count && chars[j] == "/" {
+                closing = true
+                j += 1
+            }
+            var name = ""
+            while j < chars.count && chars[j].isASCII && (chars[j].isLetter || chars[j].isNumber) {
+                name.append(chars[j])
+                j += 1
+            }
+            if !allowedTags.contains(name) { return "tag \(name.debugDescription) is not allowed" }
+            while j < chars.count && chars[j] == " " {
+                j += 1
+                var attribute = ""
+                while j < chars.count && (chars[j].isLetter || chars[j] == "-") {
+                    attribute.append(chars[j])
+                    j += 1
+                }
+                if !allowedAttributes.contains(attribute) || closing { return "attribute \(attribute.debugDescription) is not allowed" }
+                if j + 1 >= chars.count || chars[j] != "=" || chars[j + 1] != "\"" { return "attribute \(attribute) has no quoted value" }
+                j += 2
+                var value = ""
+                while j < chars.count && chars[j] != "\"" {
+                    if chars[j] == "<" || chars[j] == ">" { return "a raw angle bracket in \(attribute)" }
+                    value.append(chars[j])
+                    j += 1
+                }
+                if j >= chars.count { return "an attribute that never ends" }
+                j += 1
+                if attribute == "href" {
+                    let lower = value.lowercased()
+                    if !(lower.hasPrefix("https://") || lower.hasPrefix("http://") || lower.hasPrefix("mailto:") || lower.hasPrefix("#")) {
+                        return "href \(value.prefix(40).debugDescription) is not allowed"
+                    }
+                }
+                if attribute == "style" && !["text-align:left", "text-align:right", "text-align:center"].contains(value) {
+                    return "style \(value.debugDescription)"
+                }
+            }
+            if j >= chars.count || chars[j] != ">" { return "a tag that never ends at \(i)" }
+            if closing {
+                if stack.last != name { return "</\(name)> does not match \(stack.suffix(3))" }
+                stack.removeLast()
+            } else if !voidTags.contains(name) {
+                stack.append(name)
+            }
+            i = j + 1
+        }
+        return stack.isEmpty ? nil : "unclosed \(stack)"
+    }
+    check(problem(in: "<p>a</p>") == nil && problem(in: "<script>x</script>") != nil && problem(in: "<p>a") != nil
+            && problem(in: "<a href=\"javascript:x\">a</a>") != nil && problem(in: "a > b") != nil && problem(in: "<p onclick=\"x\">a</p>") != nil
+            && problem(in: "<img src=\"x\">") != nil && problem(in: "<p><b></p>") != nil,
+          "the checker itself catches what it is for")
+
+    // Hostile documents never become markup.
+    let hostile: [String] = [
+        "[a](javascript:alert(1))", "[a](JaVaScRiPt:alert(1))", "[a]( javascript:alert(1))", "[a](java\tscript:alert(1))",
+        "[a](data:text/html;base64,PHNjcmlwdD4=)", "[a](vbscript:msgbox(1))", "[a](file:///etc/passwd)", "[a](//evil.example/x)",
+        "<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "![x](javascript:alert(1))", "<javascript:alert(1)>",
+        "<http://a.b/\"onmouseover=\"alert(1)>", "[a](http://x.y/\" onclick=\"alert(1))", "[a](<http://x.y/\"onclick=\"x>)",
+        "<a href=\"javascript:alert(1)\">x</a>", "&lt;script&gt;", "<iframe src=//evil>", "<style>*{display:none}</style>",
+        "javascript:alert(1)", "http://x.y/\"><script>", "[a](http://x.y/ \"t\" onclick=\"z\")", "[[a](javascript:x)](https://ok.example)",
+        "[a]\n(javascript:alert(1))", "\u{0}<script>", "<!-- x --><script>", "</article><script>alert(1)</script>",
+        "# <script>alert(1)</script>", "| <script> |\n|---|\n| <img onerror=x> |", "> <script>", "- <script>", "```\n</code></pre><script>\n```",
+        "[x](https://a.b/\u{7}c)", "[x](https://a.b/c d)", "![<script>](https://x.y)", "**<script>**", "`<script>`",
+    ]
+    for document in hostile {
+        let output = MarkdownHTML.render(document)
+        if let found = problem(in: output) {
+            check(false, "\(document.debugDescription) gave \(output.debugDescription): \(found)")
+        } else {
+            check(!output.lowercased().contains("<script") && !output.lowercased().contains("<img") && !output.lowercased().contains("<iframe"),
+                  "\(document.debugDescription) left a tag in: \(output.debugDescription)")
+        }
+    }
+    check(MarkdownHTML.safeHref("https://a.b/c") != nil && MarkdownHTML.safeHref("HTTP://A.B") != nil && MarkdownHTML.safeHref("mailto:a@b.c") != nil
+            && MarkdownHTML.safeHref("#top") != nil, "web, mail and in-page addresses may be linked")
+    for address in ["", "javascript:x", "JAVASCRIPT:x", "data:text/html,x", "file:///x", "ftp://x.y", "//x.y", "x.y", "/x", "http://", "https://", "mailto:",
+                    "https://a b", "https://a\tb", "https://a\nb", "https://a\u{1}b"] {
+        check(MarkdownHTML.safeHref(address) == nil, "\(address.debugDescription) is not linked")
+    }
+
+    // Random markup, from a fixed seed so a failure can be reproduced.
+    var seed: UInt64 = 7
+    func next(_ bound: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int((seed >> 33) % UInt64(bound))
+    }
+    let atoms: [String] = ["*", "**", "_", "__", "~~", "`", "``", "[", "]", "(", ")", "<", ">", "!", "\\", "#", "## ", "- ", "1. ", "+ ", "> ", "|", "|---|",
+                           ":", "\"", "'", "&", " ", "  ", "\n", "\n\n", "\t", "    ", "http://", "https://e.com", "javascript:", "mailto:", "a", "b b",
+                           "foo_bar", "x*y", "[t](", "](", "![", "```", "~~~", "---", "***", "===", "[ ] ", "[x] ", "\r\n", "\r", "é", "\u{2028}", "\u{0}", "\u{7F}"]
+    var firstFailure: String?
+    let began = Date()
+    for _ in 0..<3000 {
+        var document = ""
+        for _ in 0..<(1 + next(60)) { document += atoms[next(atoms.count)] }
+        let output = MarkdownHTML.render(document)
+        if firstFailure == nil, let found = problem(in: output) { firstFailure = "\(document.debugDescription): \(found)" }
+    }
+    check(firstFailure == nil, "random markup always comes out as allowed, nested tags: \(firstFailure ?? "")")
+    check(Date().timeIntervalSince(began) < 30, "3000 random documents are quick: \(Date().timeIntervalSince(began)) s")
+
+    // Documents built to be slow, or to nest forever, finish.
+    let almost = MarkdownHTML.maxInline - 1_000
+    let heavy: [(String, String)] = [
+        ("stars", String(repeating: String(repeating: "*", count: almost) + "\n\n", count: 3)),
+        ("underscore pairs", String(repeating: "_a", count: almost / 2)),
+        ("brackets", String(repeating: "[", count: almost)),
+        ("backticks", String(repeating: "`", count: almost)),
+        ("mixed backtick runs", (0..<2000).map { String(repeating: "`", count: $0 % 7 + 1) + "a " }.joined()),
+        ("open parens", String(repeating: "[a](", count: almost / 4)),
+        ("emphasis openers", String(repeating: "*a *b *c ", count: almost / 9)),
+        ("a paren address", "http://" + String(repeating: ")", count: almost)),
+        ("an open paren address", "http://" + String(repeating: "(", count: almost)),
+        ("angle brackets", String(repeating: "<", count: almost)),
+        ("bangs", String(repeating: "!", count: almost)),
+        ("backslashes", String(repeating: "\\", count: almost)),
+        ("tilde runs", String(repeating: "~~a ", count: almost / 4)),
+        ("many links", String(repeating: "[a](http://x.y) ", count: 1500)),
+        ("many addresses", String(repeating: "http://a.b/x ", count: 1500)),
+        ("nested quotes", String(repeating: "> ", count: 2000) + "x"),
+        ("dashes", String(repeating: "- ", count: 2000)),
+        ("nested lists", (0..<120).map { String(repeating: "  ", count: $0) + "- x" }.joined(separator: "\n")),
+        ("quotes in lists", String(repeating: "> - ", count: 100) + "x"),
+        ("one long line", String(repeating: "a ", count: 60_000)),
+        ("a big table", "| a | b |\n|---|---|\n" + String(repeating: "| 1 | 2 |\n", count: 2500)),
+        ("pipes", String(repeating: "|", count: almost) + "\n" + String(repeating: "|-", count: almost / 2)),
+        ("headings", String(repeating: "# h\n", count: 3000)),
+        ("fences", String(repeating: "```\n", count: 3000)),
+        ("blank lines", String(repeating: "\n", count: 60_000)),
+    ]
+    for (name, document) in heavy {
+        let started = Date()
+        let output = MarkdownHTML.render(document)
+        let took = Date().timeIntervalSince(started)
+        check(took < 10, "\(name) took \(took) s")
+        if output.count < 300_000, let found = problem(in: output) { check(false, "\(name): \(found)") }
+    }
+    check(MarkdownHTML.render(String(repeating: "a", count: MarkdownHTML.maxInput + 500)).count <= MarkdownHTML.maxInput + 20,
+          "the source is cut at the limit")
+}
+
 // MARK: Font import
 
 do {

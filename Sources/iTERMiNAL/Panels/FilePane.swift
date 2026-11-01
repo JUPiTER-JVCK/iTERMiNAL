@@ -34,6 +34,8 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     @Published private(set) var operationProblem: RemoteProblem?
     @Published var selection: String?
     @Published private(set) var transferNote: String?
+    /// A Markdown file, rendered, for the sheet that shows it.
+    @Published var markdownPreview: MarkdownDocument?
 
     /// Says something in the strip under the list, for an action that is not
     /// one of the transfers but has something to tell the person.
@@ -253,6 +255,32 @@ final class FileBrowserModel: ObservableObject, Identifiable {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
+    /// A Markdown file shown rendered, in a sheet; a remote one comes down to a
+    /// temporary copy first. What the preview can and cannot do is
+    /// `MarkdownHTML`'s, and a file too big to be a document is not read.
+    func previewMarkdown(_ item: FileItem) {
+        guard !item.isDirectory, MarkdownHTML.isMarkdownFile(named: item.name) else { return }
+        if let size = item.size, size > Int64(MarkdownPreview.maxBytes) {
+            say("\(item.name) is too large to preview. Open it instead.")
+            return
+        }
+        if provider.isRemote {
+            fetchToTemporary(item) { [weak self] url in
+                self?.showMarkdown(at: url, title: item.name)
+            }
+        } else {
+            showMarkdown(at: URL(fileURLWithPath: item.path), title: item.name)
+        }
+    }
+
+    private func showMarkdown(at url: URL, title: String) {
+        guard let text = MarkdownPreview.readText(at: url) else {
+            say("\(title) could not be read as a text file.")
+            return
+        }
+        markdownPreview = MarkdownDocument(title: title, html: MarkdownHTML.page(text, title: title))
+    }
+
     private var sftpURLPrefix: String {
         guard let sftp = provider as? SFTPFileSystemProvider else { return "" }
         return "sftp://\(sftp.connection.destination)"
@@ -365,6 +393,9 @@ struct FilePaneView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             loadDroppedFiles(providers)
             return true
+        }
+        .sheet(item: $model.markdownPreview) { document in
+            MarkdownPreviewSheet(document: document)
         }
     }
 
@@ -493,6 +524,9 @@ struct FilePaneView: View {
                     .simultaneousGesture(TapGesture().onEnded { model.selection = item.path })
                     .contextMenu {
                         Button("Open") { model.open(item) }
+                        if !item.isDirectory && MarkdownHTML.isMarkdownFile(named: item.name) {
+                            Button("Preview Markdown") { model.previewMarkdown(item) }
+                        }
                         if model.isRemote {
                             Button("Download to Downloads") { model.download(item) }
                         } else {
