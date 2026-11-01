@@ -307,6 +307,21 @@ extension Workspace {
     }
 
     convenience init(snapshot: WorkspaceSnapshot) {
-        self.init(id: snapshot.id, name: snapshot.name, tabs: snapshot.tabs.map { WorkspaceTab(snapshot: $0) })
+        self.init(
+            id: snapshot.id,
+            name: Self.renamedDefault(snapshot.name),
+            tabs: snapshot.tabs.map { WorkspaceTab(snapshot: $0) }
+        )
+    }
+
+    /// Saved layouts name the automatic ones "Workspace 1", "Workspace 2"…;
+    /// they are now "Space 1", "Space 2"…. Only that exact pattern is
+    /// rewritten, so a name the person typed is never touched.
+    private static func renamedDefault(_ name: String) -> String {
+        let prefix = "Workspace "
+        guard name.hasPrefix(prefix) else { return name }
+        let number = name.dropFirst(prefix.count)
+        guard !number.isEmpty, number.allSatisfy({ $0.isASCII && $0.isNumber }) else { return name }
+        return "Space \(number)"
     }
 }
