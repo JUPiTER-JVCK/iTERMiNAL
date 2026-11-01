@@ -234,6 +234,16 @@ final class AppSettings: ObservableObject {
     @Published var composerSuggestFromShellHistory: Bool {
         didSet { defaults.set(composerSuggestFromShellHistory, forKey: "composerSuggestFromShellHistory") }
     }
+    /// Typing an opening bracket or quote in the composer also types its closer.
+    /// Off by default: it changes what a key does.
+    @Published var composerAutoClose: Bool {
+        didSet { defaults.set(composerAutoClose, forKey: "composerAutoClose") }
+    }
+    /// A line above the composer's input naming the dangers in what is typed,
+    /// and a quote or bracket left open. Advice only; it never stops a command.
+    @Published var composerShowNotes: Bool {
+        didSet { defaults.set(composerShowNotes, forKey: "composerShowNotes") }
+    }
 
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
@@ -442,6 +452,8 @@ final class AppSettings: ObservableObject {
         composerOpacity = defaults.object(forKey: "composerOpacity") as? Double ?? 1.0
         composerVibrancy = defaults.bool(forKey: "composerVibrancy")
         composerSuggestFromShellHistory = defaults.object(forKey: "composerSuggestFromShellHistory") as? Bool ?? true
+        composerAutoClose = defaults.object(forKey: "composerAutoClose") as? Bool ?? false
+        composerShowNotes = defaults.object(forKey: "composerShowNotes") as? Bool ?? true
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -731,6 +743,8 @@ final class AppSettings: ObservableObject {
         composerOpacity = 1.0
         composerVibrancy = false
         composerSuggestFromShellHistory = true
+        composerAutoClose = false
+        composerShowNotes = true
 
         assistantBaseURL = "https://api.openai.com/v1"
         assistantModel = "gpt-4o-mini"

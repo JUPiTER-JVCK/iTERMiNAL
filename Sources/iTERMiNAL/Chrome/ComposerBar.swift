@@ -41,6 +41,8 @@ struct ComposerBar: View {
     @State private var dragging = false
     /// Whether the input has keyboard focus, reported by the editor.
     @State private var inputFocused = false
+    /// What `CommandNotes` found in the line typed, a moment after typing stops.
+    @State private var notes: [String] = []
 
     var body: some View {
         Group {
@@ -82,6 +84,10 @@ struct ComposerBar: View {
         // A list that is open follows the text, including changes the editor
         // is not told about, such as the field being cleared on send.
         .onChange(of: text) { _, newText in suggestions.refresh(text: newText, caret: suggestions.caret) }
+        // Notes about the line follow it a moment after typing stops. Keyed on
+        // the setting too, so switching it off clears them at once, and
+        // restarted by every change, so a line still being typed is never read.
+        .task(id: settings.composerShowNotes ? text : "") { await refreshNotes() }
         // Hiding the composer mid-request used to leave the call running with
         // nothing left to show its answer.
         .onDisappear {
@@ -224,6 +230,19 @@ struct ComposerBar: View {
                         maxHeight: maxTranscriptHeight,
                         theme: theme
                     )
+                }
+
+                if !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(notes.prefix(3), id: \.self) { note in
+                            Label(note, systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .accessibilityElement(children: .combine)
+                    .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
                 }
 
                 inputField(theme: theme)
@@ -374,6 +393,20 @@ struct ComposerBar: View {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Reads the line for `CommandNotes` once it has been still for a moment.
+    /// A line that is empty, or an `@ai` prompt, has none.
+    private func refreshNotes() async {
+        let line = settings.composerShowNotes ? text : ""
+        guard !line.isEmpty, !line.lowercased().hasPrefix("@ai") else {
+            if !notes.isEmpty { withAnimation(Motion.banner) { notes = [] } }
+            return
+        }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        guard !Task.isCancelled else { return }
+        let found = CommandNotes.notes(for: line)
+        if found != notes { withAnimation(Motion.banner) { notes = found } }
+    }
+
     private func send() {
         let command = trimmedText
         guard !command.isEmpty else { return }
@@ -487,7 +520,8 @@ struct ComposerBar: View {
             onFocusTaken: { store.composerFocusHandled = store.composerFocusRequest },
             onSubmit: send,
             onRecallEarlier: recallEarlier,
-            onRecallLater: recallLater
+            onRecallLater: recallLater,
+            autoClose: settings.composerAutoClose
         )
         // Opaque and sRGB, so the colours chosen for it are checked against
         // exactly what is drawn. The focus change is the accent hairline.
