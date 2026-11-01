@@ -293,7 +293,7 @@ struct DetailView: View {
 }
 
 /// The strip along the window's bottom: the machine's vital signs at the right,
-/// and, when it is turned on, the Remote Ports globe at the left.
+/// and, when it is turned on, the Remote Ports globe last, at the right.
 ///
 /// A strip rather than a floating card: that corner is exactly where a terminal
 /// writes its newest output, and something hovering over it would cover the one
@@ -305,16 +305,14 @@ private struct DetailBottomStrip: View {
     let showPorts: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Opposite the machine's figures, so the two never share a corner:
-            // the ports list opens upward from the left, the numbers stay put
-            // on the right.
-            if showPorts {
-                RemotePortsButton()
-            }
+        HStack(spacing: 14) {
             Spacer(minLength: 12)
             if showMetrics {
                 SystemMetricsReadout()
+            }
+            // Last, past the network figure, in the bottom-right corner.
+            if showPorts {
+                RemotePortsButton()
             }
         }
         .padding(.horizontal, 14)

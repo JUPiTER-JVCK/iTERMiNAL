@@ -139,7 +139,7 @@ final class RemotePortsModel: ObservableObject {
     }
 }
 
-/// The globe in the status bar's left corner, and the list it opens.
+/// The globe in the status bar's right corner, and the list it opens.
 struct RemotePortsButton: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
