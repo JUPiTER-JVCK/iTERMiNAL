@@ -340,7 +340,7 @@ final class WorkspaceStore: ObservableObject {
     }
 
     private func bootstrap() {
-        let workspace = Workspace(name: "Workspace 1")
+        let workspace = Workspace(name: "Space 1")
         workspaces = [workspace]
         newTab(in: workspace)
     }
@@ -527,7 +527,7 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func newWorkspace(named name: String? = nil) {
-        let resolved = (name?.isEmpty == false) ? name! : "Workspace \(workspaces.count + 1)"
+        let resolved = (name?.isEmpty == false) ? name! : "Space \(workspaces.count + 1)"
         let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
         scheduleSave()
@@ -576,7 +576,7 @@ final class WorkspaceStore: ObservableObject {
         } else if let current = currentWorkspace {
             target = current
         } else {
-            let created = Workspace(name: "Workspace 1")
+            let created = Workspace(name: "Space 1")
             workspaces = [created]
             target = created
         }

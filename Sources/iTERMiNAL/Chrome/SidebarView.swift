@@ -61,7 +61,7 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .alert("Rename Workspace", isPresented: isRenamingWorkspace, presenting: renamingWorkspace) { workspace in
+        .alert("Rename Space", isPresented: isRenamingWorkspace, presenting: renamingWorkspace) { workspace in
             TextField("Name", text: $renameText)
             Button("Rename") {
                 if !renameText.isEmpty {
@@ -84,7 +84,7 @@ struct SidebarView: View {
 
     private func header(theme: Theme) -> some View {
         HStack(spacing: 8) {
-            Text("Workspaces")
+            Text("Spaces")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
@@ -118,7 +118,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .help(settings.railPanelPinned ? "Unpin — float over the content" : "Pin — keep beside the content")
-            .accessibilityLabel(settings.railPanelPinned ? "Unpin workspaces panel" : "Pin workspaces panel")
+            .accessibilityLabel(settings.railPanelPinned ? "Unpin spaces panel" : "Pin spaces panel")
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 12)
@@ -172,7 +172,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func projectsSection(theme: Theme) -> some View {
         SidebarSectionHeader(
-            title: "Projects",
+            title: "Workspaces",
             isExpanded: $settings.projectsExpanded,
             showsDot: store.workspaces.contains { workspace in
                 workspace.tabs.contains { tab in
@@ -197,7 +197,7 @@ struct SidebarView: View {
                     .font(.system(size: 10))
             }
             .buttonStyle(.plain)
-            .help("New workspace")
+            .help("New space")
         }
 
         if settings.projectsExpanded {
@@ -616,9 +616,9 @@ private struct WorkspaceFolderRow: View {
             if hovering {
                 Menu {
                     Button("New Tab Here", action: onNewTab)
-                    Button("Rename Workspace…", action: onRename)
+                    Button("Rename Space…", action: onRename)
                     Divider()
-                    Button("Delete Workspace", role: .destructive, action: onDelete)
+                    Button("Delete Space", role: .destructive, action: onDelete)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 10))

@@ -538,12 +538,12 @@ private struct LandingView: View {
                     Button(workspace.name) { store.newTab(in: workspace) }
                 }
                 Divider()
-                Button("New Workspace") { store.newWorkspace() }
+                Button("New Space") { store.newWorkspace() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
                         .font(.system(size: 11))
-                    Text(store.currentWorkspace?.name ?? "Workspace")
+                    Text(store.currentWorkspace?.name ?? "Space")
                         .font(.system(size: 12, weight: .medium))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))

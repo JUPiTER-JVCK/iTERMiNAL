@@ -17,7 +17,7 @@ enum LocalStateStore {
     static let displayName = "This Mac"
 
     static var statusDescription: String {
-        "Workspaces and preferences are stored on this Mac. Export a snapshot to move them to another machine."
+        "Spaces and preferences are stored on this Mac. Export a snapshot to move them to another machine."
     }
 
     /// Where the state file lives, for display in settings.

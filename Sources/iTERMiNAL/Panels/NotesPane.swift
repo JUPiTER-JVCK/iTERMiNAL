@@ -123,7 +123,7 @@ struct NotesPaneView: View {
                 .padding(.top, 8)
                 .overlay(alignment: .topLeading) {
                     if model.isEmpty {
-                        Text("Notes for this workspace. Saved as you type.")
+                        Text("Notes for this space. Saved as you type.")
                             .font(.system(size: 13))
                             .foregroundStyle(theme.textSecondary)
                             .padding(.horizontal, 15)

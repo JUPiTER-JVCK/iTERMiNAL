@@ -49,14 +49,14 @@ struct BackupSettingsView: View {
 
             Section("Snapshots") {
                 HStack {
-                    Button("Export Workspaces…") {
+                    Button("Export Spaces…") {
                         WorkspaceArchiveIO.promptExport(store: store, settings: settings)
                     }
-                    Button("Import Workspaces…") {
+                    Button("Import Spaces…") {
                         WorkspaceArchiveIO.promptImport(store: store, settings: settings)
                     }
                 }
-                Text("A snapshot carries your workspaces, tabs, split layout, and preferences — but no secrets. Importing replaces the current layout and closes the shells running under it.")
+                Text("A snapshot carries your spaces, tabs, split layout, and preferences — but no secrets. Importing replaces the current layout and closes the shells running under it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
