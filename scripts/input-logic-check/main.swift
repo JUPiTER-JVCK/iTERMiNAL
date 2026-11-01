@@ -6364,6 +6364,245 @@ do {
     check(RFBAuth.response(challenge: [1, 2, 3], password: "x") == nil, "a challenge that is not 16 bytes gets no answer")
 }
 
+// MARK: Reading a log for the assistant
+
+// A log is read from its end, masked, cut into pieces, and asked about a piece at a time. What
+// is checked: how files are read (tails, line and character boundaries, what is refused), how
+// text is cut and notes grouped, how many requests there can be, what the sheet says it will
+// send, and the sequence of requests itself, against a sender that only records.
+do {
+    let fm = FileManager.default
+    let folder = NSTemporaryDirectory() + "log-check-\(UUID().uuidString)"
+    try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: folder) }
+    func write(_ name: String, _ data: Data) -> String {
+        let path = folder + "/" + name
+        try? data.write(to: URL(fileURLWithPath: path))
+        return path
+    }
+    func write(_ name: String, _ text: String) -> String { write(name, Data(text.utf8)) }
+
+    // Cutting text.
+    check(LogAnalysis.chunks(of: "", limit: 10).isEmpty && LogAnalysis.chunks(of: " \n\n ", limit: 10).isEmpty, "nothing to cut is no pieces")
+    check(LogAnalysis.chunks(of: "short", limit: 10) == ["short"], "short text is one piece")
+    check(LogAnalysis.chunks(of: "aaaa\nbbbb\ncccc", limit: 10) == ["aaaa\nbbbb", "cccc"], "lines are packed and cut at a line end")
+    check(LogAnalysis.chunks(of: "abcdefghijkl", limit: 5) == ["abcde", "fghij", "kl"], "one long line is cut where it must be")
+    check(LogAnalysis.chunks(of: "ab\n123456789\ncd", limit: 6) == ["ab", "123456", "789", "cd"], "a long line among short ones")
+    check(LogAnalysis.chunks(of: "a\n\nb", limit: 100) == ["a\n\nb"], "a blank line between lines is kept")
+    check(LogAnalysis.chunks(of: "\n\na\nb\n\n", limit: 100) == ["a\nb"], "blank lines at the ends are not")
+    let numbered = (1...50).map { "L\($0)" }
+    let pieces = LogAnalysis.chunks(of: numbered.joined(separator: "\n"), limit: 20)
+    check(pieces.allSatisfy { $0.count <= 20 } && pieces.count > 1, "every piece is within the limit: \(pieces.map(\.count))")
+    check(pieces.joined(separator: "\n") == numbered.joined(separator: "\n"), "and together they are the text, in order")
+
+    // Grouping notes, and counting requests.
+    let longNote = String(repeating: "x", count: LogAnalysis.noteLimit)
+    check(LogAnalysis.batches(of: Array(repeating: longNote, count: 17)).map(\.count) == [7, 7, 3], "longest notes go seven to a group")
+    check(LogAnalysis.batches(of: ["a", "b", "c"]).map(\.count) == [3], "short ones go together")
+    check(LogAnalysis.batches(of: []).isEmpty, "none is none")
+    check(LogAnalysis.batches(of: ["s", String(repeating: "y", count: 13_000), "s"]).map(\.count) == [1, 1, 1], "a note too big for a group stands alone")
+    check(LogAnalysis.requestCount(chunkCount: 0) == 0 && LogAnalysis.requestCount(chunkCount: 1) == 1, "none, or one part, one request")
+    check(LogAnalysis.requestCount(chunkCount: 2) == 3 && LogAnalysis.requestCount(chunkCount: 7) == 8, "two parts: two notes and an answer")
+    check(LogAnalysis.requestCount(chunkCount: 8) == 11 && LogAnalysis.requestCount(chunkCount: 17) == 21, "more parts take a round of combining first")
+
+    // Words.
+    check(LogAnalysis.sizeLabel(0) == "0 bytes" && LogAnalysis.sizeLabel(1) == "1 byte" && LogAnalysis.sizeLabel(999) == "999 bytes", "sizes in bytes")
+    check(LogAnalysis.sizeLabel(1_000) == "1 KB" && LogAnalysis.sizeLabel(196_000) == "196 KB" && LogAnalysis.sizeLabel(999_499) == "999 KB", "in kilobytes")
+    check(LogAnalysis.sizeLabel(999_500) == "1.0 MB" && LogAnalysis.sizeLabel(3_100_000) == "3.1 MB" && LogAnalysis.sizeLabel(12_345_678) == "12.3 MB", "in megabytes")
+    check(LogAnalysis.cleanQuestion("") == LogAnalysis.defaultQuestion && LogAnalysis.cleanQuestion("  \n ") == LogAnalysis.defaultQuestion, "no question is the usual one")
+    check(LogAnalysis.cleanQuestion("  what broke?\n  after 3pm ") == "what broke? after 3pm", "a question is trimmed and made one line")
+    let askedWithSecret = LogAnalysis.cleanQuestion("why does password=hunter2 fail")
+    check(!askedWithSecret.contains("hunter2") && askedWithSecret.contains("[redacted]"), "a secret in the question is masked: \(askedWithSecret)")
+    check(LogAnalysis.cleanQuestion(String(repeating: "q", count: 600)).count == LogAnalysis.questionLimit, "and it is cut")
+    check(LogAnalysis.cleanFileName("/var/log/app.log") == "app.log" && LogAnalysis.cleanFileName("a\u{1B}b.log") == "ab.log", "a file name is its last part, without control characters")
+    check(!LogAnalysis.cleanFileName("token=abc123secret.log").contains("abc123"), "and without a secret in it")
+
+    // Reading files.
+    check(LogAnalysis.readTail(atPath: folder + "/nonesuch") == .failure(.notAFile), "a file that is not there")
+    check(LogAnalysis.readTail(atPath: folder) == .failure(.notAFile), "a folder")
+    check(LogAnalysis.readTail(atPath: write("empty.log", "")) == .failure(.empty), "an empty file")
+    check(LogAnalysis.readTail(atPath: write("bin.log", Data([0x61, 0x00, 0x62]))) == .failure(.binary), "a file with a NUL in it")
+    if case .success(let whole) = LogAnalysis.readTail(atPath: write("small.log", "line1\nline2\n")) {
+        check(whole.text == "line1\nline2\n" && whole.totalBytes == 12 && whole.readBytes == 12 && !whole.droppedPartialLine, "a small file is read whole")
+    } else {
+        check(false, "a small file can be read")
+    }
+    let hundred = (0..<100).map { String(format: "line %03d\n", $0) }.joined()
+    let hundredPath = write("hundred.log", hundred)
+    if case .success(let tail) = LogAnalysis.readTail(atPath: hundredPath, maxBytes: 50) {
+        let expected = (95...99).map { String(format: "line %03d\n", $0) }.joined()
+        check(tail.text == expected && tail.droppedPartialLine && tail.totalBytes == 900 && tail.readBytes == 50,
+              "the end of a file, from a whole line: \(tail.text.debugDescription) \(tail.readBytes)")
+    } else {
+        check(false, "the end of a file can be read")
+    }
+    if case .success(let aligned) = LogAnalysis.readTail(atPath: hundredPath, maxBytes: 45) {
+        let expected = (95...99).map { String(format: "line %03d\n", $0) }.joined()
+        check(aligned.text == expected && !aligned.droppedPartialLine && aligned.readBytes == 45,
+              "a cut on a line start keeps that line: \(aligned.text.debugDescription)")
+    } else {
+        check(false, "a tail that starts on a line can be read")
+    }
+    if case .success(let exact) = LogAnalysis.readTail(atPath: hundredPath, maxBytes: 900) {
+        check(exact.text == hundred && exact.readBytes == exact.totalBytes, "a file as big as the limit is read whole")
+    } else {
+        check(false, "a file at the limit can be read")
+    }
+    if case .success(let accents) = LogAnalysis.readTail(atPath: write("accents.log", String(repeating: "éé\n", count: 10)), maxBytes: 7) {
+        check(accents.text == "éé\n" && !accents.text.contains("\u{FFFD}"), "a cut in the middle of a character does not leave half of it: \(accents.text.debugDescription)")
+    } else {
+        check(false, "a tail that starts inside a character can be read")
+    }
+    if case .success(let oneLine) = LogAnalysis.readTail(atPath: write("oneline.log", String(repeating: "x", count: 1_000)), maxBytes: 100) {
+        check(oneLine.text.count == 100 && !oneLine.droppedPartialLine, "a file that is one long line keeps what it can")
+    } else {
+        check(false, "one long line can be read")
+    }
+
+    // Preparing: cleaned, masked, cut.
+    let messy = "\u{1B}[31mERROR\u{1B}[0m connect failed\nAuthorization: Bearer abcdefghijklmnop\npassword=hunter2\nok\r\nline\r"
+    if case .success(let prepared) = LogAnalysis.prepare(path: write("app.log", messy)) {
+        let text = prepared.chunks.joined(separator: "\n")
+        check(prepared.fileName == "app.log", "it names the file")
+        check(text.contains("ERROR connect failed") && !text.contains("\u{1B}"), "control sequences are gone")
+        check(!text.contains("abcdefghijklmnop") && !text.contains("hunter2") && text.contains("[redacted]"), "secrets are masked: \(text.debugDescription)")
+        check(prepared.maskedCount == 2, "and counted: \(prepared.maskedCount)")
+        check(!text.contains("\r"), "line endings are plain")
+        check(!prepared.isPartial && prepared.chunks.count == 1, "a small log is one whole part")
+    } else {
+        check(false, "a log can be prepared")
+    }
+    let big = (1...3_000).map { String(format: "line %04d\n", $0) }.joined()
+    if case .success(let partial) = LogAnalysis.prepare(path: write("big.log", big), maxBytes: 20_000) {
+        check(partial.isPartial && partial.totalBytes == 30_000 && partial.readBytes == 20_000, "a long log is cut from its end: \(partial.readBytes)")
+        check(partial.chunks.count == 2 && partial.chunks.allSatisfy { $0.count <= LogAnalysis.chunkCharacters }, "into parts of a size a model can read: \(partial.chunks.map(\.count))")
+        check(partial.chunks.last?.hasSuffix("line 3000") == true && partial.chunks.first?.hasPrefix("line 1001") == true, "the end of it, in order")
+    } else {
+        check(false, "a long log can be prepared")
+    }
+    check(LogAnalysis.prepare(path: write("ansi.log", "\u{1B}[0m \n")) == .failure(.empty), "a log with nothing in it but control sequences is empty")
+    check(LogAnalysis.ReadProblem.binary.message.contains("text") && LogAnalysis.ReadProblem.empty.message.contains("empty"), "problems have words")
+
+    // What the sheet says.
+    func log(parts: Int, masked: Int = 2, total: Int = 3_100_000, read: Int = 200_000) -> PreparedLog {
+        PreparedLog(fileName: "app.log", totalBytes: total, readBytes: read, droppedPartialLine: false,
+                    chunks: (1...parts).map { "part \($0) text" }, maskedCount: masked)
+    }
+    let remote = AssistantDestination.Description(name: "api.openai.com", staysOnThisMac: false)
+    let local = AssistantDestination.Description(name: "the assistant on this Mac", staysOnThisMac: true)
+    let message = LogAnalysis.consentMessage(log: log(parts: 17), destination: remote)
+    check(message.contains("the last 200 KB of app.log (3.1 MB in all)") && message.contains("17 parts"), "it says how much of what: \(message)")
+    check(message.contains("api.openai.com") && message.contains("up to 21 requests"), "where, and in how many requests")
+    check(message.contains("2 values that look like keys or passwords were masked") && message.contains("don't send a log that is private"), "what masking did and did not")
+    check(LogAnalysis.consentMessage(log: log(parts: 17, masked: 1), destination: remote).contains("1 value that looks like a key or a password was masked"), "one masked value")
+    check(LogAnalysis.consentMessage(log: log(parts: 17, masked: 0), destination: remote).contains("none were found"), "none masked")
+    let onThisMac = LogAnalysis.consentMessage(log: log(parts: 1, total: 12, read: 12), destination: local)
+    check(onThisMac.contains("all of app.log (12 bytes)") && onThisMac.contains("1 part and 1 request.") && onThisMac.contains("It stays on this Mac.") && !onThisMac.contains("masked"),
+          "a log that stays on this Mac, whole, in one request: \(onThisMac)")
+    let shown = LogAnalysis.preview(log: log(parts: 2), question: "why?")
+    check(shown.contains("why?") && shown.contains("— part 1 —") && shown.contains("part 2 text") && shown.contains(LogAnalysis.combineSystemPrompt),
+          "everything that is sent can be read")
+    check(!LogAnalysis.preview(log: log(parts: 1), question: "q").contains("— part") && !LogAnalysis.preview(log: log(parts: 1), question: "q").contains(LogAnalysis.combineSystemPrompt),
+          "and a single part needs no combining")
+
+    // The sequence of requests, against a sender that only records.
+    final class Recorder {
+        var calls: [(system: String, user: String)] = []
+        var progress: [LogProgress] = []
+        var outcome: Result<String, Error>?
+    }
+    struct Refused: Error {}
+    func run(_ prepared: PreparedLog, question: String = "",
+             reply: @escaping (Int, String, String) throws -> String) -> Recorder {
+        let recorder = Recorder()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            do {
+                let answer = try await LogAnalysis.analyze(
+                    log: prepared,
+                    question: question,
+                    send: { system, user in
+                        recorder.calls.append((system, user))
+                        return try reply(recorder.calls.count, system, user)
+                    },
+                    progress: { recorder.progress.append($0) }
+                )
+                recorder.outcome = .success(answer)
+            } catch {
+                recorder.outcome = .failure(error)
+            }
+            done.signal()
+        }
+        done.wait()
+        return recorder
+    }
+
+    let one = run(log(parts: 1)) { _, _, _ in "  The answer.  " }
+    check(one.calls.count == 1 && one.calls[0].system == LogAnalysis.answerSystemPrompt, "one part is asked about once, for the answer")
+    check(one.calls.first?.user.contains("part 1 text") == true && one.calls.first?.user.contains("Question: \(LogAnalysis.defaultQuestion)") == true,
+          "with the text and the usual question")
+    check((try? one.outcome?.get()) == "The answer.", "the reply is trimmed")
+    check(one.progress == [LogProgress(step: 1, total: 1, label: "Reading the log")], "and progress is told")
+
+    let three = run(log(parts: 3), question: "  why?\n  now ") { count, _, _ in count < 4 ? "note \(count)" : "ANSWER" }
+    check(three.calls.count == 4, "three parts take three notes and an answer: \(three.calls.count)")
+    if three.calls.count == 4 {
+        check(three.calls.prefix(3).allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "the first three read a part each")
+        check(three.calls[0].user.contains("part 1 of 3") && three.calls[0].user.contains("part 1 text") && !three.calls[0].user.contains("part 2 text"), "the first has the first part only")
+        check(three.calls[2].user.contains("part 3 of 3") && three.calls[2].user.contains("Question about the whole file: why? now"), "the third, and the question as cleaned")
+        check(three.calls[3].system == LogAnalysis.answerSystemPrompt && three.calls[3].user.contains("[1] note 1") && three.calls[3].user.contains("[3] note 3"),
+              "the last writes the answer from the notes")
+    }
+    check((try? three.outcome?.get()) == "ANSWER", "and is what comes back")
+    check(three.progress.map(\.step) == [1, 2, 3, 4] && three.progress.allSatisfy { $0.total == 4 }, "progress counts up to the total")
+    check(three.progress.map(\.label) == ["Reading part 1 of 3", "Reading part 2 of 3", "Reading part 3 of 3", "Writing the answer"], "and says what it is doing")
+
+    // Notes of the longest length, which is what 21 is the count for: they go seven to a group.
+    func paddedNote(_ count: Int) -> String { String(("n\(count)-" + String(repeating: "x", count: LogAnalysis.noteLimit)).prefix(LogAnalysis.noteLimit)) }
+    let seventeen = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : paddedNote(count) }
+    check(seventeen.calls.count == 21 && LogAnalysis.requestCount(chunkCount: 17) == 21, "seventeen parts of the longest notes take 21 requests, as the sheet says: \(seventeen.calls.count)")
+    if seventeen.calls.count == 21 {
+        check(seventeen.calls[..<17].allSatisfy { $0.system == LogAnalysis.noteSystemPrompt }, "seventeen notes")
+        check(seventeen.calls[17..<20].allSatisfy { $0.system == LogAnalysis.combineSystemPrompt }, "three rounds of combining")
+        check(seventeen.calls[17].user.contains("[7]") && !seventeen.calls[17].user.contains("[8]"), "the first combines seven notes")
+        check(seventeen.calls[19].user.contains("[3]") && !seventeen.calls[19].user.contains("[4]"), "the third combines the last three")
+        check(seventeen.calls[20].system == LogAnalysis.answerSystemPrompt && seventeen.calls[20].user.contains("[3]"), "and the answer is written from three")
+    }
+    check(seventeen.progress.last?.step == 21 && seventeen.progress.allSatisfy { $0.total == 21 }, "progress ends at 21 of 21")
+    check((try? seventeen.outcome?.get()) == "FINAL", "and the answer comes back")
+
+    // Short notes all fit in one group, so fewer requests are made than the sheet allows for.
+    let brief = run(log(parts: 17)) { count, system, _ in system == LogAnalysis.answerSystemPrompt ? "FINAL" : "n\(count)" }
+    check(brief.calls.count == 18 && brief.calls.count <= LogAnalysis.requestCount(chunkCount: 17), "short notes need no round of combining: \(brief.calls.count)")
+    check(brief.progress.last?.step == 18 && brief.progress.allSatisfy { $0.total == 21 }, "and the count on the sheet was an upper bound")
+
+    let loud = run(log(parts: 3)) { count, _, _ in count < 4 ? String(repeating: "x", count: 5_000) : "ok" }
+    check(loud.calls.count == 4 && !loud.calls[loud.calls.count - 1].user.contains(String(repeating: "x", count: LogAnalysis.noteLimit + 1)),
+          "a note longer than the limit is cut before it is passed on")
+    let wordy = run(log(parts: 1)) { _, _, _ in String(repeating: "w", count: 30_000) }
+    check((try? wordy.outcome?.get())?.count == LogAnalysis.replyLimit, "a very long answer is cut")
+
+    let broken = run(log(parts: 5)) { count, _, _ in
+        if count == 2 { throw Refused() }
+        return "note"
+    }
+    if case .failure(let error)? = broken.outcome {
+        check(error is Refused && broken.calls.count == 2, "a request that fails stops the rest: \(broken.calls.count)")
+    } else {
+        check(false, "a failing request fails the analysis")
+    }
+
+    let stopped = run(log(parts: 5)) { count, _, _ in
+        if count == 2 { withUnsafeCurrentTask { $0?.cancel() } }
+        return "note"
+    }
+    if case .failure(let error)? = stopped.outcome {
+        check(error is CancellationError && stopped.calls.count == 2, "cancelling stops before the next request: \(stopped.calls.count)")
+    } else {
+        check(false, "a cancelled analysis ends in cancellation")
+    }
+}
+
 // MARK: Reading a selection
 
 // What the right-click menu offers for selected text: an address to open, a

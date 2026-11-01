@@ -418,6 +418,15 @@ struct CommandPaletteView: View {
         })
 
         actions.append(PaletteAction(
+            id: "log.analyze",
+            title: "Analyze a Log File…",
+            subtitle: "Ask the assistant about the end of a log; it shows what it will send first",
+            systemImage: "doc.text.magnifyingglass"
+        ) {
+            store.chooseLogToAnalyze()
+        })
+
+        actions.append(PaletteAction(
             id: "state.export",
             title: "Export Workspaces…",
             subtitle: "Portable snapshot",

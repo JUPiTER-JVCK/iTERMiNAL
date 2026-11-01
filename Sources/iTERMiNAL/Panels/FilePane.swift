@@ -566,6 +566,11 @@ struct FilePaneView: View {
                         if !item.isDirectory {
                             Button("Quick Look") { model.quickLook(item) }
                         }
+                        // A file on this Mac: a remote one would have to be
+                        // fetched first, and a log can be large.
+                        if !item.isDirectory && !model.isRemote {
+                            Button("Analyze Log…") { store.analyzeLog(at: item.path) }
+                        }
                         if !item.isDirectory && MarkdownHTML.isMarkdownFile(named: item.name) {
                             Button("Preview Markdown") { model.previewMarkdown(item) }
                         }

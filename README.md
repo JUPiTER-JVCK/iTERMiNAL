@@ -481,6 +481,21 @@ A tour of the app in thirty-four pictures, in five groups.
   stops short, the palette says so. It does not search your home folder or the
   top of the disk (macOS would ask to allow Desktop, Documents and Downloads), or
   a remote tab.
+- **Log analysis** — right-click a file in the file browser (on this Mac) and
+  choose **Analyze Log…**, or **Analyze a Log File…** in the command palette. It
+  reads the *end* of the file, at most 200 KB, masks anything that looks like a
+  key or a password, and asks the assistant about it a part at a time (about
+  12,000 characters each, so a small local model can cope) before combining the
+  notes into one answer — about 21 requests for 200 KB of ordinary lines, more
+  when the lines are very long (the sheet gives the exact number). A sheet comes first
+  and asks every time: the file, how much of it, which server it goes to (and
+  plainly when that is not this Mac), how many requests, how many values were
+  masked, and — one click away — every character that would be sent. The model is
+  told the log is data and not instructions, and its answer is shown as text:
+  nothing in it is run. Masking is best-effort, like the rest of the assistant's:
+  it knows the shapes of common tokens and `password=…`, not every secret, so
+  don't send a log that is private to a service you don't trust. A file on a host
+  is not offered yet.
 - **Gentle motion** — panels, the dock, banners and the sidebar's sections
   move on springs, and hover and selection in the sidebar, toolbar and dock
   fade instead of flashing. With Reduce Motion on (System Settings →

@@ -24,6 +24,12 @@ struct MainWindowView: View {
                 HStack(spacing: 0) {
                     SidebarRail()
                     contentCard(theme)
+                        // A sheet of its own, apart from the other two.
+                        .sheet(item: $store.logAnalysisTarget) { target in
+                            LogAnalysisSheet(target: target)
+                                .environmentObject(store)
+                                .environmentObject(settings)
+                        }
                 }
             }
             // Its own anchor, apart from the palette's below: SwiftUI has not
