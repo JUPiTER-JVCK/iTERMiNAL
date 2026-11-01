@@ -166,7 +166,7 @@ struct ComposerBar: View {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 10, weight: .semibold))
-                Text("Run anything")
+                Text(isChatting ? "Ask anything" : "Run anything")
                     .font(.system(size: 12))
                 if store.composerHasRun {
                     // A quiet reminder that a shell is still alive down here.
@@ -228,7 +228,28 @@ struct ComposerBar: View {
             VStack(alignment: .leading, spacing: 10) {
                 gripBar(theme: theme)
 
-                if store.composerHasRun, let session = store.composerSession {
+                if isChatting {
+                    // A chat instead of a shell: the same place, the same size,
+                    // and the same handle to resize it.
+                    ComposerChatView(
+                        chat: store.composerChat,
+                        modelName: settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                        theme: theme,
+                        accent: settings.accentColor
+                    )
+                    .frame(height: effectiveTranscriptHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(theme.surfaceBorder)
+                    )
+
+                    TranscriptResizeHandle(
+                        height: $settings.composerTranscriptHeight,
+                        maxHeight: maxTranscriptHeight,
+                        theme: theme
+                    )
+                } else if store.composerHasRun, let session = store.composerSession {
                     // The composer's own shell. Identity is tied to the
                     // session so a reset swaps the view rather than reusing
                     // a container still hosting the old terminal.
@@ -443,10 +464,28 @@ struct ComposerBar: View {
         if found != notes { withAnimation(Motion.banner) { notes = found } }
     }
 
+    /// Whether what is typed here is a message to the AI model, not a command.
+    private var isChatting: Bool {
+        if case .assistant = store.composerDestination { return true }
+        return false
+    }
+
     private func send() {
         let command = trimmedText
         guard !command.isEmpty else { return }
         suggestions.close()
+        if isChatting {
+            // No shell, no `@ai` banner, no error watching: the message goes
+            // into the conversation and the reply appears in it.
+            ai.cancel()
+            ai.clearBanner()
+            outcome.stop()
+            store.composerChat.send(command, settings: settings, store: store)
+            text = ""
+            historyIndex = nil
+            draft = ""
+            return
+        }
         if command.lowercased().hasPrefix("@ai") {
             // A bare `@ai` is a typo, not a prompt. Without this it reached
             // submit with an empty string and spent a real chat-completions
@@ -554,7 +593,7 @@ struct ComposerBar: View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         return CommandInputView(
             text: $text,
-            placeholder: "Run anything",
+            placeholder: isChatting ? "Message the AI" : "Run anything",
             style: inputStyle(theme),
             workingDirectory: destinationDirectory,
             ghost: suggestions.ghost(for: text),
@@ -619,6 +658,8 @@ struct ComposerBar: View {
     /// starts it with.
     private var destinationDirectory: String? {
         switch store.composerDestination {
+        case .assistant:
+            return nil
         case .terminal(let session):
             return session.isRemote ? nil : session.currentDirectory
         case .ownShell:

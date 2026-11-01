@@ -200,14 +200,13 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            if settings.showStatusBar || settings.showSystemMetrics || settings.showRemotePorts {
-                FadedDivider()
-                DetailBottomStrip(
-                    showStatus: settings.showStatusBar,
-                    showMetrics: settings.showSystemMetrics,
-                    showPorts: settings.showRemotePorts
-                )
-            }
+            // Always: the globe at its right end is where you connect to a
+            // host, so the strip cannot be switched away with the readouts.
+            FadedDivider()
+            DetailBottomStrip(
+                showStatus: settings.showStatusBar,
+                showMetrics: settings.showSystemMetrics
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background)
@@ -308,7 +307,6 @@ struct DetailView: View {
 private struct DetailBottomStrip: View {
     let showStatus: Bool
     let showMetrics: Bool
-    let showPorts: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -321,9 +319,7 @@ private struct DetailBottomStrip: View {
                 SystemMetricsReadout()
             }
             // Last, past the network figure, in the bottom-right corner.
-            if showPorts {
-                RemotePortsButton()
-            }
+            RemotePortsButton()
         }
         .padding(.horizontal, 14)
         .frame(height: 26)

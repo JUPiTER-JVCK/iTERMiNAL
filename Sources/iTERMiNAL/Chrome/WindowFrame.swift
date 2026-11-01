@@ -124,8 +124,6 @@ enum RailNavigation {
         switch item {
         case .terminal: store.detailMode = .terminal
         case .workspaces: withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
-        // A menu of its own on the rail; never routed through here.
-        case .connections: break
         case .tasks: store.detailMode = .tasks
         case .automations: store.detailMode = .automations
         case .skills: store.detailMode = .skills
@@ -133,7 +131,7 @@ enum RailNavigation {
     }
 }
 
-/// The icon rail down the left edge: the three destinations that are always
+/// The icon rail down the left edge: the two destinations that are always
 /// there, whichever of the rest you've pinned under a rule, and at the bottom a
 /// "···" menu for the rest and the terminal dock.
 struct SidebarRail: View {
@@ -141,7 +139,6 @@ struct SidebarRail: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @State private var moreOpen = false
-    @State private var connectHovering = false
 
     /// Live shells, shown as a badge on Tasks so the count is visible without
     /// opening the page.
@@ -155,13 +152,6 @@ struct SidebarRail: View {
         VStack(spacing: 6) {
             railButton(.terminal)
             railButton(.workspaces)
-
-            ConnectMenu(
-                label: RailIconLabel(icon: RailItem.connections.icon, isHovering: connectHovering)
-            )
-            .onHover { connectHovering = $0 }
-            .help("Connect to a saved host or a machine on this network")
-            .accessibilityLabel("Connect")
 
             if !pinned.isEmpty {
                 Rectangle()
@@ -220,7 +210,6 @@ struct SidebarRail: View {
         switch item {
         case .terminal: return store.detailMode == .terminal
         case .workspaces: return settings.railPanelOpen
-        case .connections: return false
         case .tasks: return store.detailMode == .tasks
         case .automations: return store.detailMode == .automations
         case .skills: return store.detailMode == .skills

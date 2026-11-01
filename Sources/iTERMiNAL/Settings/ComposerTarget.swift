@@ -17,13 +17,24 @@ enum ComposerTarget: String, CaseIterable, Identifiable {
     /// input. The old behaviour, kept because running something without
     /// disturbing the pane in front of you is a real use for it.
     case ownShell
+    /// No shell at all: the composer becomes a chat with the AI model chosen in
+    /// Settings → AI. What is typed goes to the model, never to a terminal.
+    case assistant
 
     var id: String { rawValue }
+
+    /// The label with the model's name, for the picker, where there is one.
+    func label(model: String) -> String {
+        guard self == .assistant else { return label }
+        let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "AI assistant" : "AI — \(name)"
+    }
 
     var label: String {
         switch self {
         case .activeTerminal: return "Active terminal"
         case .ownShell: return "Composer's own shell"
+        case .assistant: return "AI assistant"
         }
     }
 
@@ -33,6 +44,8 @@ enum ComposerTarget: String, CaseIterable, Identifiable {
             return "Commands run in the terminal that has focus — a pane or a dock tab, local or remote."
         case .ownShell:
             return "Commands run in a separate local shell, with the output shown inside the composer."
+        case .assistant:
+            return "The composer is a chat with the AI model from Settings → AI. Nothing typed runs in a terminal; the conversation is kept per space on this Mac."
         }
     }
 }

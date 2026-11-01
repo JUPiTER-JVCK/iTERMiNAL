@@ -29,7 +29,25 @@ final class OpenAICompatibleAssistant: AssistantService {
         try await send(system: system, user: user, temperature: temperature)
     }
 
+    func chat(system: String, messages: [AssistantMessage]) async throws -> String {
+        try await send(
+            messages: [.init(role: "system", content: system)]
+                + messages.map { .init(role: $0.role, content: $0.content) },
+            temperature: nil
+        )
+    }
+
     private func send(system: String, user: String, temperature: Double?) async throws -> String {
+        try await send(
+            messages: [
+                .init(role: "system", content: system),
+                .init(role: "user", content: user),
+            ],
+            temperature: temperature
+        )
+    }
+
+    private func send(messages: [ChatCompletionRequest.Message], temperature: Double?) async throws -> String {
         guard isConfigured else { throw AssistantError.notConfigured }
 
         let base = settings.assistantBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -48,10 +66,7 @@ final class OpenAICompatibleAssistant: AssistantService {
 
         let body = ChatCompletionRequest(
             model: settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            messages: [
-                .init(role: "system", content: system),
-                .init(role: "user", content: user),
-            ],
+            messages: messages,
             temperature: AssistantDestination.temperature(temperature, forBaseURL: base)
         )
         request.httpBody = try JSONEncoder().encode(body)
