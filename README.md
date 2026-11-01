@@ -368,6 +368,9 @@ A tour of the app in thirty-four pictures, in five groups.
   program it will run — Vim and Nano come with macOS. The line typed into the tab
   names the editor by the absolute path found for it and quotes the file's, and a
   file whose name has a control character in it is refused.
+- **Markdown preview** — right-click a `.md` file in the file browser, on this
+  Mac or on a host, and **Preview Markdown** shows it rendered, in a sheet. It is
+  built not to trust the file: see [Markdown preview](#markdown-preview).
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -599,6 +602,39 @@ starship follow the terminal rather than staying one palette behind:
 ```
 
 See [`contrib/ghostty/README.md`](contrib/ghostty/README.md).
+
+## Markdown preview
+
+Right-click a Markdown file (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`,
+`.mdwn`) in the file browser and choose **Preview Markdown**. On this Mac it is
+read in place; on a host it is fetched to a temporary copy first, like **Open**.
+A file over 5 MB is not previewed.
+
+A README is someone else's text, so the preview does not trust it, in three
+layers, any one of which would be enough:
+
+- **The converter writes only what it knows.** Everything in the output is
+  escaped text or a tag the converter wrote itself, from a short list (headings,
+  paragraphs, emphasis, lists, quotes, code, tables, rules, links). A tag in the
+  source — `<script>`, `<img onerror=…>`, `<iframe>` — is shown as the text it
+  is, never passed through. A link is made only for `http`, `https`, `mailto` or
+  a `#fragment`; any other address, `javascript:` and `data:` and a relative path
+  included, becomes plain text that shows the address on hover and goes nowhere.
+- **An image is a caption.** There is no `<img>`: a README's badges would
+  otherwise fetch from wherever they like, and say who is reading. You see
+  *Image: the alt text* in its place.
+- **The page and the view are locked down too.** The page carries a policy that
+  allows no scripts, no fetches and no frames, and the web view that shows it
+  has scripting off, keeps no data, and approves no navigation of its own: a link
+  to the web opens in your default browser, and a link within the page scrolls.
+
+What it does not do: reference-style links (`[text][ref]`), footnotes, raw HTML,
+syntax colouring in code blocks, or relative links to other files — they show as
+the text they are. The converter is tested in CI against hostile documents, a
+random-markup fuzzer, and documents built to be slow (deep nesting, a hundred
+thousand brackets, a paragraph of unmatched backticks); it reads at most a
+million characters, nests quotes and lists ten deep, and parses at most 20,000
+characters of one paragraph for markup.
 
 ## Scripting API
 
