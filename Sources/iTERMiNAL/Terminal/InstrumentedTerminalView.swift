@@ -163,7 +163,8 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
             guard dropPolicy == .filesAndText else { return nil }
             // `filePathURL` turns a file-reference URL (some apps drag those)
             // into the real path; for an ordinary file URL it is the same one.
-            let paths = urls.map { ($0.filePathURL ?? $0).path }
+            // It belongs to `NSURL`, not Swift's `URL`, hence the bridge.
+            let paths = urls.map { (($0 as NSURL).filePathURL ?? $0).path }
             return TerminalDrop.typedPaths(paths).map(DropContent.typed)
         }
         if let text = pasteboard.string(forType: .string),
