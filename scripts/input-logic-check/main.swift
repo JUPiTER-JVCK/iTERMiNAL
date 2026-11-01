@@ -4915,6 +4915,43 @@ do {
           "the standard policy is modest")
 }
 
+// MARK: Models a local server offers
+
+// Only a server on this Mac is asked, with no key, and what comes back is names.
+do {
+    func url(_ base: String) -> String? { LocalModels.listURL(baseURL: base)?.absoluteString }
+    check(url("http://127.0.0.1:11434/v1") == "http://127.0.0.1:11434/v1/models", "Ollama's address: \(String(describing: url("http://127.0.0.1:11434/v1")))")
+    check(url("http://localhost:1234/v1/") == "http://localhost:1234/v1/models" && url("http://localhost:1234/v1///") == "http://localhost:1234/v1/models",
+          "trailing slashes do not double")
+    check(url("http://localhost:1234") == "http://localhost:1234/models" && url("https://localhost/v1") == "https://localhost/v1/models", "no path, and https")
+    check(url("http://[::1]:8080/v1") == "http://[::1]:8080/v1/models", "an IPv6 loopback: \(String(describing: url("http://[::1]:8080/v1")))")
+    check(url("http://localhost:1/v1?x=1#f") == "http://localhost:1/v1/models", "a query or fragment is dropped")
+    check(LocalModels.listURL(baseURL: "  HTTP://LOCALHOST:1/v1 ") != nil, "case and padding do not matter")
+    for base in ["https://api.openai.com/v1", "http://example.com/v1", "http://127.0.0.1.evil.com/v1", "http://user:pw@127.0.0.1/v1",
+                 "http://evil.com@127.0.0.1/v1", "http://localhost@evil.com/v1", "ftp://127.0.0.1/v1", "file:///etc/passwd", "", "not a url",
+                 "http://192.168.1.5:11434/v1", "http://0.0.0.0:11434/v1", "http://[::ffff:127.0.0.1]/v1"] {
+        check(LocalModels.listURL(baseURL: base) == nil, "\(base.debugDescription) is not asked")
+    }
+
+    func names(_ json: String) -> [String] { LocalModels.parse(Data(json.utf8)) }
+    check(names(#"{"object":"list","data":[{"id":"llama3"},{"id":"Qwen2.5"},{"id":"llama3"}]}"#) == ["llama3", "Qwen2.5"], "OpenAI's shape, once each, sorted")
+    check(names(#"{"models":[{"name":"mistral:latest"},{"model":"gemma:2b"}]}"#) == ["gemma:2b", "mistral:latest"], "Ollama's own shape")
+    check(names(#"{"data":[{"id":"b"}],"models":[{"name":"a"}]}"#) == ["a", "b"], "both together")
+    check(names(#"{"data":[{"id":" x "}]}"#) == ["x"], "padding is trimmed")
+    check(names(#"{"data":[{"id":""},{"id":"  "},{"id":"a\u0001b"},{"id":5},{"nope":1},"text",null]}"#).isEmpty, "empty, control-character and non-text names are left out")
+    check(names(#"{"data":[{"id":"a\u0001b"},{"id":5},{"nope":1},{"id":"ok"}]}"#) == ["ok"], "a name with a control character, or a number, is left out; the rest stay")
+    for bad in ["", "not json", "[]", #"{"data":"x"}"#, #"{"data":{"id":"a"}}"#, "{}", "null"] {
+        check(names(bad).isEmpty, "\(bad.debugDescription) is no list")
+    }
+    let longest = String(repeating: "a", count: LocalModels.maxNameLength)
+    check(names("{\"data\":[{\"id\":\"\(longest)\"},{\"id\":\"\(longest)a\"}]}") == [longest], "a name over the limit is left out")
+    let many = (0..<300).map { "{\"id\":\"m\(String(format: "%03d", $0))\"}" }.joined(separator: ",")
+    let capped = names("{\"data\":[\(many)]}")
+    check(capped.count == LocalModels.maxModels && capped.first == "m000", "only so many are kept")
+    check(LocalModels.parse(Data(repeating: 0x20, count: LocalModels.maxResponseBytes + 1)).isEmpty, "a huge reply is not read")
+    check(names(#"{"data":[{"id":"<script>alert(1)</script>"}]}"#) == ["<script>alert(1)</script>"], "a name is only text; the menu shows it as such")
+}
+
 // MARK: Bundled tools on PATH
 
 do {

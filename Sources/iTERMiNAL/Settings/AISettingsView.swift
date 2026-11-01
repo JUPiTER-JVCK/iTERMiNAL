@@ -8,6 +8,9 @@ struct AISettingsView: View {
     @State private var apiKeyDraft = ""
     @State private var keyMessage: String?
     @State private var providerPreset: AssistantProvider = .openai
+    @State private var localModels: [String] = []
+    @State private var localModelsNote: String?
+    @State private var loadingModels = false
 
     var body: some View {
         Form {
@@ -33,6 +36,27 @@ struct AISettingsView: View {
                     }
 
                 TextField("Model", text: $settings.assistantModel)
+
+                // Only a server on this Mac is asked, for its list and nothing else.
+                if let listURL = LocalModels.listURL(baseURL: settings.assistantBaseURL) {
+                    HStack {
+                        Button("List Models") { fetchLocalModels(listURL) }
+                            .disabled(loadingModels)
+                        if !localModels.isEmpty {
+                            Menu("Choose…") {
+                                ForEach(localModels, id: \.self) { name in
+                                    Button(name) { settings.assistantModel = name }
+                                }
+                            }
+                            .fixedSize()
+                        }
+                    }
+                    if let localModelsNote {
+                        Text(localModelsNote)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text("OpenAI-compatible chat completions at `{base}/chat/completions`. Point the base URL at Ollama or any compatible proxy for local models.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -117,6 +141,37 @@ struct AISettingsView: View {
         }
     }
 
+    /// Asks the server on this Mac what models it has. No key is sent, a
+    /// redirect to anywhere else is refused, and the answer is only names.
+    private func fetchLocalModels(_ url: URL) {
+        loadingModels = true
+        localModelsNote = nil
+        Task {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            do {
+                let (data, response) = try await URLSession(configuration: .ephemeral)
+                    .data(for: request, delegate: NoRedirects())
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let names = status == 200 ? LocalModels.parse(data) : []
+                await MainActor.run {
+                    localModels = names
+                    localModelsNote = status != 200
+                        ? "The server answered \(status), not a list."
+                        : names.isEmpty ? "The server listed no models." : "\(names.count) model\(names.count == 1 ? "" : "s") on this Mac."
+                    loadingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    localModels = []
+                    localModelsNote = "Couldn't reach a server at \(url.host ?? "this Mac"): is it running?"
+                    loadingModels = false
+                }
+            }
+        }
+    }
+
     /// A pick from the preset menu: the address it fixes, and a model that
     /// provider accepts when the field still holds another provider's stock one.
     private func choose(_ provider: AssistantProvider) {
@@ -170,5 +225,18 @@ struct AISettingsView: View {
         let deleted = KeychainStore.delete(keyAccount)
         apiKeyDraft = ""
         keyMessage = deleted ? "Key cleared." : "Couldn't remove the key from your keychain."
+    }
+}
+
+/// Refuses every redirect: the list is asked of this Mac and nowhere else.
+private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
