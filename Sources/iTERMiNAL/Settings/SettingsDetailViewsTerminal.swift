@@ -192,6 +192,21 @@ struct TerminalSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Shell integration") {
+                Toggle("Report each command's result from zsh", isOn: $settings.shellIntegration)
+                Text("A new zsh tab on this Mac is started with two small hooks that tell iTERMiNAL when a command starts and what status it ends with. It works through zsh's ZDOTDIR: iTERMiNAL's own .zshenv adds the hooks, puts ZDOTDIR back and loads yours, so zsh reads everything else from where it really is — nothing in your home folder is changed. A tab whose last command failed shows its exit status in the sidebar. bash, fish and ssh sessions are left alone, and a tab that is already open keeps the way it was started.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Notify when a long command finishes", isOn: $settings.notifyLongCommands)
+                    .disabled(!settings.shellIntegration)
+                Stepper(value: $settings.longCommandSeconds, in: 5...3600, step: 5) {
+                    Text("Long means \(settings.longCommandSeconds) seconds or more")
+                }
+                .disabled(!settings.shellIntegration || !settings.notifyLongCommands)
+                Text("Follows Pane attention above: nothing if it is off, an in-app mark, or a system banner as well. It is shown only for a tab you are not looking at.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Performance") {
                 Toggle("GPU rendering (experimental)", isOn: $settings.useGPURendering)
                 Text("Draws the terminal with Metal for smoother scrolling. The renderer is still experimental upstream; if it can't start, terminals silently keep using the CPU renderer.")

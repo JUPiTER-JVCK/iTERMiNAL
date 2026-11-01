@@ -169,6 +169,14 @@ final class AppSettings: ObservableObject {
             SecureKeyboardEntry.shared.refresh(enabled: secureKeyboardEntry)
         }
     }
+    /// Starts new zsh tabs on this Mac with hooks that report each command's
+    /// start and exit status. Off: nothing about a shell's startup is touched.
+    @Published var shellIntegration: Bool { didSet { defaults.set(shellIntegration, forKey: "shellIntegration") } }
+    /// Says so when a command that ran for `longCommandSeconds` ends in a tab
+    /// nobody is looking at. Needs shell integration.
+    @Published var notifyLongCommands: Bool { didSet { defaults.set(notifyLongCommands, forKey: "notifyLongCommands") } }
+    /// How long counts as long, in seconds: 5 to 3600.
+    @Published var longCommandSeconds: Int { didSet { defaults.set(longCommandSeconds, forKey: "longCommandSeconds") } }
     /// Multiplier on the terminal's line height. See `VisualRange`.
     @Published var terminalLineSpacing: Double { didSet { defaults.set(terminalLineSpacing, forKey: "terminalLineSpacing") } }
     /// The accent when `accentID` is "custom", as "#RRGGBB".
@@ -430,6 +438,9 @@ final class AppSettings: ObservableObject {
         boldAsBright = defaults.object(forKey: "boldAsBright") as? Bool ?? true
         optionAsMeta = defaults.object(forKey: "optionAsMeta") as? Bool ?? true
         secureKeyboardEntry = defaults.object(forKey: "secureKeyboardEntry") as? Bool ?? false
+        shellIntegration = defaults.object(forKey: "shellIntegration") as? Bool ?? false
+        notifyLongCommands = defaults.object(forKey: "notifyLongCommands") as? Bool ?? false
+        longCommandSeconds = min(max(defaults.object(forKey: "longCommandSeconds") as? Int ?? 30, 5), 3600)
         terminalLineSpacing = VisualRange.clamp(
             defaults.object(forKey: "terminalLineSpacing") as? Double ?? 1, to: VisualRange.lineSpacing)
         customAccentHex = defaults.string(forKey: "customAccentHex") ?? FrameStyle.hexString(0x10A37F)
@@ -732,6 +743,9 @@ final class AppSettings: ObservableObject {
         boldAsBright = true
         optionAsMeta = true
         secureKeyboardEntry = false
+        shellIntegration = false
+        notifyLongCommands = false
+        longCommandSeconds = 30
         terminalLineSpacing = 1
         animationSpeed = 1
         splitFocusStyleTag = SplitFocusStyle.standard.rawValue

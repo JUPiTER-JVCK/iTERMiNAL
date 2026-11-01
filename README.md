@@ -535,7 +535,52 @@ politeness. This repository has immutable releases enabled, so a tag name that
 has ever backed a published release is reserved permanently — a typo cannot be
 deleted and retried, which is how `latest` was burned here for good.
 
-## Shell integration (recommended)
+## Shell integration
+
+### Command results, built in for zsh (opt-in)
+
+Settings → Terminal → **Shell integration**, off until you turn it on. A new zsh
+tab on this Mac is then started with two small hooks that tell iTERMiNAL when a
+command starts and what status it ends with. Nothing in your home folder is
+changed: iTERMiNAL points zsh's `ZDOTDIR` at a private folder
+(`~/Library/Application Support/iTERMiNAL/ShellIntegration/zsh`) holding one
+`.zshenv`. zsh reads it first; it adds the hooks, puts `ZDOTDIR` back exactly as
+you had it — a `ZDOTDIR` you set yourself included — and loads **your**
+`.zshenv`. Every other startup file, yours and the system's, is then read from
+where it really is, as if iTERMiNAL had not been involved, so nothing that uses
+`ZDOTDIR` (the place your history file is kept, say) is pointed at the app's
+folder.
+
+- A tab whose last command failed shows `exit 1` (or whatever it was) in the
+  sidebar in place of the time, until the next command starts.
+- **Notify when a long command finishes**, in the same section: when a command
+  that ran for as many seconds as you choose ends in a tab you are not looking
+  at, you get an in-app mark or a system banner — whichever *Pane attention*
+  is set to — naming the command when it could tell what you typed, with its
+  status and how long it ran.
+
+What it is not: it works for **zsh only**. bash, fish, ssh sessions, and a tab
+that was already open are left exactly as they were. The folder is made private
+to your account and checked every time; if it is a link, someone else's, or open
+to others in a way that cannot be fixed, the shell starts the ordinary way
+instead. The hooks report only a status and the start and end of a command —
+never the command's text. They use OSC 633, the code VS Code's integration uses,
+because SwiftTerm already handles OSC 133 itself and keeps no exit status; and
+the marks are believed only from a tab started with the hooks. A program running
+in such a tab can still print one, which could change that tab's status line or
+raise the long-command notice — no more than it can already do with a bell or an
+OSC 777 notification.
+
+These files run inside your own login shell, so they are tested as one: CI
+writes them exactly as the app does and runs them in the runner's real zsh, on a
+pseudo-terminal, for login and non-login shells, with a `ZDOTDIR` of your own,
+with a `.zshenv` that moves it, with a `precmd` of yours that fails, and with
+options such as `NO_UNSET` and `KSH_ARRAYS` set — and checks that anything
+reading `ZDOTDIR` afterwards, the system's own startup files included, sees
+yours, and that the same shell started without them reports nothing. See
+[`scripts/shell-integration-check`](scripts/shell-integration-check/check.py).
+
+### Working directory (OSC 7)
 
 The sidebar and file panel follow your working directory via OSC 7. zsh
 doesn't emit it by default — add this to `~/.zshrc`:

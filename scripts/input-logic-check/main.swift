@@ -41,6 +41,20 @@ func check(_ condition: Bool, _ message: @autoclosure () -> String) {
     }
 }
 
+// `input-logic-check --write-shell-integration <folder>` writes the zsh files the
+// app points ZDOTDIR at, exactly as the app does, and stops. CI then runs them in a
+// real zsh (scripts/shell-integration-check); none of the checks below run.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--write-shell-integration" {
+    switch ShellIntegrationFiles.install(into: CommandLine.arguments[2]) {
+    case .success(let folder):
+        print("wrote the zsh integration files to \(folder)")
+        exit(0)
+    case .failure(let error):
+        print("could not write them: \(error)")
+        exit(1)
+    }
+}
+
 // MARK: Tokenizer
 
 /// Tokens as (kind, text) so a case reads like the command line it describes.
@@ -1405,6 +1419,142 @@ do {
         if enables - disables != (fresh.engaged ? 1 : 0) { balanced = false }
     }
     check(balanced, "enables minus disables is always the one outstanding, or none")
+}
+
+// MARK: Shell integration
+
+// What a zsh that reports its own commands may say, and how it is believed: marks
+// read strictly (anything a program prints can look like one), a command timed from
+// its start to its end, the words for a notification, which shell it is for, and the
+// files that make zsh read them — written safely, and only into a folder that is
+// this user's alone. The scripts themselves are run in a real zsh by
+// scripts/shell-integration-check.
+do {
+    func mark(_ text: String) -> ShellIntegration.Mark? { ShellIntegration.parse(Array(text.utf8)[...]) }
+
+    // The marks.
+    check(mark("A") == .promptStart && mark("C") == .commandStart, "a prompt and a command start")
+    check(mark("D") == .commandFinished(exitCode: nil), "a finish with no status")
+    check(mark("D;0") == .commandFinished(exitCode: 0) && mark("D;1") == .commandFinished(exitCode: 1)
+            && mark("D;42") == .commandFinished(exitCode: 42) && mark("D;255") == .commandFinished(exitCode: 255),
+          "a finish with its status")
+    check(mark("D;007") == .commandFinished(exitCode: 7), "leading zeros are the same number")
+    for text in ["", "B", "E;ls", "P;Cwd=/", "a", "AA", "A;1", "C;x", "D;", "D;256", "D;999", "D;1000",
+                 "D;-1", "D;+1", "D;1x", "D;1;2", "D:1", "D; 1", "D;\u{0661}", "D;0\u{1B}", "D;0\n", "d;0"] {
+        check(mark(text) == nil, "\(text.debugDescription) is not a mark")
+    }
+
+    // Timing a command.
+    var tracker = ShellIntegration.CommandTracker()
+    let start = Date(timeIntervalSince1970: 1_000)
+    check(tracker.handle(.promptStart, at: start) == nil && tracker.runningSince == nil, "a prompt starts nothing")
+    check(tracker.handle(.commandStart, at: start) == nil && tracker.runningSince == start, "a command starts")
+    let done = tracker.handle(.commandFinished(exitCode: 2), at: start.addingTimeInterval(75.5))
+    check(done == ShellIntegration.Finished(exitCode: 2, seconds: 75.5) && tracker.runningSince == nil, "and ends, timed: \(String(describing: done))")
+    check(tracker.handle(.commandFinished(exitCode: 0), at: start) == ShellIntegration.Finished(exitCode: 0, seconds: nil),
+          "an end with no start has a status and no time")
+    _ = tracker.handle(.commandStart, at: start)
+    _ = tracker.handle(.promptStart, at: start.addingTimeInterval(5))
+    check(tracker.handle(.commandFinished(exitCode: 1), at: start.addingTimeInterval(9))?.seconds == nil,
+          "a prompt means nothing is running, so a later end has no start to measure from")
+    _ = tracker.handle(.commandStart, at: start)
+    check(tracker.handle(.commandFinished(exitCode: 0), at: start.addingTimeInterval(-30))?.seconds == 0, "a clock that went back gives 0, not a negative time")
+
+    // The words.
+    let durations: [(Double, String)] = [(0, "0s"), (0.9, "0s"), (59.9, "59s"), (60, "1m 0s"), (134, "2m 14s"),
+                                         (3599, "59m 59s"), (3600, "1h 0m"), (3723, "1h 2m"), (-5, "0s"),
+                                         (.nan, "0s"), (.infinity, "0s")]
+    for (seconds, text) in durations {
+        check(ShellIntegration.durationText(seconds) == text, "\(seconds) seconds reads \(text), not \(ShellIntegration.durationText(seconds))")
+    }
+    check(ShellIntegration.summary(exitCode: 0, seconds: 134.2) == "Finished after 2m 14s", "a success")
+    check(ShellIntegration.summary(exitCode: 1, seconds: 5) == "Exited with status 1 after 5s", "a failure")
+    check(ShellIntegration.summary(exitCode: nil, seconds: 5) == "Finished after 5s", "an unknown status")
+    check(ShellIntegration.summary(exitCode: 3, seconds: nil) == "Exited with status 3" && ShellIntegration.summary(exitCode: 0, seconds: nil) == "Finished",
+          "with no time, none is claimed")
+
+    // Which shell.
+    check(ShellIntegration.isZsh(path: "/bin/zsh") && ShellIntegration.isZsh(path: "/opt/homebrew/bin/zsh") && ShellIntegration.isZsh(path: "zsh"), "zsh")
+    check(!ShellIntegration.isZsh(path: "/bin/bash") && !ShellIntegration.isZsh(path: "/usr/bin/zsh5") && !ShellIntegration.isZsh(path: "/bin/zshx")
+            && !ShellIntegration.isZsh(path: "/zsh/bin/bash") && !ShellIntegration.isZsh(path: "") && !ShellIntegration.isZsh(path: "/usr/local/bin/fish"),
+          "and nothing else")
+
+    // How zsh is pointed at the files.
+    let wrapper = "/Users/me/Library/Application Support/iTERMiNAL/ShellIntegration/zsh"
+    let withZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": "/Users/me/.config/zsh", "HOME": "/Users/me"])
+    check(withZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_ZDOTDIR_ORIG": "/Users/me/.config/zsh"] && withZdotdir.remove.isEmpty,
+          "their ZDOTDIR is handed on: \(withZdotdir)")
+    let withoutZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["HOME": "/Users/me"])
+    check(withoutZdotdir.set == ["ZDOTDIR": wrapper] && withoutZdotdir.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "with none, none is handed on, and a stale hand-over is removed")
+    let stale = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ITERMINAL_ZDOTDIR_ORIG": "/somewhere/else"])
+    check(stale.set["ITERMINAL_ZDOTDIR_ORIG"] == nil && stale.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "a hand-over inherited from elsewhere is never believed")
+    check(ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": ""]).set["ITERMINAL_ZDOTDIR_ORIG"] == "", "an empty ZDOTDIR is theirs too")
+
+    // The files.
+    let files = ShellIntegration.zshFiles
+    check(files.map { $0.name } == [".zshenv"], "one file, the first zsh reads: \(files.map { $0.name })")
+    for file in files {
+        check(file.contents.hasSuffix("\n") && !file.contents.contains("\t") && file.contents.utf8.count < 4_000, "\(file.name) ends in a newline, has no tabs, and is small")
+        for word in ["eval ", "curl", "wget", "sudo", "rm -", "> ~", "chmod", "ssh"] {
+            check(!file.contents.contains(word), "\(file.name) has no \(word.debugDescription) in it")
+        }
+    }
+    let script = files[0].contents
+    check(script.contains("ITERMINAL_ZDOTDIR_ORIG") && script.contains("builtin source"), ".zshenv hands ZDOTDIR back and loads theirs")
+    check(script.contains("633;C\\a") && script.contains("633;D;") && script.contains("633;A\\a"), "and says what the app reads: C, D;status, A")
+    check(script.contains("emulate -L zsh") && script.contains("precmd_functions") && script.contains("preexec_functions"), "from zsh's own option defaults, through the hook arrays")
+    check(!script.contains("633;E") && !script.contains("]7;") && !script.contains("]133;"), "and nothing else: no command text, no OSC 7, no OSC 133")
+    // The order is the point. The hooks go in before any of their files can set an
+    // option; ZDOTDIR goes back before anything else reads it (Apple's /etc/zshrc puts
+    // the history file at ${ZDOTDIR:-$HOME}/.zsh_history); and theirs is loaded last.
+    if let hooks = script.range(of: "precmd_functions=("), let handBack = script.range(of: "ITERMINAL_ZDOTDIR_ORIG+x"),
+       let theirs = script.range(of: "builtin source") {
+        check(hooks.lowerBound < handBack.lowerBound && handBack.lowerBound < theirs.lowerBound, "hooks, then ZDOTDIR back, then their .zshenv")
+    } else {
+        check(false, "the script has its hooks, its hand-back and its load of theirs")
+    }
+
+    // Writing them.
+    let fileManager = FileManager.default
+    let root = NSTemporaryDirectory() + "itm-shell-\(UUID().uuidString)"
+    defer { try? fileManager.removeItem(atPath: root) }
+    try? fileManager.createDirectory(atPath: root, withIntermediateDirectories: true)
+    func permissions(_ path: String) -> Int? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+              let number = attributes[.posixPermissions] as? NSNumber else { return nil }
+        return number.intValue
+    }
+    func contents(_ path: String) -> String? { try? String(contentsOfFile: path, encoding: .utf8) }
+
+    let folder = root + "/zsh"
+    check(ShellIntegrationFiles.install(into: folder) == .success(folder), "files are written into a new folder")
+    check(permissions(folder) == 0o700, "which only its owner can enter: \(String(describing: permissions(folder)))")
+    for file in files {
+        check(contents(folder + "/" + file.name) == file.contents && permissions(folder + "/" + file.name) == 0o600, "\(file.name) is written, and private")
+    }
+    check(ShellIntegrationFiles.install(into: folder) == .success(folder), "writing again is fine")
+    try? "stale".write(toFile: folder + "/.zshenv", atomically: true, encoding: .utf8)
+    check(ShellIntegrationFiles.install(into: folder) == .success(folder) && contents(folder + "/.zshenv") == files[0].contents, "a file with the wrong text is put right")
+
+    let keep = root + "/keep.txt"
+    try? "keep".write(toFile: keep, atomically: true, encoding: .utf8)
+    try? fileManager.removeItem(atPath: folder + "/.zshenv")
+    try? fileManager.createSymbolicLink(atPath: folder + "/.zshenv", withDestinationPath: keep)
+    check(ShellIntegrationFiles.install(into: folder) == .success(folder), "a link where a file belongs does not stop it")
+    var linkInfo = stat()
+    check(lstat(folder + "/.zshenv", &linkInfo) == 0 && (linkInfo.st_mode & S_IFMT) == S_IFREG && contents(folder + "/.zshenv") == files[0].contents,
+          "it is replaced by the real file")
+    check(contents(keep) == "keep", "and what the link pointed at is untouched")
+
+    _ = chmod(folder, 0o777)
+    check(ShellIntegrationFiles.install(into: folder) == .success(folder) && permissions(folder) == 0o700, "a folder left open to others is closed")
+
+    let link = root + "/link"
+    try? fileManager.createSymbolicLink(atPath: link, withDestinationPath: folder)
+    check(ShellIntegrationFiles.install(into: link) == .failure(.notPrivate(link)), "a link to a folder is refused, not followed")
+    let plain = root + "/plainfile"
+    try? "x".write(toFile: plain, atomically: true, encoding: .utf8)
+    check(ShellIntegrationFiles.install(into: plain) == .failure(.notPrivate(plain)), "so is a file where the folder should be")
 }
 
 // MARK: Assistant output is never run
