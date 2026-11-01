@@ -402,8 +402,16 @@ A tour of the app in thirty-four pictures, in five groups.
   palette — and never when a workspace is restored at launch, when a tab is
   reopened from Recents, or in a split; a split of a profile's tab uses the same
   shell and environment. Deleting a profile leaves its tabs as ordinary ones.
+  A profile can also have its own **colors**, **font** and **font size**, each
+  following Terminal settings until you choose one; and a saved host can name a
+  profile in Settings → Connections to draw its tabs with those two (a host uses
+  only the colors and font — its shell, variables and startup command are for
+  shells on this Mac). A profile with its own size does not follow Bigger Text and
+  Smaller Text, which change the size in Terminal settings.
   Profiles are not part of an exported archive (see
-  [Backup and restore](#backup-and-restore)).
+  [Backup and restore](#backup-and-restore)); a host's choice of profile is, but
+  it is only an id, and on a Mac without that profile the host follows Terminal
+  settings.
 - **Quick Look** — right-click a file in the file browser and choose **Quick Look**,
   or select it and press Space, to see it in the system's own Quick Look panel,
   the one Finder uses. A file on this Mac is previewed where it is. A file on a

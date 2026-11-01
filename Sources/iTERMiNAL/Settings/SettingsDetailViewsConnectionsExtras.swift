@@ -6,6 +6,7 @@ import AppKit
 struct HostOptionsSection: View {
     @Binding var connection: SSHConnection
     @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         Section("Sign-in") {
@@ -38,6 +39,16 @@ struct HostOptionsSection: View {
                         .textSelection(.enabled)
                 }
             }
+
+            Picker("Colors and font", selection: $connection.profileID) {
+                Text("Same as Terminal settings").tag(UUID?.none)
+                ForEach(settings.profiles) { profile in
+                    Text("Profile: \(profile.displayName)").tag(UUID?.some(profile.id))
+                }
+            }
+            Text("Draws this host's terminal tabs with the colors and font of a profile (Settings → General → Profiles). Only those two apply to a host; a profile's shell, variables and startup command are for shells on this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if connection.transport == .ssh {
                 Picker("Address family", selection: $connection.ipFamily) {

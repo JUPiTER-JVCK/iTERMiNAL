@@ -493,6 +493,18 @@ final class TerminalSession: ObservableObject, Identifiable {
         kind.isTool ? 1 : BackgroundOpacity.clamped(settings.backgroundOpacity)
     }
 
+    /// The profile whose theme and font this terminal is drawn with: the one a
+    /// local shell was opened with, or the one a saved host is set to use. Nil
+    /// when there is none, it has been deleted, or this is a bundled tool.
+    private func appearanceProfile(_ settings: AppSettings) -> TerminalProfile? {
+        if kind.isTool { return nil }
+        if let connectionID = kind.connectionID {
+            let host = settings.sshConnections.first { $0.id == connectionID }
+            return settings.profile(withID: host?.profileID)
+        }
+        return settings.profile(withID: profileID)
+    }
+
     /// Pushes font, colors, ANSI palette, and the GPU renderer preference
     /// into the engine. Safe to call on every SwiftUI update — the engine
     /// ignores values that haven't changed.
@@ -506,11 +518,19 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// That is what made resizing feel heavy. The inputs are cheap to compare,
     /// so compare them and do nothing when a redraw is just a redraw.
     func applyStyling(settings: AppSettings, darkMode: Bool) {
-        let inputs = StylingInputs(
+        // A profile's own theme and font, where it made a choice; otherwise
+        // the settings. A bundled tool has no profile.
+        let look = TerminalProfile.appearance(
+            of: appearanceProfile(settings),
             themeID: settings.terminalThemeID,
-            darkMode: darkMode,
             fontName: settings.terminalFontName,
-            fontSize: settings.terminalFontSize,
+            fontSize: settings.terminalFontSize
+        )
+        let inputs = StylingInputs(
+            themeID: look.themeID,
+            darkMode: darkMode,
+            fontName: look.fontName,
+            fontSize: look.fontSize,
             backgroundOpacity: effectiveBackgroundOpacity(settings),
             gpuRequested: settings.useGPURendering,
             cursorStyleTag: settings.cursorStyleTag,
@@ -525,10 +545,10 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard inputs != appliedStyling else { return }
         appliedStyling = inputs
 
-        let theme = settings.resolvedTerminalTheme(darkMode: darkMode)
+        let theme = settings.resolvedTerminalTheme(id: look.themeID, darkMode: darkMode)
         engine.applyPalette(theme.palette)
         engine.apply(TerminalAppearance(
-            font: settings.resolvedTerminalFont(),
+            font: settings.resolvedTerminalFont(name: look.fontName, size: look.fontSize),
             background: theme.backgroundColor,
             foreground: theme.foregroundColor,
             backgroundAlpha: CGFloat(inputs.backgroundOpacity),

@@ -43,6 +43,10 @@ struct ProfilesSection: View {
 
     private func delete(_ profile: TerminalProfile) {
         if settings.defaultProfileID == profile.id.uuidString { settings.defaultProfileID = "" }
+        // A host that drew its tabs with it goes back to following the settings.
+        for index in settings.sshConnections.indices where settings.sshConnections[index].profileID == profile.id {
+            settings.sshConnections[index].profileID = nil
+        }
         settings.profiles.removeAll { $0.id == profile.id }
     }
 }
@@ -53,6 +57,15 @@ private struct ProfileEditor: View {
     let isDefault: Bool
     let open: () -> Void
     let delete: () -> Void
+    @ObservedObject private var imported = ImportedFonts.shared
+
+    /// Families to choose from: the installed fixed-pitch ones, those the person
+    /// imported, and the profile's own choice even if it has gone missing.
+    private var fontFamilies: [String] {
+        var names = Set(TerminalSettingsView.monospacedFamilies).union(imported.families.map(\.name))
+        if let chosen = profile.fontName, !chosen.isEmpty { names.insert(chosen) }
+        return names.sorted()
+    }
 
     var body: some View {
         DisclosureGroup {
@@ -95,6 +108,48 @@ private struct ProfileEditor: View {
             if let problem = profile.startupProblem {
                 Text(problem).font(.caption).foregroundStyle(.red)
             }
+
+            Picker("Colors", selection: Binding(
+                get: { profile.themeID ?? "" },
+                set: { profile.themeID = $0.isEmpty ? nil : $0 }
+            )) {
+                Text("Same as Terminal settings").tag("")
+                Text("Match system appearance").tag("auto")
+                Divider()
+                ForEach(TerminalTheme.available) { theme in
+                    Text(theme.name).tag(theme.id)
+                }
+            }
+            Picker("Font", selection: Binding(
+                get: { profile.fontName },
+                set: { profile.fontName = $0 }
+            )) {
+                Text("Same as Terminal settings").tag(String?.none)
+                Text("System monospace (SF Mono)").tag(String?.some(""))
+                Divider()
+                ForEach(fontFamilies, id: \.self) { family in
+                    Text(family).tag(String?.some(family))
+                }
+            }
+            Toggle("Its own font size", isOn: Binding(
+                get: { profile.fontSize != nil },
+                set: { profile.fontSize = $0 ? 13 : nil }
+            ))
+            if let size = profile.fontSize {
+                HStack {
+                    Slider(
+                        value: Binding(get: { size }, set: { profile.fontSize = $0 }),
+                        in: TerminalProfile.fontSizeRange,
+                        step: 1
+                    )
+                    Text("\(Int(size)) pt")
+                        .monospacedDigit()
+                        .frame(width: 42, alignment: .trailing)
+                }
+            }
+            Text("Colors and font apply to a shell opened with this profile, and to the tabs of any saved host set to use it. Bigger Text and Smaller Text change the size in Terminal settings, so a profile with its own size does not follow them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
                 Button("Open a Tab", action: open)

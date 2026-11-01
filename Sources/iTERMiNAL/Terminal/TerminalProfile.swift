@@ -29,6 +29,16 @@ struct TerminalProfile: Codable, Equatable, Identifiable {
     /// One line typed into the tab when the person opens it — never when a
     /// workspace is restored, and never in a split.
     var startupCommand = ""
+    /// How its terminal is drawn, where it differs from Settings → Terminal.
+    /// Each is nil to follow the setting, so a profile saved before these
+    /// existed reads as following all three. They apply to a shell opened with
+    /// the profile and, through a saved host's profile, to that host's tabs.
+    ///
+    /// A theme id as `TerminalTheme` knows it, or `"auto"` to match the system.
+    var themeID: String?
+    /// A font family; empty is the system monospaced font.
+    var fontName: String?
+    var fontSize: Double?
 
     init(id: UUID = UUID(), name: String) {
         self.id = id
@@ -121,6 +131,34 @@ extension TerminalProfile {
         return nil
     }
 
+    // MARK: Appearance
+
+    /// The sizes Settings → Terminal allows, which Bigger Text and Smaller Text
+    /// also stay within.
+    static let fontSizeRange: ClosedRange<Double> = 9...24
+
+    /// What a terminal is drawn with: the profile's choice where it made one,
+    /// the global setting where it did not, and a size kept in range.
+    static func appearance(
+        of profile: TerminalProfile?,
+        themeID: String,
+        fontName: String,
+        fontSize: Double
+    ) -> (themeID: String, fontName: String, fontSize: Double) {
+        let theme = profile?.themeID?.trimmingCharacters(in: .whitespaces) ?? ""
+        let size = profile?.fontSize.flatMap { $0.isFinite ? $0 : nil }
+        return (
+            theme.isEmpty ? themeID : theme,
+            profile?.fontName ?? fontName,
+            size.map { min(max($0, fontSizeRange.lowerBound), fontSizeRange.upperBound) } ?? fontSize
+        )
+    }
+
+    /// Whether it changes how a terminal is drawn at all.
+    var overridesAppearance: Bool {
+        !(themeID?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty || fontName != nil || fontSize != nil
+    }
+
     // MARK: Where and what
 
     /// The start folder if it is written and exists, with `~` expanded.
@@ -147,6 +185,11 @@ extension TerminalProfile {
         let count = environment.count
         if count > 0 { parts.append(count == 1 ? "1 variable" : "\(count) variables") }
         if startupLine != nil { parts.append("runs a command") }
+        if !(themeID?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty { parts.append("own colors") }
+        if fontName != nil { parts.append("own font") }
+        if let size = fontSize, size.isFinite {
+            parts.append("\(Int(min(max(size, Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound))) pt")
+        }
         return parts.isEmpty ? "Same as the default" : parts.joined(separator: " · ")
     }
 

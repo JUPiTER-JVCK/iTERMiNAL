@@ -10,7 +10,8 @@ struct TerminalSettingsView: View {
     /// What the last import did, in a sentence.
     @State private var importMessage: String?
 
-    private static let monospacedFamilies: [String] = {
+    /// The installed fixed-pitch families, also offered to a profile.
+    static let monospacedFamilies: [String] = {
         NSFontManager.shared.availableFontFamilies.filter { family in
             // The bundled symbols face is fixed-pitch too, but it has no
             // letters: picked as the terminal font, every line would draw as

@@ -5565,6 +5565,97 @@ do {
     }
 }
 
+// MARK: Profile appearance
+
+// A profile can draw its terminal with its own colors and font, and a saved host can name a
+// profile to do the same for its tabs. What is checked: that a choice made in the profile wins
+// and a choice not made leaves the settings in charge; that a size is kept in range; that a
+// profile saved before these existed still reads, as following the settings; and the same for
+// the host's profile reference.
+do {
+    func profile(_ build: (inout TerminalProfile) -> Void = { _ in }) -> TerminalProfile {
+        var made = TerminalProfile(name: "p")
+        build(&made)
+        return made
+    }
+    func look(_ chosen: TerminalProfile?) -> (themeID: String, fontName: String, fontSize: Double) {
+        TerminalProfile.appearance(of: chosen, themeID: "auto", fontName: "Menlo", fontSize: 13)
+    }
+
+    // Following the settings.
+    check(look(nil) == (themeID: "auto", fontName: "Menlo", fontSize: 13), "no profile: the settings")
+    check(look(profile()) == (themeID: "auto", fontName: "Menlo", fontSize: 13), "a profile that chose nothing: the settings")
+    check(!profile().overridesAppearance, "and it does not say it changes anything")
+    check(look(profile { $0.themeID = "   " }).themeID == "auto" && !profile { $0.themeID = "  " }.overridesAppearance, "a blank theme is no choice")
+
+    // Choosing.
+    check(look(profile { $0.themeID = "dracula" }) == (themeID: "dracula", fontName: "Menlo", fontSize: 13), "a theme alone")
+    check(look(profile { $0.themeID = "  nord " }).themeID == "nord", "trimmed")
+    check(look(profile { $0.themeID = "auto" }).themeID == "auto", "matching the system is a choice too")
+    check(look(profile { $0.fontName = "Fira Code" }) == (themeID: "auto", fontName: "Fira Code", fontSize: 13), "a font alone")
+    check(look(profile { $0.fontName = "" }).fontName == "", "the system monospace is a choice, not 'unset'")
+    check(look(profile { $0.fontSize = 16 }) == (themeID: "auto", fontName: "Menlo", fontSize: 16), "a size alone")
+    let all = look(profile { $0.themeID = "nord"; $0.fontName = "Hack"; $0.fontSize = 11 })
+    check(all == (themeID: "nord", fontName: "Hack", fontSize: 11), "all three")
+    check(profile { $0.themeID = "x" }.overridesAppearance, "a theme is a change")
+    check(profile { $0.fontName = "" }.overridesAppearance, "a font is a change")
+    check(profile { $0.fontSize = 12 }.overridesAppearance, "a size is a change")
+
+    // Sizes in range.
+    check(look(profile { $0.fontSize = 3 }).fontSize == 9 && look(profile { $0.fontSize = 99 }).fontSize == 24, "kept between 9 and 24")
+    check(look(profile { $0.fontSize = 9 }).fontSize == 9 && look(profile { $0.fontSize = 24 }).fontSize == 24, "the ends are allowed")
+    check(look(profile { $0.fontSize = Double.nan }).fontSize == 13 && look(profile { $0.fontSize = Double.infinity }).fontSize == 13, "nonsense is no choice")
+    check(TerminalProfile.fontSizeRange == 9...24, "the range Settings allows")
+
+    // How it reads in a list.
+    let colorsAndSize = profile { $0.themeID = "nord"; $0.fontSize = 16 }
+    check(colorsAndSize.summary == "own colors · 16 pt", "colors and size: \(colorsAndSize.summary)")
+    check(profile { $0.fontSize = 99 }.summary == "24 pt", "a size as it will be used")
+    check(profile { $0.shellPath = "/bin/zsh"; $0.themeID = "nord" }.summary == "zsh · own colors", "after the rest")
+    check(profile { $0.fontName = "Hack" }.summary == "own font", "a font alone")
+    check(profile { $0.themeID = "nord"; $0.fontName = "Hack"; $0.fontSize = 12 }.summary == "own colors · own font · 12 pt", "all three, in that order")
+
+    // What an older save held, and a round trip.
+    let id = UUID().uuidString
+    let older = #"{"id":"\#(id)","name":"Work","shellPath":"/bin/zsh","shellArguments":"","variables":[],"startDirectory":"","startupCommand":""}"#
+    if let read = try? JSONDecoder().decode(TerminalProfile.self, from: Data(older.utf8)) {
+        check(read.themeID == nil && read.fontName == nil && read.fontSize == nil && read.name == "Work" && read.shellPath == "/bin/zsh",
+              "a profile saved before these existed follows the settings")
+    } else {
+        check(false, "a profile saved before appearance existed can be read")
+    }
+    let styled = profile { $0.themeID = "nord"; $0.fontName = ""; $0.fontSize = 15 }
+    if let data = try? JSONEncoder().encode(styled), let back = try? JSONDecoder().decode(TerminalProfile.self, from: data) {
+        check(back == styled && back.fontName == "" && back.fontSize == 15, "and the choices survive being saved")
+    } else {
+        check(false, "a styled profile can be saved and read back")
+    }
+
+    // A host's profile.
+    let named = UUID()
+    check(SSHConnection(name: "n", host: "h", username: "u").profileID == nil, "a host follows the settings unless told otherwise")
+    check(SSHConnection(name: "n", host: "h", username: "u", profileID: named).profileID == named, "or names a profile")
+    let hostID = UUID().uuidString
+    let bare = #"{"id":"\#(hostID)","name":"n","host":"h"}"#
+    let withProfile = #"{"id":"\#(hostID)","name":"n","host":"h","profileID":"\#(named.uuidString)"}"#
+    let garbled = #"{"id":"\#(hostID)","name":"n","host":"h","profileID":"not a uuid"}"#
+    if let a = try? JSONDecoder().decode(SSHConnection.self, from: Data(bare.utf8)),
+       let b = try? JSONDecoder().decode(SSHConnection.self, from: Data(withProfile.utf8)),
+       let c = try? JSONDecoder().decode(SSHConnection.self, from: Data(garbled.utf8)) {
+        check(a.profileID == nil, "a host saved before this has none")
+        check(b.profileID == named, "one saved with it has it")
+        check(c.profileID == nil, "and a value that is not an id costs the host its profile, not the whole list")
+    } else {
+        check(false, "hosts with, without and with a damaged profile can be read")
+    }
+    let host = SSHConnection(name: "n", host: "h", username: "u", profileID: named)
+    if let data = try? JSONEncoder().encode(host), let back = try? JSONDecoder().decode(SSHConnection.self, from: data) {
+        check(back == host && back.profileID == named, "the host's profile survives being saved")
+    } else {
+        check(false, "a host with a profile can be saved and read back")
+    }
+}
+
 // MARK: Tab order
 
 do {
