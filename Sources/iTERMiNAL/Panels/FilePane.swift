@@ -273,6 +273,45 @@ final class FileBrowserModel: ObservableObject, Identifiable {
         }
     }
 
+    /// A file in the system's Quick Look panel. A remote one comes down to a
+    /// copy in a folder of its own first, within `QuickLookPolicy`'s limit, and
+    /// the copy is removed when the panel closes. Nothing is run or opened.
+    func quickLook(_ item: FileItem) {
+        if let refusal = QuickLookPolicy.refusal(isDirectory: item.isDirectory, isRemote: provider.isRemote, size: item.size) {
+            if refusal != .folder { say(QuickLookPolicy.message(refusal, name: item.name)) }
+            return
+        }
+        guard provider.isRemote else {
+            if QuickLookPresenter.isRegularFile(atPath: item.path) {
+                QuickLookPresenter.shared.show(URL(fileURLWithPath: item.path))
+            } else {
+                say("\(item.name) is not a plain file, so it can't be previewed.")
+            }
+            return
+        }
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iTERMiNAL", isDirectory: true)
+            .appendingPathComponent("QuickLook-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            say("Could not make room to fetch \(item.name).")
+            return
+        }
+        let destination = folder.appendingPathComponent(QuickLookPolicy.safeFileName(item.name))
+        transferNote = "Fetching \(item.name)…"
+        provider.download(item.path, to: destination) { [weak self] result in
+            self?.transferNote = nil
+            switch result {
+            case .success(let url):
+                QuickLookPresenter.shared.show(url, scratchFolder: folder)
+            case .failure(let error):
+                try? FileManager.default.removeItem(at: folder)
+                self?.fail(error)
+            }
+        }
+    }
+
     private func showMarkdown(at url: URL, title: String) {
         guard let text = MarkdownPreview.readText(at: url) else {
             say("\(title) could not be read as a text file.")
@@ -524,6 +563,9 @@ struct FilePaneView: View {
                     .simultaneousGesture(TapGesture().onEnded { model.selection = item.path })
                     .contextMenu {
                         Button("Open") { model.open(item) }
+                        if !item.isDirectory {
+                            Button("Quick Look") { model.quickLook(item) }
+                        }
                         if !item.isDirectory && MarkdownHTML.isMarkdownFile(named: item.name) {
                             Button("Preview Markdown") { model.previewMarkdown(item) }
                         }
@@ -558,6 +600,15 @@ struct FilePaneView: View {
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
+            // Space, as in Finder. A folder is left alone, so the key does
+            // nothing there rather than complain.
+            .onKeyPress(.space) {
+                guard let path = model.selection,
+                      let item = model.items.first(where: { $0.path == path }),
+                      !item.isDirectory else { return .ignored }
+                model.quickLook(item)
+                return .handled
+            }
         }
     }
 
