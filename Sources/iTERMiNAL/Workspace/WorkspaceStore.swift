@@ -201,6 +201,9 @@ final class WorkspaceStore: ObservableObject {
     struct ComposerHelpRequest: Equatable {
         let id: Int
         let kind: ErrorHelpKind
+        /// Text selected in a terminal, when the request is about that and not
+        /// about what the composer's terminal last printed.
+        var selection: String? = nil
     }
     @Published private(set) var composerHelpRequest: ComposerHelpRequest?
     var composerHelpHandled = 0
@@ -929,12 +932,12 @@ final class WorkspaceStore: ObservableObject {
     /// Asks the composer's assistant to explain, or suggest a fix for, what the
     /// composer's terminal last printed — un-hiding the composer first, since
     /// the answer appears there.
-    func requestComposerHelp(_ kind: ErrorHelpKind) {
+    func requestComposerHelp(_ kind: ErrorHelpKind, selection: String? = nil) {
         detailMode = .terminal
         AppSettings.shared.composerEnabled = true
         AppSettings.shared.composerCollapsed = false
         composerHelpCounter += 1
-        composerHelpRequest = ComposerHelpRequest(id: composerHelpCounter, kind: kind)
+        composerHelpRequest = ComposerHelpRequest(id: composerHelpCounter, kind: kind, selection: selection)
     }
 
     // MARK: Composer routing

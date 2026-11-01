@@ -48,7 +48,12 @@ enum TerminalContextMenu {
     /// `link` is what is under the pointer, when something is: a hyperlink a
     /// program printed or text that reads as a URL.
     @MainActor
-    static func make(for terminal: InstrumentedTerminalView, actions: [TerminalMenuAction], link: String? = nil) -> NSMenu {
+    static func make(
+        for terminal: InstrumentedTerminalView,
+        actions: [TerminalMenuAction],
+        link: String? = nil,
+        selectionActions: [TerminalMenuAction] = []
+    ) -> NSMenu {
         let menu = NSMenu(title: "Terminal")
         // The system adds its own entries to a context menu for a view that takes
         // text input — an "AutoFill" submenu showed up under the first real
@@ -57,6 +62,15 @@ enum TerminalContextMenu {
 
         if let link {
             addLinkItems(for: link, to: menu, terminal: terminal)
+        }
+
+        // What can be done with the selected text, above the editing items so it
+        // is the first thing a selection offers.
+        if !selectionActions.isEmpty {
+            for action in selectionActions {
+                menu.addItem(ActionMenuItem(action.title, key: action.key, modifiers: action.modifiers, handler: action.perform))
+            }
+            menu.addItem(.separator())
         }
 
         // The editing items are SwiftTerm's own, aimed at the terminal itself

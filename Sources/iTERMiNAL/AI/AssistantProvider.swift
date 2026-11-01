@@ -5,7 +5,7 @@ import Foundation
 /// an address and the model to start from; adding one does not change how a
 /// request is made.
 enum AssistantProvider: String, CaseIterable, Identifiable {
-    case openai, claude, ollama, custom
+    case openai, claude, ollama, lmstudio, custom
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum AssistantProvider: String, CaseIterable, Identifiable {
         case .openai: return "OpenAI"
         case .claude: return "Claude (Anthropic)"
         case .ollama: return "Ollama (local)"
+        case .lmstudio: return "LM Studio (local)"
         case .custom: return "Custom"
         }
     }
@@ -24,6 +25,11 @@ enum AssistantProvider: String, CaseIterable, Identifiable {
         case .openai: return "https://api.openai.com/v1"
         case .claude: return "https://api.anthropic.com/v1"
         case .ollama: return "http://127.0.0.1:11434/v1"
+        // Its server's own default, from its documentation. There is no
+        // llama.cpp preset: its server's default port is 9931 in the current
+        // source but 8080 in its own Docker examples, so no fixed address is
+        // right for every build — Custom takes whatever port it was started on.
+        case .lmstudio: return "http://127.0.0.1:1234/v1"
         case .custom: return nil
         }
     }
@@ -34,7 +40,7 @@ enum AssistantProvider: String, CaseIterable, Identifiable {
         switch self {
         case .openai: return "gpt-4o-mini"
         case .claude: return "claude-haiku-5-5"
-        case .ollama, .custom: return nil
+        case .ollama, .lmstudio, .custom: return nil
         }
     }
 
@@ -43,7 +49,7 @@ enum AssistantProvider: String, CaseIterable, Identifiable {
     var keysPage: URL? {
         switch self {
         case .claude: return URL(string: "https://platform.claude.com/settings/keys")
-        case .openai, .ollama, .custom: return nil
+        case .openai, .ollama, .lmstudio, .custom: return nil
         }
     }
 

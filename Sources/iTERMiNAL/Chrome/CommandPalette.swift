@@ -296,6 +296,21 @@ struct CommandPaletteView: View {
             WorkspaceArchiveIO.promptImport(store: store, settings: settings)
         })
 
+        // Jump to a workspace itself, by its first tab: a workspace with no tab
+        // has nowhere to go.
+        for workspace in store.workspaces {
+            guard let first = workspace.tabs.first else { continue }
+            let count = workspace.tabs.count
+            actions.append(PaletteAction(
+                id: "workspace.goto.\(workspace.id.uuidString)",
+                title: "Go to Workspace: \(workspace.name)",
+                subtitle: count == 1 ? "1 tab" : "\(count) tabs",
+                systemImage: "folder"
+            ) {
+                store.selectedTabID = first.id
+            })
+        }
+
         // Jump straight to any open tab.
         for workspace in store.workspaces {
             for tab in workspace.tabs {

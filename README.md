@@ -230,6 +230,16 @@ A tour of the app in thirty-four pictures, in five groups.
   the screen, so it is safe while a program is running. A program that has
   switched on mouse reporting does not receive the right button (the terminal
   engine never reported it), so the menu takes nothing from it.
+  Select text first and the menu leads with what can be done with it. A web
+  address can be opened or copied. A file or folder that is really there — a
+  name in the terminal's folder, a `./`, `../` or `~/` path, with or without the
+  `:12:3` a compiler adds — can be revealed in Finder, opened in a new tab
+  (a file opens its folder) or copied as a shell-quoted path; a remote session
+  looks for no paths, since they would be on another machine. And any selection
+  can be sent to the assistant with **Explain Selection**: it asks first unless
+  *Include recent terminal output* is on in Settings → AI, shows exactly what
+  would go, sends only the selected text (secrets masked, cut to 6,000
+  characters) and, if that switch is on, the workspace name, and runs nothing.
 - **Colored output** — `ls` prints folders, links and programs in color, and
   `man` pages (and anything read through `less`) get colored headings, options
   and placeholders, with no shell plugin to install: the app gives each local
@@ -386,7 +396,7 @@ A tour of the app in thirty-four pictures, in five groups.
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
 - **Command palette** — ⌘K (or ⌘P), fuzzy search over every command in the
-  menus, your saved hosts, the themes and the tabs that are open.
+  menus, your saved hosts, the themes, the workspaces and the tabs that are open.
 - **Gentle motion** — panels, the dock, banners and the sidebar's sections
   move on springs, and hover and selection in the sidebar, toolbar and dock
   fade instead of flashing. With Reduce Motion on (System Settings →
@@ -1198,6 +1208,20 @@ header, which iTERMiNAL cannot send; use a key scoped to a workspace.
    localhost. Plain HTTP works here only because ATS is given the
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
+
+### LM Studio and other local servers
+
+**LM Studio** has a preset (base URL `http://127.0.0.1:1234/v1`, the address its
+documentation gives for its local server). A local address needs no key from
+this app; if your server asks for one, save it under API key. Set the model to
+the name the server shows.
+
+There is no llama.cpp preset, on purpose: the default port of its `llama-server`
+is 9931 in its current source but its own Docker examples use 8080, so no fixed
+address is right for every build. Choose **Custom** and enter the address and
+`--port` you started it with, followed by `/v1`. Anything on this Mac's loopback
+address is treated as local: no key needed, and the consent sheets say it stays
+on this Mac.
 
 ## Site explorer
 

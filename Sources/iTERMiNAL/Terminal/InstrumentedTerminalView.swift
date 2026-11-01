@@ -23,6 +23,9 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// splitting the pane, opening a tab. Asked each time the menu opens, so it
     /// can reflect the moment.
     var contextMenuActions: (() -> [TerminalMenuAction])?
+    /// What the app offers for the text selected here, asked each time the menu
+    /// opens, with that text. Not asked when nothing is selected.
+    var selectionActions: ((String) -> [TerminalMenuAction])?
 
     /// What has been typed since the last Enter.
     private var lineBuffer: [UInt8] = []
@@ -102,10 +105,17 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// which is as far as a right-click gets: SwiftTerm does not handle the
     /// right button at all. See `TerminalContextMenu`.
     override func menu(for event: NSEvent) -> NSMenu? {
-        TerminalContextMenu.make(
+        // `getSelection` is nil unless a selection is active: the selection
+        // service's own text reader would hand back the range of the last one.
+        let selected = getSelection() ?? ""
+        let forSelection = selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? []
+            : (selectionActions?(selected) ?? [])
+        return TerminalContextMenu.make(
             for: self,
             actions: contextMenuActions?() ?? [],
-            link: link(at: convert(event.locationInWindow, from: nil))
+            link: link(at: convert(event.locationInWindow, from: nil)),
+            selectionActions: forSelection
         )
     }
 
