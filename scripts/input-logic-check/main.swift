@@ -5002,5 +5002,102 @@ do {
     check(RFBAuth.response(challenge: [1, 2, 3], password: "x") == nil, "a challenge that is not 16 bytes gets no answer")
 }
 
+// MARK: Reading a selection
+
+// What the right-click menu offers for selected text: an address to open, a
+// file that is really there, or just text — and nothing about a path for a
+// remote session, a missing file, or something a terminal would act on.
+do {
+    let home = "/Users/me"
+    let folder = "/Users/me/code"
+    let there: Set<String> = [
+        "/Users/me/code/Package.swift", "/Users/me/code/Sources", "/Users/me/notes.txt",
+        "/etc/hosts", "/Users/me/code/My File.txt", "/Users/me",
+    ]
+    var asked: [String] = []
+    func read(_ selection: String, in directory: String? = folder) -> TerminalSelection.Kind {
+        TerminalSelection.classify(selection, directory: directory, home: home) { path in
+            asked.append(path)
+            return there.contains(path)
+        }
+    }
+
+    // Addresses.
+    check(read("https://example.com/a?b=1") == .url("https://example.com/a?b=1"), "a web address")
+    check(read("http://localhost:3000") == .url("http://localhost:3000"), "an address with a port")
+    check(read("(https://example.com).") == .url("https://example.com"), "an address in a sentence loses the punctuation around it")
+    check(read("<https://example.com>,") == .url("https://example.com"), "and its angle brackets")
+    check(read("see https://x.org") == .text, "an address inside other words is just text")
+    check(read("ftp://x.org") == .text && read("file:///etc/hosts") == .text && read("https://") == .text, "only a web address with a host is an address")
+    check(read("https://example.com", in: nil) == .url("https://example.com"), "an address means the same in a remote session")
+
+    // Files and folders that are there.
+    check(read("Package.swift") == .path("/Users/me/code/Package.swift"), "a name in this folder")
+    check(read("./Sources") == .path("/Users/me/code/Sources") && read("Sources/") == .path("/Users/me/code/Sources"), "a folder, with or without a slash")
+    check(read("../notes.txt") == .path("/Users/me/notes.txt"), "a parent folder's file")
+    check(read("../../../etc/hosts") == .path("/etc/hosts"), "going up past the top stops at the top")
+    check(read("~/notes.txt") == .path("/Users/me/notes.txt") && read("~") == .path("/Users/me"), "the home folder")
+    check(read("/etc/hosts") == .path("/etc/hosts"), "an absolute path")
+    check(read("'/etc/hosts'") == .path("/etc/hosts") && read("\"My File.txt\"") == .path("/Users/me/code/My File.txt"), "a quoted one")
+    check(read("My File.txt") == .path("/Users/me/code/My File.txt"), "a name with a space in it")
+    check(read("(Package.swift)") == .path("/Users/me/code/Package.swift"), "in brackets")
+    check(read("Package.swift:12:3") == .path("/Users/me/code/Package.swift"), "with the line and column a compiler adds")
+    check(read("Package.swift:12:") == .path("/Users/me/code/Package.swift") && read("Package.swift:12") == .path("/Users/me/code/Package.swift"), "and without the last colon")
+    check(read("Package.swift:") == .path("/Users/me/code/Package.swift"), "or a bare colon after it")
+    check(read("/Users/me/code/../notes.txt") == .path("/Users/me/notes.txt") && read("/Users//me/./notes.txt") == .path("/Users/me/notes.txt"), "dots and doubled slashes are worked out")
+
+    // Not offered.
+    check(read("nothing/here") == .text && read("ls") == .text && read("and/or") == .text, "something that is not there is just text")
+    check(read("/etc/hosts", in: nil) == .text && read("Package.swift", in: nil) == .text, "no paths for a remote session")
+    check(read("") == .text && read("  \n ") == .text, "nothing selected")
+    check(read("Package.swift\nSources") == .text, "two lines are not a path")
+    check(read("/etc/hosts\u{07}") == .text, "a control character is not a path")
+    check(read(String(repeating: "a", count: TerminalSelection.maxLength + 1)) == .text, "a very long selection is text")
+    check(!asked.isEmpty && asked.allSatisfy { $0.hasPrefix("/") && !$0.contains("//") && !$0.contains("/./") }, "only tidy absolute paths are looked up: \(asked.prefix(4))")
+}
+
+// MARK: Explaining a selection
+
+// A selection is not an error, so it is asked about differently, named
+// differently to the person, and masked and cut like any other text.
+do {
+    let secret = "AKIAIOSFODNN7EXAMPLE"
+    let selected = ErrorHelpRequest.make(
+        kind: .explainSelection, command: nil,
+        rawOutput: "no such module 'Foo'\nkey \(secret)", baseURL: "https://api.openai.com/v1"
+    )
+    let output = ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "a\nb", baseURL: "https://api.openai.com/v1")
+    let fix = ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "a\nb", baseURL: "https://api.openai.com/v1")
+
+    check(selected.prompt != output.prompt && selected.prompt != fix.prompt, "a selection has its own question")
+    check(selected.prompt.contains("selected text") && !selected.prompt.contains("went wrong"), "which does not assume it is an error: \(selected.prompt)")
+    check(selected.contents == ["2 lines of selected text"], "the sheet calls it selected text: \(selected.contents)")
+    check(output.contents == ["2 lines of output"], "and the existing kinds still say output: \(output.contents)")
+    check(ErrorHelpRequest.make(kind: .explainSelection, command: nil, rawOutput: "one", baseURL: "https://a.b").contents == ["1 line of selected text"], "singular, too")
+    check(selected.preview.contains("Selected text:\n") && !selected.preview.contains("Output:\n"), "the preview is headed Selected text")
+    check(output.preview.contains("Output:\n") && !output.preview.contains("Selected text:"), "and the others are still headed Output")
+    check(!selected.output.contains(secret) && !selected.preview.contains(secret), "a key in a selection is masked before it is shown or sent")
+    check(selected.consentMessage.contains("2 lines of selected text") && selected.consentMessage.contains("api.openai.com"), "the question names what and where: \(selected.consentMessage)")
+    check(selected.command == nil && selected.workingDirectory == nil && selected.gitBranch == nil, "a selection carries no command or folder of its own")
+}
+
+// MARK: Local model presets
+
+do {
+    let address = "http://127.0.0.1:1234/v1"
+    check(AssistantProvider.lmstudio.baseURL == address && AssistantProvider.matching(baseURL: address) == .lmstudio, "LM Studio's own default address is its preset")
+    check(AssistantProvider.lmstudio.label == "LM Studio (local)" && AssistantProvider.lmstudio.defaultModel == nil && AssistantProvider.lmstudio.keysPage == nil, "it has no stock model and no keys page")
+    check(AssistantDestination.describe(baseURL: address).staysOnThisMac, "it stays on this Mac")
+    check(AssistantDestination.keyAccount(forBaseURL: address) == "assistant.apiKey", "a local server uses the shared key item, if it needs one at all")
+    check(AssistantProvider.lmstudio.model(afterSwitchingFrom: "gpt-4o-mini") == nil, "choosing it leaves a model name alone")
+    let addresses = AssistantProvider.allCases.compactMap { $0.baseURL }
+    check(Set(addresses).count == addresses.count, "no two presets share an address")
+    // Matched on "llama.cpp", not "llama": "Ollama" contains the shorter word.
+    check(!AssistantProvider.allCases.map(\.label).contains { $0.lowercased().contains("llama.cpp") || $0.lowercased().contains("llama-server") },
+          "there is no llama.cpp preset: its default port differs between builds")
+    check(!addresses.contains { $0.contains(":8080/") || $0.contains(":9931/") },
+          "and no preset guesses a port llama-server might be listening on")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

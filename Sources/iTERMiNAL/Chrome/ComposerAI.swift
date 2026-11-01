@@ -96,7 +96,13 @@ final class ComposerAIController: ObservableObject {
     ///
     /// When "Include recent terminal output" is off this asks first, naming
     /// where the text would go. It does not turn the setting on.
-    func requestHelp(_ kind: ErrorHelpKind, offer: ErrorOffer?, store: WorkspaceStore, settings: AppSettings) {
+    func requestHelp(
+        _ kind: ErrorHelpKind,
+        offer: ErrorOffer?,
+        selection: String? = nil,
+        store: WorkspaceStore,
+        settings: AppSettings
+    ) {
         task?.cancel()
 
         guard AssistantServiceProvider.current.isConfigured else {
@@ -106,7 +112,12 @@ final class ComposerAIController: ObservableObject {
 
         let command: String?
         let output: String
-        if let offer {
+        if let selection {
+            // What the person selected, and only that: no command, and no
+            // screen capture of a terminal they may not have been looking at.
+            command = nil
+            output = selection
+        } else if let offer {
             command = offer.command
             output = offer.output
         } else {
@@ -129,7 +140,7 @@ final class ComposerAIController: ObservableObject {
             }
         }
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            banner = .failure("There's no output to look at yet.")
+            banner = .failure(selection != nil ? "There's no text selected." : "There's no output to look at yet.")
             return
         }
 
@@ -141,8 +152,10 @@ final class ComposerAIController: ObservableObject {
             command: command,
             rawOutput: output,
             baseURL: settings.assistantBaseURL,
-            workingDirectory: settings.assistantIncludeCwd ? session?.currentDirectory : nil,
-            gitBranch: settings.assistantIncludeGitBranch ? session?.gitBranch : nil,
+            // Not for a selection: the folder and branch are the composer's
+            // terminal's, which need not be where the text was selected.
+            workingDirectory: settings.assistantIncludeCwd && selection == nil ? session?.currentDirectory : nil,
+            gitBranch: settings.assistantIncludeGitBranch && selection == nil ? session?.gitBranch : nil,
             workspaceName: settings.assistantIncludeWorkspace ? store.currentWorkspace?.name : nil
         )
         if settings.assistantIncludeRecentOutput {
@@ -170,7 +183,11 @@ final class ComposerAIController: ObservableObject {
         context.workingDirectory = request.workingDirectory
         context.gitBranch = request.gitBranch
         context.workspaceName = request.workspaceName
-        context.recentOutput = request.output
+        if request.kind == .explainSelection {
+            context.selection = request.output
+        } else {
+            context.recentOutput = request.output
+        }
         context.lastCommand = request.command
         banner = .thinking
         run(prompt: request.prompt, context: context, service: service)

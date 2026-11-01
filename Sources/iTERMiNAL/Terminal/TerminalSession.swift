@@ -146,6 +146,59 @@ final class TerminalSession: ObservableObject, Identifiable {
         engine.contextMenuActions = { [weak self] in
             self?.contextMenuActions() ?? []
         }
+        engine.selectionActions = { [weak self] text in
+            self?.selectionActions(for: text) ?? []
+        }
+    }
+
+    /// What a right-click on selected text offers: for an address, to open or
+    /// copy it; for a file or folder that exists on this Mac, to reveal it,
+    /// open a tab there, or copy it ready to paste into a command; and, for any
+    /// of it, to ask the assistant what it means. A bundled tool draws its own
+    /// screen, so nothing is offered there.
+    private func selectionActions(for text: String) -> [TerminalMenuAction] {
+        guard !kind.isTool else { return [] }
+        var items: [TerminalMenuAction] = []
+        // A remote session's paths are on another machine, so none are looked
+        // for here.
+        let folder: String? = kind.isRemote ? nil : currentDirectory
+        switch TerminalSelection.classify(text, directory: folder, exists: { FileManager.default.fileExists(atPath: $0) }) {
+        case .url(let address):
+            if let page = TerminalLinks.webURL(address) {
+                items.append(TerminalMenuAction(title: "Open Link", modifiers: []) {
+                    WorkspaceStore.shared.openLinkFromTerminal(page.absoluteString)
+                })
+                items.append(TerminalMenuAction(title: "Open in Default Browser", modifiers: []) {
+                    NSWorkspace.shared.open(page)
+                })
+            }
+            items.append(TerminalMenuAction(title: "Copy Link", modifiers: []) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(address, forType: .string)
+            })
+        case .path(let path):
+            var isFolder: ObjCBool = false
+            _ = FileManager.default.fileExists(atPath: path, isDirectory: &isFolder)
+            items.append(TerminalMenuAction(title: "Reveal in Finder", modifiers: []) {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            })
+            // A file opens its folder, as in the file browser: there is no `cd`
+            // to a file, and the folder is where you wanted to be.
+            let tabFolder = isFolder.boolValue ? path : (path as NSString).deletingLastPathComponent
+            items.append(TerminalMenuAction(title: "Open in New Tab", modifiers: []) {
+                WorkspaceStore.shared.newTab(directory: tabFolder)
+            })
+            items.append(TerminalMenuAction(title: "Copy as Quoted Path", modifiers: []) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(EditorCommand.quote(path), forType: .string)
+            })
+        case .text:
+            break
+        }
+        items.append(TerminalMenuAction(title: "Explain Selection", modifiers: []) {
+            WorkspaceStore.shared.requestComposerHelp(.explainSelection, selection: text)
+        })
+        return items
     }
 
     /// What a right-click here offers beyond copy and paste. Splitting acts on

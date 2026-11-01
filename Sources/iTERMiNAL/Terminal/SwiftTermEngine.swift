@@ -23,6 +23,11 @@ final class SwiftTermEngine: TerminalEngine {
         get { terminalView.contextMenuActions }
         set { terminalView.contextMenuActions = newValue }
     }
+    /// What the app adds to the right-click menu for selected text.
+    var selectionActions: ((String) -> [TerminalMenuAction])? {
+        get { terminalView.selectionActions }
+        set { terminalView.selectionActions = newValue }
+    }
 
     private let terminalView: InstrumentedTerminalView
     private var started = false

@@ -495,7 +495,7 @@ struct ComposerBar: View {
         guard let request = store.composerHelpPending else { return }
         store.composerHelpHandled = request.id
         withAnimation(Motion.banner) {
-            ai.requestHelp(request.kind, offer: nil, store: store, settings: settings)
+            ai.requestHelp(request.kind, offer: nil, selection: request.selection, store: store, settings: settings)
         }
     }
 
