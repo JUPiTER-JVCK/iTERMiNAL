@@ -121,6 +121,35 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
     }
 }
 
+/// Paints the hosting window's own background, which is what shows wherever
+/// the content does not reach.
+///
+/// The Settings scene's window keeps a system title bar and a content area
+/// sized by the view's fixed frame, so a band of the window's default grey
+/// showed above the content and below it. Painting the window the same colour
+/// as the content makes those bands part of it, in either appearance. Only the
+/// settings window uses this: the main window leaves its background alone
+/// because the translucent terminal depends on it.
+struct WindowBackgroundPainter: NSViewRepresentable {
+    let color: Color
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { paint(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { paint(nsView.window) }
+    }
+
+    private func paint(_ window: NSWindow?) {
+        guard let window else { return }
+        let next = NSColor(color)
+        if window.backgroundColor != next { window.backgroundColor = next }
+    }
+}
+
 extension FrameFontDesign {
     /// The SwiftUI design this choice stands for. Nil for System, which leaves
     /// the text as it was drawn rather than forcing a design on it.

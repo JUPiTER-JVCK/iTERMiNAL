@@ -25,6 +25,9 @@ struct SettingsRootView: View {
         }
         .frame(width: 940, height: 640)
         .background(theme.background)
+        // The window's own background, so the bands above and below the content
+        // are the same colour as it rather than the system's grey.
+        .background(WindowBackgroundPainter(color: theme.background))
         // No title bar above the rail: the search field and the section icons
         // start at the top edge, with the traffic lights floating over the
         // band the rail clears for them.
