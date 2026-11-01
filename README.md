@@ -467,7 +467,8 @@ A tour of the app in thirty-four pictures, in five groups.
   reads the *end* of the file, at most 200 KB, masks anything that looks like a
   key or a password, and asks the assistant about it a part at a time (about
   12,000 characters each, so a small local model can cope) before combining the
-  notes into one answer — up to 21 requests for a 200 KB log. A sheet comes first
+  notes into one answer — about 21 requests for 200 KB of ordinary lines, more
+  when the lines are very long (the sheet gives the exact number). A sheet comes first
   and asks every time: the file, how much of it, which server it goes to (and
   plainly when that is not this Mac), how many requests, how many values were
   masked, and — one click away — every character that would be sent. The model is
