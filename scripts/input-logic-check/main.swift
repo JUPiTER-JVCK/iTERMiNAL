@@ -4393,6 +4393,29 @@ do {
     check(TerminalLinks.preview(String(repeating: "e\u{301}", count: 30), limit: 10).count == 10, "it counts what is seen, not scalars")
 }
 
+// MARK: Saving a code block
+
+// A reply's code block saved as a file: a name from its language, a trailing
+// newline, and nothing else added.
+do {
+    let names: [(String?, String)] = [
+        (nil, "script.sh"), ("", "script.sh"), ("bash", "script.sh"), ("SH", "script.sh"), ("zsh", "script.zsh"), ("fish", "script.fish"),
+        ("python", "script.py"), ("py", "script.py"), ("JavaScript", "script.js"), ("ts", "script.ts"), ("yaml", "script.yml"),
+        ("json", "script.json"), ("rust", "script.rs"), ("c++", "script.cpp"), ("brainfuck", "script.txt"), ("../../etc/passwd", "script.txt"),
+        ("sh; rm -rf ~", "script.txt"),
+    ]
+    for (language, expected) in names {
+        check(ScriptFile.suggestedName(forLanguage: language) == expected, "\(String(describing: language)) is saved as \(expected), not \(ScriptFile.suggestedName(forLanguage: language))")
+    }
+    for language in ["sh", "python", "weird", "a/b", nil] as [String?] {
+        let name = ScriptFile.suggestedName(forLanguage: language)
+        check(!name.contains("/") && !name.contains("..") && name.hasPrefix("script."), "\(name) is a plain file name")
+    }
+    check(ScriptFile.contents(of: "echo hi") == "echo hi\n" && ScriptFile.contents(of: "echo hi\n") == "echo hi\n" && ScriptFile.contents(of: "") == "\n",
+          "a newline at the end, once")
+    check(ScriptFile.contents(of: "a\nb") == "a\nb\n" && !ScriptFile.contents(of: "echo hi").hasPrefix("#!"), "and no shebang or header added")
+}
+
 // MARK: Cursor animation
 
 do {
@@ -5833,29 +5856,6 @@ do {
     check(!selected.output.contains(secret) && !selected.preview.contains(secret), "a key in a selection is masked before it is shown or sent")
     check(selected.consentMessage.contains("2 lines of selected text") && selected.consentMessage.contains("api.openai.com"), "the question names what and where: \(selected.consentMessage)")
     check(selected.command == nil && selected.workingDirectory == nil && selected.gitBranch == nil, "a selection carries no command or folder of its own")
-}
-
-// MARK: Saving a code block
-
-// A reply's code block saved as a file: a name from its language, a trailing
-// newline, and nothing else added.
-do {
-    let names: [(String?, String)] = [
-        (nil, "script.sh"), ("", "script.sh"), ("bash", "script.sh"), ("SH", "script.sh"), ("zsh", "script.zsh"), ("fish", "script.fish"),
-        ("python", "script.py"), ("py", "script.py"), ("JavaScript", "script.js"), ("ts", "script.ts"), ("yaml", "script.yml"),
-        ("json", "script.json"), ("rust", "script.rs"), ("c++", "script.cpp"), ("brainfuck", "script.txt"), ("../../etc/passwd", "script.txt"),
-        ("sh; rm -rf ~", "script.txt"),
-    ]
-    for (language, expected) in names {
-        check(ScriptFile.suggestedName(forLanguage: language) == expected, "\(String(describing: language)) is saved as \(expected), not \(ScriptFile.suggestedName(forLanguage: language))")
-    }
-    for language in ["sh", "python", "weird", "a/b", nil] as [String?] {
-        let name = ScriptFile.suggestedName(forLanguage: language)
-        check(!name.contains("/") && !name.contains("..") && name.hasPrefix("script."), "\(name) is a plain file name")
-    }
-    check(ScriptFile.contents(of: "echo hi") == "echo hi\n" && ScriptFile.contents(of: "echo hi\n") == "echo hi\n" && ScriptFile.contents(of: "") == "\n",
-          "a newline at the end, once")
-    check(ScriptFile.contents(of: "a\nb") == "a\nb\n" && !ScriptFile.contents(of: "echo hi").hasPrefix("#!"), "and no shebang or header added")
 }
 
 // MARK: Local model presets
