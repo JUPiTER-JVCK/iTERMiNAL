@@ -230,16 +230,6 @@ A tour of the app in thirty-four pictures, in five groups.
   the screen, so it is safe while a program is running. A program that has
   switched on mouse reporting does not receive the right button (the terminal
   engine never reported it), so the menu takes nothing from it.
-  Select text first and the menu leads with what can be done with it. A web
-  address can be opened or copied. A file or folder that is really there — a
-  name in the terminal's folder, a `./`, `../` or `~/` path, with or without the
-  `:12:3` a compiler adds — can be revealed in Finder, opened in a new tab
-  (a file opens its folder) or copied as a shell-quoted path; a remote session
-  looks for no paths, since they would be on another machine. And any selection
-  can be sent to the assistant with **Explain Selection**: it asks first unless
-  *Include recent terminal output* is on in Settings → AI, shows exactly what
-  would go, sends only the selected text (secrets masked, cut to 6,000
-  characters) and, if that switch is on, the workspace name, and runs nothing.
 - **Colored output** — `ls` prints folders, links and programs in color, and
   `man` pages (and anything read through `less`) get colored headings, options
   and placeholders, with no shell plugin to install: the app gives each local
@@ -251,6 +241,17 @@ A tour of the app in thirty-four pictures, in five groups.
   and whose address is another — then **Open Link** (the ⌘-click route), **Open in
   Default Browser** and **Copy Link**. Only `http` and `https` addresses are
   offered for opening; any kind of link can be copied.
+- **Selected text** — select some text in a terminal and right-click: the menu
+  leads with what can be done with it. A web address can be opened or copied. A
+  file or folder that is really there — a name in the terminal's folder, a `./`,
+  `../` or `~/` path, with or without the `:12:3` a compiler adds — can be
+  revealed in Finder, opened in a new tab (a file opens its folder) or copied as
+  a shell-quoted path; a remote session looks for no paths, since they would be
+  on another machine. And any selection can be sent to the assistant with
+  **Explain Selection**: it asks first unless *Include recent terminal output*
+  is on in Settings → AI, shows exactly what would go, sends only the selected
+  text (secrets masked, cut to 6,000 characters) and, if that switch is on, the
+  workspace name, and runs nothing.
 - **Cursor animations** — Settings → Terminal → Cursor has an Animation choice
   beside the cursor style: Breathing, Heartbeat, Neon flicker, Pulse and Candle,
   each a fixed table of opacities, so the cursor looks the same on every launch.

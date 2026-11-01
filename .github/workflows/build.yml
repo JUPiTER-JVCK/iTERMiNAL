@@ -208,11 +208,11 @@ jobs:
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
             Sources/iTERMiNAL/Terminal/BackgroundOpacity.swift \
             Sources/iTERMiNAL/Terminal/TerminalLinks.swift \
+            Sources/iTERMiNAL/Terminal/TerminalSelection.swift \
             Sources/iTERMiNAL/Terminal/CursorAnimation.swift \
             Sources/iTERMiNAL/Terminal/FontImport.swift \
             Sources/iTERMiNAL/Terminal/ToolsPath.swift \
             Sources/iTERMiNAL/Terminal/EditorCommand.swift \
-            Sources/iTERMiNAL/Terminal/TerminalSelection.swift \
             Sources/iTERMiNAL/Workspace/TabOrder.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
