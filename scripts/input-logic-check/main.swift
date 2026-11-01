@@ -11,6 +11,8 @@
 //     Sources/iTERMiNAL/Input/FuzzyMatcher.swift \
 //     Sources/iTERMiNAL/Input/CommandHistoryIndex.swift \
 //     Sources/iTERMiNAL/Input/PathCompleter.swift \
+//     Sources/iTERMiNAL/Input/AutoPairing.swift \
+//     Sources/iTERMiNAL/Input/CommandNotes.swift \
 //     Sources/iTERMiNAL/Input/SuggestionState.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
@@ -1432,6 +1434,133 @@ do {
         for word in forbidden where code.contains(word) { offenders.append("\(path) uses \(word)") }
     }
     check(offenders.isEmpty, "the AI path must not send to a terminal: \(offenders)")
+}
+
+// MARK: Closing brackets and quotes
+
+// What the shell would read as an open quote or bracket, when typing an opener
+// also types its closer, and — the property that matters — that typing a
+// command through it ends up exactly as typed.
+do {
+    // Reading a line the way a shell does.
+    check(AutoPairing.scan("echo 'a").state == .single, "an open single quote")
+    check(AutoPairing.scan("echo \"a b").state == .double, "an open double quote")
+    check(AutoPairing.scan("echo `a").state == .backtick, "an open backtick")
+    check(AutoPairing.scan("echo \"a\\\"b\"").state == .none, "an escaped quote does not close a string")
+    check(AutoPairing.scan("echo 'a\\'").state == .none, "a backslash is nothing inside single quotes, so the quote closes")
+    check(AutoPairing.scan("echo \"it's\"").state == .none, "an apostrophe inside double quotes is a letter")
+    check(AutoPairing.scan("echo 'say \"hi\"'").state == .none, "double quotes inside single quotes are letters")
+    check(AutoPairing.scan("ls # it's").state == .comment, "a quote in a comment opens nothing")
+    check(AutoPairing.scan("echo a#b 'c").state == .single, "a # inside a word is not a comment")
+    check(AutoPairing.scan("echo $#").state == .none, "$# is not a comment")
+    check(AutoPairing.scan("ls # note\necho 'x").state == .single, "a comment ends at the line's end")
+    check(AutoPairing.scan("f() { echo hi").open == ["{"], "an open brace is found and the closed parentheses are not")
+    check(AutoPairing.scan("echo (a").open == ["("], "an open parenthesis")
+    check(AutoPairing.scan("case x in a) echo;; esac").open.isEmpty, "a stray closer opens nothing")
+    check(AutoPairing.scan("echo \"(\" '[' \\{").open.isEmpty, "brackets in quotes or escaped are not counted")
+    check(AutoPairing.scan("echo ([{").open == ["(", "[", "{"], "open brackets are kept outermost first")
+    check(AutoPairing.scan("ls \\").endsWithBackslash && !AutoPairing.scan("ls \\\\").endsWithBackslash, "a trailing backslash asks for another line; an escaped one does not")
+    check(!AutoPairing.scan("echo '\\").endsWithBackslash, "a backslash inside single quotes is nothing")
+    check(AutoPairing.scan("").state == .none && AutoPairing.scan("").open.isEmpty, "an empty line has nothing open")
+
+    // Typing an opener.
+    func edit(_ typed: Character, _ before: String, _ after: String = "") -> AutoPairing.Edit {
+        AutoPairing.edit(typing: typed, before: before, after: after)
+    }
+    check(edit("(", "") == .pair && edit("(", "echo ") == .pair && edit("[", "x ") == .pair && edit("{", "x ") == .pair, "a bracket is closed at the end of the line")
+    check(edit("(", "echo ", " bar") == .pair && edit("(", "echo $", ")") == .pair, "and before a space or a closer")
+    check(edit("(", "foo", "bar") == .plain, "but not in front of a word, so it does not split one")
+    check(edit("(", "echo '") == .plain && edit("[", "echo '") == .plain, "not inside single quotes")
+    check(edit("(", "# ") == .plain, "not in a comment")
+    check(edit("(", "echo \"") == .plain && edit("(", "echo \"$") == .pair && edit("{", "echo \"$") == .pair, "inside double quotes only after $")
+    check(edit("a", "ls ") == .plain && edit(" ", "ls") == .plain && edit("<", "ls ") == .plain, "other characters are typed as they are")
+
+    // Typing a quote.
+    check(edit("\"", "echo ") == .pair && edit("`", "echo ") == .pair && edit("'", "echo ") == .pair, "a quote is closed where one opens")
+    check(edit("'", "don") == .plain && edit("'", "it") == .plain && edit("'", "x9") == .plain, "an apostrophe after a letter or digit stays one")
+    check(edit("\"", "echo \\") == .plain && edit("'", "echo \\") == .plain, "an escaped quote is a letter")
+    check(edit("\"", "echo ", "x") == .plain, "a quote before a word is not closed")
+    check(edit("'", "echo \"it") == .plain && edit("\"", "echo '") == .plain && edit("`", "echo '") == .plain, "a quote inside another kind of quote is a letter")
+    check(edit("'", "# ") == .plain && edit("\"", "# a") == .plain, "and in a comment")
+    check(edit("\"", "echo \"hi", "\"") == .stepOver && edit("'", "echo 'hi", "'") == .stepOver && edit("`", "echo `hi", "`") == .stepOver, "the quote that closes the string steps over its closer")
+    check(edit("\"", "echo \"hi", "") == .plain, "typing the closer by hand, with none after, is just typing it")
+
+    // Typing a closer.
+    check(edit(")", "echo $(pwd", ")") == .stepOver && edit("]", "x[0", "]") == .stepOver && edit("}", "${HOME", "}") == .stepOver, "a closer steps over the one already there")
+    check(edit(")", "echo (a", "") == .plain && edit(")", "echo (a", "x") == .plain, "and is typed when there is none")
+    check(edit(")", "echo ')", ")") == .plain && edit(")", "# ", ")") == .plain, "but not in single quotes or a comment, where it is a letter")
+
+    // Backspace.
+    check(AutoPairing.deletesPair(before: "echo (", after: ")") && AutoPairing.deletesPair(before: "x[", after: "]") && AutoPairing.deletesPair(before: "x{", after: "}"), "an opener straight before its closer goes with it")
+    check(AutoPairing.deletesPair(before: "echo \"", after: "\"") && AutoPairing.deletesPair(before: "echo '", after: "'") && AutoPairing.deletesPair(before: "echo `", after: "`"), "so does an empty pair of quotes")
+    check(!AutoPairing.deletesPair(before: "echo \"abc\"", after: "\"def\""), "a quote that closed a string is not paired with the next one's")
+    check(!AutoPairing.deletesPair(before: "echo '(", after: ")"), "not a bracket inside single quotes")
+    check(!AutoPairing.deletesPair(before: "# (", after: ")"), "nor in a comment")
+    check(!AutoPairing.deletesPair(before: "echo \\\"", after: "\""), "nor an escaped quote")
+    check(!AutoPairing.deletesPair(before: "x", after: ")") && !AutoPairing.deletesPair(before: "(", after: "]") && !AutoPairing.deletesPair(before: "", after: "") && !AutoPairing.deletesPair(before: "(", after: ""), "nothing to remove")
+
+    // The property that matters: typing a command through all of it leaves
+    // exactly the command, with the caret at its end and nothing left over.
+    func typed(_ input: String) -> (text: String, after: String) {
+        var before = "", after = ""
+        for character in input {
+            switch AutoPairing.edit(typing: character, before: before, after: after) {
+            case .plain:
+                before.append(character)
+            case .pair:
+                before.append(character)
+                after = String(AutoPairing.closers[character] ?? " ") + after
+            case .stepOver:
+                before.append(character)
+                after.removeFirst()
+            }
+        }
+        return (before + after, after)
+    }
+    for command in [
+        "echo \"a (b)\"",
+        "git commit -m \"it's done\"",
+        "ls $(pwd)",
+        "echo \"$(date)\"",
+        "echo ${HOME}/x",
+        "echo 'a \"b\" (c'",
+        "echo don't stop",
+        "a[0]=(1 2)",
+        "if [ -f x ]; then echo \"y\"; fi",
+        "grep -E '^(a|b)$' file | wc -l",
+        "echo `date` \"x\" 'y'",
+        "# it's (not) a command",
+        "find . -name \"*.swift\" -exec rm {} \\;",
+        "echo \"日本語 (🎉)\"",
+    ] {
+        let result = typed(command)
+        check(result.text == command && result.after.isEmpty, "typing \(command.debugDescription) leaves \(result.text.debugDescription) with \(result.after.debugDescription) after the caret")
+    }
+}
+
+// MARK: Notes on a typed command
+
+// What is said about a line before Return, and when nothing is: a quote left
+// open, a bracket, a trailing backslash, and the dangers CommandRisk knows —
+// never about a line that is merely long, a comment, or fine.
+do {
+    check(CommandNotes.notes(for: "").isEmpty && CommandNotes.notes(for: "ls -la").isEmpty, "an ordinary command has no notes")
+    check(CommandNotes.notes(for: "echo 'hi").count == 1 && CommandNotes.notes(for: "echo 'hi")[0].hasPrefix("A quote is still open"), "an open quote is noted")
+    check(CommandNotes.notes(for: "echo \"hi").first?.hasPrefix("A quote is still open") == true && CommandNotes.notes(for: "echo `hi").first?.hasPrefix("A quote is still open") == true, "so is a double quote or a backtick")
+    check(CommandNotes.notes(for: "echo (a") == ["A bracket is still open."] && CommandNotes.notes(for: "f() { echo hi") == ["A bracket is still open."], "an open bracket is noted, and says no more than that")
+    check(CommandNotes.notes(for: "echo \"a (b\"").isEmpty, "a bracket inside quotes is not")
+    check(CommandNotes.notes(for: "echo 'a (b").count == 1, "and an open quote hides the brackets after it: one note, not two")
+    check(CommandNotes.notes(for: "ls \\") == ["Ends with a backslash, so the shell will wait for the next line."], "a trailing backslash is noted")
+    check(CommandNotes.notes(for: "ls \\\\").isEmpty, "an escaped backslash is not")
+    check(CommandNotes.notes(for: "ls # don't (").isEmpty, "a comment is not read")
+    check(CommandNotes.notes(for: "rm -rf /tmp/x") == CommandRisk.warnings(for: "rm -rf /tmp/x") && !CommandNotes.notes(for: "rm -rf /tmp/x").isEmpty, "a known danger is passed on as CommandRisk words it")
+    check(CommandNotes.notes(for: "sudo ls") == CommandRisk.warnings(for: "sudo ls") && !CommandNotes.notes(for: "sudo ls").isEmpty, "so is administrator rights")
+    let both = CommandNotes.notes(for: "rm -rf 'x")
+    check(both.count >= 2 && both[0].hasPrefix("A quote is still open") && Array(both.dropFirst()) == CommandRisk.warnings(for: "rm -rf 'x"), "an unfinished line says so first, then its dangers: \(both)")
+    check(Set(both).count == both.count, "and says nothing twice")
+    check(CommandNotes.notes(for: String(repeating: "a", count: CommandNotes.maxLength)).isEmpty, "a line at the limit is read, and fine")
+    check(CommandNotes.notes(for: String(repeating: "'", count: CommandNotes.maxLength + 1)).isEmpty, "one past the limit is left alone")
+    check(CommandNotes.notes(for: "sudo " + String(repeating: "a", count: CommandNotes.maxLength)).isEmpty, "a pasted wall of text is not read for dangers")
 }
 
 // MARK: HTTP methods and cURL

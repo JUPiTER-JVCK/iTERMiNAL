@@ -41,6 +41,9 @@ struct CommandInputView: NSViewRepresentable {
     /// Return true if the key was used; false lets the text view move the caret.
     var onRecallEarlier: () -> Bool
     var onRecallLater: () -> Bool
+    /// Close brackets and quotes as they are typed. Last, and defaulted, so a
+    /// caller that does not care leaves it off.
+    var autoClose = false
 
     static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     static let insets = NSSize(width: 12, height: 9)
@@ -186,6 +189,7 @@ struct CommandInputView: NSViewRepresentable {
                     }
                 }
             }
+            textView.autoClosesPairs = view.autoClose
             textView.ghost = view.ghost
             textView.ghostBase = view.ghostBase
             textView.isListOpen = { [weak self] in self?.parent.suggestions.mode != nil }
@@ -342,6 +346,9 @@ final class CommandTextView: NSTextView {
     /// Asked at the moment of a key, not cached: a list can open and close
     /// between one SwiftUI update and the next.
     var isListOpen: () -> Bool = { false }
+    /// Whether typing an opening bracket or quote also types its closer. Off
+    /// unless the setting is; see `AutoPairing`.
+    var autoClosesPairs = false
 
     var ghost = "" {
         didSet { if ghost != oldValue { needsDisplay = true } }
@@ -380,6 +387,15 @@ final class CommandTextView: NSTextView {
             return
         }
 
+        // Typing a bracket or quote with nothing selected: close it, or step
+        // over a closer that is already there. A real key press only — a paste,
+        // a picked suggestion or a recalled command does not come this way.
+        if autoClosesPairs, modifiers.subtracting(.shift).isEmpty,
+           let typed = event.characters, typed.count == 1, let character = typed.first,
+           selectedRange().length == 0, handleTypedCharacter(character) {
+            return
+        }
+
         if Self.returnKeys.contains(code) {
             if modifiers.isEmpty {
                 onReturn?()
@@ -409,6 +425,45 @@ final class CommandTextView: NSTextView {
             }
         }
         super.keyDown(with: event)
+    }
+
+    /// The text either side of the caret, for `AutoPairing`.
+    private func aroundCaret() -> (before: String, after: String, caret: Int) {
+        let text = string as NSString
+        let caret = min(max(selectedRange().location, 0), text.length)
+        return (text.substring(to: caret), text.substring(from: caret), caret)
+    }
+
+    /// Types `character` as `AutoPairing` says. True if it was handled here;
+    /// false leaves it to the text view to type as it always did.
+    private func handleTypedCharacter(_ character: Character) -> Bool {
+        let around = aroundCaret()
+        switch AutoPairing.edit(typing: character, before: around.before, after: around.after) {
+        case .plain:
+            return false
+        case .pair:
+            guard let closer = AutoPairing.closers[character] else { return false }
+            // One insertion, so one undo takes both away.
+            insertText(String(character) + String(closer), replacementRange: NSRange(location: NSNotFound, length: 0))
+            setSelectedRange(NSRange(location: around.caret + (String(character) as NSString).length, length: 0))
+            return true
+        case .stepOver:
+            setSelectedRange(NSRange(location: around.caret + (String(character) as NSString).length, length: 0))
+            return true
+        }
+    }
+
+    /// Backspace straight after an opener that was closed for the person takes
+    /// the closer too, as one deletion.
+    override func deleteBackward(_ sender: Any?) {
+        if autoClosesPairs, !hasMarkedText(), selectedRange().length == 0 {
+            let around = aroundCaret()
+            if AutoPairing.deletesPair(before: around.before, after: around.after), around.caret > 0 {
+                // The opener and the closer are one character each in UTF-16.
+                setSelectedRange(NSRange(location: around.caret - 1, length: 2))
+            }
+        }
+        super.deleteBackward(sender)
     }
 
     /// What a key means to an open list.

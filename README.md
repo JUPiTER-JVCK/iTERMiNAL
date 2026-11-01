@@ -303,6 +303,21 @@ A tour of the app in thirty-four pictures, in five groups.
   single-line commands are suggested. The chip above the input names the
   terminal it will run in, and switches it to a private shell of its own if you
   want one.
+- **Closing brackets and quotes** — Settings → Composer → Typing, off by
+  default. Typing `(`, `[`, `{`, `"`, `'` or a backtick in the composer also
+  types the closer, with the caret between; typing the closer steps over it, and
+  ⌫ straight after an opener removes both. It reads the line the way a shell
+  does, so nothing is closed inside another kind of quote, in a comment, after a
+  backslash, or (for `'`) after a letter, where it is an apostrophe: typing
+  `git commit -m "it's done"` or `echo "$(date)"` leaves exactly that. It acts
+  only on keys you press — not on paste or on a suggestion you pick.
+- **Notes on a command before you run it** — Settings → Composer → Typing, on by
+  default. A moment after you stop typing, a line above the input names the
+  well-known dangers in what you typed (deleting folders, administrator rights,
+  piping a download into a shell, overwriting a file, force-pushing) and says
+  when a quote or bracket is still open or the line ends in a backslash. It is
+  advice, not a check: it never stops or delays a command, a fast Return can
+  beat it, and a line with no note is not thereby safe.
 - **Framed window with an icon rail** — one top bar and an icon rail down the
   left edge frame the content, which sits in a rounded card. The rail holds
   Terminal, Workspaces and Connect, with a `···` menu for the rest (Tasks,

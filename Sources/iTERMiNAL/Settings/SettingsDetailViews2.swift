@@ -217,6 +217,17 @@ struct ComposerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Typing") {
+                Toggle("Close brackets and quotes as you type", isOn: $settings.composerAutoClose)
+                Text("Typing ( [ { \" ' or ` also types the closing one, with the caret between. Typing the closing character steps over it, and ⌫ straight after the opener removes both. A quote is not closed inside another kind of quote, in a comment, after a backslash, or after a letter, so an apostrophe in a word stays one. Off by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Note risky or unfinished commands", isOn: $settings.composerShowNotes)
+                Text("A moment after you stop typing, a line above the input names well-known dangers in what you typed — deleting folders, administrator rights, piping a download into a shell, overwriting a file — and says when a quote is still open, a bracket is, or the line ends in a backslash. It is advice, not a check: it never stops a command, and no note does not mean a command is safe.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Where commands run") {
                 Picker("Run commands in", selection: $settings.composerTarget) {
                     ForEach(ComposerTarget.allCases) { target in
