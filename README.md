@@ -1455,6 +1455,15 @@ header, which iTERMiNAL cannot send; use a key scoped to a workspace.
    `NSAllowsLocalNetworking` exemption, which covers loopback and local-link
    addresses alone — a LAN hostname over plain HTTP is still refused.
 
+**List Models.** With a loopback base URL (`localhost`, `127.0.0.1` or `::1`),
+Settings → AI shows **List Models**, which asks the server what it has
+(`{base URL}/models`) and offers the names under **Choose…**, instead of typing
+one. It asks the server on this Mac and nothing else: no key is sent, the
+address must be plain `http(s)` on a loopback host with no login in it, a
+redirect elsewhere is refused, and the reply is read only for names (OpenAI's
+`data[].id` and Ollama's `models[].name`), at most 200, none with a control
+character. For any other address the button is not there.
+
 ### LM Studio and other local servers
 
 **LM Studio** has a preset (base URL `http://127.0.0.1:1234/v1`, the address its
