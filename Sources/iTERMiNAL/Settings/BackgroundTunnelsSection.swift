@@ -12,9 +12,12 @@ struct BackgroundTunnelsSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ForEach($settings.savedTunnels) { $tunnel in
+            // Not `ForEach($settings.savedTunnels)`: its per-row bindings read
+            // `array[index]`, and after Remove a row's stale binding is still
+            // evaluated during layout, trapping on an out-of-range index.
+            ForEach(settings.savedTunnels) { tunnel in
                 DisclosureGroup {
-                    editor($tunnel)
+                    editor(binding(for: tunnel))
                 } label: {
                     header(tunnel)
                 }
@@ -26,6 +29,22 @@ struct BackgroundTunnelsSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Looks the tunnel up by id on every read and write, so a row that has
+    /// just been removed falls back to its value at render time instead of
+    /// indexing past the end.
+    private func binding(for tunnel: SavedTunnel) -> Binding<SavedTunnel> {
+        let id = tunnel.id
+        let fallback = tunnel
+        return Binding(
+            get: { settings.savedTunnels.first(where: { $0.id == id }) ?? fallback },
+            set: { newValue in
+                if let index = settings.savedTunnels.firstIndex(where: { $0.id == id }) {
+                    settings.savedTunnels[index] = newValue
+                }
+            }
+        )
     }
 
     private func header(_ tunnel: SavedTunnel) -> some View {
