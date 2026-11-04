@@ -1272,6 +1272,17 @@ final class WorkspaceStore: ObservableObject {
         scheduleSave()
     }
 
+    /// The `<` / `>` button beside the panels menu: puts the whole region away
+    /// or brings it back with the panels it had (the picker if it had none).
+    func toggleRightRegion() {
+        if rightRegionOpen {
+            closeRightRegion()
+        } else {
+            withAnimation(Motion.panel) { rightRegionOpen = true }
+            scheduleSave()
+        }
+    }
+
     func toggleRightPanelExpanded() {
         withAnimation(Motion.panel) { rightPanelExpanded.toggle() }
     }

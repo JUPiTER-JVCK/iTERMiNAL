@@ -65,6 +65,14 @@ struct TopBar: View {
 
             Spacer(minLength: 12)
 
+            BarIconButton(
+                icon: store.rightRegionOpen ? "chevron.right" : "chevron.left",
+                help: store.rightRegionOpen ? "Hide panels and tools" : "Show panels and tools",
+                isActive: store.rightRegionOpen
+            ) {
+                store.toggleRightRegion()
+            }
+
             PanelsMenuButton()
         }
         // Clear the traffic lights sideways, not downwards: padding down past
