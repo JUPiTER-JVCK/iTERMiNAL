@@ -242,44 +242,8 @@ final class WorkspaceStore: ObservableObject {
     lazy var panelFiles = FileBrowserModel()
     lazy var panelHTTPClient = HTTPClientModel(id: HTTPClientModel.sidePanelHistoryID)
 
-    /// Built on first use like the panels above, but through an explicit
-    /// backing store rather than `lazy` so quitting can flush a pending write
-    /// without *creating* the model — reading a `lazy var` to ask whether it
-    /// exists is what would create it.
-    private var notesModels: [UUID: NotesModel] = [:]
-
-    /// The note of the workspace being looked at; each workspace has its own.
-    /// The first workspace adopts the pre-per-workspace `Notes.txt`.
-    var panelNotes: NotesModel {
-        notesModel(for: currentWorkspace)
-    }
-
-    /// The note of any workspace, built on first ask. Reading one is a small
-    /// file read, so the sidebar can list every space's note.
-    func notesModel(for workspace: Workspace?) -> NotesModel {
-        let id = workspace?.id ?? Self.fallbackNotesID
-        if let model = notesModels[id] { return model }
-        let model = NotesModel(
-            workspaceID: id,
-            adoptLegacy: workspace != nil && workspace === workspaces.first
-        )
-        notesModels[id] = model
-        return model
-    }
-
-    /// Whether the Notes panel is showing for the space being looked at.
-    var notesPanelOpen: Bool {
-        rightRegionOpen && openPanels.contains(.notes)
-    }
-
-    /// Goes to a space and shows its note.
-    func openNotes(of workspace: Workspace) {
-        if let tab = workspace.tabs.first, currentWorkspace !== workspace {
-            selectedTabID = tab.id
-        }
-        detailMode = .terminal
-        openPanel(.notes)
-    }
+    /// The notes, kept together and not tied to a space.
+    let panelNotes = NotesModel()
 
     private static let fallbackNotesID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
@@ -299,10 +263,9 @@ final class WorkspaceStore: ObservableObject {
         chatModels.values.forEach { $0.saveNow() }
     }
 
-    /// Writes any note still inside its debounce window. Only notes that were
-    /// opened exist as models, so this never creates one.
+    /// Writes any note still inside its debounce window.
     func flushNotes() {
-        notesModels.values.forEach { $0.saveNow() }
+        panelNotes.saveNow()
     }
 
     // MARK: Bundled tools
@@ -780,8 +743,6 @@ final class WorkspaceStore: ObservableObject {
     func deleteWorkspace(_ workspace: Workspace) {
         workspace.tabs.forEach { $0.root.allSessions().forEach { $0.terminate() } }
         workspaces.removeAll { $0 === workspace }
-        notesModels[workspace.id] = nil
-        NotesModel.deleteFile(for: workspace.id)
         chatModels[workspace.id]?.cancel()
         chatModels[workspace.id] = nil
         ComposerChatModel.deleteFile(for: workspace.id)
@@ -1545,10 +1506,9 @@ final class WorkspaceStore: ObservableObject {
     /// live-session guard it needed to avoid killing shells mid-build.
     func applySnapshot(_ snapshot: AppStateSnapshot) {
         terminateAllSessions()
-        // Notes are not in a snapshot; keep what is on disk, drop the cached
-        // models so each workspace reloads its own.
+        // Notes are not in a snapshot and not tied to a space, so an import
+        // leaves them alone.
         flushNotes()
-        notesModels.removeAll()
         flushChats()
         chatModels.values.forEach { $0.cancel() }
         chatModels.removeAll()
