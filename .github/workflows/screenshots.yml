@@ -15,14 +15,6 @@ on:
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
   workflow_dispatch:
-  # And when the capture itself changes, so that a break in it shows up in the
-  # pull request that causes it. The normal build cannot see one: the capture
-  # code is compiled out of it.
-  pull_request:
-    paths:
-      - .github/workflows/screenshots.yml
-      - scripts/screenshots/**
-      - Sources/iTERMiNAL/App/Screenshot*.swift
 
 permissions:
   contents: read
