@@ -128,10 +128,27 @@ final class SwiftTermEngine: TerminalEngine {
     private func reportFocusIfClickLands(_ event: NSEvent) {
         guard let window = terminalView.window,
               event.window === window else { return }
-        let point = terminalView.convert(event.locationInWindow, from: nil)
-        if terminalView.bounds.contains(point) {
-            onFocusGained?()
+        // The container's padding counts as the terminal, as it does for the
+        // right-click menu.
+        let area = terminalView.superview ?? terminalView
+        let point = area.convert(event.locationInWindow, from: nil)
+        guard area.bounds.contains(point) else { return }
+        // Only when this terminal is what is under the pointer: a popover,
+        // sheet or overlapping terminal drawn above it keeps the click.
+        if let frameView = window.contentView?.superview,
+           let hit = frameView.hitTest(event.locationInWindow),
+           hit !== area, !hit.isDescendant(of: area) {
+            return
         }
+        // Take the keyboard now. Relying on a later SwiftUI update to move it
+        // fails whenever the current first responder is not a terminal — the
+        // composer's input, a dock terminal — which the update deliberately
+        // never takes focus from, so the click selected nothing and typing
+        // went to the other terminal.
+        if window.firstResponder !== terminalView {
+            window.makeFirstResponder(terminalView)
+        }
+        onFocusGained?()
     }
 
     func start(_ configuration: TerminalLaunchConfiguration) {
