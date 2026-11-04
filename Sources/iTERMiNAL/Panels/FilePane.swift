@@ -32,8 +32,76 @@ final class FileBrowserModel: ObservableObject, Identifiable {
     /// A transfer or a change on a remote host failed. The listing is fine, so
     /// this is a strip below it.
     @Published private(set) var operationProblem: RemoteProblem?
-    @Published var selection: String?
+    @Published var selection: String? {
+        didSet {
+            if selection != oldValue { loadPreview() }
+        }
+    }
     @Published private(set) var transferNote: String?
+
+    // MARK: Preview options (the Files pane's toggles)
+
+    /// Show the selected file's contents beside the list.
+    @Published var showPreview: Bool = FileBrowserModel.storedFlag("files.showPreview", default: true) {
+        didSet {
+            UserDefaults.standard.set(showPreview, forKey: "files.showPreview")
+            if showPreview { loadPreview() }
+        }
+    }
+    /// Show the file list (the tree). Off leaves the preview alone.
+    @Published var showTree: Bool = FileBrowserModel.storedFlag("files.showTree", default: true) {
+        didSet { UserDefaults.standard.set(showTree, forKey: "files.showTree") }
+    }
+    /// Wrap long lines in the preview instead of scrolling sideways.
+    @Published var wordWrap: Bool = FileBrowserModel.storedFlag("files.wordWrap", default: true) {
+        didSet { UserDefaults.standard.set(wordWrap, forKey: "files.wordWrap") }
+    }
+    @Published private(set) var preview: FilePreviewState = .none
+
+    private static func storedFlag(_ key: String, default value: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? value
+    }
+
+    /// The most of a file the preview shows, in lines and in bytes.
+    private static let previewMaxLines = 5_000
+    private static let previewMaxBytes: Int64 = 2_000_000
+
+    private func loadPreview() {
+        guard showPreview, let path = selection,
+              let item = items.first(where: { $0.path == path }), !item.isDirectory else {
+            preview = .none
+            return
+        }
+        if let size = item.size, size > Self.previewMaxBytes {
+            preview = .message("\(item.name) is too large to preview.")
+            return
+        }
+        preview = .loading
+        let show: (URL) -> Void = { [weak self] url in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let text = MarkdownPreview.readText(at: url)
+                DispatchQueue.main.async {
+                    guard let self, self.selection == path else { return }
+                    self.preview = Self.previewState(name: item.name, text: text)
+                }
+            }
+        }
+        if provider.isRemote {
+            fetchToTemporary(item, completion: show)
+        } else {
+            show(URL(fileURLWithPath: item.path))
+        }
+    }
+
+    private static func previewState(name: String, text: String?) -> FilePreviewState {
+        guard let text else { return .message("\(name) can't be previewed.") }
+        if text.contains("\0") { return .message("\(name) is a binary file.") }
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
+        if lines.last == "" { lines.removeLast() }
+        let truncated = lines.count > previewMaxLines
+        if truncated { lines = Array(lines.prefix(previewMaxLines)) }
+        return .text(name: name, lines: lines, truncated: truncated)
+    }
     /// A Markdown file, rendered, for the sheet that shows it.
     @Published var markdownPreview: MarkdownDocument?
 
@@ -534,14 +602,75 @@ struct FilePaneView: View {
                 .buttonStyle(.plain)
                 .help("Reveal in Finder")
             }
+
+            Rectangle()
+                .fill(theme.surfaceBorder)
+                .frame(width: 1, height: 14)
+
+            optionToggle("eye", isOn: $model.showPreview, theme: theme,
+                         help: "Preview the selected file")
+            optionToggle("list.bullet", isOn: $model.showTree, theme: theme,
+                         help: "Show or hide the file tree")
+            optionToggle("text.justify.left", isOn: $model.wordWrap, theme: theme,
+                         help: "Wrap long lines in the preview")
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
 
+    private func optionToggle(_ icon: String, isOn: Binding<Bool>, theme: Theme, help: String) -> some View {
+        Button { isOn.wrappedValue.toggle() } label: {
+            Image(systemName: icon)
+                .foregroundStyle(isOn.wrappedValue ? theme.textPrimary : theme.textSecondary)
+                .frame(width: 24, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isOn.wrappedValue ? theme.surface : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])
+    }
+
+    /// The listing and the preview, side by side as in Claude Code's file
+    /// view: the preview on the left, the tree on the right.
     @ViewBuilder
     private func content(theme: Theme) -> some View {
+        let previewing = model.showPreview && !isPreviewEmpty
+        if model.showTree && previewing {
+            HStack(spacing: 0) {
+                FilePreviewView(model: model, theme: theme)
+                Rectangle().fill(theme.surfaceBorder).frame(width: 1)
+                listing(theme: theme)
+                    .frame(minWidth: 140, idealWidth: 180, maxWidth: 240)
+            }
+        } else if previewing {
+            FilePreviewView(model: model, theme: theme)
+        } else if model.showTree {
+            listing(theme: theme)
+        } else {
+            VStack {
+                Spacer()
+                Text(model.showPreview ? "Select a file to preview" : "Tree and preview are hidden")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var isPreviewEmpty: Bool {
+        if case .none = model.preview { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private func listing(theme: Theme) -> some View {
         if let problem = model.listingProblem, !model.isLoading {
             // Not "Empty folder": the folder was never read.
             RemoteProblemView(problem: problem, theme: theme, perform: perform)
@@ -692,6 +821,84 @@ struct FilePaneView: View {
         group.notify(queue: .main) {
             model.upload(collected.urls)
         }
+    }
+}
+
+enum FilePreviewState {
+    case none
+    case loading
+    case message(String)
+    case text(name: String, lines: [String], truncated: Bool)
+}
+
+/// The selected file's text with line numbers, wrapping or scrolling sideways
+/// according to the pane's word-wrap toggle.
+private struct FilePreviewView: View {
+    @ObservedObject var model: FileBrowserModel
+    let theme: Theme
+
+    var body: some View {
+        switch model.preview {
+        case .none:
+            EmptyView()
+        case .loading:
+            note("Loading…")
+        case .message(let text):
+            note(text)
+        case .text(let name, let lines, let truncated):
+            VStack(alignment: .leading, spacing: 0) {
+                Text(name)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                FadedDivider()
+                ScrollView(model.wordWrap ? .vertical : [.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text("\(index + 1)")
+                                    .foregroundStyle(theme.textSecondary.opacity(0.6))
+                                    .frame(minWidth: 28, alignment: .trailing)
+                                if model.wordWrap {
+                                    Text(line.isEmpty ? " " : line)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else {
+                                    Text(line.isEmpty ? " " : line)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+                            }
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(theme.textPrimary)
+                        }
+                        if truncated {
+                            Text("Preview cut off — open the file to see the rest.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textSecondary)
+                                .padding(.top, 8)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        VStack {
+            Spacer()
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

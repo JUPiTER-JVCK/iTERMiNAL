@@ -286,6 +286,7 @@ final class AppSettings: ObservableObject {
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
     @Published var projectsExpanded: Bool { didSet { defaults.set(projectsExpanded, forKey: "projectsExpanded") } }
     @Published var recentsExpanded: Bool { didSet { defaults.set(recentsExpanded, forKey: "recentsExpanded") } }
+    @Published var notesExpanded: Bool { didSet { defaults.set(notesExpanded, forKey: "notesExpanded") } }
 
     // MARK: Left rail
     /// `RailItem` raw values pinned to the rail, in order. Read through
@@ -523,6 +524,7 @@ final class AppSettings: ObservableObject {
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
         recentsExpanded = defaults.object(forKey: "recentsExpanded") as? Bool ?? false
+        notesExpanded = defaults.object(forKey: "notesExpanded") as? Bool ?? true
 
         railPinnedItems = defaults.stringArray(forKey: "railPinnedItems") ?? RailPins.encode(RailItem.defaultPinned)
         // Open and docked by default, so a first launch looks like the sidebar
