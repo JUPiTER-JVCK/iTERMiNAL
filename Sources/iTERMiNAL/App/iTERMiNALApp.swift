@@ -88,6 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidResignActive(_ notification: Notification) {
+        // Switching away is as good a moment as any to write notes down.
+        WorkspaceStore.shared.flushNotes()
         SecureKeyboardEntry.shared.refresh(enabled: AppSettings.shared.secureKeyboardEntry)
     }
 

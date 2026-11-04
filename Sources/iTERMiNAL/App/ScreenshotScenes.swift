@@ -1676,7 +1676,7 @@ final class ScreenshotRun {
         settings.rightPanelWidth = 460
         store.openPanel(.notes)
         await pause(1.0)
-        store.panelNotes.text = Self.notes
+        store.panelNotes.setSelectedText(Self.notes)
         await tidyServer()
         return capture("notes")
     }

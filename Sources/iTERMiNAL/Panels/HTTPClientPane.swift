@@ -272,14 +272,14 @@ struct HTTPClientPaneView: View {
     /// explorer is half of what this pane is for, and should be visible.
     private func modeBar(theme: Theme) -> some View {
         HStack {
-            Picker("Mode", selection: $model.mode) {
-                Text("Request").tag(HTTPPaneMode.request)
-                Text("Explore").tag(HTTPPaneMode.explore)
-                Text("Lookup").tag(HTTPPaneMode.lookup)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            UnderlinedTabBar(
+                selection: $model.mode,
+                items: [
+                    (HTTPPaneMode.request, "Request"),
+                    (HTTPPaneMode.explore, "Explore"),
+                    (HTTPPaneMode.lookup, "Lookup")
+                ]
+            )
             .help("Request: build and send one request · Explore: walk the paths a site publishes, like a directory · Lookup: what a name or an address is, and where")
             Spacer(minLength: 0)
         }
@@ -370,5 +370,43 @@ struct HTTPClientPaneView: View {
         )
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(HTTPMessage.curlCommand(for: spec), forType: .string)
+    }
+}
+
+/// Text tabs with a line under the selected one — a lighter look than a
+/// segmented control.
+struct UnderlinedTabBar<Value: Hashable>: View {
+    @Binding var selection: Value
+    let items: [(value: Value, title: String)]
+
+    @Namespace private var underline
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        HStack(spacing: 16) {
+            ForEach(items, id: \.value) { item in
+                let isSelected = selection == item.value
+                Button {
+                    withAnimation(Motion.hover) { selection = item.value }
+                } label: {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+                        .padding(.vertical, 4)
+                        .overlay(alignment: .bottom) {
+                            if isSelected {
+                                Rectangle()
+                                    .fill(theme.textPrimary)
+                                    .frame(height: 2)
+                                    .matchedGeometryEffect(id: "underline", in: underline)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
     }
 }
