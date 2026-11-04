@@ -18,6 +18,9 @@ enum RemoteAction: Equatable {
     /// A new tab on this Mac with `command` typed and not run.
     case runInLocalTerminal(label: String, command: String)
     case editConnection
+    /// System Settings → Privacy & Security → Local Network, for a host on
+    /// this Mac's own network that macOS may not be letting iTERMiNAL reach.
+    case openLocalNetworkSettings
 
     var title: String {
         switch self {
@@ -25,6 +28,7 @@ enum RemoteAction: Equatable {
         case .signInInTerminal: return "Sign In in a Terminal"
         case .runInLocalTerminal(let label, _): return label
         case .editConnection: return "Connection Settings…"
+        case .openLocalNetworkSettings: return "Local Network Settings…"
         }
     }
 }
@@ -236,6 +240,11 @@ struct RemoteProblem: Equatable {
             return "No answer came back from \(host)\(portNote) in time. It may be asleep or off, on a different "
                 + "network, or behind a firewall that drops the connection without saying so."
         case .unreachable:
+            if LocalNetwork.isLocal(host: host) {
+                return "\(host) is on your local network, and macOS says there is no route to it. That is what it "
+                    + "says when it is not letting iTERMiNAL reach devices on your local network — and also when "
+                    + "the machine is off, or no longer has that address."
+            }
             return "There is no route from this Mac to \(host)\(portNote): it is on a network this Mac isn't on, "
                 + "or macOS is not letting iTERMiNAL reach devices on your local network."
         case .hostNotFound:
@@ -349,6 +358,22 @@ struct RemoteProblem: Equatable {
                 ),
             ]
         case .unreachable:
+            if LocalNetwork.isLocal(host: host) {
+                return [
+                    RemoteStep(
+                        text: "If ssh to \(host) works in Terminal but not here, macOS is blocking iTERMiNAL. Press "
+                            + "Local Network Settings…, turn iTERMiNAL on (or off and on again), then quit and reopen it.",
+                        command: nil
+                    ),
+                    RemoteStep(text: "If it fails in Terminal too, check whether the port answers there:",
+                               command: "nc -vz \(Self.shellQuoted(host)) \(connection.port)"),
+                    RemoteStep(
+                        text: "Then check \(host) is on and still has that address. A virtual machine needs its network "
+                            + "adapter bridged to this Mac's network, not NAT, to have an address like this one.",
+                        command: nil
+                    ),
+                ]
+            }
             return [
                 RemoteStep(text: "Join the same Wi-Fi, or connect the VPN, then try again.", command: nil),
                 RemoteStep(
@@ -401,6 +426,8 @@ struct RemoteProblem: Equatable {
             list.append(.signInInTerminal)
             list.append(.editConnection)
             return list
+        case .unreachable where LocalNetwork.isLocal(host: host):
+            return [.tryAgain, .openLocalNetworkSettings, .editConnection]
         case .tooManyAuthFailures, .identityFile, .connectionRefused, .timedOut, .unreachable, .hostNotFound:
             return [.tryAgain, .editConnection]
         case .hostKeyChanged:

@@ -49,6 +49,11 @@ final class SFTPFileSystemProvider: FileSystemProvider {
             completion(.failure(FileProviderError.unusablePath(path)))
             return
         }
+        // So macOS asks for the Local Network permission, if it still has to,
+        // before sftp is refused without it (see `LocalNetworkPermission`).
+        if LocalNetwork.isLocal(host: connection.host) {
+            DispatchQueue.main.async { LocalNetworkPermission.ask() }
+        }
         // `pwd` resolves ".", "..", and "~" to a concrete path for the UI.
         let script = ["cd \(quotedPath)", "pwd", showHidden ? "ls -la" : "ls -l"]
         run(script) { [weak self] result in

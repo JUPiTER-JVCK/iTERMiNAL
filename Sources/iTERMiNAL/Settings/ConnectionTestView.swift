@@ -101,6 +101,8 @@ struct ConnectionTestRow: View {
         case .runInLocalTerminal(_, let command):
             WorkspaceStore.shared.newTab(typing: command)
             openWindow(id: "main")
+        case .openLocalNetworkSettings:
+            LocalNetworkPermission.openSettings()
         case .editConnection:
             // Already on the page that edits it.
             break

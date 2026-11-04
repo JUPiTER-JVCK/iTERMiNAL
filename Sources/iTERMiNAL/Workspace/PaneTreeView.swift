@@ -128,6 +128,13 @@ private struct SessionStatusBanner: View {
                 .font(.system(size: 11))
                 .lineLimit(2)
             Spacer(minLength: 8)
+            if session.localNetworkBlocked {
+                Button("Local Network Settings…") {
+                    LocalNetworkPermission.openSettings()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+            }
             if session.reconnectPlan != nil {
                 Button("Stop") {
                     session.stopAutoReconnect()

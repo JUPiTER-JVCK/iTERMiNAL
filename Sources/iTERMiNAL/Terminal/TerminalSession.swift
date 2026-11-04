@@ -18,6 +18,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Set when the session could not be launched at all (missing binary,
     /// deleted connection) — distinct from a process that ran and exited.
     @Published private(set) var launchError: String?
+    /// Set when ssh ended with `No route to host` for a host on the local
+    /// network, which is what a missing Local Network permission looks like
+    /// (see `LocalNetwork`). The banner offers that setting. A launch clears it.
+    @Published private(set) var localNetworkBlocked = false
     /// Whether SwiftTerm's Metal renderer ended up active for this session —
     /// requesting GPU rendering can silently fall back to the CPU path.
     @Published private(set) var isGPUAccelerated = false
@@ -393,6 +397,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func launch(agentApproved: Bool? = nil, unattended: Bool = false) {
         let settings = AppSettings.shared
         reconnectNote = nil
+        localNetworkBlocked = false
         if agentApproved == nil, let connection = connectionThatAsksAboutAgent(settings) {
             guard !awaitingAgentAnswer else { return }
             awaitingAgentAnswer = true
@@ -418,6 +423,11 @@ final class TerminalSession: ObservableObject, Identifiable {
             shellIntegrationActive = configuration.shellIntegration
             commandTracker = ShellIntegration.CommandTracker()
             lastCommandResult = nil
+            // Before ssh connects, so macOS has its question up — if it still
+            // has one to ask — rather than refusing the connection unasked.
+            if let connection, LocalNetwork.isLocal(host: connection.host) {
+                LocalNetworkPermission.ask()
+            }
             engine.start(configuration)
             launchedAt = Date()
             isRunning = true
@@ -888,6 +898,19 @@ extension TerminalSession: TerminalEngineDelegate {
             // Not if it has been started again, or ended, in that moment.
             guard let self, !self.isRunning, self.launchedAt == launched else { return }
             self.considerAutoReconnect(terminationStatus: exitCode, ranFor: ranFor)
+            self.noteLocalNetworkBlock(terminationStatus: exitCode)
         }
+    }
+
+    /// Says on the banner when ssh could not reach a host on the local network,
+    /// since the likeliest reason is one only System Settings can change. Not
+    /// while a reconnect is waiting: that banner says something else.
+    private func noteLocalNetworkBlock(terminationStatus: Int32?) {
+        guard reconnectPlan == nil, let connection, LocalNetwork.isLocal(host: connection.host),
+              AutoReconnect.isConnectionError(terminationStatus: terminationStatus) else { return }
+        let tail = AutoReconnect.tail(of: engine.captureScrollback(maxBytes: 4_096))
+        guard LocalNetwork.looksBlocked(output: tail) else { return }
+        localNetworkBlocked = true
+        reconnectNote = LocalNetwork.endNote(host: connection.host)
     }
 }
