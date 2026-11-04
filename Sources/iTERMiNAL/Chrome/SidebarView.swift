@@ -43,6 +43,7 @@ struct SidebarView: View {
 
                     pinnedSection(theme: theme)
                     projectsSection(theme: theme)
+                    notesSection(theme: theme)
                     recentsSection(theme: theme)
                 }
                 .padding(.top, 4)
@@ -285,6 +286,41 @@ struct SidebarView: View {
         }
     }
 
+    /// Spaces whose note has something in it (saved), and the one whose Notes
+    /// panel is up right now (open), even while it is still empty.
+    @ViewBuilder
+    private func notesSection(theme: Theme) -> some View {
+        let current = store.currentWorkspace
+        let entries: [(workspace: Workspace, model: NotesModel)] = store.workspaces.compactMap { workspace in
+            let model = store.notesModel(for: workspace)
+            let isOpen = store.notesPanelOpen && workspace === current
+            guard !model.isEmpty || isOpen else { return nil }
+            guard query.isEmpty
+                || workspace.name.localizedCaseInsensitiveContains(query)
+                || model.text.localizedCaseInsensitiveContains(query) else { return nil }
+            return (workspace, model)
+        }
+        if !entries.isEmpty {
+            SidebarSectionHeader(
+                title: "Notes",
+                isExpanded: $settings.notesExpanded,
+                showsDot: false
+            )
+            if settings.notesExpanded {
+                ForEach(entries, id: \.workspace.id) { entry in
+                    SidebarNoteRow(
+                        workspace: entry.workspace,
+                        model: entry.model,
+                        isOpen: store.notesPanelOpen && entry.workspace === current
+                    ) {
+                        store.openNotes(of: entry.workspace)
+                        dismissIfFloating()
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func recentsSection(theme: Theme) -> some View {
         let recents = store.recentSessions.filter {
@@ -492,6 +528,64 @@ struct SidebarActionRow: View {
                 isActive: isActive,
                 isHovering: hovering
             )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, 8)
+    }
+}
+
+/// One space's note: the space's name and the first line of what is written,
+/// with a dot while the Notes panel is open on it.
+private struct SidebarNoteRow: View {
+    let workspace: Workspace
+    @ObservedObject var model: NotesModel
+    let isOpen: Bool
+    let action: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+
+    private var firstLine: String {
+        model.text
+            .split(whereSeparator: \.isNewline)
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? "Empty note"
+    }
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 11))
+                    .foregroundStyle(IdentityPalette.color(for: workspace.id))
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(workspace.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                    Text(firstLine)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if isOpen {
+                    Circle()
+                        .fill(Color(hex: 0x3B82F6))
+                        .frame(width: 5, height: 5)
+                        .help("Open")
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isOpen ? theme.surface : theme.surface.opacity(hovering ? 0.6 : 0))
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

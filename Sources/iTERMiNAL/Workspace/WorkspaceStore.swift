@@ -251,7 +251,12 @@ final class WorkspaceStore: ObservableObject {
     /// The note of the workspace being looked at; each workspace has its own.
     /// The first workspace adopts the pre-per-workspace `Notes.txt`.
     var panelNotes: NotesModel {
-        let workspace = currentWorkspace
+        notesModel(for: currentWorkspace)
+    }
+
+    /// The note of any workspace, built on first ask. Reading one is a small
+    /// file read, so the sidebar can list every space's note.
+    func notesModel(for workspace: Workspace?) -> NotesModel {
         let id = workspace?.id ?? Self.fallbackNotesID
         if let model = notesModels[id] { return model }
         let model = NotesModel(
@@ -260,6 +265,20 @@ final class WorkspaceStore: ObservableObject {
         )
         notesModels[id] = model
         return model
+    }
+
+    /// Whether the Notes panel is showing for the space being looked at.
+    var notesPanelOpen: Bool {
+        rightRegionOpen && openPanels.contains(.notes)
+    }
+
+    /// Goes to a space and shows its note.
+    func openNotes(of workspace: Workspace) {
+        if let tab = workspace.tabs.first, currentWorkspace !== workspace {
+            selectedTabID = tab.id
+        }
+        detailMode = .terminal
+        openPanel(.notes)
     }
 
     private static let fallbackNotesID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
