@@ -451,6 +451,8 @@ final class FileBrowserModel: ObservableObject, Identifiable {
             }
         case .runInLocalTerminal(_, let command):
             WorkspaceStore.shared.newTab(typing: command)
+        case .openLocalNetworkSettings:
+            LocalNetworkPermission.openSettings()
         case .editConnection:
             break
         }

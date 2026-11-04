@@ -2808,6 +2808,19 @@ do {
     check(kind("ssh: connect to host 10.0.0.9 port 22: Network is unreachable") == .unreachable, "no network")
     check(RemoteProblem.classify(output: "ssh: connect to host 10.0.0.9 port 22: No route to host", connection: host).explanation.contains("local network"),
           "a missing route also names the macOS local-network permission, which blocks exactly this")
+    // On the local network, the permission is the likeliest reason, so it leads
+    // and comes with a button; anywhere else it is not offered.
+    let noRoute = "ssh: connect to host 192.168.1.148 port 22: No route to host"
+    let localNoRoute = RemoteProblem.classify(output: noRoute, connection: host)
+    check(localNoRoute.steps.first?.text.contains("works in Terminal but not here") == true,
+          "a local host that cannot be reached leads with the Terminal comparison that tells the permission apart")
+    check(localNoRoute.actions == [.tryAgain, .openLocalNetworkSettings, .editConnection],
+          "and offers the Local Network settings")
+    check(localNoRoute.steps.contains { $0.command == "nc -vz 192.168.1.148 22" }, "with a way to test the port")
+    let farNoRoute = RemoteProblem.classify(output: noRoute, connection: SSHConnection(name: "w", host: "203.0.113.5", username: "u"))
+    check(farNoRoute.kind == .unreachable && !farNoRoute.actions.contains(.openLocalNetworkSettings),
+          "a host on the internet is not sent to the Local Network settings")
+    check(RemoteAction.openLocalNetworkSettings.title == "Local Network Settings…", "the button says where it goes")
     check(kind("ssh: Could not resolve hostname nas.local: nodename nor servname provided, or not known") == .hostNotFound, "a name that does not resolve, on macOS")
     check(kind("ssh: Could not resolve hostname nas: Name or service not known") == .hostNotFound, "and on Linux")
     check(kind("Connection closed by 192.168.1.148 port 22") == .connectionDropped, "closed by the host")
@@ -2856,6 +2869,7 @@ do {
 
     var everyProblem: [RemoteProblem] = []
     for output in [refused, changed, "ssh: connect to host h port 22: Connection refused", "subsystem request failed on channel 0",
+                   "ssh: connect to host h port 22: No route to host",
                    "Too many authentication failures", "Couldn't canonicalize: No such file or directory", "", "xyz"] {
         for connection in [host, configured, spaced, hostile] {
             everyProblem.append(RemoteProblem.classify(output: output, connection: connection))
@@ -2869,6 +2883,39 @@ do {
     }
     check(!commands.isEmpty && commands.allSatisfy { !$0.contains("\n") && !$0.contains("\r") },
           "no command offered contains a line break, so typing one into a terminal cannot run it")
+}
+
+// MARK: Local Network permission
+
+// Which hosts macOS's Local Network permission stands between this Mac and,
+// and when a failed connection is worth blaming on it.
+do {
+    check(LocalNetwork.isLocal(host: "192.168.1.194"), "a home network address")
+    check(LocalNetwork.isLocal(host: "10.0.0.9") && LocalNetwork.isLocal(host: "172.16.4.2") && LocalNetwork.isLocal(host: "172.31.255.1"),
+          "the other private ranges")
+    check(!LocalNetwork.isLocal(host: "172.32.0.1"), "but not just past the end of 172.16/12")
+    check(LocalNetwork.isLocal(host: "169.254.10.20"), "a link-local address, as a direct cable gets")
+    check(LocalNetwork.isLocal(host: "fe80::1%en0") && LocalNetwork.isLocal(host: "[fe80::1]"), "link-local IPv6, scoped or bracketed")
+    check(LocalNetwork.isLocal(host: "fd12:3456::1"), "a unique local IPv6 address")
+    check(LocalNetwork.isLocal(host: "debian.local") && LocalNetwork.isLocal(host: "Studio.LOCAL."), "a Bonjour name")
+    check(LocalNetwork.isLocal(host: " 192.168.1.194 "), "surrounding spaces do not change the answer")
+    check(!LocalNetwork.isLocal(host: "127.0.0.1") && !LocalNetwork.isLocal(host: "::1"), "not this Mac itself")
+    check(!LocalNetwork.isLocal(host: "203.0.113.5") && !LocalNetwork.isLocal(host: "build.example.com"),
+          "not an internet address, nor a name whose address is not known here")
+    check(!LocalNetwork.isLocal(host: "100.101.102.103"), "nor a carrier-grade NAT address, which a VPN like Tailscale hands out")
+    check(!LocalNetwork.isLocal(host: ""), "nor nothing")
+
+    check(LocalNetwork.looksBlocked(output: "ssh: connect to host 192.168.1.194 port 22: No route to host"), "ssh's words")
+    check(LocalNetwork.looksBlocked(output: "nc: connectx to 192.168.1.194 port 22 (tcp) failed: No route to host"), "and nc's")
+    check(!LocalNetwork.looksBlocked(output: "ssh: connect to host 192.168.1.194 port 22: Connection refused"),
+          "a refused connection got through, so it is not this")
+    check(!LocalNetwork.looksBlocked(output: "ssh: connect to host 192.168.1.194 port 22: Operation timed out"), "nor is a timeout")
+
+    let note = LocalNetwork.endNote(host: "192.168.1.194")
+    check(note.contains("192.168.1.194") && note.contains("Terminal") && note.contains("Local Network"),
+          "the banner names the host, the comparison and the setting")
+    check(LocalNetwork.settingsURL.hasPrefix("x-apple.systempreferences:") && LocalNetwork.settingsURL.hasSuffix("Privacy_LocalNetwork"),
+          "the settings link points at the Local Network list")
 }
 
 // MARK: Remote start directory
