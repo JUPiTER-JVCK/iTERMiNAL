@@ -134,11 +134,14 @@ struct ComposerActionsPopover: View {
                     ComposerActionRow(
                         icon: "network",
                         title: connection.name.isEmpty ? connection.destination : connection.name,
-                        detail: connection.subtitle,
+                        detail: connection.hasHost
+                            ? connection.subtitle
+                            : "No host set — add one in Settings → Connections",
                         shortcut: nil
                     ) {
                         store.newTab(kind: .remote(connection.id))
                     }
+                    .disabled(!connection.hasHost)
                 }
             }
         }

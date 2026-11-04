@@ -153,6 +153,12 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         username.isEmpty ? host : "\(username)@\(host)"
     }
 
+    /// Whether there is an address to connect to; a host added in Settings
+    /// starts without one.
+    var hasHost: Bool {
+        !host.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     var subtitle: String {
         let base = port == 22 ? destination : "\(destination):\(port)"
         return transport == .ssh ? base : "\(base) · \(transport.label)"

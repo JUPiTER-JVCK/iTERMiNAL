@@ -27,6 +27,7 @@ enum SessionKind: Equatable {
 
 enum SessionLaunchError: LocalizedError {
     case unknownConnection
+    case missingHost(String)
     case missingExecutable(String)
     case emptyCustomCommand
     case toolUnavailable(TerminalTool)
@@ -41,6 +42,8 @@ enum SessionLaunchError: LocalizedError {
             return JumpHosts.refusal(problem)
         case .unknownConnection:
             return "That saved connection no longer exists."
+        case .missingHost(let name):
+            return "“\(name)” has no host address yet. Open Settings → Connections, fill in its Host, then connect again."
         case .missingExecutable(let name):
             return "Couldn't find \(name) on this Mac. Install it, or point the connection at a custom command."
         case .emptyCustomCommand:
@@ -106,6 +109,11 @@ enum SessionLaunch {
         case .remote(let id):
             guard let connection = settings.sshConnections.first(where: { $0.id == id }) else {
                 return .failure(.unknownConnection)
+            }
+            // A host added in Settings but never filled in would make ssh
+            // fail with "Could not resolve hostname".
+            if connection.host.trimmingCharacters(in: .whitespaces).isEmpty {
+                return .failure(.missingHost(connection.name.isEmpty ? "This host" : connection.name))
             }
             // The host's own choice, or the one made for remote sessions.
             let terminal = connection.terminalTypeTag.isEmpty
