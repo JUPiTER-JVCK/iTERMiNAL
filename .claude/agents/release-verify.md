@@ -26,10 +26,18 @@ looked current, so check the contents, never the presence.
    and `Contents/Resources/AppIcon.icns` exist, that the main binary carries
    **both** `x86_64` and `arm64` slices, that `CFBundleIconName` is `AppIcon`,
    and — when given an expected version — that `CFBundleShortVersionString`
-   matches. It exits non-zero and prints `::error::` lines on failure.
+   matches. It also asserts the bundle is **signed**: `Contents/_CodeSignature/
+   CodeResources` exists, and each slice of the main binary carries an embedded
+   signature with the Hardened Runtime flag. An unsigned download is what
+   this catches — the same release page and much the same file size as a
+   signed one. It exits non-zero and prints `::error::` lines on failure.
 
-   It reads the Mach-O fat header and Info.plist directly, because `lipo` and
-   `plutil` do not exist on Linux.
+   It reads the Mach-O fat header, the embedded signature and Info.plist
+   directly, because `lipo`, `plutil` and `codesign` do not exist on Linux.
+   That makes it a check that a signature is *present and of the right kind*,
+   not that it *verifies* — CI's `Verify signature` step runs
+   `codesign --verify` before anything is published, and only a Mac can do it
+   again afterwards.
 
 4. **Confirm the build is genuinely fresh**, not a re-upload of an older one:
    compare the newest file mtime inside the bundle against the release's
@@ -55,7 +63,8 @@ Also check the release itself:
   `/releases/latest` resolve to them).
 - The notes must carry the install block with the
   `xattr -dr com.apple.quarantine` line. Losing it is silent and the download
-  is unusable without it — the builds are unsigned.
+  is unusable without it — the builds are ad-hoc signed but not notarized, so
+  Gatekeeper still quarantines them.
 - The changelog must not be empty. If it is, the `previous_tag_name` baseline
   picked the wrong starting point.
 

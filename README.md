@@ -553,10 +553,17 @@ xattr -dr com.apple.quarantine iTERMiNAL.app   # see note below
 open iTERMiNAL.app
 ```
 
-These builds are **unsigned**, and macOS quarantines anything downloaded
-through a browser — so without that `xattr` line Gatekeeper refuses to open
-it ("damaged or can't be verified"). Right-click → Open works too. Signing
-properly needs an Apple Developer ID, which this project doesn't have yet.
+These builds are **ad-hoc signed**: they carry a signature, but not a
+Developer ID one, and they are not notarized. macOS quarantines anything
+downloaded through a browser — so without that `xattr` line Gatekeeper still
+refuses to open it ("damaged or can't be verified"). Right-click → Open works
+too. Notarizing needs an Apple Developer ID, which this project doesn't have
+yet.
+
+Every build is signed before it is published, and CI fails the build if the
+bundle's signature does not verify. An unsigned copy is not a supported way to
+run the app: macOS ties per-app permissions, such as Local Network, to a
+signature.
 
 To try a branch that hasn't merged, the same app is attached to every CI run
 as the **iTERMiNAL-app** artifact under the
@@ -2018,7 +2025,7 @@ tab will run.
 - [x] HTTP client: Extract tab — parsers, queries, downloads, image previews, a bounded same-site crawl, assistant-read rows
 - [ ] HTTP client: saved `.http` collections
 - [ ] Optional libghostty engine
-- [ ] Signed/notarized releases
+- [ ] Developer ID signed and notarized releases (builds are ad-hoc signed today)
 
 ### Considered and left out
 
