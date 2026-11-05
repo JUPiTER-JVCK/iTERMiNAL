@@ -72,19 +72,22 @@ struct RemoteServicesSettingsSection: View {
         .onAppear { discovery.start() }
 
         Section("Screen sharing and remote desktop") {
-            ForEach($settings.remoteServices) { $service in
+            // Iterates by value and binds by id on purpose; see
+            // `Binding.element(matching:)` for why.
+            ForEach(settings.remoteServices) { service in
+                let binding = $settings.remoteServices.element(matching: service)
                 DisclosureGroup(service.name.isEmpty ? "Untitled" : service.name) {
-                    Picker("Protocol", selection: $service.kind) {
+                    Picker("Protocol", selection: binding.kind) {
                         ForEach(RemoteServiceKind.allCases) { kind in
                             Text(kind.label).tag(kind)
                         }
                     }
-                    TextField("Name", text: $service.name)
-                    TextField("Host", text: $service.host, prompt: Text("studio.local"))
-                    TextField("Port", value: $service.port, format: .number)
-                    TextField("Username (optional)", text: $service.username)
+                    TextField("Name", text: binding.name)
+                    TextField("Host", text: binding.host, prompt: Text("studio.local"))
+                    TextField("Port", value: binding.port, format: .number)
+                    TextField("Username (optional)", text: binding.username)
                     if service.kind == .vnc {
-                        Picker("Open with", selection: $service.viewer) {
+                        Picker("Open with", selection: binding.viewer) {
                             ForEach(RemoteViewer.allCases) { viewer in
                                 Text(viewer.label).tag(viewer)
                             }
@@ -96,7 +99,7 @@ struct RemoteServicesSettingsSection: View {
                         }
                     }
                     if !service.kind.isHandledInApp {
-                        Picker("Go through", selection: $service.tunnelThrough) {
+                        Picker("Go through", selection: binding.tunnelThrough) {
                             Text("Connect directly").tag(UUID?.none)
                             ForEach(settings.sshConnections) { connection in
                                 Text("SSH: \(connection.name.isEmpty ? connection.host : connection.name)")
@@ -110,7 +113,7 @@ struct RemoteServicesSettingsSection: View {
                         }
                     }
                     HStack {
-                        Button("Connect") { open(service) }
+                        Button("Connect") { open(binding.wrappedValue) }
                         Button("Remove", role: .destructive) {
                             settings.remoteServices.removeAll { $0.id == service.id }
                         }

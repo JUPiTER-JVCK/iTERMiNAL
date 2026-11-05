@@ -80,23 +80,26 @@ struct HostOptionsSection: View {
 
     @ViewBuilder
     private var forwardsEditor: some View {
-        ForEach($connection.forwards) { $forward in
+        // Iterates by value and binds by id on purpose; see
+        // `Binding.element(matching:)`. Writes still go through `$connection`.
+        ForEach(connection.forwards) { forward in
+            let binding = $connection.forwards.element(matching: forward)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Picker("", selection: $forward.kind) {
+                    Picker("", selection: binding.kind) {
                         ForEach(PortForward.Kind.allCases) { kind in
                             Text(kind.label).tag(kind)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 130)
-                    TextField("Port", value: $forward.bindPort, format: .number.grouping(.never))
+                    TextField("Port", value: binding.bindPort, format: .number.grouping(.never))
                         .frame(width: 70)
                     if forward.kind != .dynamic {
                         Text("→")
-                        TextField("Host", text: $forward.targetHost)
+                        TextField("Host", text: binding.targetHost)
                         Text(":")
-                        TextField("Port", value: $forward.targetPort, format: .number.grouping(.never))
+                        TextField("Port", value: binding.targetPort, format: .number.grouping(.never))
                             .frame(width: 70)
                     }
                     Spacer(minLength: 0)
