@@ -29,15 +29,18 @@ struct HTTPRequestBuilderView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
 
-            ForEach($model.headerFields) { $field in
+            // Iterates by value and binds by id on purpose; see
+            // `Binding.element(matching:)` for why.
+            ForEach(model.headerFields) { field in
+                let binding = $model.headerFields.element(matching: field)
                 HStack(spacing: 6) {
-                    TextField("Name", text: $field.name)
+                    TextField("Name", text: binding.name)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity)
                     Text(":")
                         .foregroundStyle(theme.textSecondary)
-                    TextField("Value", text: $field.value)
+                    TextField("Value", text: binding.value)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity)

@@ -19,11 +19,14 @@ struct ProfilesSection: View {
                 }
             }
 
-            ForEach($settings.profiles) { $profile in
+            // Iterates by value and binds by id on purpose; see
+            // `Binding.element(matching:)` for why.
+            ForEach(settings.profiles) { profile in
+                let binding = $settings.profiles.element(matching: profile)
                 ProfileEditor(
-                    profile: $profile,
+                    profile: binding,
                     isDefault: settings.defaultProfileID == profile.id.uuidString,
-                    open: { store.openTab(profile: profile) },
+                    open: { store.openTab(profile: binding.wrappedValue) },
                     delete: { delete(profile) }
                 )
             }
@@ -78,12 +81,15 @@ private struct ProfileEditor: View {
             }
 
             let problems = profile.variableProblems
-            ForEach($profile.variables) { $variable in
+            // Iterates by value and binds by id on purpose; see
+            // `Binding.element(matching:)`. Writes still go through `$profile`.
+            ForEach(profile.variables) { variable in
+                let binding = $profile.variables.element(matching: variable)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
-                        TextField("Variable", text: $variable.name, prompt: Text("NAME"))
+                        TextField("Variable", text: binding.name, prompt: Text("NAME"))
                         Text("=").foregroundStyle(.secondary)
-                        TextField("Value", text: $variable.value, prompt: Text("value"))
+                        TextField("Value", text: binding.value, prompt: Text("value"))
                         Button {
                             profile.variables.removeAll { $0.id == variable.id }
                         } label: {
