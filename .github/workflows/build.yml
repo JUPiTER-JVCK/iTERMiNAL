@@ -369,6 +369,10 @@ jobs:
             echo "EXPECTED_SHORT_VERSION=$short_version"
             echo "EXPECTED_BUNDLE_VERSION=$build_number"
           } >> "$GITHUB_ENV"
+          # Xcode is told not to sign, so this bundle comes out with no
+          # signature at all. The signature is put on afterwards, in the Sign
+          # app step, so that how the bundle is signed is written out in one
+          # place and checked by the step after it.
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
@@ -381,6 +385,96 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             "${VERSION_ARG[@]}" \
             build
+
+      # An ad-hoc signature: it seals the bundle as built, with no certificate
+      # behind it. Left unsigned, the bundle has no seal at all, and macOS
+      # ties per-app permissions to an app's signature. The symptom that
+      # prompted this was Local Network: on an unsigned build the toggle read
+      # "on" while the `ssh` the app started still got "No route to host" on a
+      # LAN address. That was seen on a Mac; whether signing alone clears it is
+      # not something this workflow can test, which is why the checks below
+      # are about the signature and not about the permission.
+      #
+      # It is not a Developer ID signature and is not notarized, so Gatekeeper
+      # still quarantines a download (the xattr line in the release notes).
+      #
+      # Hardened Runtime is on because project.yml declares it
+      # (ENABLE_HARDENED_RUNTIME) and the README documents the app as having
+      # it; until this step existed no published build did. Nothing in Sources
+      # uses Apple Events, dlopen or a capture device, so none of the
+      # entitlements that would need is asked for. Programs the app spawns are
+      # separate processes and are not restricted by it.
+      #
+      # Inside out, because the bundle's seal records the contents of what it
+      # contains: signing iterminalctl after the bundle would break the seal.
+      # The tools under Resources/Tools were each signed where they were made
+      # (btop above, the others by their fetch scripts), so they are sealed
+      # as they are rather than re-signed. --timestamp=none because an ad-hoc
+      # signature has nothing to timestamp, and asking would put a call to
+      # Apple's server in the way of every build.
+      - name: Sign app (ad-hoc)
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/$CONFIGURATION/iTERMiNAL.app"
+          # codesign refuses a bundle carrying Finder info or resource forks.
+          xattr -cr "$APP"
+          codesign --force --sign - --options runtime --timestamp=none \
+            "$APP/Contents/Resources/iterminalctl"
+          codesign --force --sign - --options runtime --timestamp=none "$APP"
+
+      # Signed is not the same as signed correctly, and a bundle that has lost
+      # its signature looks identical until a Mac refuses it. The release job
+      # needs this job, so a bundle that fails here is never published.
+      #
+      # Two kinds of check: codesign's own verdict (the seal still matches
+      # every file in the bundle, tools included), and the properties that
+      # make the signature the one wanted — the identifier macOS keys
+      # permissions on, ad-hoc, Hardened Runtime, Info.plist and resources
+      # actually bound into it.
+      - name: Verify signature
+        run: |
+          APP="build/Build/Products/$CONFIGURATION/iTERMiNAL.app"
+          fail=0
+
+          if ! codesign --verify --deep --strict --verbose=2 "$APP"; then
+            echo "::error::the app's code signature does not verify"
+            fail=1
+          fi
+
+          # The seal records these files' bytes but not whether each one is
+          # itself signed, and a Mach-O with no signature of its own is what
+          # an unsigned tool looks like to macOS.
+          tools="$APP/Contents/Resources/Tools"
+          for bin in "$APP/Contents/Resources/iterminalctl" \
+            "$tools/spf" "$tools/btop" "$tools/bin/rg" "$tools/bin/bat"
+          do
+            if ! codesign --verify --strict "$bin"; then
+              echo "::error::bundled $(basename "$bin") is not validly signed"
+              fail=1
+            fi
+          done
+
+          # codesign -d writes to stderr.
+          if ! details=$(codesign -dvv "$APP" 2>&1); then
+            echo "::error::codesign could not read the app's signature"
+            echo "$details"
+            exit 1
+          fi
+          echo "$details"
+          expect() {
+            if ! grep -Eq "$1" <<<"$details"; then
+              echo "::error::$2"
+              fail=1
+            fi
+          }
+          expect '^Identifier=com\.jupiterjvck\.iterminal$' \
+            "signature identifier is not com.jupiterjvck.iterminal"
+          expect '^Signature=adhoc$' "signature is not ad-hoc"
+          expect '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' \
+            "Hardened Runtime is not enabled in the signature"
+          expect '^Info\.plist entries=' "Info.plist is not bound into the signature"
+          expect '^Sealed Resources version=' "resources are not sealed"
+          exit $fail
 
       # The app promises a bundled iterminalctl (Settings → Security installs
       # it). That went missing for weeks because nothing checked, so check.
@@ -593,7 +687,7 @@ jobs:
 
           # Every release says this, because it is the first thing that goes
           # wrong: macOS quarantines anything downloaded through a browser, and
-          # these builds are unsigned.
+          # these builds are ad-hoc signed but not notarized.
           gatekeeper=$(cat <<'NOTE'
 
           ## Installing
@@ -604,10 +698,11 @@ jobs:
           open iTERMiNAL.app
           ```
 
-          This build is **unsigned**, so without the `xattr` line Gatekeeper
-          refuses to open it ("damaged or can't be verified"). Right-click →
-          Open works too. Proper signing needs an Apple Developer ID this
-          project doesn't have yet.
+          This build is **ad-hoc signed**: it carries a signature, but not a
+          Developer ID one, and it is not notarized. So without the `xattr`
+          line Gatekeeper still refuses to open it ("damaged or can't be
+          verified"). Right-click → Open works too. Notarizing needs an Apple
+          Developer ID this project doesn't have yet.
 
           Universal binary — Intel and Apple Silicon. Requires macOS 14 or later.
           NOTE
