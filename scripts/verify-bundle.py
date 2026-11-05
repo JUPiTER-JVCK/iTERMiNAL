@@ -8,6 +8,10 @@ is parsed with plistlib, which handles the binary format CI produces.
 Usage: verify_bundle.py <path to iTERMiNAL.app> [expected-version]
 Exits non-zero and prints one ::error:: line per failed invariant.
 """
+# Annotations like `int | None` are only valid at definition time from Python
+# 3.10, and the Python that ships with Apple's command line tools is 3.9.
+from __future__ import annotations
+
 import os
 import plistlib
 import struct

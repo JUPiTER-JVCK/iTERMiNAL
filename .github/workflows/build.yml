@@ -369,10 +369,12 @@ jobs:
             echo "EXPECTED_SHORT_VERSION=$short_version"
             echo "EXPECTED_BUNDLE_VERSION=$build_number"
           } >> "$GITHUB_ENV"
-          # Xcode is told not to sign, so this bundle comes out with no
-          # signature at all. The signature is put on afterwards, in the Sign
-          # app step, so that how the bundle is signed is written out in one
-          # place and checked by the step after it.
+          # Xcode is told not to sign, so this bundle comes out unsealed: at
+          # most the linker's own signature on its binaries (the Sign app step
+          # reports it as an existing signature it replaces), and nothing
+          # signing the bundle as a whole. The signature is put on afterwards,
+          # in that step, so that how the bundle is signed is written out in
+          # one place and checked by the step after it.
           xcodebuild \
             -project iTERMiNAL.xcodeproj \
             -scheme iTERMiNAL \
@@ -474,6 +476,16 @@ jobs:
             "Hardened Runtime is not enabled in the signature"
           expect '^Info\.plist entries=' "Info.plist is not bound into the signature"
           expect '^Sealed Resources version=' "resources are not sealed"
+
+          # The same facts again, read out of the files by the script the
+          # release-verify agent runs on Linux, where there is no codesign. It
+          # is run here, on a real signed bundle, so that reader is tested
+          # against what Xcode and codesign actually produce and cannot rot
+          # unnoticed. It also repeats checks made below; that is deliberate.
+          if ! python3 scripts/verify-bundle.py "$APP" "$EXPECTED_SHORT_VERSION"; then
+            echo "::error::scripts/verify-bundle.py does not accept this bundle"
+            fail=1
+          fi
           exit $fail
 
       # The app promises a bundled iterminalctl (Settings → Security installs
