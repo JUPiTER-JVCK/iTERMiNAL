@@ -213,6 +213,9 @@ final class AppSettings: ObservableObject {
     /// The `.mmdb` file the Local MMDB provider reads. A path only; the file
     /// is never copied.
     @Published var ipLookupMMDBPath: String { didSet { defaults.set(ipLookupMMDBPath, forKey: "ipLookupMMDBPath") } }
+    /// A second `.mmdb` file read with the first — GeoLite2 ships City and
+    /// ASN as separate databases. A path only, like the first.
+    @Published var ipLookupASNMMDBPath: String { didSet { defaults.set(ipLookupASNMMDBPath, forKey: "ipLookupASNMMDBPath") } }
 
     var ipLookupProvider: GeoProvider {
         get { GeoProvider(rawValue: ipLookupProviderTag) ?? .disabled }
@@ -471,6 +474,7 @@ final class AppSettings: ObservableObject {
         }
         ipLookupProviderTag = defaults.string(forKey: "ipLookupProviderTag") ?? GeoProvider.disabled.rawValue
         ipLookupMMDBPath = defaults.string(forKey: "ipLookupMMDBPath") ?? ""
+        ipLookupASNMMDBPath = defaults.string(forKey: "ipLookupASNMMDBPath") ?? ""
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
         autoReconnect = defaults.object(forKey: "autoReconnect") as? Bool ?? false
         fillInConnectionDefaults = defaults.object(forKey: "fillInConnectionDefaults") as? Bool ?? true
@@ -828,6 +832,7 @@ final class AppSettings: ObservableObject {
         showRemotePorts = false
         ipLookupProviderTag = GeoProvider.disabled.rawValue
         ipLookupMMDBPath = ""
+        ipLookupASNMMDBPath = ""
         shareSignInWithFiles = true
         autoReconnect = false
         fillInConnectionDefaults = true

@@ -6,6 +6,7 @@ import AppKit
 /// Saved collections are a later milestone and have no settings here yet.
 struct HTTPClientSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var rirFiles = RIRDelegationStore.shared
     @State private var ipinfoToken = ""
     @State private var hasSavedToken = KeychainStore.get(IPLookupModel.ipinfoTokenAccount) != nil
 
@@ -23,15 +24,43 @@ struct HTTPClientSettingsView: View {
         hasSavedToken = KeychainStore.get(IPLookupModel.ipinfoTokenAccount) != nil
     }
 
-    private func chooseMMDB() {
+    private func chooseMMDB(_ path: ReferenceWritableKeyPath<AppSettings, String>, message: String) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose an .mmdb database (IPinfo Lite, GeoLite2, DB-IP)."
+        panel.message = message
         if panel.runModal() == .OK, let url = panel.url {
-            settings.ipLookupMMDBPath = url.path
+            settings[keyPath: path] = url.path
         }
+    }
+
+    private func mmdbRow(_ title: String, _ path: ReferenceWritableKeyPath<AppSettings, String>, message: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(settings[keyPath: path].isEmpty
+                 ? "None chosen"
+                 : (settings[keyPath: path] as NSString).abbreviatingWithTildeInPath)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+            Button("Choose…") { chooseMMDB(path, message: message) }
+            if !settings[keyPath: path].isEmpty {
+                Button("Clear") { settings[keyPath: path] = "" }
+            }
+        }
+    }
+
+    private var rirStatus: String {
+        if let progress = rirFiles.progress { return "Downloading \(progress)" }
+        guard rirFiles.fileCount > 0, let oldest = rirFiles.oldestDownload else { return "Not downloaded" }
+        let when = oldest.formatted(date: .abbreviated, time: .omitted)
+        let total = RIRRegistry.allCases.count
+        return rirFiles.fileCount == total
+            ? "All \(total), oldest from \(when)"
+            : "\(rirFiles.fileCount) of \(total), oldest from \(when)"
     }
 
     var body: some View {
@@ -83,21 +112,39 @@ struct HTTPClientSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                mmdbRow("MMDB file", \.ipLookupMMDBPath,
+                        message: "Choose an .mmdb database (IPinfo Lite, GeoLite2 City or Country, DB-IP).")
+                mmdbRow("Second MMDB file", \.ipLookupASNMMDBPath,
+                        message: "Choose a second .mmdb database, such as GeoLite2 ASN.")
+                Text("MaxMind's free GeoLite2 databases need a MaxMind account and licence key to download, and come as separate files: choose GeoLite2 City first for city, region and an approximate location, and GeoLite2 ASN second for the network's owner. The first file's answer is shown first; the second fills in what it lacks. City-level answers are much less reliable than country-level ones, in any IP database.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 HStack {
-                    Text("MMDB file")
+                    Text("RIR files")
                     Spacer()
-                    Text(settings.ipLookupMMDBPath.isEmpty
-                         ? "None chosen"
-                         : (settings.ipLookupMMDBPath as NSString).abbreviatingWithTildeInPath)
-                        .font(.system(size: 11, design: .monospaced))
+                    Text(rirStatus)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.head)
-                    Button("Choose…") { chooseMMDB() }
-                    if !settings.ipLookupMMDBPath.isEmpty {
-                        Button("Clear") { settings.ipLookupMMDBPath = "" }
+                    if rirFiles.isDownloading {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button(rirFiles.fileCount == 0 ? "Download" : "Update") { rirFiles.download() }
+                        .disabled(rirFiles.isDownloading)
+                    if rirFiles.fileCount > 0 {
+                        Button("Remove") { rirFiles.remove() }
+                            .disabled(rirFiles.isDownloading)
                     }
                 }
+                if let problem = rirFiles.problem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("For RIR files (local): the delegation statistics ARIN, RIPE NCC, APNIC, LACNIC and AFRINIC publish daily — about 45 MB in all — fetched over HTTPS from each registry only when you press \(rirFiles.fileCount == 0 ? "Download" : "Update"), and kept in Application Support. The download sends no address. They give the country each block's holder registered in, which is usually, but not always, where the addresses are used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Only a public address is ever looked up; private, local and reserved ones are never sent anywhere. The Lookup tab always shows what this Mac's own resolver says.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
