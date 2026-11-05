@@ -6997,5 +6997,87 @@ do {
           "and no preset guesses a port llama-server might be listening on")
 }
 
+// MARK: RIR delegation files and MMDB City records
+
+do {
+    let file = """
+    2.3|ripencc|1700000000|5|19830705|20261104|+0100
+    # a comment
+    ripencc|*|ipv4|*|3|summary
+    ripencc|FR|ipv4|2.0.0.0|1048576|20100712|allocated|abc\r
+    ripencc|DE|ipv4|5.10.0.0|768|20120101|assigned|def
+    ripencc||ipv4|5.20.0.0|256||available
+    ripencc|ZZ|ipv4|5.30.0.0|256||reserved
+    ripencc|NL|ipv4|5.40.0.0|256|bad|reserved
+    ripencc|GB|ipv6|2a00:1450::|29|20091005|allocated|ghi
+    ripencc|GB|ipv4|999.0.0.0|256|20100101|allocated
+    ripencc|GB|ipv4|255.255.255.0|512|20100101|allocated
+    ripencc|gb|ipv4|6.0.0.0|256|20100101|allocated
+    ripencc|GB|asn|15169|1|20100101|allocated
+    ripencc|GB|ipv6|2a01::|200|20100101|allocated
+    not|a|line
+    """
+    let other = "2|apnic|20261104|2|19830613|20261103|+1000\napnic|AU|ipv4|1.1.1.0|256|20110811|assigned\napnic|JP|ipv4|2.10.0.0|256|20200101|assigned\n"
+    let table = RIRDelegationTable(files: [Data(file.utf8), Data(other.utf8)])
+    check(table.ipv4Count == 4 && table.ipv6Count == 1, "only delegated, well-formed blocks are kept: \(table.ipv4Count) v4, \(table.ipv6Count) v6")
+    let france = table.lookup("2.15.255.255")
+    check(france?.countryCode == "FR" && france?.registry == .ripencc && france?.network == "2.0.0.0/12"
+            && france?.date == "2010-07-12" && france?.status == "allocated", "a CIDR-sized block, with a CRLF line end")
+    check(table.lookup("2.0.0.0")?.countryCode == "FR" && table.lookup("2.16.0.0") == nil, "its first address is in it, the one after its last is not")
+    check(table.lookup("2.10.0.5")?.countryCode == "JP", "a block inside another is found, not hidden by it")
+    check(table.lookup("2.10.1.0")?.countryCode == "FR", "and past that block the larger one is found again")
+    check(table.lookup("5.10.2.255")?.network == "5.10.0.0 – 5.10.2.255" && table.lookup("5.10.3.0") == nil,
+          "a block that is not a power of two is a range")
+    check(table.lookup("5.20.0.1") == nil && table.lookup("5.30.0.1") == nil && table.lookup("5.40.0.1") == nil,
+          "available, reserved and unknown-country blocks have no answer")
+    check(table.lookup("1.1.1.1")?.registry == .apnic && table.lookup("1.1.1.1")?.status == "assigned", "files are read together")
+    check(table.lookup("::ffff:1.1.1.1")?.countryCode == "AU", "an IPv4 address written as IPv6")
+    let google = table.lookup("2a00:1450:4001:80b::200e")
+    check(google?.countryCode == "GB" && google?.network == "2a00:1450::/29" && table.lookup("2a00:1458::") == nil, "an IPv6 block")
+    check(table.lookup("0.0.0.0") == nil && table.lookup("255.255.255.255") == nil && table.lookup("example.com") == nil
+            && table.lookup("") == nil, "addresses with nothing before or after them, and things that aren't addresses")
+    check(RIRDelegationTable(files: [Data("2.3|arin|1|0|0|0|0\n".utf8)]).isEmpty && RIRDelegationTable().lookup("1.1.1.1") == nil,
+          "a file with no blocks in it, and no file")
+    check(RIRDelegationTable.network4(0x0A000000, 0x0A0000FF) == "10.0.0.0/24" && RIRDelegationTable.network4(0x0A000080, 0x0A00017F) == "10.0.0.128 – 10.0.1.127",
+          "a block not aligned to its size is a range")
+    check(Set(RIRRegistry.allCases.map { $0.url.scheme }) == ["https"]
+            && RIRRegistry.allCases.allSatisfy { $0.url.lastPathComponent == $0.fileName },
+          "every registry's file is fetched over https, under its own name")
+
+    if let delegation = france {
+        let intel = IPIntelParse.fromDelegation(delegation)
+        check(intel.countryName == "France" && intel.continent == "Europe" && intel.registry == "RIPE NCC, allocated 2010-07-12"
+                && intel.rows.map(\.label) == ["Network", "Country", "Country Name", "Continent", "Registry"],
+              "what the registries say, as rows: \(intel.rows.map(\.label))")
+    }
+
+    // GeoLite2 City's nested record, and GeoLite2 ASN's flat one, read together.
+    let city: [String: Any] = [
+        "city": ["names": ["en": "Mountain View", "de": "Mountain View"]],
+        "subdivisions": [["iso_code": "CA", "names": ["en": "California"]]],
+        "country": ["iso_code": "US", "names": ["en": "United States"]],
+        "continent": ["code": "NA", "names": ["en": "North America"]],
+        "location": ["latitude": 37.386, "longitude": -122.0838, "accuracy_radius": UInt64(1000), "time_zone": "America/Los_Angeles"],
+    ]
+    let asn: [String: Any] = ["autonomous_system_number": UInt64(15169), "autonomous_system_organization": "GOOGLE"]
+    let cityIntel = IPIntelParse.fromRecord(city)
+    check(cityIntel.city == "Mountain View" && cityIntel.region == "California" && cityIntel.timeZone == "America/Los_Angeles"
+            && cityIntel.coordinates == "37.3860, -122.0838 (within 1000 km)" && cityIntel.asn == nil,
+          "a City record: \(cityIntel)")
+    let both = IPIntelParse.merged(cityIntel, with: IPIntelParse.fromRecord(asn))
+    check(both.asn == "AS15169" && both.organisation == "GOOGLE" && both.city == "Mountain View" && both.countryCode == "US",
+          "an ASN record fills in what the City record lacks")
+    check(IPIntelParse.merged(IPIntelParse.fromRecord(["country": ["iso_code": "DE"]]), with: cityIntel).countryCode == "DE",
+          "the first file's answer wins where both have one")
+    let flat = IPIntelParse.fromRecord(["city": "Berlin", "region": "Berlin", "country_code": "DE", "timezone": "Europe/Berlin",
+                                        "latitude": "52.52", "longitude": "13.405"])
+    check(flat.city == "Berlin" && flat.region == "Berlin" && flat.timeZone == "Europe/Berlin" && flat.coordinates == "52.5200, 13.4050",
+          "a flat record's city fields")
+    check(IPIntelParse.coordinates(91.0, 0.0, radius: nil) == nil && IPIntelParse.coordinates("x", 0.0, radius: nil) == nil,
+          "coordinates that can't be are left out")
+    check(GeoProvider.allCases.contains(.rirDelegations) && !GeoProvider.rirDelegations.leavesTheMac,
+          "the registries' files are read on this Mac")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

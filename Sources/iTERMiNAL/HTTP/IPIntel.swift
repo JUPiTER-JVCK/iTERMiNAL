@@ -10,6 +10,7 @@ import Foundation
 enum GeoProvider: String, CaseIterable, Identifiable {
     case ipinfoLite
     case localMMDB
+    case rirDelegations
     case teamCymru
     case disabled
 
@@ -19,6 +20,7 @@ enum GeoProvider: String, CaseIterable, Identifiable {
         switch self {
         case .ipinfoLite: return "IPinfo Lite"
         case .localMMDB: return "Local MMDB"
+        case .rirDelegations: return "RIR files (local)"
         case .teamCymru: return "DNS (Team Cymru)"
         case .disabled: return "Disabled"
         }
@@ -27,7 +29,8 @@ enum GeoProvider: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .ipinfoLite: return "ASN, AS name, country, continent"
-        case .localMMDB: return "Local ASN/country MMDB data"
+        case .localMMDB: return "City, ASN or country from MMDB files"
+        case .rirDelegations: return "Country and registry, offline"
         case .teamCymru: return "ASN, CIDR, country code"
         case .disabled: return "No third-party geo lookups"
         }
@@ -38,7 +41,9 @@ enum GeoProvider: String, CaseIterable, Identifiable {
         case .ipinfoLite:
             return "Uses the IPinfo Lite API to look up ASN, organization name, country, and continent for IP addresses. IP addresses are sent to ipinfo.io over HTTPS. Needs a free IPinfo token, set in Settings → HTTP Client."
         case .localMMDB:
-            return "Reads an MMDB database file on this Mac (IPinfo Lite, MaxMind GeoLite2, DB-IP). Nothing is sent anywhere. Choose the file in Settings → HTTP Client."
+            return "Reads MMDB database files on this Mac (IPinfo Lite, MaxMind GeoLite2, DB-IP). A City database adds city, region and an approximate location; an ASN database, chosen as the second file, adds the network's owner. Nothing is sent anywhere. Choose the files in Settings → HTTP Client."
+        case .rirDelegations:
+            return "Searches the five Regional Internet Registries' delegation files (ARIN, RIPE NCC, APNIC, LACNIC, AFRINIC), downloaded to this Mac in Settings → HTTP Client, for the block an address belongs to: the country its holder registered in, and which registry delegated it when. Nothing about an address is sent anywhere — the download asks the registries for their whole file, not about an address."
         case .teamCymru:
             return "Asks Team Cymru's IP-to-ASN DNS service for the ASN, network, and country code. The address is sent in a DNS query through this Mac's resolver."
         case .disabled:
@@ -58,6 +63,13 @@ struct IPIntel: Equatable {
     var countryCode: String?
     var countryName: String?
     var continent: String?
+    var city: String?
+    var region: String?
+    var timeZone: String?
+    /// "37.7510, -97.8220 (within 1000 km)", as an MMDB City database gives it.
+    var coordinates: String?
+    /// "RIPE NCC, allocated 2010-07-12", from the registries' own files.
+    var registry: String?
 
     var isEmpty: Bool { self == IPIntel() }
 
@@ -85,9 +97,14 @@ struct IPIntel: Equatable {
         if let organisation { rows.append(Row(label: "Organization", value: organisation)) }
         if let domain { rows.append(Row(label: "Domain", value: domain)) }
         if let network { rows.append(Row(label: "Network", value: network)) }
+        if let city { rows.append(Row(label: "City", value: city)) }
+        if let region { rows.append(Row(label: "Region", value: region)) }
         if let countryCode { rows.append(Row(label: "Country", value: countryCode)) }
         if let countryName { rows.append(Row(label: "Country Name", value: countryName)) }
         if let continent { rows.append(Row(label: "Continent", value: continent)) }
+        if let timeZone { rows.append(Row(label: "Time Zone", value: timeZone)) }
+        if let coordinates { rows.append(Row(label: "Location", value: coordinates)) }
+        if let registry { rows.append(Row(label: "Registry", value: registry)) }
         return rows
     }
 
@@ -160,9 +177,76 @@ enum IPIntelParse {
         } else {
             found.continent = clean(record["continent"])
         }
+        if let city = record["city"] as? [String: Any] {
+            found.city = name(in: city)
+        } else {
+            found.city = clean(record["city"])
+        }
+        if let subdivisions = record["subdivisions"] as? [Any],
+           let first = subdivisions.first as? [String: Any] {
+            found.region = name(in: first)
+        } else {
+            found.region = clean(record["region"])
+        }
+        if let location = record["location"] as? [String: Any] {
+            found.timeZone = clean(location["time_zone"])
+            found.coordinates = coordinates(location["latitude"], location["longitude"], radius: location["accuracy_radius"])
+        } else {
+            found.timeZone = clean(record["timezone"]) ?? clean(record["time_zone"])
+            found.coordinates = coordinates(record["latitude"], record["longitude"], radius: nil)
+        }
         if found.countryName == nil, let registered = record["registered_country"] as? [String: Any], found.countryCode == nil {
             found.countryCode = clean(registered["iso_code"])
         }
+        found.fillFromCountryCode()
+        return found
+    }
+
+    /// What a database's `location` says, with how far off it may be: City
+    /// databases are often right about the country and much less so about
+    /// the town.
+    static func coordinates(_ latitude: Any?, _ longitude: Any?, radius: Any?) -> String? {
+        func number(_ value: Any?) -> Double? {
+            if let double = value as? Double { return double }
+            if let text = value as? String { return Double(text) }
+            return nil
+        }
+        guard let latitude = number(latitude), let longitude = number(longitude),
+              (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+        let place = String(format: "%.4f, %.4f", latitude, longitude)
+        if let radius = radius as? UInt64, radius > 0, radius < 50_000 {
+            return "\(place) (within \(radius) km)"
+        }
+        return place
+    }
+
+    /// Fills, from `other`, what `self` did not say — for a City and an ASN
+    /// database read together.
+    static func merged(_ base: IPIntel, with other: IPIntel) -> IPIntel {
+        var found = base
+        found.asn = found.asn ?? other.asn
+        found.organisation = found.organisation ?? other.organisation
+        found.domain = found.domain ?? other.domain
+        found.network = found.network ?? other.network
+        found.countryCode = found.countryCode ?? other.countryCode
+        found.countryName = found.countryName ?? other.countryName
+        found.continent = found.continent ?? other.continent
+        found.city = found.city ?? other.city
+        found.region = found.region ?? other.region
+        found.timeZone = found.timeZone ?? other.timeZone
+        found.coordinates = found.coordinates ?? other.coordinates
+        found.registry = found.registry ?? other.registry
+        return found
+    }
+
+    // MARK: RIR delegation files
+
+    static func fromDelegation(_ delegation: RIRDelegation) -> IPIntel {
+        var found = IPIntel()
+        found.network = delegation.network
+        found.countryCode = delegation.countryCode
+        found.registry = delegation.date.map { "\(delegation.registry.title), \(delegation.status) \($0)" }
+            ?? "\(delegation.registry.title), \(delegation.status)"
         found.fillFromCountryCode()
         return found
     }

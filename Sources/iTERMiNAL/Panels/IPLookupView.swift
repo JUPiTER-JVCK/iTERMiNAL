@@ -86,7 +86,12 @@ final class IPLookupModel: ObservableObject {
     }
 
     private func cacheKey(_ config: IPLookupConfig, _ address: HostLookup.Address) -> String {
-        let source = config.provider == .localMMDB ? config.mmdbPath : ""
+        let source: String
+        switch config.provider {
+        case .localMMDB: source = "\(config.mmdbPath)+\(config.asnMMDBPath)"
+        case .rirDelegations: source = config.rirStamp
+        default: source = ""
+        }
         return "\(config.provider.rawValue)|\(source)|\(address.text)"
     }
 
@@ -127,7 +132,8 @@ final class IPLookupModel: ObservableObject {
     private static func fetch(_ address: HostLookup.Address, config: IPLookupConfig) -> Result<IPIntel, Failure> {
         switch config.provider {
         case .ipinfoLite: return fetchIPinfo(address)
-        case .localMMDB: return fetchMMDB(address, path: config.mmdbPath)
+        case .localMMDB: return fetchMMDB(address, paths: [config.mmdbPath, config.asnMMDBPath])
+        case .rirDelegations: return fetchRIR(address)
         case .teamCymru: return fetchCymru(address)
         case .disabled: return .failure(Failure(message: "Lookups are disabled."))
         }
@@ -179,20 +185,43 @@ final class IPLookupModel: ObservableObject {
         }
     }
 
-    private static func fetchMMDB(_ address: HostLookup.Address, path: String) -> Result<IPIntel, Failure> {
-        guard !path.isEmpty else {
+    /// Reads each chosen file — a City database and an ASN one, say — and
+    /// puts together what they say, the first file's answer first.
+    private static func fetchMMDB(_ address: HostLookup.Address, paths: [String]) -> Result<IPIntel, Failure> {
+        let chosen = paths.filter { !$0.isEmpty }
+        guard !chosen.isEmpty else {
             return .failure(Failure(message: "Choose an MMDB file in Settings → HTTP Client."))
         }
-        guard let reader = MMDBReaderCache.reader(at: path) else {
-            return .failure(Failure(message: "That file isn't a readable MMDB database."))
+        var found = IPIntel()
+        var unreadable: [String] = []
+        for path in chosen {
+            guard let reader = MMDBReaderCache.reader(at: path) else {
+                unreadable.append((path as NSString).lastPathComponent)
+                continue
+            }
+            if let record = reader.lookup(address.text) {
+                found = IPIntelParse.merged(found, with: IPIntelParse.fromRecord(record))
+            }
         }
-        guard let record = reader.lookup(address.text) else {
-            return .failure(Failure(message: "The database has nothing for that address."))
+        if !found.isEmpty { return .success(found) }
+        if !unreadable.isEmpty {
+            return .failure(Failure(message: "\(unreadable.joined(separator: ", ")) isn't a readable MMDB database."))
         }
-        let found = IPIntelParse.fromRecord(record)
-        return found.isEmpty
-            ? .failure(Failure(message: "The database's record for it had nothing this tab can show."))
-            : .success(found)
+        return .failure(Failure(message: chosen.count == 1
+            ? "The database has nothing for that address."
+            : "Neither database has anything for that address."))
+    }
+
+    private static func fetchRIR(_ address: HostLookup.Address) -> Result<IPIntel, Failure> {
+        let store = RIRDelegationStore.shared
+        let table = store.table()
+        guard !table.isEmpty else {
+            return .failure(Failure(message: "Download the registries' files in Settings → HTTP Client."))
+        }
+        guard let delegation = table.lookup(address.text) else {
+            return .failure(Failure(message: "No registry file on this Mac has a delegated block holding that address."))
+        }
+        return .success(IPIntelParse.fromDelegation(delegation))
     }
 
     private static func fetchCymru(_ address: HostLookup.Address) -> Result<IPIntel, Failure> {
@@ -216,19 +245,26 @@ final class IPLookupModel: ObservableObject {
 struct IPLookupConfig: Equatable {
     var provider: GeoProvider = .disabled
     var mmdbPath = ""
+    /// A second MMDB file read alongside the first — GeoLite2 publishes its
+    /// City and ASN data as separate files.
+    var asnMMDBPath = ""
+    /// Which download of the registries' files answers were read from.
+    var rirStamp = ""
 }
 
-/// Keeps the open database between lookups, so a large file is mapped once.
+/// Keeps the open databases between lookups, so a large file is mapped once.
 private enum MMDBReaderCache {
     private static let lock = NSLock()
-    private static var current: (path: String, reader: MMDBReader?)?
+    private static var readers: [String: MMDBReader?] = [:]
 
     static func reader(at path: String) -> MMDBReader? {
         lock.lock()
         defer { lock.unlock() }
-        if let current, current.path == path { return current.reader }
+        if let cached = readers[path] { return cached }
+        // Only the files in use now are kept: there are at most two.
+        if readers.count >= 2 { readers = [:] }
         let reader = MMDBReader(url: URL(fileURLWithPath: path))
-        current = (path, reader)
+        readers[path] = reader
         return reader
     }
 }
@@ -236,11 +272,15 @@ private enum MMDBReaderCache {
 struct IPLookupView: View {
     @ObservedObject var model: IPLookupModel
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var rirFiles = RIRDelegationStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focused: Bool
 
     private var currentConfig: IPLookupConfig {
-        IPLookupConfig(provider: settings.ipLookupProvider, mmdbPath: settings.ipLookupMMDBPath)
+        IPLookupConfig(provider: settings.ipLookupProvider,
+                       mmdbPath: settings.ipLookupMMDBPath,
+                       asnMMDBPath: settings.ipLookupASNMMDBPath,
+                       rirStamp: rirFiles.stamp)
     }
 
     var body: some View {
@@ -293,6 +333,14 @@ struct IPLookupView: View {
         .onChange(of: settings.ipLookupMMDBPath) { _, _ in
             model.config = currentConfig
             if settings.ipLookupProvider == .localMMDB { model.refresh() }
+        }
+        .onChange(of: settings.ipLookupASNMMDBPath) { _, _ in
+            model.config = currentConfig
+            if settings.ipLookupProvider == .localMMDB { model.refresh() }
+        }
+        .onChange(of: rirFiles.stamp) { _, _ in
+            model.config = currentConfig
+            if settings.ipLookupProvider == .rirDelegations { model.refresh() }
         }
     }
 
@@ -435,7 +483,7 @@ struct IPLookupView: View {
     }
 
     private func footer(theme: Theme) -> some View {
-        Text("Names and address kinds come from this Mac's own resolver. A provider other than Disabled is asked about a public address when you look it up, and is sent the address alone — not the name you typed.")
+        Text("Names and address kinds come from this Mac's own resolver: the Name row is the address's reverse DNS (PTR) record, which its network's owner sets and need not match the name you typed. IPinfo Lite and Team Cymru are asked about a public address when you look it up, and are sent the address alone — not the name you typed. Local MMDB and RIR files never send it anywhere.")
             .font(.system(size: 10))
             .foregroundStyle(theme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
