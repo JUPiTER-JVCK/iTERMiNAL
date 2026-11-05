@@ -124,7 +124,8 @@ enum SessionLaunch {
                 terminal: terminal,
                 controlPath: controlPath,
                 agentApproved: agentApproved,
-                unattended: unattended
+                unattended: unattended,
+                fillInDefaults: settings.fillInConnectionDefaults
             )
 
         case .tool(let tool):
@@ -157,12 +158,17 @@ enum SessionLaunch {
     /// `unattended` is for a reconnect that nobody is at the keyboard for (see
     /// `AutoReconnect`): ssh is told not to prompt and not to wait long to
     /// connect, ahead of everything else so that is the value it keeps.
+    ///
+    /// `fillInDefaults` adds a keep-alive, a connect timeout and a second try
+    /// at connecting where neither `~/.ssh/config` nor the host sets them (see
+    /// `SSHDefaults`).
     private static func remoteConfiguration(
         _ connection: SSHConnection,
         terminal: TerminalType = .default,
         controlPath: String? = nil,
         agentApproved: Bool = false,
-        unattended: Bool = false
+        unattended: Bool = false,
+        fillInDefaults: Bool = false
     ) -> Result<TerminalLaunchConfiguration, SessionLaunchError> {
         var executable: String
         var args: [String] = []
@@ -200,6 +206,13 @@ enum SessionLaunch {
                 // each only when the host was set up with it.
                 args.append(contentsOf: connection.optionArguments)
                 args.append(contentsOf: connection.forwardArguments)
+            }
+            if fillInDefaults {
+                // Asked with everything above, so a value set there, in
+                // ~/.ssh/config, or by an unattended retry reads as set and
+                // is kept; only ssh's own defaults are filled in.
+                let effective = SSHDefaults.query(ssh: executable, arguments: args, destination: connection.destination)
+                args.append(contentsOf: SSHDefaults.arguments(effective: effective, secondTry: !unattended))
             }
             if let controlPath {
                 // After the person's own arguments, so a ControlPath they chose

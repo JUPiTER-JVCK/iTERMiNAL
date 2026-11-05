@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftTerm
 
 /// One live session: a local shell or a remote host, owning the engine (and
@@ -22,6 +23,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// network, which is what a missing Local Network permission looks like
     /// (see `LocalNetwork`). The banner offers that setting. A launch clears it.
     @Published private(set) var localNetworkBlocked = false
+    /// What ssh's last words said went wrong, when that is more than "the
+    /// session ended" (see `TabConnectionProblem`). The banner names it and
+    /// offers its buttons. A launch clears it.
+    @Published private(set) var endProblem: RemoteProblem?
     /// Whether SwiftTerm's Metal renderer ended up active for this session —
     /// requesting GPU rendering can silently fall back to the CPU path.
     @Published private(set) var isGPUAccelerated = false
@@ -96,6 +101,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         let attempt: Int
         let total: Int
         let at: Date
+        /// Held because there is no network: it starts a few seconds after one
+        /// comes back (see `NetworkWatch`), and `at` means nothing until then.
+        var waitingForNetwork = false
     }
     @Published private(set) var reconnectPlan: ReconnectPlan?
     /// Why automatic reconnecting stopped, when the person would want to know.
@@ -104,6 +112,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Tries made in the current run of them; 0 for a session the person started.
     private var reconnectAttempts = 0
     private var reconnectWork: DispatchWorkItem?
+    /// `NetworkWatch.mayReconnect`, taken the first time a reconnect waits.
+    /// Ends with the session.
+    private var networkSubscription: AnyCancellable?
     /// Set when the person ended the session — closed it, or stopped it — so
     /// the end that follows is not a drop to retry. A launch clears it.
     private var endedByUser = false
@@ -398,6 +409,10 @@ final class TerminalSession: ObservableObject, Identifiable {
         let settings = AppSettings.shared
         reconnectNote = nil
         localNetworkBlocked = false
+        endProblem = nil
+        // Watching from the first remote launch, so that when one drops it is
+        // already known whether there is a network to reconnect over.
+        if isRemote { NetworkWatch.shared.start() }
         if agentApproved == nil, let connection = connectionThatAsksAboutAgent(settings) {
             guard !awaitingAgentAnswer else { return }
             awaitingAgentAnswer = true
@@ -654,25 +669,73 @@ final class TerminalSession: ObservableObject, Identifiable {
         case .retry(let delay, let attempt):
             reconnectAttempts = attempt
             reconnectNote = nil
-            reconnectPlan = ReconnectPlan(
-                attempt: attempt,
-                total: AutoReconnect.standard.maxAttempts,
-                at: Date().addingTimeInterval(delay)
-            )
-            let work = DispatchWorkItem { [weak self] in self?.runAutoReconnect() }
-            reconnectWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+            if NetworkWatch.shared.isOnline {
+                scheduleAutoReconnect(after: delay, attempt: attempt)
+            } else {
+                holdForNetwork(attempt: attempt)
+            }
         case .stop(let reason):
             reconnectAttempts = 0
             reconnectNote = reason.note
         }
     }
 
+    /// Try number `attempt` starts after `delay`, unless the network comes back
+    /// first and brings it forward (`networkMayHaveReturned`).
+    private func scheduleAutoReconnect(after delay: TimeInterval, attempt: Int) {
+        reconnectWork?.cancel()
+        reconnectPlan = ReconnectPlan(
+            attempt: attempt,
+            total: AutoReconnect.standard.maxAttempts,
+            at: Date().addingTimeInterval(delay)
+        )
+        watchNetwork()
+        let work = DispatchWorkItem { [weak self] in self?.runAutoReconnect() }
+        reconnectWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Try number `attempt` waits for a network to make it over: a try made
+    /// with none could not work, and would use up one of the few there are.
+    private func holdForNetwork(attempt: Int) {
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        reconnectPlan = ReconnectPlan(
+            attempt: attempt,
+            total: AutoReconnect.standard.maxAttempts,
+            at: Date(),
+            waitingForNetwork: true
+        )
+        watchNetwork()
+    }
+
+    private func watchNetwork() {
+        guard networkSubscription == nil else { return }
+        networkSubscription = NotificationCenter.default
+            .publisher(for: NetworkWatch.mayReconnect)
+            .sink { [weak self] _ in self?.networkMayHaveReturned() }
+    }
+
+    /// There is a network again, a different one, or the Mac has woken: a try
+    /// that is waiting starts within a few seconds rather than when its wait
+    /// would have ended. It is still the same try, counted the same way.
+    private func networkMayHaveReturned() {
+        guard let plan = reconnectPlan, !isRunning, !endedByUser else { return }
+        let remaining: TimeInterval? = plan.waitingForNetwork ? nil : max(0, plan.at.timeIntervalSinceNow)
+        let delay = AutoReconnect.waitAfterNetworkReturns(remaining: remaining, jitterSample: Double.random(in: 0..<1))
+        scheduleAutoReconnect(after: delay, attempt: plan.attempt)
+    }
+
     /// The wait is over. Checked again because the person may have turned it
-    /// off, closed the tab or reconnected by hand in the meantime.
+    /// off, closed the tab or reconnected by hand in the meantime — and the
+    /// network may have gone, in which case the try waits for it.
     private func runAutoReconnect() {
         reconnectWork = nil
-        guard reconnectPlan != nil else { return }
+        guard let plan = reconnectPlan else { return }
+        guard NetworkWatch.shared.isOnline else {
+            holdForNetwork(attempt: plan.attempt)
+            return
+        }
         reconnectPlan = nil
         guard !isRunning, !endedByUser, AppSettings.shared.autoReconnect,
               let connection, AutoReconnect.isEligible(connection) else { return }
@@ -899,7 +962,23 @@ extension TerminalSession: TerminalEngineDelegate {
             guard let self, !self.isRunning, self.launchedAt == launched else { return }
             self.considerAutoReconnect(terminationStatus: exitCode, ranFor: ranFor)
             self.noteLocalNetworkBlock(terminationStatus: exitCode)
+            self.noteEndProblem(terminationStatus: exitCode, ranFor: ranFor)
         }
+    }
+
+    /// Names on the banner what ssh said went wrong, when it said more than
+    /// that the session ended (see `TabConnectionProblem`). Not while a
+    /// reconnect is waiting — that banner counts down — nor over the Local
+    /// Network note, which says the same thing more exactly for that case.
+    private func noteEndProblem(terminationStatus: Int32?, ranFor: TimeInterval) {
+        guard reconnectPlan == nil, !localNetworkBlocked, !endedByUser, let connection else { return }
+        let tail = AutoReconnect.tail(of: engine.captureScrollback(maxBytes: 4_096))
+        endProblem = TabConnectionProblem.diagnose(
+            tail: tail,
+            connection: connection,
+            terminationStatus: terminationStatus,
+            ranFor: ranFor
+        )
     }
 
     /// Says on the banner when ssh could not reach a host on the local network,
