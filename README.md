@@ -1118,6 +1118,14 @@ nothing asks for an answer with nobody there:
   host do not all knock at once. A try that stays up for 30 seconds has worked,
   and its own end is a new drop, counted from one. After the sixth failure it
   gives up and says so in the banner.
+- **Not while there is no network.** A try that falls due while this Mac has no
+  network is held, not spent: the banner says it is waiting for the network,
+  and the try starts 1 to 4 seconds after there is one again. When the network
+  comes back, changes (Wi-Fi to Ethernet, say) or the Mac wakes from sleep, a
+  try that is waiting is brought forward to then, never pushed later. It is
+  still the same try, counted the same way, so an outage longer than the whole
+  run of waits no longer uses the tries up. The network is read from this
+  Mac's own view of its interfaces; nothing is sent anywhere to find out.
 - While it waits, the banner counts down, with **Reconnect Now** (which signs in
   the ordinary way, prompts and all) and **Stop**.
 - **Not for** mosh, which roams by itself; a custom command, which is yours; or
@@ -1162,6 +1170,27 @@ pattern — `web[1-3].example.com`, `r[01-10]`, `db-{a,b}.lan` — and opens a t
 for each (up to 8; more are saved but not opened). **Look up a host** shows what
 this Mac's own resolver says about a name or an address; nothing goes to a
 lookup service.
+
+**Settings → Connections → Notice a dead connection, and give up on a host that
+doesn't answer** (on by default) fills in three things for an ssh terminal tab
+where neither `~/.ssh/config` nor the host sets them:
+
+| Option | Value | Why |
+| --- | --- | --- |
+| `ServerAliveInterval` | 15 | A connection that has died — a change of network, a sleep, a router that forgot it — is noticed in about 45 seconds (three unanswered), instead of the tab sitting on it until TCP gives up |
+| `ConnectTimeout` | 10 | A host that doesn't answer is given up on in seconds, not after the system's TCP timeout, which can be over a minute |
+| `ConnectionAttempts` | 2 | A second try a second later catches a network that is not quite back after a wake; an automatic reconnect doesn't get one, as it is already one of a counted run |
+
+A value set anywhere is kept. ssh takes an option given on its command line
+over the same one in `~/.ssh/config`, so these are never added blindly: before
+the tab starts, `ssh -G` — which prints the settings ssh would use and connects
+to nothing — is asked with the tab's own arguments, and only an option it
+reports at ssh's built-in default is filled in. If it can't say within two
+seconds (it runs the config's `Match exec` commands, which can be slow), nothing
+is added and ssh runs as before. The two tries at connecting end within 21
+seconds, inside the 30 seconds after which a session counts as having been up,
+so a host that never answers is never taken for one that worked and dropped.
+mosh and custom commands are left alone. It applies to tabs opened from then on.
 
 ### Background tunnels
 
@@ -1291,6 +1320,20 @@ or a login that prints text, and a folder that is missing or off limits.
 Anything else is shown as `sftp` said it, with a Try Again. A failed upload,
 download or delete leaves the listing alone and shows a one-line strip with
 Details.
+
+**A terminal tab says the same.** When an ssh tab ends because the sign-in was
+refused, too many keys were offered, an identity file can't be used or the host
+key has changed, its banner names that, in a sentence written for a terminal
+(which, unlike the file browser, can ask for a password), with the buttons that
+fix it — **Set Up Key…**, **Forget Old Key…**, **Connection Settings…**, or
+**Local Network Settings…** for a host on this network — next to Reconnect. A
+connection that couldn't be made at all (refused, no answer, no route, a name
+that doesn't resolve, closed before signing in) is named only when the session
+never got going: after one that worked, the same words mean a dropped
+connection, and the banner says that. "Host key verification failed." on its
+own is not called a changed key in a tab: it is also what ssh says when you
+answer no to a host it has never seen. Each command is typed into a new tab and
+left for Return; nothing runs by itself.
 
 **Settings → Connections → Test File Access** signs in the way the file browser
 does and shows the same words, so a host can be checked with its settings in

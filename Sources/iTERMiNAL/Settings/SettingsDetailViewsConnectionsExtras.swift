@@ -8,6 +8,16 @@ struct HostOptionsSection: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var settings: AppSettings
 
+    /// What the keep-alive stepper reads. At 0 the host sets none, which
+    /// leaves it to ~/.ssh/config — and, for a terminal tab, to the default
+    /// filled in when that sets none either (see `SSHDefaults`).
+    private var keepAliveLabel: String {
+        if connection.keepAliveSeconds > 0 { return "every \(connection.keepAliveSeconds) s" }
+        return settings.fillInConnectionDefaults
+            ? "As in ~/.ssh/config, or \(SSHDefaults.keepAliveSeconds) s in a tab"
+            : "As in ~/.ssh/config"
+    }
+
     var body: some View {
         Section("Sign-in") {
             Button("Set Up Key Login…") {
@@ -61,7 +71,7 @@ struct HostOptionsSection: View {
                     HStack {
                         Text("Keep-alive")
                         Spacer()
-                        Text(connection.keepAliveSeconds == 0 ? "As in ~/.ssh/config" : "every \(connection.keepAliveSeconds) s")
+                        Text(keepAliveLabel)
                             .foregroundStyle(.secondary)
                     }
                 }

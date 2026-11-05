@@ -192,6 +192,12 @@ final class AppSettings: ObservableObject {
     /// Starts a dropped `ssh` session again by itself, within the limits in
     /// `AutoReconnect`. Off: a dropped session waits for Reconnect.
     @Published var autoReconnect: Bool { didSet { defaults.set(autoReconnect, forKey: "autoReconnect") } }
+    /// Gives an ssh terminal tab a keep-alive, a connect timeout and a second
+    /// try at connecting where `~/.ssh/config` and the host set none. See
+    /// `SSHDefaults`. Off: ssh runs with only what was set.
+    @Published var fillInConnectionDefaults: Bool {
+        didSet { defaults.set(fillInConnectionDefaults, forKey: "fillInConnectionDefaults") }
+    }
     /// Forwards kept in Settings and run in the background. See `SavedTunnel`.
     @Published var savedTunnels: [SavedTunnel] {
         didSet {
@@ -467,6 +473,7 @@ final class AppSettings: ObservableObject {
         ipLookupMMDBPath = defaults.string(forKey: "ipLookupMMDBPath") ?? ""
         shareSignInWithFiles = defaults.object(forKey: "shareSignInWithFiles") as? Bool ?? true
         autoReconnect = defaults.object(forKey: "autoReconnect") as? Bool ?? false
+        fillInConnectionDefaults = defaults.object(forKey: "fillInConnectionDefaults") as? Bool ?? true
         cursorColorHex = defaults.string(forKey: "cursorColorHex") ?? ""
         cursorTextColorHex = defaults.string(forKey: "cursorTextColorHex") ?? ""
         selectionColorHex = defaults.string(forKey: "selectionColorHex") ?? ""
@@ -823,6 +830,7 @@ final class AppSettings: ObservableObject {
         ipLookupMMDBPath = ""
         shareSignInWithFiles = true
         autoReconnect = false
+        fillInConnectionDefaults = true
         cursorColorHex = ""
         cursorTextColorHex = ""
         selectionColorHex = ""

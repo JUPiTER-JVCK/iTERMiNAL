@@ -203,6 +203,7 @@ jobs:
             Sources/iTERMiNAL/Panels/QuickLookPolicy.swift \
             Sources/iTERMiNAL/Files/SSHConnection.swift \
             Sources/iTERMiNAL/Files/SSHRoute.swift \
+            Sources/iTERMiNAL/Files/SSHDefaults.swift \
             Sources/iTERMiNAL/Files/SSHControlSocket.swift \
             Sources/iTERMiNAL/Files/RemoteProblem.swift \
             Sources/iTERMiNAL/Files/PortForward.swift \
@@ -214,6 +215,7 @@ jobs:
             Sources/iTERMiNAL/Remote/HostLookup.swift \
             Sources/iTERMiNAL/Remote/LocalNetwork.swift \
             Sources/iTERMiNAL/Terminal/AutoReconnect.swift \
+            Sources/iTERMiNAL/Terminal/TabConnectionProblem.swift \
             Sources/iTERMiNAL/Terminal/ExitStatus.swift \
             Sources/iTERMiNAL/Remote/SavedTunnel.swift \
             Sources/iTERMiNAL/HTTP/GeoLookup.swift \

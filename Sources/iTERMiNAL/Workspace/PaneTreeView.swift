@@ -119,6 +119,7 @@ private struct SessionStatusBanner: View {
     @ObservedObject var session: TerminalSession
     let note: String
     let theme: Theme
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 8) {
@@ -134,6 +135,13 @@ private struct SessionStatusBanner: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .medium))
+            }
+            if let problem = session.endProblem {
+                ForEach(TabConnectionProblem.actions(for: problem), id: \.title) { action in
+                    Button(action.title) { perform(action) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                }
             }
             if session.reconnectPlan != nil {
                 Button("Stop") {
@@ -155,18 +163,41 @@ private struct SessionStatusBanner: View {
         .overlay(alignment: .bottom) { FadedDivider() }
     }
 
+    /// What a button from `TabConnectionProblem` does. A command is typed into
+    /// a new tab and left for Return, as the file browser's are.
+    private func perform(_ action: RemoteAction) {
+        switch action {
+        case .runInLocalTerminal(_, let command):
+            WorkspaceStore.shared.newTab(typing: command)
+        case .editConnection:
+            SettingsNavigator.request(.connections)
+            openSettings()
+        case .openLocalNetworkSettings:
+            LocalNetworkPermission.openSettings()
+        case .tryAgain:
+            session.reconnect()
+        case .signInInTerminal:
+            // Not offered on a tab, which is already a terminal signed in to it.
+            break
+        }
+    }
+
     /// While a reconnect is waiting, the count down to it; otherwise what
     /// happened to the session, and why it was not started again if that is
     /// worth saying.
     @ViewBuilder
     private var message: some View {
-        if let plan = session.reconnectPlan {
+        if let plan = session.reconnectPlan, plan.waitingForNetwork {
+            Text("Connection lost, and this Mac has no network. Try \(plan.attempt) of \(plan.total) starts when it is back.")
+        } else if let plan = session.reconnectPlan {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let seconds = max(0, Int(plan.at.timeIntervalSince(context.date).rounded(.up)))
                 Text("Connection lost. Reconnecting in \(seconds) s — try \(plan.attempt) of \(plan.total).")
             }
         } else if let error = session.launchError {
             Text(error)
+        } else if let problem = session.endProblem {
+            Text("\(problem.title). \(TabConnectionProblem.summary(for: problem))")
         } else if let why = session.reconnectNote {
             Text("Session \(note). \(why)")
         } else {

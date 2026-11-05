@@ -111,6 +111,10 @@ struct ConnectionsSettingsView: View {
                 Text("On, a new ssh tab keeps its connection open, and the file browser, the port scan and forwards use it. A host that wants a password then needs signing in to once, in a tab, and the file browser fills in by itself; closing the tab ends the sharing. The connection is reachable only by this account, through a private folder. Applies to tabs opened from now on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Notice a dead connection, and give up on a host that doesn't answer", isOn: $settings.fillInConnectionDefaults)
+                Text(Self.connectionDefaultsCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Reconnect a dropped ssh session by itself", isOn: $settings.autoReconnect)
                 Text(Self.autoReconnectCaption)
                     .font(.caption)
@@ -127,6 +131,11 @@ struct ConnectionsSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// What the filled-in defaults are, from the same numbers the code uses.
+    private static var connectionDefaultsCaption: String {
+        "Each ssh tab gets a keep-alive every \(SSHDefaults.keepAliveSeconds) seconds, so a connection that has died is noticed in under a minute, and gives up on a host that doesn't answer after \(SSHDefaults.connectTimeoutSeconds) seconds, trying \(SSHDefaults.connectionAttempts) times. Only where ~/.ssh/config and the host's own settings leave them unset: what ssh would use is read first, with ssh -G, and a value set anywhere is kept. Applies to tabs opened from now on."
     }
 
     /// What automatic reconnecting does and does not do, from the same numbers

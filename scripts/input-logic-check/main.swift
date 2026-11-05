@@ -5166,6 +5166,193 @@ do {
     let standard = AutoReconnect.standard
     check(standard.maxAttempts >= 1 && standard.maxAttempts <= 10 && standard.minUptime >= 10 && standard.maxDelay <= 300 && standard.jitter < 0.5,
           "the standard policy is modest")
+
+    // The network: a try waits for one, and starts soon after it is back.
+    check(AutoReconnect.settleDelay(jitterSample: 0) == AutoReconnect.settle.lowerBound
+            && AutoReconnect.settleDelay(jitterSample: 1) == AutoReconnect.settle.upperBound
+            && AutoReconnect.settleDelay(jitterSample: 0.5) == 2.5,
+          "the settle delay spans its range: \(AutoReconnect.settleDelay(jitterSample: 0.5))")
+    check(AutoReconnect.settleDelay(jitterSample: .nan) == 2.5 && AutoReconnect.settleDelay(jitterSample: -3) == 1
+            && AutoReconnect.settleDelay(jitterSample: 7) == 4,
+          "a sample out of range is held to it")
+    check(AutoReconnect.settle.lowerBound >= 1 && AutoReconnect.settle.upperBound <= 10 && AutoReconnect.settle.upperBound > AutoReconnect.settle.lowerBound,
+          "the network is given a moment to settle, spread, and not long")
+    check(AutoReconnect.waitAfterNetworkReturns(remaining: nil, jitterSample: 0) == 1
+            && AutoReconnect.waitAfterNetworkReturns(remaining: nil, jitterSample: 1) == 4,
+          "a try held for want of a network starts a settle delay after it is back")
+    check(AutoReconnect.waitAfterNetworkReturns(remaining: 60, jitterSample: 0.5) == 2.5
+            && AutoReconnect.waitAfterNetworkReturns(remaining: 32, jitterSample: 0) == 1,
+          "a long wait is brought forward when the network comes back")
+    check(AutoReconnect.waitAfterNetworkReturns(remaining: 0.5, jitterSample: 1) == 0.5
+            && AutoReconnect.waitAfterNetworkReturns(remaining: 0, jitterSample: 0.5) == 0
+            && AutoReconnect.waitAfterNetworkReturns(remaining: -4, jitterSample: 0.5) == 0,
+          "a try that was about to start is never pushed later")
+    check(AutoReconnect.waitAfterNetworkReturns(remaining: .infinity, jitterSample: 0.5) == 2.5
+            && AutoReconnect.waitAfterNetworkReturns(remaining: .nan, jitterSample: 0.5) == 2.5,
+          "a wait that is not a number is treated as none")
+}
+
+// MARK: Connection defaults (ssh -G)
+
+// A keep-alive, a connect timeout and a second try, filled in only where ssh
+// would otherwise use its own defaults — never over a value someone set.
+do {
+    // The shape `ssh -G` prints: a lowercase name, a space, the value.
+    let printed = """
+    host example.com
+    user me
+    port 22
+    connectionattempts 1
+    serveraliveinterval 0
+    serveralivecountmax 3
+    connecttimeout none
+    identityfile ~/.ssh/id_ed25519
+    identityfile ~/.ssh/id_rsa
+    localforward 8080 [localhost]:80
+
+    """
+    let read = SSHDefaults.parse(printed)
+    check(read["serveraliveinterval"] == "0" && read["connecttimeout"] == "none" && read["connectionattempts"] == "1"
+            && read["serveralivecountmax"] == "3" && read["port"] == "22", "ssh -G's lines are read by name: \(read)")
+    check(read["identityfile"] == "~/.ssh/id_ed25519", "a setting printed twice keeps its first value, as ssh does")
+    check(read["localforward"] == "8080 [localhost]:80", "a value with spaces in it is kept whole")
+    check(SSHDefaults.parse("ConnectTimeout 30\n  serveraliveinterval   20  \nnovalue\n\n")["connecttimeout"] == "30"
+            && SSHDefaults.parse("serveraliveinterval   20  ")["serveraliveinterval"] == "20"
+            && SSHDefaults.parse("novalue\n").isEmpty && SSHDefaults.parse("").isEmpty,
+          "names are lowercased, padding trimmed, and a line with no value skipped")
+
+    let all = ["-o", "ServerAliveInterval=15", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=2"]
+    check(SSHDefaults.arguments(effective: read) == all, "ssh's own defaults are all filled in: \(SSHDefaults.arguments(effective: read))")
+    let chosen = ["serveraliveinterval": "120", "connecttimeout": "60", "connectionattempts": "4"]
+    check(SSHDefaults.arguments(effective: chosen).isEmpty, "a value set in ~/.ssh/config or by the host is kept, never cut")
+    check(SSHDefaults.arguments(effective: ["serveraliveinterval": "30", "connecttimeout": "none", "connectionattempts": "1"])
+            == ["-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=2"], "only the ones left unset")
+    check(SSHDefaults.arguments(effective: ["serveraliveinterval": "0", "connecttimeout": "-1", "connectionattempts": "3"])
+            == ["-o", "ServerAliveInterval=15", "-o", "ConnectTimeout=10"], "an older ssh's -1 is no timeout too")
+    check(SSHDefaults.arguments(effective: nil).isEmpty && SSHDefaults.arguments(effective: [:]).isEmpty
+            && SSHDefaults.arguments(effective: ["port": "22"]).isEmpty,
+          "nothing is added when ssh -G could not say, or did not mention them")
+    check(SSHDefaults.keepAliveSeconds * 3 <= 60, "a dead connection is noticed within a minute")
+    // Every try at connecting together ends well inside the time after which a
+    // session counts as having been up: a host that never answers must not look
+    // like a connection that worked and then dropped — for an unattended retry
+    // that would restart the count each time, and retry it for ever.
+    let connecting = SSHDefaults.connectTimeoutSeconds * SSHDefaults.connectionAttempts + (SSHDefaults.connectionAttempts - 1)
+    check(Double(connecting) < AutoReconnect.standard.minUptime,
+          "a tab's tries at connecting end in \(connecting) s, inside the \(AutoReconnect.standard.minUptime) s that counts as up")
+    let retryTimeout = Int(AutoReconnect.unattendedArguments.last?.split(separator: "=").last ?? "") ?? -1
+    check(retryTimeout > 0 && Double(retryTimeout) < AutoReconnect.standard.minUptime,
+          "a retry's one try at connecting ends inside it too: \(retryTimeout) s")
+    check(SSHDefaults.arguments(effective: read, secondTry: false) == ["-o", "ServerAliveInterval=15", "-o", "ConnectTimeout=10"],
+          "an automatic reconnect gets no second try at connecting: it is already one of a counted run")
+
+    // The real ssh, with no configuration at all (-F /dev/null), so the answer
+    // does not depend on this machine's: it connects to nothing.
+    if let ssh = ["/usr/bin/ssh", "/opt/homebrew/bin/ssh", "/usr/local/bin/ssh"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+        let plain = SSHDefaults.query(ssh: ssh, arguments: ["-F", "/dev/null"], destination: "me@example.invalid")
+        check(plain?["user"] == "me" && plain?["hostname"] == "example.invalid",
+              "ssh -G is read for the destination: \(String(describing: plain?["user"])) \(String(describing: plain?["hostname"]))")
+        check(SSHDefaults.arguments(effective: plain) == all,
+              "with no configuration, this ssh reports its defaults the way they are read: \(String(describing: plain.map { ["serveraliveinterval": $0["serveraliveinterval"], "connecttimeout": $0["connecttimeout"], "connectionattempts": $0["connectionattempts"]] }))")
+        let given = SSHDefaults.query(ssh: ssh, arguments: ["-F", "/dev/null", "-o", "ConnectTimeout=60", "-o", "ServerAliveInterval=30"],
+                                      destination: "example.invalid")
+        check(SSHDefaults.arguments(effective: given) == ["-o", "ConnectionAttempts=2"],
+              "options the tab already passes read as set: \(SSHDefaults.arguments(effective: given))")
+        check(SSHDefaults.query(ssh: ssh, arguments: ["-F", "/dev/null", "-o", "NoSuchOption=1"], destination: "x") == nil,
+              "an ssh -G that fails gives no answer, so nothing is filled in")
+    } else {
+        check(false, "no ssh to ask: the connection defaults could not be checked against it")
+    }
+
+    // A query that does not finish is given up on, in its time, and adds nothing.
+    let slow = NSTemporaryDirectory() + "slow-ssh-\(UUID().uuidString)"
+    FileManager.default.createFile(atPath: slow, contents: Data("#!/bin/sh\nsleep 5\n".utf8),
+                                   attributes: [.posixPermissions: 0o700])
+    let started = Date()
+    check(SSHDefaults.query(ssh: slow, arguments: [], destination: "x", timeout: 0.3) == nil && Date().timeIntervalSince(started) < 2,
+          "a slow ssh -G is stopped after its timeout: \(Date().timeIntervalSince(started)) s")
+    try? FileManager.default.removeItem(atPath: slow)
+    check(SSHDefaults.query(ssh: "/usr/bin/false", arguments: [], destination: "x") == nil
+            && SSHDefaults.query(ssh: "/no/such/ssh", arguments: [], destination: "x") == nil,
+          "an ssh that fails, or is not there, gives no answer")
+}
+
+// MARK: A terminal tab's connection problem
+
+do {
+    let host = SSHConnection(name: "Web", host: "web1.example.com", username: "me")
+    let lost: Int32 = 65280  // ssh's 255, as the wait status SwiftTerm hands over
+    func diagnose(_ tail: String, ran: TimeInterval = 2, status: Int32? = lost, on connection: SSHConnection = host) -> RemoteProblem? {
+        TabConnectionProblem.diagnose(tail: tail, connection: connection, terminationStatus: status, ranFor: ran)
+    }
+    func titles(_ problem: RemoteProblem?) -> [String] { problem.map { TabConnectionProblem.actions(for: $0).map(\.title) } ?? [] }
+
+    // Turned away: named whenever ssh says so, with the buttons that fix it.
+    let refused = diagnose("me@web1.example.com: Permission denied (publickey,password).")
+    check(refused?.kind == .signInRefused(methods: ["publickey", "password"]), "a refused sign-in is named: \(String(describing: refused?.kind))")
+    check(refused.map(TabConnectionProblem.summary) == "The password or key wasn't accepted.", "said for a terminal, which can ask for a password")
+    check(titles(refused) == ["Set Up Key…", "Connection Settings…"], "Set Up Key, not Try Again or Sign In in a Terminal: \(titles(refused))")
+    let keyOnly = diagnose("me@web1.example.com: Permission denied (publickey).")
+    check(keyOnly.map(TabConnectionProblem.summary)?.contains("only a key") == true, "a host that takes only keys says so")
+    check(diagnose("me@web1.example.com: Permission denied (publickey).", ran: 7_200)?.kind == .signInRefused(methods: ["publickey"]),
+          "a refusal is named however long it took, as it stops an automatic reconnect")
+    check(diagnose("Received disconnect from 10.0.0.5 port 22:2: Too many authentication failures")?.kind == .tooManyAuthFailures,
+          "too many keys is named")
+    check(diagnose("Load key \"/Users/me/.ssh/id_work\": bad permissions")?.kind == .identityFile(path: "/Users/me/.ssh/id_work", reason: "bad permissions"),
+          "an identity file ssh can't use is named")
+
+    // A changed host key — and not a new one the person declined.
+    let changed = diagnose("""
+    Please contact your system administrator.
+    Add correct host key in /Users/me/.ssh/known_hosts to get rid of this message.
+    Offending ECDSA key in /Users/me/.ssh/known_hosts:5
+    Host key for web1.example.com has changed and you have requested strict checking.
+    Host key verification failed.
+    """)
+    check(changed?.kind == .hostKeyChanged(offending: "/Users/me/.ssh/known_hosts:5"), "a changed host key is named: \(String(describing: changed?.kind))")
+    check(titles(changed) == ["Forget Old Key…"], "its one button types the command to forget the old key: \(titles(changed))")
+    check(changed.map(TabConnectionProblem.summary)?.contains("don't carry on") == true, "and says not to carry on without knowing why")
+    check(diagnose("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.")?.kind == .hostKeyChanged(offending: nil),
+          "ssh's warning alone is enough")
+    check(diagnose("Are you sure you want to continue connecting (yes/no/[fingerprint])? no\nHost key verification failed.") == nil,
+          "answering no to a host never seen before is not a changed key")
+
+    // Could not connect: named when the session never got going.
+    let cannot = "ssh: connect to host web1.example.com port 22: Connection refused"
+    check(diagnose(cannot)?.kind == .connectionRefused && titles(diagnose(cannot)) == ["Connection Settings…"], "a refused connection is named")
+    check(diagnose("ssh: connect to host web1.example.com port 22: Operation timed out", ran: 21)?.kind == .timedOut,
+          "no answer is named, with the filled-in timeout's two tries")
+    check(diagnose("ssh: connect to host web1.example.com port 22: Operation timed out", ran: 75)?.kind == .timedOut,
+          "and after a longer timeout from ~/.ssh/config: ssh's words say it never connected")
+    check(diagnose("ssh: Could not resolve hostname web1.example.com: nodename nor servname provided, or not known", ran: 40)?.kind == .hostNotFound,
+          "a name that doesn't resolve is named")
+    check(diagnose("ssh: connect to host web1.example.com port 22: No route to host")?.kind == .unreachable
+            && diagnose("kex_exchange_identification: Connection closed by remote host", ran: 3)?.kind == .connectionDropped,
+          "no route, and a host that hangs up before signing in")
+    check(diagnose("ssh: connect to host web1.example.com port 22: Operation timed out")
+            .map(TabConnectionProblem.summary) == "It may be asleep or off, or on a network this Mac isn't on.",
+          "a summary does not repeat the title")
+    let lan = SSHConnection(name: "Pi", host: "192.168.1.20", username: "pi")
+    check(titles(diagnose("ssh: connect to host 192.168.1.20 port 22: No route to host", on: lan)) == ["Local Network Settings…", "Connection Settings…"],
+          "a host on this network offers Local Network settings")
+
+    // Left to the banner's own words: a connection that was up and is lost.
+    check(diagnose("Timeout, server not responding.", ran: 3_600) == nil
+            && diagnose("client_loop: send disconnect: Broken pipe", ran: 900) == nil
+            && diagnose("Connection to web1.example.com closed by remote host.\nConnection to web1.example.com closed.", ran: 600) == nil
+            && diagnose("Connection reset by 10.0.0.5 port 22", ran: 600) == nil,
+          "a session that worked and then dropped is just a lost connection")
+    check(diagnose("Connection to web1.example.com closed.") == nil, "~. is the person's own end")
+    check(diagnose(cannot, status: 0) == nil && diagnose(cannot, status: 1 << 8) == nil && diagnose(cannot, status: nil) == nil,
+          "only ssh's 255 is a connection that went wrong")
+    var mosh = host
+    mosh.transport = .mosh
+    check(diagnose(cannot, on: mosh) == nil, "only ssh's words are read as ssh's")
+    check(diagnose("") == nil && diagnose("bash: line 1: nope: command not found") == nil, "nothing said, nothing named")
+    check(TabConnectionProblem.neverConnected("ssh: connect to host x port 22: Connection refused")
+            && TabConnectionProblem.neverConnected("SSH: COULD NOT RESOLVE HOSTNAME x")
+            && !TabConnectionProblem.neverConnected("Connection to x closed by remote host."),
+          "the words that mean ssh never connected")
 }
 
 // MARK: Models a local server offers

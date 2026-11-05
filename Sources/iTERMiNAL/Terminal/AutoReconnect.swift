@@ -184,6 +184,34 @@ enum AutoReconnect {
         return .retry(after: delay(forAttempt: attempt, policy: policy, jitterSample: jitterSample), attempt: attempt)
     }
 
+    // MARK: The network
+
+    /// How long after the network comes back — or changes, or the Mac wakes —
+    /// a waiting try starts: long enough for an address and DNS to settle, and
+    /// spread across the range so a dozen tabs to one host do not all knock at
+    /// once. The try still counts as one of the `maxAttempts`.
+    static let settle: ClosedRange<TimeInterval> = 1...4
+
+    /// A point in `settle`, chosen by `jitterSample` (0 to 1).
+    static func settleDelay(jitterSample: Double) -> TimeInterval {
+        let sample = min(max(jitterSample.isFinite ? jitterSample : 0.5, 0), 1)
+        return settle.lowerBound + (settle.upperBound - settle.lowerBound) * sample
+    }
+
+    /// When a waiting try starts once the network is back. `remaining` is how
+    /// long its wait still had to run, or nil if it was held for want of a
+    /// network. It is brought forward to the settle delay, never pushed later:
+    /// a try that was about to start anyway still starts then.
+    ///
+    /// No try is made while there is no network (`TerminalSession` holds it
+    /// until there is one), so an outage longer than the whole run of waits
+    /// does not use the tries up on a connection that could not have worked.
+    static func waitAfterNetworkReturns(remaining: TimeInterval?, jitterSample: Double) -> TimeInterval {
+        let settled = settleDelay(jitterSample: jitterSample)
+        guard let remaining, remaining.isFinite else { return settled }
+        return max(0, min(remaining, settled))
+    }
+
     /// Twice as long each time, up to `maxDelay`, then moved by up to `jitter`
     /// of itself either way.
     static func delay(forAttempt attempt: Int, policy: Policy = standard, jitterSample: Double) -> TimeInterval {
