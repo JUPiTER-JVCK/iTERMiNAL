@@ -100,7 +100,7 @@ final class FileBrowserModel: ObservableObject, Identifiable {
         if lines.last == "" { lines.removeLast() }
         let truncated = lines.count > previewMaxLines
         if truncated { lines = Array(lines.prefix(previewMaxLines)) }
-        return .text(name: name, lines: lines, truncated: truncated)
+        return .text(name: name, text: lines.joined(separator: "\n"), truncated: truncated)
     }
     /// A Markdown file, rendered, for the sheet that shows it.
     @Published var markdownPreview: MarkdownDocument?
@@ -830,11 +830,12 @@ enum FilePreviewState {
     case none
     case loading
     case message(String)
-    case text(name: String, lines: [String], truncated: Bool)
+    case text(name: String, text: String, truncated: Bool)
 }
 
 /// The selected file's text with line numbers, wrapping or scrolling sideways
-/// according to the pane's word-wrap toggle.
+/// according to the pane's word-wrap toggle. The text itself is
+/// `FilePreviewTextView`.
 private struct FilePreviewView: View {
     @ObservedObject var model: FileBrowserModel
     let theme: Theme
@@ -847,7 +848,7 @@ private struct FilePreviewView: View {
             note("Loading…")
         case .message(let text):
             note(text)
-        case .text(let name, let lines, let truncated):
+        case .text(let name, let text, let truncated):
             VStack(alignment: .leading, spacing: 0) {
                 Text(name)
                     .font(.system(size: 12))
@@ -856,34 +857,18 @@ private struct FilePreviewView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 FadedDivider()
-                ScrollView(model.wordWrap ? .vertical : [.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                            HStack(alignment: .top, spacing: 10) {
-                                Text("\(index + 1)")
-                                    .foregroundStyle(theme.textSecondary.opacity(0.6))
-                                    .frame(minWidth: 28, alignment: .trailing)
-                                if model.wordWrap {
-                                    Text(line.isEmpty ? " " : line)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                } else {
-                                    Text(line.isEmpty ? " " : line)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-                            }
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(theme.textPrimary)
-                        }
-                        if truncated {
-                            Text("Preview cut off — open the file to see the rest.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.textSecondary)
-                                .padding(.top, 8)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .textSelection(.enabled)
+                FilePreviewTextView(
+                    text: text,
+                    wrap: model.wordWrap,
+                    textColor: NSColor(theme.textPrimary),
+                    numberColor: NSColor(theme.textSecondary).withAlphaComponent(0.6)
+                )
+                if truncated {
+                    Text("Preview cut off — open the file to see the rest.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
