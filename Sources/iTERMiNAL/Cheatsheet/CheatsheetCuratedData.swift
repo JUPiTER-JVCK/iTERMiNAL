@@ -283,7 +283,7 @@ extension CheatsheetCurated {
     # --- mkdir ---------------------------------------------------------------
     prog mkdir | Make folders
     use mkdir [options] directory ...
-    tags create directory folder
+    tags make create directory folder
     ? Create a folder
     $ mkdir {{folder}}
     ~ new directory
@@ -1247,6 +1247,9 @@ extension CheatsheetCurated {
     prog chmod | Change who can read, write and run a file
     use chmod [options] mode file ...
     tags permissions access mode executable
+    ? Change a file's permissions
+    $ chmod {{mode}} {{file}}
+    ~ set access rights modify
     ? Make a file runnable
     $ chmod +x {{file}}
     ~ executable script permission

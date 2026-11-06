@@ -86,6 +86,7 @@ struct CheatIndex {
     private let ranges: [Range<Int>]
     private let nameCharacters: [[Character]]
     private let nameFolded: [[Character]]
+    private let natural: CheatNaturalIndex
 
     init(library: CheatLibrary) {
         self.library = library
@@ -109,6 +110,7 @@ struct CheatIndex {
         self.ranges = ranges
         self.nameCharacters = library.programs.map { Array($0.name) }
         self.nameFolded = nameCharacters.map { $0.map { FuzzyMatcher.fold($0) } }
+        self.natural = CheatNaturalIndex(library: library)
     }
 
     /// The fewest letters that are matched against the examples. One letter
@@ -209,9 +211,17 @@ struct CheatIndex {
                 matchCount: examples?.count ?? 0
             ))
         }
-        // Among equal scores, a page written for this app first, then the one
-        // with more matches, then the order they are listed in.
-        programs.sort { a, b in
+        return CheatSearchResult(
+            programs: Array(ordered(programs).prefix(programLimit)),
+            examples: Array(hits.prefix(exampleLimit)),
+            exampleTotal: hits.count
+        )
+    }
+
+    /// Best first. Among equal scores, a page written for this app, then the one
+    /// with more matches, then the order they are listed in.
+    private func ordered(_ programs: [CheatProgramHit]) -> [CheatProgramHit] {
+        programs.sorted { a, b in
             if a.score != b.score { return a.score > b.score }
             let aCurated = library.programs[a.program].isCurated
             let bCurated = library.programs[b.program].isCurated
@@ -219,11 +229,79 @@ struct CheatIndex {
             if a.matchCount != b.matchCount { return a.matchCount > b.matchCount }
             return a.program < b.program
         }
+    }
+
+    // MARK: By meaning
+
+    /// `query` searched the way `mode` says: its letters, or what its words mean.
+    func search(
+        _ query: String,
+        as mode: CheatQuery.Resolved,
+        programLimit: Int = 300,
+        exampleLimit: Int = 600,
+        token: CheatSearchToken? = nil
+    ) -> CheatSearchResult {
+        switch mode {
+        case .fuzzy:
+            return search(query, programLimit: programLimit, exampleLimit: exampleLimit, token: token)
+        case .natural:
+            return searchNatural(query, programLimit: programLimit, exampleLimit: exampleLimit, token: token)
+        }
+    }
+
+    /// The examples that answer a question put in words, best first, with the
+    /// words that matched emphasised. A score here is `CheatNaturalIndex`'s, a
+    /// hundred times over; it is not comparable with a fuzzy one.
+    func searchNatural(
+        _ query: String,
+        programLimit: Int = 300,
+        exampleLimit: Int = 600,
+        token: CheatSearchToken? = nil
+    ) -> CheatSearchResult {
+        let terms = CheatText.queryTerms(query)
+        guard !terms.isEmpty else { return CheatSearchResult() }
+        let ranked = natural.rank(terms: terms, token: token)
+        if token?.isCancelled == true || ranked.isEmpty { return CheatSearchResult() }
+
+        let wanted = Set(terms)
+        func emphasised(_ text: String) -> [Int] {
+            CheatText.tokens(Array(text))
+                .filter { wanted.contains(CheatText.stem($0.text)) }
+                .flatMap { Array($0.start..<$0.end) }
+        }
+        func points(_ score: Float) -> Int { Int((score * 100).rounded()) }
+
+        let examples = ranked.prefix(exampleLimit).map { entry -> CheatHit in
+            let program = library.programs[entry.program]
+            let example = program.examples[entry.example]
+            return CheatHit(
+                program: entry.program,
+                example: entry.example,
+                score: points(entry.score),
+                nameIndices: [],
+                descriptionIndices: emphasised(example.description),
+                commandIndices: emphasised(example.command)
+            )
+        }
+
+        var perProgram: [Int: (best: Float, count: Int)] = [:]
+        for entry in ranked {
+            let current = perProgram[entry.program] ?? (best: 0, count: 0)
+            perProgram[entry.program] = (best: max(current.best, entry.score), count: current.count + 1)
+        }
+        let programs = perProgram.map { program, found in
+            CheatProgramHit(
+                program: program,
+                score: points(found.best),
+                nameIndices: emphasised(library.programs[program].name),
+                matchCount: found.count
+            )
+        }
 
         return CheatSearchResult(
-            programs: Array(programs.prefix(programLimit)),
-            examples: Array(hits.prefix(exampleLimit)),
-            exampleTotal: hits.count
+            programs: Array(ordered(programs).prefix(programLimit)),
+            examples: Array(examples),
+            exampleTotal: ranked.count
         )
     }
 

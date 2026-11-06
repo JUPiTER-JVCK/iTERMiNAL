@@ -34,6 +34,21 @@ final class CheatsheetStore: ObservableObject {
         case failed(String)
     }
 
+    /// Where asking the assistant has got to. Optional, explicit, and never started
+    /// by typing.
+    enum AskState: Equatable {
+        case idle
+        /// Choosing which entries to offer it.
+        case preparing
+        /// Waiting for the person to say yes to exactly this.
+        case confirming(CheatsheetAskRequest)
+        case asking(question: String)
+        case answered(question: String, picks: [CheatsheetAskRequest.Candidate])
+        /// No assistant is set up, which is a thing to fix and not an error.
+        case notConfigured
+        case failed(String)
+    }
+
     @Published private(set) var library: CheatLibrary
     private var index: CheatIndex
     private var positions: [String: Int]
@@ -43,15 +58,23 @@ final class CheatsheetStore: ObservableObject {
             if query != oldValue { startSearch() }
         }
     }
+    /// Letters, words, or whichever the text looks like.
+    @Published var mode: CheatSearchMode = .auto {
+        didSet {
+            if mode != oldValue { startSearch() }
+        }
+    }
     @Published var selectedProgram: String?
     /// The programs in the list: best match first while searching; otherwise
     /// the ones written for this app, then the rest, each A to Z.
     @Published private(set) var rows: [Row] = []
     @Published private(set) var result = CheatSearchResult()
     @Published private(set) var tldr: TldrStatus = .notLoaded
+    @Published private(set) var ask: AskState = .idle
 
     private var generation = 0
     private var token = CheatSearchToken()
+    private var askTask: Task<Void, Never>?
 
     init(library: CheatLibrary = CheatsheetCurated.library) {
         self.library = library
@@ -63,6 +86,9 @@ final class CheatsheetStore: ObservableObject {
 
     var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// What the text is being searched as: the letters or the words.
+    var resolvedMode: CheatQuery.Resolved { CheatQuery.resolve(trimmedQuery, mode: mode) }
 
     /// The open program.
     var selection: CheatProgram? {
@@ -166,10 +192,13 @@ final class CheatsheetStore: ObservableObject {
 
     private func startSearch() {
         generation += 1
-        // The search before this one, if still running, is no longer wanted.
+        // The search before this one, if still running, is no longer wanted; nor is a
+        // question to the assistant about the words before these.
         token.cancel()
         token = CheatSearchToken()
+        if ask != .idle { cancelAsk() }
         let text = trimmedQuery
+        let resolved = resolvedMode
         guard !text.isEmpty else {
             // Back to the whole list, with the program that was open still open.
             result = CheatSearchResult()
@@ -180,7 +209,7 @@ final class CheatsheetStore: ObservableObject {
         let index = self.index
         let token = self.token
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let found = index.search(text, token: token)
+            let found = index.search(text, as: resolved, token: token)
             DispatchQueue.main.async {
                 guard let self, self.generation == generation else { return }
                 self.apply(found)
@@ -202,6 +231,93 @@ final class CheatsheetStore: ObservableObject {
         }
         // As in fzf, the best match is the one under the cursor.
         selectedProgram = rows.first?.name
+    }
+
+    // MARK: Asking the assistant
+
+    /// Begins asking the assistant to choose among the entries closest to what is
+    /// typed. Nothing is sent: this prepares the question, and the person is shown
+    /// exactly what would go, and where, before `confirmAsk` sends it.
+    ///
+    /// Whether an assistant is set up is looked up here, once, and not as the page
+    /// is drawn: it reads the Keychain.
+    func beginAsk(baseURL: String) {
+        guard isSearching else { return }
+        switch ask {
+        case .preparing, .asking: return
+        default: break
+        }
+        guard AssistantServiceProvider.current.isConfigured else {
+            ask = .notConfigured
+            return
+        }
+        let question = trimmedQuery
+        ask = .preparing
+        let index = self.index
+        let library = self.library
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // The closest entries by meaning, whatever mode the page is in: a question
+            // is words.
+            let found = index.searchNatural(question, programLimit: 0, exampleLimit: CheatsheetAskRequest.candidateLimit)
+            let entries = found.examples.map { hit -> (program: String, description: String, command: String) in
+                let program = library.programs[hit.program]
+                let example = program.examples[hit.example]
+                return (program.name, example.description, example.command)
+            }
+            DispatchQueue.main.async {
+                guard let self, case .preparing = self.ask, self.trimmedQuery == question else { return }
+                if let request = CheatsheetAskRequest.make(question: question, candidates: entries, baseURL: baseURL) {
+                    self.ask = .confirming(request)
+                } else {
+                    self.ask = .failed("Nothing in the cheatsheet comes close to that, so there is nothing for the assistant to choose from.")
+                }
+            }
+        }
+    }
+
+    /// Sends what `beginAsk` prepared, now that the person has seen it.
+    func confirmAsk() {
+        guard case .confirming(let request) = ask else { return }
+        let service = AssistantServiceProvider.current
+        guard service.isConfigured else {
+            ask = .notConfigured
+            return
+        }
+        ask = .asking(question: request.question)
+        askTask = Task { [weak self] in
+            do {
+                let reply = try await service.complete(
+                    system: CheatsheetAskRequest.systemPrompt,
+                    user: request.userContent,
+                    temperature: nil
+                )
+                guard !Task.isCancelled else { return }
+                let picks = request.picks(from: reply)
+                DispatchQueue.main.async {
+                    self?.finishAsk(question: request.question, .answered(question: request.question, picks: picks))
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                let message = error.localizedDescription
+                DispatchQueue.main.async { self?.finishAsk(question: request.question, .failed(message)) }
+            }
+        }
+    }
+
+    /// Stops asking, or drops the answer, and goes back to the search.
+    func cancelAsk() {
+        askTask?.cancel()
+        askTask = nil
+        ask = .idle
+    }
+
+    /// An answer counts only for the question it was asked.
+    private func finishAsk(question: String, _ state: AskState) {
+        guard case .asking(let asked) = ask, asked == question else { return }
+        askTask = nil
+        ask = state
     }
 
     // MARK: Building the lists

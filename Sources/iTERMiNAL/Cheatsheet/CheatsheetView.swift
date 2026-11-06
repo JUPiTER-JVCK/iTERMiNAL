@@ -14,6 +14,7 @@ struct CheatsheetView: View {
     @EnvironmentObject private var workspace: WorkspaceStore
     @ObservedObject private var cheats = CheatsheetStore.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
 
     @FocusState private var searchFocused: Bool
     @State private var copiedKey: String?
@@ -25,6 +26,7 @@ struct CheatsheetView: View {
         VStack(alignment: .leading, spacing: 0) {
             header(theme: theme)
             FadedDivider()
+            askPanel(theme: theme)
             HStack(spacing: 0) {
                 programList(theme: theme)
                     .frame(width: 250)
@@ -42,6 +44,20 @@ struct CheatsheetView: View {
             showAllExamples = false
             expandedSubcommands = []
         }
+        // Shown before anything is sent: where it goes, and every character of it.
+        .sheet(isPresented: Binding(
+            get: { isConfirming },
+            set: { shown in
+                if !shown && isConfirming { cheats.cancelAsk() }
+            }
+        )) {
+            CheatsheetAskSheet(cheats: cheats)
+        }
+    }
+
+    private var isConfirming: Bool {
+        if case .confirming = cheats.ask { return true }
+        return false
     }
 
     // MARK: Header and search
@@ -58,6 +74,7 @@ struct CheatsheetView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             searchField(theme: theme)
+            modeRow(theme: theme)
             if let status = statusLine {
                 Text(status)
                     .font(.system(size: 11))
@@ -67,6 +84,40 @@ struct CheatsheetView: View {
         .padding(.horizontal, 28)
         .padding(.top, 26)
         .padding(.bottom, 16)
+    }
+
+    private func modeRow(theme: Theme) -> some View {
+        HStack(spacing: 10) {
+            Picker("Search by", selection: $cheats.mode) {
+                ForEach(CheatSearchMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 210)
+            .help("Letters finds what contains them in order, as fzf does: gcm finds git commit -m. Words finds what a sentence means: undo my last commit. Auto decides from what you typed.")
+            if let caption = modeCaption {
+                Text(caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Button {
+                cheats.beginAsk(baseURL: settings.assistantBaseURL)
+            } label: {
+                Label("Ask AI", systemImage: "sparkles")
+            }
+            .controlSize(.small)
+            .disabled(!cheats.isSearching)
+            .help("Ask the AI assistant to pick from the commands closest to what you typed. You see exactly what would be sent, and where, before anything is.")
+        }
+    }
+
+    /// Which way an Auto search went, so it is never a mystery why a result is there.
+    private var modeCaption: String? {
+        guard cheats.mode == .auto, cheats.isSearching else { return nil }
+        return cheats.resolvedMode == .natural ? "Matching by meaning" : "Matching letters"
     }
 
     /// What to say about tldr-pages' examples while they are not all there.
@@ -88,7 +139,7 @@ struct CheatsheetView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.textSecondary)
-            TextField("Search programs and commands", text: $cheats.query)
+            TextField("Search, or say what you want to do", text: $cheats.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($searchFocused)
@@ -129,6 +180,121 @@ struct CheatsheetView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(theme.surface)
         )
+    }
+
+    // MARK: The assistant
+
+    /// The assistant's part, between the search and the list: working, its picks, or why
+    /// there are none. It is about the words typed, so it goes when they change.
+    @ViewBuilder
+    private func askPanel(theme: Theme) -> some View {
+        switch cheats.ask {
+        case .idle, .confirming:
+            EmptyView()
+        case .preparing:
+            askBanner(theme: theme) {
+                ProgressView().controlSize(.small)
+                Text("Choosing what to ask about…")
+            }
+        case .asking:
+            askBanner(theme: theme) {
+                ProgressView().controlSize(.small)
+                Text("Asking \(AssistantDestination.describe(baseURL: settings.assistantBaseURL).name)…")
+                Spacer(minLength: 0)
+                Button("Cancel") { cheats.cancelAsk() }
+                    .controlSize(.small)
+            }
+        case .notConfigured:
+            askBanner(theme: theme) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("The AI assistant isn't set up yet.")
+                Button("Open Settings → AI") {
+                    SettingsNavigator.request(.ai)
+                    openSettings()
+                }
+                .controlSize(.small)
+                Spacer(minLength: 0)
+                dismissButton
+            }
+        case .failed(let message):
+            askBanner(theme: theme) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(message)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                dismissButton
+            }
+        case .answered(let question, let picks):
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(theme.textSecondary)
+                    Text(picks.isEmpty ? "The assistant found nothing in the cheatsheet that answers that." : "Picked by the assistant")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+                    Spacer(minLength: 0)
+                    if picks.isEmpty {
+                        Button("Ask @ai in the terminal") {
+                            workspace.insertIntoComposer("@ai " + question)
+                        }
+                        .controlSize(.small)
+                        .help("Put your question in the composer as an @ai request. Nothing is sent until you press Return.")
+                    }
+                    dismissButton
+                }
+                if !picks.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(picks, id: \.number) { pick in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Button(pick.program) { cheats.selectedProgram = pick.program }
+                                        .buttonStyle(.link)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .help("Open this program")
+                                    exampleCard(
+                                        CheatExample(description: pick.description, command: pick.command),
+                                        key: "pick#\(pick.number)",
+                                        hit: nil,
+                                        theme: theme
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                    Text("Chosen by a model from the list it was sent. It can be wrong; nothing here is run until you insert it and press Return.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 12)
+            .background(theme.surface.opacity(0.5))
+            FadedDivider()
+        }
+    }
+
+    private func askBanner<Content: View>(theme: Theme, @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8, content: content)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textPrimary)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.surface.opacity(0.5))
+            FadedDivider()
+        }
+    }
+
+    private var dismissButton: some View {
+        Button {
+            cheats.cancelAsk()
+        } label: {
+            Image(systemName: "xmark")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss")
     }
 
     // MARK: Programs
@@ -525,5 +691,61 @@ struct CheatsheetView: View {
             if run.isMatch { piece = piece.bold() }
             return partial + piece
         }
+    }
+}
+
+/// Shown before a question goes to the assistant: what is asked, where it goes, and
+/// — one click away — every character of it.
+private struct CheatsheetAskSheet: View {
+    @ObservedObject var cheats: CheatsheetStore
+    @EnvironmentObject private var settings: AppSettings
+    @State private var showing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Ask the assistant")
+                .font(.headline)
+
+            Text("It is given your question and the commands this cheatsheet found closest, and chooses among them. It is not asked to write a command. Nothing is sent until you press Ask.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if case .confirming(let request) = cheats.ask {
+                Text(request.consentMessage)
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                DisclosureGroup("What will be sent", isExpanded: $showing) {
+                    ScrollView {
+                        Text(request.preview)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 200)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.06)))
+                }
+                .font(.system(size: 12))
+            }
+
+            Text("The answer is a pick from that list, shown to you. It can be wrong, and nothing in it is run.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { cheats.cancelAsk() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Ask") { cheats.confirmAsk() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 520)
+        .tint(settings.accentColor)
     }
 }

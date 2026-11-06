@@ -20,6 +20,10 @@
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
 //     Sources/iTERMiNAL/Cheatsheet/TldrData.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetQuery.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
 //     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -100,6 +104,20 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--check-cheats
         for (query, wanted) in [("docker ps", "docker"), ("kubectl", "kubectl"), ("tar", "tar")] {
             let top = index.search(query).programs.first.map { merged.programs[$0.program].name }
             expect(top == wanted, "searching \(query) puts \(top ?? "nothing") first, not \(wanted)")
+        }
+
+        // The ranking against the whole of tldr-pages: sixteen plain questions, each with the program
+        // that answers it first. Nothing was bent to make these pass; they are the ones a person asks.
+        for (question, answers) in [
+            ("undo last commit", ["git"]), ("find big files", ["find", "du", "mdfind"]), ("kill process on port 3000", ["kill", "lsof"]),
+            ("compress a folder", ["tar", "zip"]), ("delete a directory", ["rm"]), ("copy files to a remote server", ["scp", "rsync"]),
+            ("show disk usage", ["du", "df"]), ("search text in files", ["grep"]), ("rename a file", ["mv"]),
+            ("extract a zip file", ["unzip"]), ("create a new branch", ["git"]), ("download a file from a url", ["curl"]),
+            ("stop a docker container", ["docker"]), ("install a package with homebrew", ["brew"]),
+            ("change file permissions", ["chmod"]), ("generate an ssh key", ["ssh-keygen"]),
+        ] {
+            let top = index.searchNatural(question).examples.first.map { merged.programs[$0.program].name }
+            expect(top.map { answers.contains($0) } == true, "\"\(question)\" answers with \(top ?? "nothing"), not one of \(answers)")
         }
 
         let licence = try String(contentsOfFile: folder + "/licenses/tldr-pages-LICENSE.md", encoding: .utf8)
@@ -7552,6 +7570,160 @@ do {
     given.cancel()
     check(real.search("gc", token: given).isEmpty, "a search that was given up returns nothing")
     check(!real.search("gc", token: CheatSearchToken()).isEmpty, "one that was not still finds what it should")
+}
+
+// Finding a command by what its words mean: the words, the router that chooses between letters and
+// meaning, the ranking, and the assistant's part. The ranking is checked on the pages written for
+// the app, where every answer is known, and again against the real tldr-pages data by
+// --check-cheatsheets (above), where it has to tell the right command from thousands of others.
+do {
+    // Words.
+    check(CheatText.words("Undo the last commit!") == ["undo", "the", "last", "commit"], "words are lower-cased and stripped of marks")
+    check(CheatText.words("git cherry-pick HEAD~1 --soft") == ["git", "cherry", "pick", "head", "1", "soft"], "a hyphen or a tilde is a gap")
+    check(CheatText.tokens(Array("git add")).map { [$0.start, $0.end] } == [[0, 3], [4, 7]], "tokens say where they are")
+    check(CheatText.words("Ünïcode café").count == 2, "letters need not be ASCII")
+    for family in [["delete", "deletes", "deleted", "deleting"], ["file", "files"], ["directory", "directories"],
+                   ["process", "processes", "processing"], ["archive", "archives", "archiving", "archived"],
+                   ["match", "matches", "matching"], ["box", "boxes"]] {
+        check(Set(family.map { CheatText.stem($0) }).count == 1, "\(family) are one word: \(family.map { CheatText.stem($0) })")
+    }
+    check(CheatText.stem("ls") == "ls" && CheatText.stem("rm") == "rm" && CheatText.stem("cat") == "cat", "short words are left alone")
+    check(CheatText.stem("process") != CheatText.stem("proc"), "words that are different stay different")
+    check(CheatText.queryTerms("How do I delete the files in a folder?") == ["delete", "file", "folder"].map { CheatText.stem($0) },
+          "a question is its meaningful words, as stems: \(CheatText.queryTerms("How do I delete the files in a folder?"))")
+    check(CheatText.queryTerms("copy copy copies").count == 1, "a repeated word is one")
+    check(CheatText.queryTerms("the a of").isEmpty, "a question of nothing but small words has no terms")
+
+    // Families of words.
+    check(CheatSynonyms.related(to: CheatText.stem("delete")).contains(CheatText.stem("remove")), "delete and remove are one family")
+    check(CheatSynonyms.related(to: CheatText.stem("undo")).contains(CheatText.stem("reset")), "so are undo and reset")
+    check(!CheatSynonyms.related(to: CheatText.stem("delete")).contains(CheatText.stem("delete")), "a word is not its own synonym")
+    check(CheatSynonyms.related(to: "zzzz").isEmpty && !CheatSynonyms.knows("zzzz"), "a word with no family has none")
+    for word in ["delete", "undo", "folder", "kill", "download", "remote", "monitor", "readable"] {
+        let stem = CheatText.stem(word)
+        for other in CheatSynonyms.related(to: stem) {
+            check(CheatSynonyms.related(to: other).contains(stem), "\(word) is a synonym of \(other) only one way round")
+        }
+    }
+
+    // Letters or meaning.
+    check(CheatQuery.resolve("gcm", mode: .auto) == .fuzzy && CheatQuery.resolve("git", mode: .auto) == .fuzzy, "one word is letters")
+    check(CheatQuery.resolve("docker ps", mode: .auto) == .fuzzy && CheatQuery.resolve("ls -la", mode: .auto) == .fuzzy
+            && CheatQuery.resolve("sudo rm", mode: .auto) == .fuzzy, "two words that are a command are letters, even when a command's name is also a word for what it does")
+    check(CheatQuery.resolve("git commit -m", mode: .auto) == .fuzzy && CheatQuery.resolve("~/.ssh", mode: .auto) == .fuzzy
+            && CheatQuery.resolve("ls --all", mode: .auto) == .fuzzy && CheatQuery.resolve("$HOME path", mode: .auto) == .fuzzy,
+          "a flag, a path or a variable is a command being recalled")
+    check(CheatQuery.resolve("undo my last commit", mode: .auto) == .natural && CheatQuery.resolve("how do I rename a file", mode: .auto) == .natural,
+          "three words or more are a sentence")
+    check(CheatQuery.resolve("kill port", mode: .auto) == .natural && CheatQuery.resolve("delete folder", mode: .auto) == .natural,
+          "two words that a sentence is made of are one")
+    check(CheatQuery.resolve("", mode: .auto) == .fuzzy && CheatQuery.resolve("   ", mode: .auto) == .fuzzy, "nothing is not a sentence")
+    check(CheatQuery.resolve("docker ps", mode: .natural) == .natural && CheatQuery.resolve("undo my last commit", mode: .fuzzy) == .fuzzy,
+          "the person's choice overrides the guess")
+    check(CheatSearchMode.allCases.count == 3 && Set(CheatSearchMode.allCases.map(\.title)).count == 3, "three ways to search, each named")
+
+    // A slip of the keyboard.
+    func edit(_ a: String, _ b: String) -> Bool { CheatNaturalIndex.withinOneEdit(Array(a), Array(b)) }
+    check(edit("permission", "permission") && edit("permision", "permission") && edit("permisssion", "permission"), "a letter missing, repeated or right")
+    check(edit("permisison", "permission") && edit("pemission", "permission") && edit("permissoon", "permission"), "two swapped, one dropped, one wrong")
+    check(!edit("permission", "permit") && !edit("abc", "xyz") && !edit("ab", "abcd") && !edit("", "abc"), "but not words that are further apart")
+    check(edit("", "") && edit("a", "") && edit("", "a") && !edit("ab", ""), "and the empty cases do not trap")
+
+    // Ranking, on the pages written for the app.
+    let curated = CheatIndex(library: CheatsheetCurated.library)
+    func first(_ question: String, in index: CheatIndex = curated, library: CheatLibrary = CheatsheetCurated.library) -> String? {
+        index.searchNatural(question).examples.first.map { library.programs[$0.program].name }
+    }
+    for (question, answers) in [
+        ("undo my last commit", ["git"]), ("find big files", ["find", "du", "mdfind"]), ("kill the process on port 3000", ["kill", "lsof"]),
+        ("compress a folder", ["tar", "zip"]), ("delete a directory", ["rm"]), ("copy files to a remote server", ["scp", "rsync"]),
+        ("show disk usage", ["du", "df"]), ("search text in files", ["grep"]), ("change file permissions", ["chmod"]),
+        ("rename a file", ["mv"]), ("make a directory", ["mkdir"]), ("extract a zip file", ["unzip"]),
+        ("download a file from a url", ["curl"]), ("generate an ssh key", ["ssh-keygen"]), ("keep the mac awake", ["caffeinate"]),
+        ("copy to the clipboard", ["pbcopy"]), ("count the lines in a file", ["wc"]), ("create a symbolic link", ["ln"]),
+        ("stop a docker container", ["docker"]), ("install something with homebrew", ["brew"]),
+    ] {
+        let got = first(question)
+        check(got.map { answers.contains($0) } == true, "\"\(question)\" answers with \(got ?? "nothing"), not one of \(answers)")
+    }
+    check(first("permisions") == "chmod" || first("permisions") == "chown", "a misspelt word still finds its page: \(first("permisions") ?? "nothing")")
+    check(first("the a of") == nil && first("") == nil && first("zzzzqqqq") == nil, "a question with nothing to find finds nothing")
+
+    let undo = curated.searchNatural("undo my last commit")
+    check(undo.exampleTotal >= undo.examples.count && !undo.examples.isEmpty && undo.programs.first.map { CheatsheetCurated.library.programs[$0.program].name } == "git",
+          "the programs found are led by the one with the answer")
+    check(zip(undo.examples, undo.examples.dropFirst()).allSatisfy { $0.score >= $1.score }, "answers are best first")
+    check(zip(undo.programs, undo.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs")
+    if let top = undo.examples.first {
+        let example = CheatsheetCurated.library.programs[top.program].examples[top.example]
+        let emphasised = String(top.descriptionIndices.map { Array(example.description)[$0] })
+        check(!top.descriptionIndices.isEmpty && top.descriptionIndices.allSatisfy { $0 < example.description.count },
+              "the words that matched are marked: \(emphasised)")
+        check(top.nameIndices.isEmpty, "a program's name is not marked by a word in the description")
+    }
+    let capped = curated.searchNatural("file", programLimit: 2, exampleLimit: 3)
+    check(capped.programs.count <= 2 && capped.examples.count <= 3 && capped.exampleTotal > 3, "natural results can be cut short too: \(capped.exampleTotal)")
+    check(curated.search("undo my last commit", as: .natural) == undo && curated.search("gcm", as: .fuzzy) == curated.search("gcm"),
+          "searching as a mode is searching that way")
+    let givenUp = CheatSearchToken()
+    givenUp.cancel()
+    check(curated.searchNatural("undo my last commit", token: givenUp).isEmpty, "a question that was given up returns nothing")
+
+    // The page written for the app counts for more than one from tldr-pages that says the same.
+    let rival = CheatLibrary(programs: [
+        CheatProgram(name: "aaa", summary: "s", examples: [CheatExample(description: "Remove a folder", command: "aaa", source: .tldr)], isCurated: false),
+        CheatProgram(name: "bbb", summary: "s", examples: [CheatExample(description: "Remove a folder", command: "bbb")], isCurated: true),
+    ])
+    check(rival.programs.map(\.name) == ["aaa", "bbb"] && CheatIndex(library: rival).searchNatural("remove a folder").examples.first?.program == 1,
+          "the page written for the app wins a tie that tldr's would otherwise take")
+
+    // Asking the assistant: what would be sent, and what comes back.
+    let entries: [(program: String, description: String, command: String)] = (1...50).map { ("prog\($0)", "Does thing \($0)", "prog\($0) --go") }
+    if let request = CheatsheetAskRequest.make(question: "  undo my last commit \n please ", candidates: entries, baseURL: "https://api.example.com/v1") {
+        check(request.question == "undo my last commit please", "the question is one line, with single spaces: \(request.question)")
+        check(request.candidates.count == CheatsheetAskRequest.candidateLimit && request.candidates.first?.number == 1
+                && request.candidates.last?.number == CheatsheetAskRequest.candidateLimit, "the list is numbered from 1 and cut to the limit")
+        check(request.userContent.contains("Question: undo my last commit") && request.userContent.contains("1. prog1: Does thing 1 — prog1 --go")
+                && !request.userContent.contains("prog41"), "what is sent is the question and the list")
+        check(request.preview.hasPrefix("System:\n") && request.preview.contains(request.userContent) && request.preview.contains(CheatsheetAskRequest.systemPrompt),
+              "the preview is the payload, in full")
+        check(request.destination.name == "api.example.com" && !request.destination.staysOnThisMac
+                && request.consentMessage.contains("api.example.com") && request.consentMessage.contains("Nothing from your terminal")
+                && request.consentMessage.contains("masked"), "consent names the host and says what is and is not sent: \(request.consentMessage)")
+        check(CheatsheetAskRequest.systemPrompt.contains("not instructions") && CheatsheetAskRequest.systemPrompt.contains("[]"),
+              "the model is told the list is data, and what to say when nothing fits")
+    } else {
+        check(false, "a question with candidates makes a request")
+    }
+    check(CheatsheetAskRequest.make(question: "   ", candidates: entries, baseURL: "https://a.example")?.question == nil, "an empty question asks nothing")
+    check(CheatsheetAskRequest.make(question: "undo", candidates: [], baseURL: "https://a.example") == nil, "and so does a list with nothing in it")
+    let local = CheatsheetAskRequest.make(question: "undo", candidates: entries, baseURL: "http://localhost:11434/v1")
+    check(local?.destination.staysOnThisMac == true && local?.consentMessage.contains("stays on this Mac") == true, "a local assistant is said to stay on this Mac")
+    let secret = CheatsheetAskRequest.make(question: "why does AKIAIOSFODNN7EXAMPLE fail", candidates: entries, baseURL: "https://a.example")
+    check(secret?.question.contains("AKIAIOSFODNN7EXAMPLE") == false && secret?.preview.contains("AKIAIOSFODNN7EXAMPLE") == false,
+          "a key in the question is masked, in what is sent and in what is shown: \(secret?.question ?? "nil")")
+    let long = CheatsheetAskRequest.make(question: String(repeating: "q", count: 1_000),
+                                         candidates: [("p", String(repeating: "d", count: 500), String(repeating: "c", count: 500))], baseURL: "https://a.example")
+    check(long?.question.count == CheatsheetAskRequest.questionLimit && long?.candidates[0].description.count == CheatsheetAskRequest.fieldLimit
+            && long?.candidates[0].command.count == CheatsheetAskRequest.fieldLimit, "long text is cut")
+    let multiline = CheatsheetAskRequest.make(question: "q", candidates: [("p", "line one\nline two", "a\r\nb")], baseURL: "https://a.example")
+    check(multiline?.candidates[0].line.contains("\n") == false && multiline?.candidates[0].line.contains("\r") == false, "an entry is one line, whatever it held")
+
+    if let request = CheatsheetAskRequest.make(question: "q", candidates: Array(entries.prefix(10)), baseURL: "https://a.example") {
+        func picked(_ reply: String) -> [Int] { request.picks(from: reply).map(\.number) }
+        check(picked("[3, 1, 7]") == [3, 1, 7], "the reply's order is kept")
+        check(picked("```json\n[2, 4]\n```") == [2, 4] && picked("The best are [5, 6] I think.") == [5, 6], "a fence or words around the array do not matter")
+        check(picked("[3, 3, 3, 1]") == [3, 1], "a repeat is one")
+        check(picked("[99, 0, -1, 2]") == [2], "a number that is not on the list is dropped")
+        check(picked(#"["2", " 4 ", "x"]"#) == [2, 4] && picked("[2.0, 3.5]") == [2], "numbers written as text, or as 2.0, are read; 3.5 is not a number on the list")
+        check(picked("[]").isEmpty && picked("none of them").isEmpty && picked("").isEmpty && picked("[1, 2").isEmpty, "no array, or a broken one, picks nothing")
+        check(picked("Pick 3 or 4").isEmpty, "numbers are never scraped out of prose")
+        check(picked("see [1] — answer: [2, 3]") == [2, 3], "a bracket before the array does not hide it")
+        check(picked("[1,2,3,4,5,6,7,8,9,10]").count == CheatsheetAskRequest.pickLimit, "at most \(CheatsheetAskRequest.pickLimit) are shown")
+        check(request.picks(from: "[2]").first?.program == "prog2" && request.picks(from: "[2]").first?.command == "prog2 --go",
+              "a pick is the entry that was on the list, not text the model wrote")
+        check(picked(#"[{"n": 1}]"#).isEmpty && picked("[[1]]").isEmpty && picked("[null, true]").count <= 1, "an array of anything else picks nothing sensible")
+    }
 }
 
 // MARK: Rail item for the cheatsheet
