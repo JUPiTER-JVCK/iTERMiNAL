@@ -170,7 +170,7 @@ final class FilePreviewLineNumbers: NSRulerView {
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
     }
 
-    required init?(coder: NSCoder) {
+    required init(coder: NSCoder) {
         fatalError("FilePreviewLineNumbers is built in code")
     }
 
