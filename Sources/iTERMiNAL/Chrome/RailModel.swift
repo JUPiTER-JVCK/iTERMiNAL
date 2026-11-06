@@ -5,13 +5,15 @@ import Foundation
 /// Foundation-only, like the other pure logic in this app, so what can be
 /// pinned and how pinning behaves is checked in CI rather than by clicking.
 enum RailItem: String, CaseIterable, Identifiable {
+    /// Home, the landing page. Still named `.terminal` from when it only
+    /// switched the detail column back to the terminal surface.
     case terminal, workspaces, tasks, automations, skills
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .terminal: return "Terminal"
+        case .terminal: return "Home"
         case .workspaces: return "Spaces"
         case .tasks: return "Tasks"
         case .automations: return "Automations"
@@ -31,7 +33,7 @@ enum RailItem: String, CaseIterable, Identifiable {
     }
 
     /// Whether a person can pin it to the rail or take it off. The first
-    /// two are how you get anywhere at all — back to the terminal, to your
+    /// two are how you get anywhere at all — to the Home page, to your
     /// tabs — so they are always there (connecting to another machine is the
     /// globe's menu, bottom right); the rest live
     /// behind the rail's "···" menu until pinned.

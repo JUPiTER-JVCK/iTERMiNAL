@@ -111,6 +111,9 @@ final class WorkspaceStore: ObservableObject {
         didSet {
             guard oldValue != selectedTabID else { return }
             if selectedTabID != nil { detailMode = .terminal }
+            if let selectedTabID, let space = workspace(containingTab: selectedTabID) {
+                lastWorkspaceID = space.id
+            }
             focusSelectedTab()
             scheduleSave()
             if let selectedTabID {
@@ -118,6 +121,11 @@ final class WorkspaceStore: ObservableObject {
             }
         }
     }
+    /// The Space the person was last in. With no tab selected — on Home — no
+    /// tab says which Space is current, and falling back to the first would
+    /// make a new tab opened from Home land in Space 1 whichever Space they
+    /// came from. Not persisted: restoring the selection sets it again.
+    private var lastWorkspaceID: UUID?
     /// Looking at a pane dismisses its attention mark, however focus got
     /// there. Doing it here rather than at each call site covers the paths
     /// that assign this directly — closing a pane, closing a session,
@@ -355,7 +363,21 @@ final class WorkspaceStore: ObservableObject {
            let workspace = workspaces.first(where: { $0.tabs.contains { $0.id == selectedTabID } }) {
             return workspace
         }
+        if let lastWorkspaceID,
+           let workspace = workspaces.first(where: { $0.id == lastWorkspaceID }) {
+            return workspace
+        }
         return workspaces.first
+    }
+
+    /// True when the detail column is showing the landing page.
+    var isHome: Bool { detailMode == .terminal && selectedTab == nil }
+
+    /// Shows the landing page. Tabs stay open and their shells keep running;
+    /// none of them is selected.
+    func goHome() {
+        detailMode = .terminal
+        selectedTabID = nil
     }
 
     func workspace(containingTab tabID: UUID) -> Workspace? {
