@@ -155,6 +155,10 @@ jobs:
             Sources/iTERMiNAL/Input/CommandSpecs.swift \
             Sources/iTERMiNAL/Input/OptionCompleter.swift \
             Sources/iTERMiNAL/Input/Skill.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetModel.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
             Sources/iTERMiNAL/Chrome/ShellHistory.swift \
             Sources/iTERMiNAL/AI/SecretRedactor.swift \
             Sources/iTERMiNAL/AI/ContextSanitizer.swift \

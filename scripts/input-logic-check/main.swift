@@ -14,6 +14,11 @@
 //     Sources/iTERMiNAL/Input/AutoPairing.swift \
 //     Sources/iTERMiNAL/Input/CommandNotes.swift \
 //     Sources/iTERMiNAL/Input/SuggestionState.swift \
+//     Sources/iTERMiNAL/Input/CommandSpecs.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetModel.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
 //     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -7264,6 +7269,171 @@ do {
           "coordinates that can't be are left out")
     check(GeoProvider.allCases.contains(.rirDelegations) && !GeoProvider.rirDelegations.leavesTheMac,
           "the registries' files are read on this Mac")
+}
+
+// MARK: The cheatsheet
+
+// The Cheatsheet page's data and its search. The hand-written table has to be sound and has to cover
+// every tool the composer completes (a program's flags are read from that table, so a page for each is
+// how they get shown); then how the table's text is read, how a command is split into its placeholders,
+// and what a search finds and says about it.
+do {
+    // The table.
+    let library = CheatsheetCurated.library
+    check(CheatsheetCurated.problems.isEmpty, "the cheatsheet table is sound: \(CheatsheetCurated.problems)")
+    check(library.programs.count >= 40, "it covers a useful number of programs: \(library.programs.count)")
+    check(Set(library.programs.map(\.name)).count == library.programs.count, "no program is on two pages")
+    check(library.programs.map { $0.name.lowercased() } == library.programs.map { $0.name.lowercased() }.sorted(),
+          "the programs are in order, ignoring case")
+    let pageless = Set(CommandSpecs.toolNames).subtracting(library.programs.map(\.name))
+    check(pageless.isEmpty, "every tool the composer completes has a page: \(pageless.sorted())")
+    let thin = library.programs.filter { $0.examples.count < 4 }.map(\.name)
+    check(thin.isEmpty, "every page has recipes to show: \(thin)")
+    for program in library.programs {
+        let broken = program.examples.filter { $0.description.isEmpty || $0.command.isEmpty || $0.command.contains("\n") }
+        check(broken.isEmpty, "\(program.name) has a recipe with nothing in it, or over two lines")
+    }
+    for tool in ["git", "tar", "grep", "ssh", "docker", "find", "sed", "kill"] {
+        check(library.program(named: tool) != nil, "\(tool) has a page")
+    }
+    check(library.program(named: "nonesuch") == nil, "a program that is not there has no page")
+
+    // How the text is read.
+    let sample = CheatsheetCurated.parse("""
+    # a note to whoever edits this
+
+    prog tool | Does a thing
+    use tool [options]
+    tags helper
+    sec First
+    ? Do it
+    $ tool --go | tee out
+    ~ run start
+    ? Do it twice
+    $ tool --go --twice
+    sec Second
+    ? Undo it
+    $ tool --undo {{file}}
+    """)
+    check(sample.problems.isEmpty, "a small table reads: \(sample.problems)")
+    if let tool = sample.programs.first {
+        check(sample.programs.count == 1 && tool.name == "tool" && tool.summary == "Does a thing", "the program and its summary")
+        check(tool.syntax == ["tool [options]"] && tool.tags == ["helper"], "its syntax and tags")
+        check(tool.examples.count == 3, "three recipes: \(tool.examples.count)")
+        check(tool.examples.first?.command == "tool --go | tee out", "a command may hold a pipe, which the pipe-separated tables could not")
+        check(tool.examples.first?.intent == "run start" && tool.examples[1].intent.isEmpty, "other words go with the recipe above them")
+        check(tool.examples.map(\.section) == ["First", "First", "Second"], "headings: \(tool.examples.map { $0.section ?? "-" })")
+        check(tool.groups().map(\.section) == ["First", "Second"] && tool.groups().map { $0.items.count } == [2, 1],
+              "recipes are grouped under their headings")
+        check(tool.groups(only: [1, 2]).map { $0.items.map(\.index) } == [[1], [2]], "a group can be limited to some recipes, keeping their places")
+    } else {
+        check(false, "the sample table has its program")
+    }
+    func problems(_ text: String) -> [String] { CheatsheetCurated.parse(text).problems }
+    check(!problems("prog a | Fine.\n? x\n$ a").isEmpty, "a summary with a full stop is refused")
+    check(!problems("prog a | Fine\n? x.\n$ a").isEmpty, "so is a description with one")
+    check(!problems("prog a | Fine\n? \(String(repeating: "x", count: 91))\n$ a").isEmpty, "and one that is too long")
+    check(!problems("prog a | Fine\n? x\n? y\n$ a").isEmpty, "a description with no command under it")
+    check(!problems("prog a | Fine\n$ a").isEmpty, "a command with no description")
+    check(!problems("prog a | Fine\n? x\n$ a\n~ one\n~ two").isEmpty, "other words are for the recipe directly above only")
+    check(!problems("prog a | Fine\n? x\n$ a\n? y\n$ a").isEmpty, "a command given twice")
+    check(!problems("prog a | Fine\n? x\n$ a\nprog a | Again\n? x\n$ a").isEmpty, "a program given twice")
+    check(!problems("prog a | Fine").isEmpty, "a program with no recipes")
+    check(!problems("prog a | Fine\n? x\n$ a {{b").isEmpty, "a {{ with no }}")
+    check(!problems("prog a | Fine\n? x\n$ a {{}}").isEmpty, "an empty placeholder")
+    check(!problems("prog a | Fine\nuse b --x\n? x\n$ a").isEmpty, "a syntax line for some other program")
+    check(problems("prog a | Fine\ntags b\nuse b --x\n? x\n$ a").isEmpty, "unless it is filed under a tag")
+    check(!problems("prog a b | Fine\n? x\n$ a").isEmpty, "a name with a space in it")
+    check(!problems("? x\n$ a").isEmpty, "a recipe outside any program")
+    check(!problems("prog a | Fine\nwhat is this\n? x\n$ a").isEmpty, "an unknown directive")
+
+    // Commands: what to fill in, and what a search matched.
+    check(CheatCommand.placeholders(in: "scp {{file}} {{user}}@{{host}}:{{path}}") == ["file", "user", "host", "path"],
+          "the placeholders of a command")
+    check(CheatCommand.placeholders(in: "ls -l").isEmpty, "a command without any")
+    check(CheatCommand.placeholders(in: "x {{a}}{{b}}") == ["a", "b"], "two side by side are two")
+    check(CheatCommand.placeholders(in: "echo {{oops") .isEmpty, "a {{ that is never closed is just text")
+    check(CheatCommand.placeholders(in: "awk '{print $1}'").isEmpty, "single braces are not placeholders")
+    let sampleCommand = "git add {{file}} -p"
+    let runs = CheatCommand.runs(sampleCommand, matched: [0, 1, 2, 8])
+    check(runs.map(\.text).joined() == sampleCommand, "the runs are the command, whole and in order")
+    check(runs.filter(\.isPlaceholder).map(\.text).joined() == "{{file}}", "the placeholder's braces stay in its run")
+    check(runs.filter(\.isMatch).map(\.text).joined() == "git{", "the matched characters are marked: \(runs)")
+    check(CheatCommand.runs("").isEmpty && CheatCommand.runs("ls").count == 1, "an empty command has no runs, a plain one has one")
+    for program in library.programs {
+        for example in program.examples where CheatCommand.runs(example.command).map(\.text).joined() != example.command {
+            check(false, "the runs of \(example.command) are not the command")
+        }
+    }
+
+    // Searching a small library, where every answer can be worked out by hand.
+    let small = CheatLibrary(programs: [
+        CheatProgram(name: "tar", summary: "archives", examples: [
+            CheatExample(description: "Unpack a .tar.gz", command: "tar -xzf {{archive.tar.gz}}"),
+        ]),
+        CheatProgram(name: "git", summary: "version control", examples: [
+            CheatExample(description: "Undo the last commit", command: "git reset --soft HEAD~1"),
+            CheatExample(description: "Commit what is staged", command: "git commit -m \"{{message}}\""),
+        ]),
+    ])
+    let index = CheatIndex(library: small)
+    check(small.programs.map(\.name) == ["git", "tar"], "a library sorts its programs")
+    check(index.search("").isEmpty && index.search("   ").isEmpty, "nothing typed finds nothing")
+    check(index.search("qqq").isEmpty, "letters that are nowhere find nothing")
+    let byName = index.search("git")
+    check(byName.programs.first.map { small.programs[$0.program].name } == "git" && byName.programs.first?.nameIndices == [0, 1, 2]
+            && byName.programs.first?.matchCount == 2, "a name finds its program, with its letters: \(byName.programs)")
+    let undo = index.search("undo")
+    check(undo.examples.first.map { small.programs[$0.program].examples[$0.example].description } == "Undo the last commit",
+          "a word finds the recipe it is in")
+    check(undo.examples.first?.descriptionIndices == [0, 1, 2, 3] && undo.examples.first?.commandIndices.isEmpty == true,
+          "and says which of its letters: \(String(describing: undo.examples.first))")
+    let soft = index.search("soft")
+    check(soft.examples.first?.commandIndices == [12, 13, 14, 15], "a word in a command: \(String(describing: soft.examples.first?.commandIndices))")
+    check(index.search("UNDO") == undo, "case does not matter")
+    let joined = index.search("git undo")
+    check(joined.examples.first.map { small.programs[$0.program].name } == "git" && joined.examples.first?.example == 0
+            && joined.examples.first?.nameIndices.isEmpty == false && joined.examples.first?.descriptionIndices.isEmpty == false,
+          "a program's name and a word from its recipe, read together: \(String(describing: joined.examples.first))")
+    check(index.search("gcm").examples.first.map { small.programs[$0.program].examples[$0.example].command } == "git commit -m \"{{message}}\"",
+          "initials find a command, as in fzf")
+    check(index.search("a").programs.count == 2, "one letter finds what has it")
+    let capped = index.search("t", programLimit: 1, exampleLimit: 1)
+    check(capped.programs.count == 1 && capped.examples.count == 1 && capped.exampleTotal == 3,
+          "the lists can be cut short, and the total says how many there were: \(capped.exampleTotal)")
+    check(byName.hits(inProgram: 0).count == 2 && byName.hits(inProgram: 0).allSatisfy { $0.program == 0 },
+          "hits can be read back by program: \(byName.hits(inProgram: 0).count)")
+
+    // Searching the real library: a program's name finds it, and what a hit says is true.
+    let real = CheatIndex(library: library)
+    for (position, program) in library.programs.enumerated() {
+        let found = real.search(program.name)
+        check(found.programs.first?.program == position, "typing \(program.name) puts \(program.name) first, not \(found.programs.first.map { library.programs[$0.program].name } ?? "nothing")")
+    }
+    for query in ["a", "gc", "rm", "dock", "ssh t", "sed i", "kill 3000", "ñ", "Git", "--force", "{{", "~/"] {
+        let found = real.search(query)
+        let needle = FuzzyMatcher.needle(query)
+        var wrong: [String] = []
+        for hit in found.examples {
+            let program = library.programs[hit.program], example = program.examples[hit.example]
+            let inRange = hit.nameIndices.allSatisfy { $0 < program.name.count }
+                && hit.descriptionIndices.allSatisfy { $0 < example.description.count }
+                && hit.commandIndices.allSatisfy { $0 < example.command.count }
+            let counted = hit.nameIndices.count + hit.descriptionIndices.count + hit.commandIndices.count == needle.count
+            if !inRange || !counted { wrong.append("\(program.name): \(example.command)") }
+        }
+        check(wrong.isEmpty, "every hit for \"\(query)\" says where its letters are: \(wrong.prefix(3))")
+        check(zip(found.examples, found.examples.dropFirst()).allSatisfy { $0.score >= $1.score }, "hits for \"\(query)\" are best first")
+        check(zip(found.programs, found.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs for \"\(query)\"")
+    }
+}
+
+// MARK: Rail item for the cheatsheet
+
+do {
+    check(RailItem.cheatsheet.isPinnable && !RailItem.defaultPinned.contains(.cheatsheet),
+          "the cheatsheet can be pinned, and starts out under the menu")
+    check(RailPins.decode(["cheatsheet", "tasks", "cheatsheet", "bogus"]) == [.cheatsheet, .tasks], "it is kept when pins are read back")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

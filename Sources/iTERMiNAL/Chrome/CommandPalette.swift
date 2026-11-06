@@ -374,6 +374,14 @@ struct CommandPaletteView: View {
         ) {
             store.detailMode = .skills
         })
+        actions.append(PaletteAction(
+            id: "cheatsheet.open",
+            title: "Cheatsheet",
+            subtitle: "Flags and examples for common commands",
+            systemImage: "text.book.closed"
+        ) {
+            store.detailMode = .cheatsheet
+        })
         // A skill's text goes into the composer's input and no further: Return
         // is still what sends it.
         for skill in settings.skills {

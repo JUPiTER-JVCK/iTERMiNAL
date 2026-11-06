@@ -71,7 +71,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
 /// What the detail column is showing: the terminal surface, or one of the
 /// placeholder sections mirrored from the sidebar's action rows.
 enum DetailMode {
-    case terminal, automations, skills, tasks
+    case terminal, automations, skills, tasks, cheatsheet
 }
 
 /// A running shell plus where it lives, for the task manager.
