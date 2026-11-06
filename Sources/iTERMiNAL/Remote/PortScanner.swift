@@ -29,10 +29,20 @@ enum ProcessRunner {
     /// read and dropped, so a talkative one cannot make this grow.
     static let maxBytes = 2_000_000
 
-    static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval) -> ProcessResult? {
+    /// - Parameter environment: variables to set for the program, on top of this app's own.
+    ///   Left nil, the program is given this app's environment as it always has been.
+    static func run(
+        _ executable: String,
+        _ arguments: [String],
+        timeout: TimeInterval,
+        environment: [String: String]? = nil
+    ) -> ProcessResult? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let environment {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
         process.standardInput = FileHandle.nullDevice
         let output = Pipe()
         let errorPipe = Pipe()

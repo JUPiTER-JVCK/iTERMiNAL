@@ -20,6 +20,7 @@ struct CheatsheetView: View {
     @State private var copiedKey: String?
     @State private var showAllExamples = false
     @State private var expandedSubcommands: Set<String> = []
+    @State private var manualOpen: Set<String> = []
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
@@ -400,6 +401,7 @@ struct CheatsheetView: View {
                     if let spec = CommandSpecs.spec(named: program.name) {
                         flags(spec, theme: theme)
                     }
+                    manual(of: program, theme: theme)
                     examples(of: program, theme: theme)
                     footer(for: program, theme: theme)
                 }
@@ -533,6 +535,114 @@ struct CheatsheetView: View {
         }
     }
 
+    // MARK: Manual
+
+    /// The program's own manual page, as installed on this Mac: the original text, not a copy
+    /// of it. Closed until opened, and only then is it read, so moving down the list of
+    /// programs reads nothing.
+    @ViewBuilder
+    private func manual(of program: CheatProgram, theme: Theme) -> some View {
+        let name = program.name
+        VStack(alignment: .leading, spacing: 10) {
+            DisclosureGroup(isExpanded: Binding(
+                get: { manualOpen.contains(name) },
+                set: { setManualOpen(name, $0) }
+            )) {
+                manualBody(name: name, theme: theme)
+                    .padding(.top, 8)
+            } label: {
+                sectionTitle("Manual (from this Mac)", theme: theme)
+            }
+        }
+        .onChange(of: cheats.selectedProgram) { _, _ in
+            // A program already opened shows its page at once when it is chosen again.
+            if manualOpen.contains(name) { cheats.loadManual(name) }
+        }
+    }
+
+    @ViewBuilder
+    private func manualBody(name: String, theme: Theme) -> some View {
+        switch cheats.manuals[name] {
+        case nil, .loading?:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Reading the manual page…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+            }
+        case .found(let excerpt)?:
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(excerpt.sections.enumerated()), id: \.offset) { _, section in
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !section.title.isEmpty {
+                            Text(section.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Text(section.text)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(theme.textPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(theme.surface)
+                    )
+                }
+                HStack(spacing: 8) {
+                    if excerpt.isTruncated {
+                        Text("Shortened.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    openInTerminalButton(name: name)
+                }
+            }
+        case .missing?:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("There is no manual page called \(name) on this Mac. If it is installed some other way, the terminal may still find one.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                openInTerminalButton(name: name)
+            }
+        case .failed(let message)?:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("The manual page could not be read: \(message).")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                HStack(spacing: 8) {
+                    Button("Try again") { cheats.loadManual(name) }
+                        .controlSize(.small)
+                    openInTerminalButton(name: name)
+                }
+            }
+        }
+    }
+
+    /// `man <name>` in the composer's input, as Insert does for a command: not run, and
+    /// with the terminal's own environment, so it finds pages this app's cannot.
+    @ViewBuilder
+    private func openInTerminalButton(name: String) -> some View {
+        if ManPage.isSafeName(name) {
+            Button("Open in terminal") { workspace.insertIntoComposer("man " + name) }
+                .controlSize(.small)
+                .help("Go back to the terminal with man \(name) in the composer's input. It is not run.")
+        }
+    }
+
+    private func setManualOpen(_ name: String, _ open: Bool) {
+        if open {
+            manualOpen.insert(name)
+            cheats.loadManual(name)
+        } else {
+            manualOpen.remove(name)
+        }
+    }
+
     // MARK: Examples
 
     /// One line of the examples list. The whole page is a flat list of these, so
@@ -641,7 +751,7 @@ struct CheatsheetView: View {
     @ViewBuilder
     private func footer(for program: CheatProgram, theme: Theme) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Written by hand for the versions of these tools that macOS ships. Other systems' versions can differ.")
+            Text("Written by hand for the versions of these tools that macOS ships. Other systems' versions can differ. The lists of flags and subcommands were written from Apple's manual pages; the Manual section shows the page installed on this Mac.")
             if program.examples.contains(where: { $0.source == .tldr }) {
                 // CC BY 4.0 asks for credit, a link to the licence, and a note that it was changed.
                 Text("Examples marked tldr are from [tldr-pages](https://github.com/tldr-pages/tldr), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are reformatted here: where tldr offers a short or a long option, the long one is used; descriptions are tidied; and a subcommand's examples are filed under its program.")

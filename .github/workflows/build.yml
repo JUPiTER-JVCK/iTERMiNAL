@@ -164,6 +164,8 @@ jobs:
             Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
             Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
             Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
+            Sources/iTERMiNAL/Cheatsheet/ManPage.swift \
+            Sources/iTERMiNAL/Cheatsheet/ManPageReader.swift \
             Sources/iTERMiNAL/Chrome/ShellHistory.swift \
             Sources/iTERMiNAL/AI/SecretRedactor.swift \
             Sources/iTERMiNAL/AI/ContextSanitizer.swift \

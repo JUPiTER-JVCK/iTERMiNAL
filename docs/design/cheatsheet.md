@@ -147,6 +147,58 @@ meaning takes 0–3 ms. A search by letters takes about 4 ms for one letter (nam
 25–90 ms for longer queries and 180–220 ms for two to four letters, which most examples
 pass the plain scan for; a newer keystroke cancels it.
 
+## Known limits, and the Manual section
+
+The examples are a set of *common* ones, not a reference. 2,242 of tldr-pages' 3,556
+programs have five or fewer, so a tool with many subcommands can look nearly empty:
+`ipconfig` showed two results (`getiflist` and `getifaddr`) while its own usage text lists
+thirteen subcommands. The list of flags and subcommands on a page comes from
+`CommandSpecs`, the table the composer completes from, and it had 33 tools.
+
+Two things were done about it, because the Cheatsheet is for macOS and may draw on the
+original documentation as well as tldr-pages:
+
+- **More tables.** 21 tools were added to `CommandSpecs` (54 in all): `ipconfig`, `ifconfig`,
+  `networksetup`, `scutil`, `route`, `arp`, `netstat`, `traceroute`, `pmset`, `launchctl`,
+  `mdutil`, `softwareupdate`, `tmutil`, `hdiutil`, `plutil`, `xattr`, `say`, `screencapture`,
+  `sips`, `diskutil` and `caffeinate`. Each was written from Apple's published manual page
+  and then checked mechanically: a throwaway script fetched every page and required each
+  flag and subcommand to appear in it, strictly (a single-letter flag has to be a real
+  option term, a subcommand a term of the page). It rejected six on its first run; three
+  were false alarms from its own matching (`pmset -b`, `launchctl unload` and `hdiutil
+  -noverify` are documented in forms like `[ -a | -b | -c | -u ]`, `load | unload` and
+  `-[no]verify`), and three were real and were removed because Apple's page does not
+  document them (`scutil --nwi`, `softwareupdate --history`, `tmutil status`). The one
+  name kept that the page lacks is `ipconfig getiflist`, which the tool prints in its own
+  usage and tldr-pages uses. These tools also gained flag and subcommand completion in the
+  composer, since it reads the same table.
+- **The Manual section.** For every other program, the page can show the original manual
+  page installed on the Mac itself: the SYNOPSIS (for a tool with subcommands, that lists
+  them all) and its COMMANDS and OPTIONS, or its DESCRIPTION when the page keeps its flags
+  there. It is read when the section is opened, not when a program is chosen, so moving
+  down the list starts nothing. `ManPage` cleans and cuts the text (`man` writes bold and
+  underline as a letter, a backspace and the letter again, which mandoc was run here to
+  confirm); `ManPageReader` takes the way of running `man` as a function, so the failure
+  cases are tried without a Mac.
+
+Why `man`, and not the program's own `--help`: asking a program for its usage runs the
+program, and some tools do things when run with no arguments. `man` reads a file. The name
+passed to it is checked first (letters, digits and `. _ + -`, not starting with a dash or a
+dot, so it can be taken for neither a flag nor a path), and the process is given four seconds
+and `ProcessRunner`'s cap on how much it may say.
+
+A real `man` taught one thing the fixtures could not. This container's, with no pages
+installed, prints a notice about a "minimized" system **and exits zero**, which the first
+version showed as the program's manual. A page is now told by its headings (every one has a
+NAME, a SYNOPSIS or a DESCRIPTION), not by what `man` says about its absence, and that exact
+output is a regression test.
+
+Not known without a Mac: how the text looks on a real macOS (width, how bold comes out), and
+whether Homebrew's manual pages are found from an app's `PATH`. `PATH` is extended with
+`/opt/homebrew/bin` and `/usr/local/bin` for `man`, which finds a command's pages from the
+folders on the path. If they are not found, the section says there is no page and **Open in
+terminal** still works with the terminal's own environment.
+
 ## Not done
 
 navi's fill-in prompts for `{{placeholders}}`; cheats of your own; Linux, Windows and

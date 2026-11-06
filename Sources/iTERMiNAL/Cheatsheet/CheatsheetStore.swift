@@ -49,6 +49,15 @@ final class CheatsheetStore: ObservableObject {
         case failed(String)
     }
 
+    /// Where reading a program's manual page has got to.
+    enum ManualState: Equatable {
+        case loading
+        case found(ManPage.Excerpt)
+        /// There is no page by that name on this Mac.
+        case missing
+        case failed(String)
+    }
+
     @Published private(set) var library: CheatLibrary
     private var index: CheatIndex
     private var positions: [String: Int]
@@ -71,6 +80,8 @@ final class CheatsheetStore: ObservableObject {
     @Published private(set) var result = CheatSearchResult()
     @Published private(set) var tldr: TldrStatus = .notLoaded
     @Published private(set) var ask: AskState = .idle
+    /// Each program's manual page on this Mac, for the ones that have been asked for.
+    @Published private(set) var manuals: [String: ManualState] = [:]
 
     private var generation = 0
     private var token = CheatSearchToken()
@@ -225,6 +236,49 @@ final class CheatsheetStore: ObservableObject {
         }
         // As in fzf, the best match is the one under the cursor.
         selectedProgram = rows.first?.name
+    }
+
+    // MARK: The manual on this Mac
+
+    /// Runs `/usr/bin/man` for a name and hands back what it printed. All it does is read a
+    /// file and format it; it does not run the program the page is about. Called off the main
+    /// thread, with a time limit and `ProcessRunner`'s cap on how much it may say.
+    private static func runMan(_ name: String) -> ManPageReader.Outcome? {
+        let environment = [
+            // No pager, and nothing a terminal would be asked about.
+            "MANPAGER": "cat",
+            "PAGER": "cat",
+            "TERM": "dumb",
+            // The commands Homebrew installs are found by their folders on the path.
+            "PATH": ManPage.searchPath(base: ProcessInfo.processInfo.environment["PATH"]),
+        ]
+        guard let result = ProcessRunner.run("/usr/bin/man", [name], timeout: 4, environment: environment) else { return nil }
+        return ManPageReader.Outcome(status: result.status, output: result.output, timedOut: result.timedOut)
+    }
+
+    private let manPages = ManPageReader(run: CheatsheetStore.runMan)
+
+    /// Reads `name`'s manual page, unless it already has or is. Called when the section is
+    /// opened, not when a program is chosen: moving down the list starts nothing.
+    func loadManual(_ name: String) {
+        switch manuals[name] {
+        case .loading?, .found?, .missing?:
+            return                      // in hand, or on its way
+        case .failed?, nil:
+            break                       // not asked for yet, or it failed: try
+        }
+        manuals[name] = .loading
+        let reader = manPages
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = reader.read(name)
+            DispatchQueue.main.async {
+                switch result {
+                case .found(let excerpt): self?.manuals[name] = .found(excerpt)
+                case .missing: self?.manuals[name] = .missing
+                case .failed(let message): self?.manuals[name] = .failed(message)
+                }
+            }
+        }
     }
 
     // MARK: Asking the assistant

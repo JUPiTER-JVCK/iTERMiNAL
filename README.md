@@ -431,9 +431,20 @@ A tour of the app in thirty-four pictures, in five groups.
   open it from the command palette): programs on the left and, for the one you
   pick, its flags and the commands people reach for, each with a line on what it
   does. 48 programs have pages written for this app, for the BSD versions of the
-  tools macOS ships, and their flags are the table the composer completes from
-  when you press Tab, so they are written down once; about 3,500 more come from
-  [tldr-pages](#bundled-tools). Typing narrows the list as fzf does — `gcm` finds
+  tools macOS ships; about 3,500 more come from [tldr-pages](#bundled-tools),
+  which is a set of common examples and not a reference, so most of those have a
+  handful and no list of flags. The **Flags** list is the table the composer
+  completes from when you press Tab, so a flag is written down once: it covers
+  54 tools, among them the macOS network and system ones (`ipconfig`,
+  `networksetup`, `scutil`, `pmset`, `launchctl`, `diskutil`, `tmutil` and
+  others), written from Apple's own manual pages and checked against them. For
+  everything else the page has a **Manual (from this Mac)** section: the
+  synopsis, commands and options of the program's manual page as installed on
+  this Mac, read when you open the section. It runs `/usr/bin/man`, which only
+  reads a file, never the program itself; sends nothing anywhere; and reads
+  nothing until opened. A program with no page there says so, and **Open in
+  terminal** puts `man <name>` in the composer's input, unrun. Typing narrows the
+  list as fzf does — `gcm` finds
   `git commit -m` — with the best match already open and its matching letters
   emphasised; ↑ ↓ move down the list, Return inserts the best command, Esc
   clears. Typing a sentence — "undo my last commit", "find big files" — searches
@@ -1553,8 +1564,9 @@ Sources/
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
 │   ├── Cheatsheet/  the Cheatsheet page: the hand-written pages and their parser,
 │   │                tldr-pages' data, search by letters and by meaning, the
-│   │                optional assistant question — Foundation-only apart from
-│   │                the page and its store
+│   │                optional assistant question, the reader of the manual
+│   │                pages on this Mac — Foundation-only apart from the page
+│   │                and its store
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
 │   ├── Backup/      workspace snapshot archive, export/import

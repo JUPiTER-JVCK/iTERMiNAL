@@ -24,6 +24,8 @@
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
+//     Sources/iTERMiNAL/Cheatsheet/ManPage.swift \
+//     Sources/iTERMiNAL/Cheatsheet/ManPageReader.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
 //     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -98,6 +100,8 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--check-cheats
 
         let merged = CheatLibrary.merging(curated: CheatsheetCurated.library.programs, tldr: loaded.programs)
         expect(merged.programs.count >= loaded.programs.count, "merging lost programs")
+        let unlisted = CommandSpecs.toolNames.filter { merged.program(named: $0) == nil }
+        expect(unlisted.isEmpty, "tools the composer completes that the Cheatsheet does not list, so their flags are never shown: \(unlisted)")
         expect(merged.program(named: "git").map { $0.isCurated && $0.examples.first?.source == .curated && $0.examples.count > 300 } == true,
                "git's page should start with ours and go on with tldr's")
         let index = CheatIndex(library: merged)
@@ -762,6 +766,26 @@ do {
     func head(_ text: String, _ count: Int = 3) -> [String]? {
         words(text).map { Array($0.prefix(count)) }
     }
+
+    // ipconfig showed two results while a Mac's own usage text lists thirteen subcommands; the table now has them all,
+    // and so Tab and the Cheatsheet's Flags list do.
+    let ipconfigWanted: Set<String> = ["waitall", "getifaddr", "ifcount", "getoption", "getiflist", "getsummary", "getpacket",
+                                       "getv6packet", "getra", "getdhcpduid", "getdhcpiaid", "set", "setverbose"]
+    let ipconfigHas = Set(CommandSpecs.spec(named: "ipconfig")?.subcommands.map { $0.names[0] } ?? [])
+    check(ipconfigHas == ipconfigWanted, "ipconfig has exactly the thirteen subcommands macOS prints: missing \(ipconfigWanted.subtracting(ipconfigHas).sorted()), extra \(ipconfigHas.subtracting(ipconfigWanted).sorted())")
+    check(Set(words("ipconfig get") ?? []) == ["getiflist", "getifaddr", "getsummary", "getoption", "getpacket", "getv6packet", "getra", "getdhcpduid", "getdhcpiaid"],
+          "Tab at ipconfig get offers the nine get commands: \(String(describing: words("ipconfig get")))")
+    check(words("ipconfig set") == ["set", "setverbose"], "and at set, both: \(String(describing: words("ipconfig set")))")
+    for tool in ["ipconfig", "ifconfig", "networksetup", "scutil", "route", "arp", "netstat", "traceroute", "pmset", "launchctl", "mdutil",
+                 "softwareupdate", "tmutil", "hdiutil", "plutil", "xattr", "say", "screencapture", "sips", "diskutil", "caffeinate"] {
+        let spec = CommandSpecs.spec(named: tool)
+        check(spec.map { !$0.options.isEmpty || $0.hasSubcommands } == true, "\(tool) has flags or subcommands in the table")
+    }
+    check(CommandSpecs.toolNames.count >= 54, "the table covers the tools it was extended with: \(CommandSpecs.toolNames.count)")
+    check(words("route ")?.prefix(2).sorted() != nil && words("route ")?.contains("get") == true, "route lists its subcommands")
+    check(head("launchctl kickstart -", 2) == ["-k", "-p"], "a subcommand's flags: \(String(describing: head("launchctl kickstart -", 2)))")
+    check(words("networksetup -getinfo ") == nil, "a flag that takes a value is followed by the value, so nothing is offered")
+    check(words("caffeinate -")?.count == 7, "caffeinate's seven flags: \(String(describing: words("caffeinate -")))")
 
     // Subcommands.
     let subs = words("git ")
@@ -7358,8 +7382,18 @@ do {
     check(Set(library.programs.map(\.name)).count == library.programs.count, "no program is on two pages")
     check(library.programs.map { $0.name.lowercased() } == library.programs.map { $0.name.lowercased() }.sorted(),
           "the programs are in order, ignoring case")
-    let pageless = Set(CommandSpecs.toolNames).subtracting(library.programs.map(\.name))
-    check(pageless.isEmpty, "every tool the composer completes has a page: \(pageless.sorted())")
+    // Nineteen of the tools the composer completes have no page written for the app: tldr-pages has one
+    // for each, and the real data is checked for that by --check-cheatsheets. They are named here, so
+    // adding a tool to the table without a page is a decision and not an accident.
+    let tldrOnly: Set<String> = [
+        "ipconfig", "ifconfig", "networksetup", "scutil", "route", "arp", "netstat", "traceroute", "pmset", "launchctl",
+        "mdutil", "softwareupdate", "tmutil", "hdiutil", "plutil", "xattr", "say", "screencapture", "sips",
+    ]
+    let ownPages = Set(library.programs.map(\.name))
+    let pageless = Set(CommandSpecs.toolNames).subtracting(ownPages).subtracting(tldrOnly)
+    check(pageless.isEmpty, "every tool the composer completes has a page, ours or tldr's: \(pageless.sorted())")
+    check(tldrOnly.isSubset(of: Set(CommandSpecs.toolNames)) && tldrOnly.isDisjoint(with: ownPages),
+          "the list of tools left to tldr-pages is all in the table and none has a page of ours: \(tldrOnly.subtracting(CommandSpecs.toolNames).sorted()) \(tldrOnly.intersection(ownPages).sorted())")
     let thin = library.programs.filter { $0.examples.count < 4 }.map(\.name)
     check(thin.isEmpty, "every page has recipes to show: \(thin)")
     for program in library.programs {
@@ -7740,6 +7774,193 @@ do {
               "a pick is the entry that was on the list, not text the model wrote")
         check(picked(#"[{"n": 1}]"#).isEmpty && picked("[[1]]").isEmpty && picked("[null, true]").count <= 1, "an array of anything else picks nothing sensible")
     }
+}
+
+// The manual page: the Cheatsheet reads `man` on the Mac and shows the parts that say how a program is called. The page
+// below is written the way mandoc writes one, which was checked against its real output (bold is each letter twice with a
+// backspace between, underline an underscore, a backspace and the letter), and run through everything that follows.
+do {
+    func bold(_ s: String) -> String { s.map { "\($0)\u{8}\($0)" }.joined() }
+    func under(_ s: String) -> String { s.map { "_\u{8}\($0)" }.joined() }
+    check(bold("fakeip") == "f\u{8}fa\u{8}ak\u{8}ke\u{8}ei\u{8}ip\u{8}p" && under("name") == "_\u{8}n_\u{8}a_\u{8}m_\u{8}e",
+          "the fixture writes bold and underline as mandoc's own output does")
+
+    let page = [
+        "FAKEIP(8)                   System Manager's Manual                  FAKEIP(8)",
+        "",
+        bold("NAME"),
+        "     " + bold("fakeip") + " - view and control IP configuration state",
+        "",
+        bold("SYNOPSIS"),
+        "     " + bold("fakeip") + " " + bold("waitall"),
+        "     " + bold("fakeip") + " " + bold("getifaddr") + " " + under("interface-name"),
+        "     " + bold("fakeip") + " " + bold("set") + " " + under("interface-name") + " {" + bold("DHCP") + " | " + bold("BOOTP") + "}",
+        "",
+        bold("DESCRIPTION"),
+        "     " + bold("fakeip") + " is a utility that communicates with the configuration agent to",
+        "     retrieve and set IP configuration parameters.",
+        "",
+        bold("COMMANDS"),
+        "     " + bold("waitall"),
+        "             Wait for all interfaces to finish configuring.",
+        "",
+        "     " + bold("getifaddr") + " " + under("interface-name"),
+        "             Print the IPv4 address of the interface.",
+        "",
+        bold("OPTIONS"),
+        "     " + bold("-v") + "      Be verbose.",
+        "",
+        "     " + bold("-o") + " " + under("file"),
+        "             Write the result to " + under("file") + " instead.",
+        "",
+        bold("SEE ALSO"),
+        "     ifconfig(8), scutil(8)",
+        "",
+        "Debian                           June 3, 2020                           Debian",
+    ].joined(separator: "\n")
+
+    // Cleaning.
+    let cleaned = ManPage.clean(page)
+    check(!cleaned.contains("\u{8}") && cleaned.hasPrefix("FAKEIP(8)") && cleaned.contains("     fakeip waitall\n"),
+          "bold and underline become plain text")
+    check(cleaned.contains("     fakeip set interface-name {DHCP | BOOTP}"), "a line made of both reads as it would on paper")
+    check(ManPage.clean(cleaned) == cleaned, "cleaning clean text changes nothing")
+    check(ManPage.clean("a\u{8}ab\u{8}b") == "ab" && ManPage.clean("_\u{8}x_\u{8}y") == "xy", "a backspace takes back the letter before it")
+    check(ManPage.clean("\u{8}x") == "x", "a backspace with nothing before it does nothing")
+    check(ManPage.clean("a\n\u{8}b") == "a\nb", "and never takes back a line end")
+    check(ManPage.clean("a\r\nb\rc") == "a\nb\nc", "CRLF and CR are line ends")
+    check(ManPage.clean("a\tb") == "a        b", "a tab is spaces")
+    check(ManPage.clean("\u{1B}[1mbold\u{1B}[0m") == "bold", "escape sequences are dropped")
+    check(ManPage.clean("a\u{7}b\u{0}c\u{7F}d") == "abcd", "so are the other control characters")
+    check(ManPage.clean("a   \nb  ") == "a\nb", "trailing spaces go")
+    check(ManPage.clean("a\n\n\n\n\nb") == "a\n\nb", "and a run of blank lines is one")
+    check(ManPage.clean("\n\n  \nx\n\n\n") == "x", "blank lines at either end go: \(ManPage.clean("\n\n  \nx\n\n\n").debugDescription)")
+    check(ManPage.clean("") == "" && ManPage.clean("\u{8}\u{8}") == "", "nothing in, nothing out")
+    check(ManPage.clean("naïve ✓ 日本語") == "naïve ✓ 日本語", "other languages are left alone")
+
+    // Headings, and what is not one.
+    for heading in ["NAME", "SYNOPSIS", "SEE ALSO", "EXIT STATUS", "ENVIRONMENT VARIABLES", "STANDARDS", "AUTHORS", "C++ NOTES"] {
+        check(ManPage.isHeading(heading), "\(heading) heads a section")
+    }
+    for notHeading in ["FAKEIP(8)                   System Manager's Manual                  FAKEIP(8)", "Debian    June 3, 2020    Debian",
+                       "macOS 14.0   June 3, 2020   macOS 14.0", "  NAME", "", "A", "12345", "Name", "NAME ", "ls(1)", "BSD 4.4 (old)"] {
+        check(!ManPage.isHeading(notHeading), "\(notHeading.debugDescription) does not")
+    }
+
+    // Sections.
+    let sections = ManPage.sections(cleaned)
+    check(sections.map(\.title) == ["NAME", "SYNOPSIS", "DESCRIPTION", "COMMANDS", "OPTIONS", "SEE ALSO"],
+          "the page's sections, without its title line or footer: \(sections.map(\.title))")
+    let synopsis = sections.first { $0.title == "SYNOPSIS" }
+    check(synopsis?.lines == ["fakeip waitall", "fakeip getifaddr interface-name", "fakeip set interface-name {DHCP | BOOTP}"],
+          "a section loses the indent they all share: \(String(describing: synopsis?.lines))")
+    let commands = sections.first { $0.title == "COMMANDS" }
+    check(commands?.lines.first == "waitall" && commands?.lines[1].hasPrefix("        Wait") == true && commands?.lines.contains("") == true,
+          "and keeps the indent of what is under something: \(String(describing: commands?.lines))")
+    check(ManPage.sections("no headings here\njust text").isEmpty && ManPage.sections("").isEmpty, "text with no heading has no sections")
+    check(ManPage.sections("NAME\nSYNOPSIS\n   x").map(\.lines) == [[], ["x"]], "a heading with nothing under it has no lines")
+
+    // The excerpt.
+    let excerpt = ManPage.excerpt(fromRaw: page)
+    check(excerpt?.sections.map(\.title) == ["SYNOPSIS", "COMMANDS", "OPTIONS"] && excerpt?.isTruncated == false,
+          "the synopsis, the commands and the options: \(String(describing: excerpt?.sections.map(\.title)))")
+    let noReference = ["NAME", "   x - y", "SYNOPSIS", "   x [-a]", "DESCRIPTION", "   The -a flag does a thing.", "SEE ALSO", "   y(1)"].joined(separator: "\n")
+    check(ManPage.excerpt(fromRaw: noReference)?.sections.map(\.title) == ["SYNOPSIS", "DESCRIPTION"],
+          "a page that lists its flags under DESCRIPTION shows that instead")
+    check(ManPage.excerpt(fromRaw: "NAME\n   x\nDESCRIPTION\n   only this")?.sections.map(\.title) == ["DESCRIPTION"], "with no synopsis, the description")
+    check(ManPage.excerpt(fromRaw: "just text\nand more")?.sections == [ManPage.Section(title: "", lines: ["just text", "and more"])],
+          "a page with no headings is shown from the top")
+    check(ManPage.excerpt(fromRaw: "") == nil && ManPage.excerpt(fromRaw: " \n\u{8}\n") == nil, "nothing to show is nil")
+
+    let twelve = (1...12).map { "   ipconfig command\($0) interface-name" }
+    let big = ManPage.excerpt(fromRaw: (["SYNOPSIS"] + twelve).joined(separator: "\n"))
+    check(big?.sections.first?.lines.count == 12 && big?.isTruncated == false, "twelve synopsis lines all fit in the default limit")
+
+    // Cut to length, at a line.
+    let longOptions = ["SYNOPSIS", "   x [-a]", "OPTIONS"] + (1...200).map { "   -o\($0)    Option number \($0) does something" }
+    let cut = ManPage.excerpt(fromRaw: longOptions.joined(separator: "\n"), limit: 400)
+    let cutLines = cut?.sections.flatMap(\.lines) ?? []
+    check(cut?.isTruncated == true && cut?.sections.map(\.title) == ["SYNOPSIS", "OPTIONS"], "a long page is cut short and says so")
+    check((cut?.sections.reduce(0) { $0 + $1.title.count + $1.text.count + 1 } ?? 999) <= 420, "to about the limit: \(cut?.sections.reduce(0) { $0 + $1.text.count } ?? -1)")
+    check(cutLines.first == "x [-a]" && cutLines.dropFirst().allSatisfy { $0.hasPrefix("-o") && $0.hasSuffix("does something") },
+          "cut at a whole line: \(cutLines.suffix(2))")
+    let cutAtOnce = ManPage.excerpt(fromRaw: "SYNOPSIS\n   " + String(repeating: "x", count: 100), limit: 10)
+    check(cutAtOnce?.isTruncated == true && cutAtOnce?.sections.first?.lines.first?.count == 10, "a first line over the limit is shown, cut")
+    check(ManPage.excerpt(fromRaw: longOptions.joined(separator: "\n"), limit: 25)?.sections.last?.title != "OPTIONS",
+          "a heading is not shown with nothing under it")
+
+    // Which names may be asked for.
+    for name in ["ipconfig", "g++", "7z", "git-reset", "python3.12", "c_", "X", String(repeating: "a", count: 64)] {
+        check(ManPage.isSafeName(name), "\(name) may be asked for")
+    }
+    for name in ["", "-x", "--help", "-", ".hidden", "a b", "../etc/passwd", "a/b", "a;b", "a\nb", "$(x)", "a|b", "é", "a`b`", "a'b", "a\"b",
+                 "a\u{8}b", "a\0b", String(repeating: "a", count: 65)] {
+        check(!ManPage.isSafeName(name), "\(name.debugDescription) may not")
+    }
+
+    // Where man looks.
+    check(ManPage.searchPath(base: nil) == "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin", "no path is the system's, with Homebrew's added")
+    check(ManPage.searchPath(base: "") == ManPage.searchPath(base: nil), "so is an empty one")
+    check(ManPage.searchPath(base: "/usr/bin:/usr/local/bin") == "/usr/bin:/usr/local/bin:/opt/homebrew/bin", "what is there is not added twice")
+    check(ManPage.searchPath(base: "/a:/opt/homebrew/bin:/usr/local/bin") == "/a:/opt/homebrew/bin:/usr/local/bin", "and a full one is left as it is")
+
+    // Reading a page.
+    final class Calls { var names: [String] = [] }
+    func reader(_ calls: Calls, _ outcome: ManPageReader.Outcome?) -> ManPageReader {
+        ManPageReader { name in
+            calls.names.append(name)
+            return outcome
+        }
+    }
+    let good = ManPageReader.Outcome(status: 0, output: page, timedOut: false)
+    let calls = Calls()
+    let found = reader(calls, good)
+    if case .found(let result) = found.read("fakeip") {
+        check(result.sections.map(\.title) == ["SYNOPSIS", "COMMANDS", "OPTIONS"], "a page is read and cut down")
+    } else {
+        check(false, "a page that is there is found")
+    }
+    _ = found.read("fakeip")
+    check(calls.names == ["fakeip"] && found.hasAnswer(for: "fakeip") && !found.hasAnswer(for: "other"), "and asked for once, then remembered")
+    if case .found(let small) = found.read("fakeip", limit: 100) {
+        check(small.sections.first?.title == "SYNOPSIS", "a remembered page is not asked for again for another limit")
+    }
+
+    let none = Calls()
+    let refusing = reader(none, good)
+    for name in ["-x", "a b", "../etc/passwd", "", "a;b"] {
+        check(refusing.read(name) == .missing, "\(name.debugDescription) is missing without asking")
+    }
+    check(none.names.isEmpty, "a name that may not be asked for never reaches man: \(none.names)")
+
+    let exit1 = Calls()
+    let absent = reader(exit1, ManPageReader.Outcome(status: 1, output: "", timedOut: false))
+    check(absent.read("nosuch") == .missing && absent.read("nosuch") == .missing && exit1.names.count == 1, "a page man does not have is missing, and that is remembered")
+    for said in ["No manual entry for nosuch", "man: No entry for nosuch in the manual.\n", "\n\nNo manual entry for nosuch\n"] {
+        check(reader(Calls(), ManPageReader.Outcome(status: 0, output: said, timedOut: false)).read("x") == .missing, "\(said.debugDescription) is missing even with a zero status")
+    }
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: "", timedOut: false)).read("x") == .missing, "an empty page is missing")
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: " \n\u{8}\n", timedOut: false)).read("x") == .missing, "and so is one of nothing but blanks")
+
+    let slow = Calls()
+    let timing = reader(slow, ManPageReader.Outcome(status: 0, output: page, timedOut: true))
+    check(timing.read("x") == .failed("man took too long") && timing.read("x") == .failed("man took too long") && slow.names.count == 2 && !timing.hasAnswer(for: "x"),
+          "a man that is too slow is a failure, and is tried again")
+    let broken = Calls()
+    let cannot = reader(broken, nil)
+    check(cannot.read("x") == .failed("man could not be run") && cannot.read("x") == .failed("man could not be run") && broken.names.count == 2,
+          "so is one that could not be started")
+
+    // A page is told by its headings, not by what man says about its absence.
+    check(ManPage.looksLikePage(page) && ManPage.looksLikePage("NAME\n   x - y") && ManPage.looksLikePage(noReference), "a page has a NAME, a SYNOPSIS or a DESCRIPTION")
+    for notAPage in ["", "No manual entry for foo", "man: foo: not found", "just\nsome text\nwith lines", "SEE ALSO\n   x(1)", "   NAME\n   x"] {
+        check(!ManPage.looksLikePage(notAPage), "\(notAPage.debugDescription) is not a page")
+    }
+    // What a real man printed, with a zero status, on a system with no manual pages (this was found by running it).
+    let minimized = "This system has been minimized by removing packages and content that are\nnot required on a system that users do not log into.\n\nTo restore this content, including manpages, you can run the 'unminimize'\ncommand. You will still need to ensure the 'man-db' package is installed.\n"
+    check(!ManPage.looksLikePage(minimized), "the notice a stripped-down system prints is not a page")
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: minimized, timedOut: false)).read("ipconfig") == .missing,
+          "and so is missing, though man exited zero")
 }
 
 // MARK: Rail item for the cheatsheet
