@@ -38,6 +38,25 @@ struct CheatSearchResult: Equatable {
     }
 }
 
+/// Lets a search be abandoned from another thread once a newer one has begun,
+/// so a run of keystrokes costs one search and not one for each.
+final class CheatSearchToken {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
 /// A library made searchable: type a few letters, as for fzf, and the programs
 /// and examples that contain them in order come back best first.
 ///
@@ -92,7 +111,19 @@ struct CheatIndex {
         self.nameFolded = nameCharacters.map { $0.map { FuzzyMatcher.fold($0) } }
     }
 
-    func search(_ query: String, programLimit: Int = 300, exampleLimit: Int = 600) -> CheatSearchResult {
+    /// The fewest letters that are matched against the examples. One letter
+    /// is in most of them, which says nothing; it narrows the list of programs
+    /// by name and no more.
+    static let minimumLettersForExamples = 2
+
+    /// - Parameter token: if it is cancelled while this runs, the search stops
+    ///   and returns nothing, which is for a caller that has already moved on.
+    func search(
+        _ query: String,
+        programLimit: Int = 300,
+        exampleLimit: Int = 600,
+        token: CheatSearchToken? = nil
+    ) -> CheatSearchResult {
         let needle = FuzzyMatcher.needle(query)
         guard !needle.isEmpty else { return CheatSearchResult() }
 
@@ -108,7 +139,9 @@ struct CheatIndex {
         }
 
         var hits: [CheatHit] = []
-        for (r, ref) in refs.enumerated() {
+        let searchesExamples = needle.count >= Self.minimumLettersForExamples
+        for (r, ref) in refs.enumerated() where searchesExamples {
+            if r & 0xFF == 0, token?.isCancelled == true { return CheatSearchResult() }
             if let scanNeedle, !Self.containsInOrder(scanNeedle, in: bytes, range: ranges[r]) { continue }
             let program = library.programs[ref.program]
             let example = program.examples[ref.example]
@@ -176,8 +209,14 @@ struct CheatIndex {
                 matchCount: examples?.count ?? 0
             ))
         }
+        // Among equal scores, a page written for this app first, then the one
+        // with more matches, then the order they are listed in.
         programs.sort { a, b in
             if a.score != b.score { return a.score > b.score }
+            let aCurated = library.programs[a.program].isCurated
+            let bCurated = library.programs[b.program].isCurated
+            if aCurated != bCurated { return aCurated }
+            if a.matchCount != b.matchCount { return a.matchCount > b.matchCount }
             return a.program < b.program
         }
 

@@ -159,8 +159,9 @@ targets:
         # sandboxed phase fails in a way that is easy to misread as "the
         # tools were not fetched".
         ENABLE_USER_SCRIPT_SANDBOXING: "NO"
-    # superfile, btop, ripgrep, bat and imgcat (Vendor/Tools) and the Nerd Font
-    # symbols face (Vendor/Fonts), fetched or built by scripts/ at the versions
+    # superfile, btop, ripgrep, bat and imgcat (Vendor/Tools), the Nerd Font
+    # symbols face (Vendor/Fonts) and the Cheatsheet page's tldr-pages examples
+    # (Vendor/Cheatsheets), fetched or built by scripts/ at the versions
     # pinned in scripts/tools.env. A post-build phase rather than a resource
     # entry so a local build without Vendor/ still builds — it just ships
     # without them, and the app says so. ditto keeps the executable bit, which
@@ -171,7 +172,7 @@ targets:
         script: |
           set -euo pipefail
           resources="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
-          for dir in Tools Fonts; do
+          for dir in Tools Fonts Cheatsheets; do
             src="$SRCROOT/Vendor/$dir"
             if [ ! -d "$src" ]; then
               echo "note: $src not found; building without it (see scripts/tools.env)"

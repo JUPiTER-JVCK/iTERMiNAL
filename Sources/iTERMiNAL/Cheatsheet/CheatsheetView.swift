@@ -34,7 +34,10 @@ struct CheatsheetView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { searchFocused = true }
+        .onAppear {
+            searchFocused = true
+            cheats.loadMoreIfNeeded()
+        }
         .onChange(of: cheats.selectedProgram) { _, _ in
             showAllExamples = false
             expandedSubcommands = []
@@ -55,10 +58,29 @@ struct CheatsheetView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             searchField(theme: theme)
+            if let status = statusLine {
+                Text(status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
         }
         .padding(.horizontal, 28)
         .padding(.top, 26)
         .padding(.bottom, 16)
+    }
+
+    /// What to say about tldr-pages' examples while they are not all there.
+    private var statusLine: String? {
+        switch cheats.tldr {
+        case .notLoaded, .loaded:
+            return nil
+        case .loading:
+            return "Loading more programs…"
+        case .missing:
+            return "This build does not include the tldr-pages examples, so only the programs written for the app are here."
+        case .failed(let message):
+            return "The tldr-pages examples could not be loaded: \(message)."
+        }
     }
 
     private func searchField(theme: Theme) -> some View {
@@ -126,7 +148,10 @@ struct CheatsheetView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 2) {
-                            ForEach(cheats.rows) { row in
+                            ForEach(Array(cheats.rows.enumerated()), id: \.element.id) { position, row in
+                                if let heading = listHeading(before: position) {
+                                    listHeadingView(heading, theme: theme)
+                                }
                                 programRow(row, theme: theme)
                                     .id(row.name)
                             }
@@ -142,13 +167,38 @@ struct CheatsheetView: View {
         }
     }
 
+    /// A heading above the row at `position` when the list is the whole library,
+    /// split into the programs written for the app and the rest. While searching
+    /// the order is the ranking, and nothing interrupts it.
+    private func listHeading(before position: Int) -> String? {
+        guard !cheats.isSearching else { return nil }
+        let rows = cheats.rows
+        let row = rows[position]
+        let hasOthers = rows.last.map { !$0.isCurated } ?? false
+        guard hasOthers else { return nil }
+        if position == 0 { return row.isCurated ? "Essentials" : "All programs" }
+        if rows[position - 1].isCurated && !row.isCurated { return "All programs" }
+        return nil
+    }
+
+    private func listHeadingView(_ title: String, theme: Theme) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(theme.textSecondary)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+    }
+
     private func programRow(_ row: CheatsheetStore.Row, theme: Theme) -> some View {
         let selected = cheats.selectedProgram == row.name
         return Button {
             cheats.selectedProgram = row.name
         } label: {
             HStack(spacing: 8) {
-                styled(row.name, matched: row.nameIndices, placeholders: false, base: theme.textPrimary, theme: theme)
+                styled(row.name, matched: row.nameIndices, placeholders: false, base: theme.textPrimary)
                     .font(.system(size: 13, design: .monospaced))
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -177,15 +227,15 @@ struct CheatsheetView: View {
     private func detail(theme: Theme) -> some View {
         if let program = cheats.selection {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                // Lazy, because a page can have hundreds of examples (git has
+                // more than eight hundred) and only the ones on screen need building.
+                LazyVStack(alignment: .leading, spacing: 24) {
                     programHeader(program, theme: theme)
                     if let spec = CommandSpecs.spec(named: program.name) {
                         flags(spec, theme: theme)
                     }
                     examples(of: program, theme: theme)
-                    Text("Written by hand for the versions of these tools that macOS ships. Other systems' versions can differ.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
+                    footer(for: program, theme: theme)
                 }
                 .padding(.horizontal, 28)
                 .padding(.vertical, 22)
@@ -224,6 +274,10 @@ struct CheatsheetView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let address = program.url, let url = URL(string: address) {
+                Link("More information", destination: url)
+                    .font(.system(size: 12))
+            }
             if !program.syntax.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(program.syntax, id: \.self) { line in
@@ -315,48 +369,89 @@ struct CheatsheetView: View {
 
     // MARK: Examples
 
-    @ViewBuilder
-    private func examples(of program: CheatProgram, theme: Theme) -> some View {
-        let hits = cheats.hitsInSelection
-        VStack(alignment: .leading, spacing: 12) {
-            if hits.isEmpty {
-                allExamples(of: program, title: "Examples", theme: theme)
-            } else {
-                sectionTitle("Matches", theme: theme)
-                ForEach(hits, id: \.example) { hit in
-                    exampleCard(program.examples[hit.example], key: "\(program.name)#\(hit.example)", hit: hit, theme: theme)
+    /// One line of the examples list. The whole page is a flat list of these, so
+    /// that a page with hundreds of examples is built a screenful at a time.
+    private struct ExampleItem: Identifiable {
+        enum Kind {
+            case title(String)
+            case heading(String)
+            case card(index: Int, hit: CheatHit?)
+        }
+
+        let id: String
+        let kind: Kind
+    }
+
+    private func exampleItems(of program: CheatProgram) -> [ExampleItem] {
+        var items: [ExampleItem] = []
+        func addAll(title: String) {
+            items.append(ExampleItem(id: "title:\(title)", kind: .title(title)))
+            for (offset, group) in program.groups().enumerated() {
+                if let section = group.section {
+                    items.append(ExampleItem(id: "heading:\(offset)", kind: .heading(section)))
                 }
-                if showAllExamples {
-                    allExamples(of: program, title: "All examples", theme: theme)
-                } else if program.examples.count > hits.count {
-                    Button("Show all \(program.examples.count) examples") { showAllExamples = true }
+                for item in group.items {
+                    items.append(ExampleItem(id: "all:\(item.index)", kind: .card(index: item.index, hit: nil)))
                 }
             }
         }
+
+        let hits = cheats.hitsInSelection
+        if hits.isEmpty {
+            addAll(title: "Examples")
+        } else {
+            items.append(ExampleItem(id: "title:Matches", kind: .title("Matches")))
+            for hit in hits {
+                items.append(ExampleItem(id: "match:\(hit.example)", kind: .card(index: hit.example, hit: hit)))
+            }
+            if showAllExamples { addAll(title: "All examples") }
+        }
+        return items
     }
 
     @ViewBuilder
-    private func allExamples(of program: CheatProgram, title: String, theme: Theme) -> some View {
-        sectionTitle(title, theme: theme)
-        ForEach(Array(program.groups().enumerated()), id: \.offset) { _, group in
-            if let section = group.section {
-                Text(section)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.textPrimary)
-                    .padding(.top, 6)
+    private func examples(of program: CheatProgram, theme: Theme) -> some View {
+        let hits = cheats.hitsInSelection
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(exampleItems(of: program)) { item in
+                switch item.kind {
+                case .title(let title):
+                    sectionTitle(title, theme: theme)
+                case .heading(let section):
+                    Text(section)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+                        .padding(.top, 6)
+                case .card(let index, let hit):
+                    exampleCard(program.examples[index], key: "\(program.name)#\(index)", hit: hit, theme: theme)
+                }
             }
-            ForEach(group.items, id: \.index) { item in
-                exampleCard(item.example, key: "\(program.name)#\(item.index)", hit: nil, theme: theme)
+            if !hits.isEmpty && !showAllExamples && program.examples.count > hits.count {
+                Button("Show all \(program.examples.count) examples") { showAllExamples = true }
             }
         }
     }
 
     private func exampleCard(_ example: CheatExample, key: String, hit: CheatHit?, theme: Theme) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            styled(example.description, matched: hit?.descriptionIndices ?? [], placeholders: false, base: theme.textPrimary, theme: theme)
-                .font(.system(size: 13))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                styled(example.description, matched: hit?.descriptionIndices ?? [], placeholders: false, base: theme.textPrimary)
+                    .font(.system(size: 13))
+                if example.source == .tldr {
+                    Text("tldr")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .strokeBorder(theme.surfaceBorder)
+                        )
+                        .help("From tldr-pages, licensed CC BY 4.0")
+                }
+            }
             HStack(alignment: .top, spacing: 10) {
-                styled(example.command, matched: hit?.commandIndices ?? [], placeholders: true, base: theme.textPrimary, theme: theme)
+                styled(example.command, matched: hit?.commandIndices ?? [], placeholders: true, base: theme.textPrimary)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -373,6 +468,22 @@ struct CheatsheetView: View {
                     .fill(theme.surface)
             )
         }
+    }
+
+    // MARK: Footer
+
+    @ViewBuilder
+    private func footer(for program: CheatProgram, theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Written by hand for the versions of these tools that macOS ships. Other systems' versions can differ.")
+            if program.examples.contains(where: { $0.source == .tldr }) {
+                // CC BY 4.0 asks for credit, a link to the licence, and a note that it was changed.
+                Text("Examples marked tldr are from [tldr-pages](https://github.com/tldr-pages/tldr), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are reformatted here: options are written out in full, descriptions are tidied, and a subcommand's examples are filed under its program.")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(theme.textSecondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Actions
@@ -403,7 +514,7 @@ struct CheatsheetView: View {
     /// `text` with the characters a search matched in the accent colour and
     /// bold, and — in a command — each `{{placeholder}}` in italics, in orange,
     /// so what is yours to fill in stands out.
-    private func styled(_ text: String, matched: [Int], placeholders: Bool, base: Color, theme: Theme) -> Text {
+    private func styled(_ text: String, matched: [Int], placeholders: Bool, base: Color) -> Text {
         CheatCommand.runs(text, matched: matched).reduce(Text("")) { partial, run in
             var piece = Text(run.text)
             if placeholders && run.isPlaceholder {

@@ -19,6 +19,7 @@
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
 //     Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
+//     Sources/iTERMiNAL/Cheatsheet/TldrData.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
 //     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -58,6 +59,58 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--write-shell-
         print("could not write them: \(error)")
         exit(1)
     }
+}
+
+// `input-logic-check --check-cheatsheets <folder>` reads the tldr-pages data that
+// scripts/fetch-tldr.sh wrote into <folder> and checks it, then stops; none of the
+// checks below run. CI runs it after the fetch, because the data is not in the repo and
+// a conversion that quietly lost half of it would otherwise ship.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--check-cheatsheets" {
+    let folder = CommandLine.arguments[2]
+    var problems: [String] = []
+    func expect(_ condition: Bool, _ message: @autoclosure () -> String) {
+        if !condition { problems.append(message()) }
+    }
+    do {
+        let loaded = try TldrData.decode(try Data(contentsOf: URL(fileURLWithPath: folder + "/tldr.json")))
+        let examples = loaded.programs.reduce(0) { $0 + $1.examples.count }
+        print("tldr-pages \(loaded.version): \(loaded.programs.count) programs, \(examples) examples")
+        expect(loaded.programs.count >= 3000, "only \(loaded.programs.count) programs")
+        expect(examples >= 20000, "only \(examples) examples")
+
+        let names = Set(loaded.programs.map(\.name))
+        expect(names.count == loaded.programs.count, "a program is on two pages")
+        for name in ["git", "docker", "kubectl", "tar", "ssh-keygen", "open", "brew", "aws", "curl"] {
+            expect(names.contains(name), "\(name) is missing")
+        }
+        expect(!names.contains("git-reset") && !names.contains("docker-compose"), "a subcommand page was not filed under its program")
+        expect(loaded.programs.allSatisfy { !$0.isCurated && !$0.summary.isEmpty && !$0.examples.isEmpty }, "a page is empty or claims to be ours")
+        expect(loaded.programs.allSatisfy { $0.examples.allSatisfy { $0.source == .tldr && !$0.description.isEmpty && !$0.command.isEmpty && !$0.command.contains("\n") } },
+               "an example is empty, over two lines, or not marked as tldr's")
+        expect(loaded.programs.allSatisfy { $0.examples.allSatisfy { !$0.command.contains("{{[-") && !$0.command.contains("`") } },
+               "an example still holds markup the conversion should have removed")
+        expect(loaded.programs.first { $0.name == "git" }.map { $0.examples.contains { $0.section == "reset" } } == true, "git has no reset section")
+        expect(loaded.programs.first { $0.name == "open" }?.examples.contains { $0.command == "open ." } == true, "open is not the macOS page")
+
+        let merged = CheatLibrary.merging(curated: CheatsheetCurated.library.programs, tldr: loaded.programs)
+        expect(merged.programs.count >= loaded.programs.count, "merging lost programs")
+        expect(merged.program(named: "git").map { $0.isCurated && $0.examples.first?.source == .curated && $0.examples.count > 300 } == true,
+               "git's page should start with ours and go on with tldr's")
+        let index = CheatIndex(library: merged)
+        for (query, wanted) in [("docker ps", "docker"), ("kubectl", "kubectl"), ("tar", "tar")] {
+            let top = index.search(query).programs.first.map { merged.programs[$0.program].name }
+            expect(top == wanted, "searching \(query) puts \(top ?? "nothing") first, not \(wanted)")
+        }
+
+        let licence = try String(contentsOfFile: folder + "/licenses/tldr-pages-LICENSE.md", encoding: .utf8)
+        expect(licence.contains("Creative Commons Attribution 4.0"), "the licence that travels with the data is not CC BY 4.0")
+        expect(FileManager.default.fileExists(atPath: folder + "/manifest.json"), "no manifest")
+    } catch {
+        problems.append("could not read the data: \(error)")
+    }
+    for problem in problems { print("FAIL  \(problem)") }
+    print(problems.isEmpty ? "cheatsheet data ok" : "\(problems.count) problems with the cheatsheet data")
+    exit(problems.isEmpty ? 0 : 1)
 }
 
 // MARK: Tokenizer
@@ -7397,8 +7450,10 @@ do {
           "a program's name and a word from its recipe, read together: \(String(describing: joined.examples.first))")
     check(index.search("gcm").examples.first.map { small.programs[$0.program].examples[$0.example].command } == "git commit -m \"{{message}}\"",
           "initials find a command, as in fzf")
-    check(index.search("a").programs.count == 2, "one letter finds what has it")
-    let capped = index.search("t", programLimit: 1, exampleLimit: 1)
+    let oneLetter = index.search("a")
+    check(oneLetter.programs.map { small.programs[$0.program].name } == ["tar"] && oneLetter.examples.isEmpty && oneLetter.exampleTotal == 0,
+          "one letter narrows the programs by name and does not search the examples: \(oneLetter.programs)")
+    let capped = index.search("ta", programLimit: 1, exampleLimit: 1)
     check(capped.programs.count == 1 && capped.examples.count == 1 && capped.exampleTotal == 3,
           "the lists can be cut short, and the total says how many there were: \(capped.exampleTotal)")
     check(byName.hits(inProgram: 0).count == 2 && byName.hits(inProgram: 0).allSatisfy { $0.program == 0 },
@@ -7426,6 +7481,77 @@ do {
         check(zip(found.examples, found.examples.dropFirst()).allSatisfy { $0.score >= $1.score }, "hits for \"\(query)\" are best first")
         check(zip(found.programs, found.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs for \"\(query)\"")
     }
+}
+
+// The tldr-pages data, as the converter writes it, and how it joins the pages written for the app.
+do {
+    let fixture = """
+    {"format":1,"version":"9.9","pages":[
+      {"n":"tool","p":"common","s":"A tool","u":"https://example.com/tool",
+       "x":[["Do it","tool --go"],["Do it again","tool --again","again"],["bad"],["","x"],["No section","cmd",""]]},
+      {"n":"empty","p":"common","s":"nothing","x":[]},
+      {"n":"","p":"common","s":"no name","x":[["a","b"]]},
+      {"n":"odd","p":"osx","s":"s","u":"javascript:alert(1)","x":[["a","b"]]}
+    ]}
+    """
+    func decoded(_ text: String) -> TldrData.Loaded? { try? TldrData.decode(Data(text.utf8)) }
+    func failure(_ text: String) -> TldrData.Failure? {
+        do { _ = try TldrData.decode(Data(text.utf8)); return nil } catch { return error as? TldrData.Failure }
+    }
+    if let loaded = decoded(fixture) {
+        check(loaded.version == "9.9" && loaded.programs.map(\.name) == ["tool", "odd"], "pages with no name or no examples are left out: \(loaded.programs.map(\.name))")
+        let tool = loaded.programs[0]
+        check(tool.examples.map(\.command) == ["tool --go", "tool --again", "cmd"], "an example that is not [description, command] is left out: \(tool.examples.map(\.command))")
+        check(tool.examples.map(\.section) == [nil, "again", nil], "the third item is the section, and an empty one is none")
+        check(tool.examples.allSatisfy { $0.source == .tldr } && !tool.isCurated, "everything read is marked as tldr's")
+        check(tool.url == "https://example.com/tool" && loaded.programs[1].url == nil, "only a web address is kept as a link")
+    } else {
+        check(false, "the sample data reads")
+    }
+    check(failure(#"{"format":2,"version":"1","pages":[]}"#) == .unsupportedFormat(2), "a newer format is refused, by name")
+    check(failure("not json") == .unreadable && failure(#"{"format":1}"#) == .unreadable, "so is something that is not the data")
+    check(TldrData.webAddress("http://a.example") != nil && TldrData.webAddress("file:///etc/passwd") == nil && TldrData.webAddress(nil) == nil,
+          "links are http or https")
+
+    // Joining the two.
+    let ours = [CheatProgram(name: "git", summary: "ours", syntax: ["git x"],
+                             examples: [CheatExample(description: "Ours", command: "git  status")])]
+    let theirs = [
+        CheatProgram(name: "git", summary: "theirs", examples: [
+            CheatExample(description: "Dup", command: "git status", source: .tldr),
+            CheatExample(description: "New", command: "git log", source: .tldr),
+            CheatExample(description: "Sub", command: "git add .", source: .tldr, section: "add"),
+        ], isCurated: false, url: "https://git-scm.com"),
+        CheatProgram(name: "zed", summary: "z", examples: [CheatExample(description: "Z", command: "zed", source: .tldr)], isCurated: false),
+    ]
+    let merged = CheatLibrary.merging(curated: ours, tldr: theirs)
+    check(merged.programs.map(\.name) == ["git", "zed"], "both libraries' programs, in order: \(merged.programs.map(\.name))")
+    if let git = merged.program(named: "git") {
+        check(git.summary == "ours" && git.syntax == ["git x"] && git.isCurated, "where both have a page, ours is kept")
+        check(git.examples.map(\.command) == ["git  status", "git log", "git add ."], "tldr's examples follow ours, without a repeat of one we have: \(git.examples.map(\.command))")
+        check(git.examples.map(\.source) == [.curated, .tldr, .tldr], "and are marked as theirs")
+        check(git.examples.map(\.section) == [nil, CheatLibrary.moreExamplesHeading, "add"], "kept apart from ours by a heading, keeping their own: \(git.examples.map { $0.section ?? "-" })")
+        check(git.url == "https://git-scm.com", "a link is taken from tldr if we have none")
+    }
+    check(merged.program(named: "zed").map { !$0.isCurated } == true, "a program only tldr has keeps its page")
+    check(CheatLibrary.merging(curated: ours, tldr: []).programs == ours && CheatLibrary.merging(curated: [], tldr: theirs).programs.count == 2,
+          "either side can be empty")
+
+    // Searching: a tie goes to the page we wrote, and a search can be given up.
+    func example(_ text: String) -> CheatExample { CheatExample(description: text, command: "x") }
+    let tied = CheatLibrary(programs: [
+        CheatProgram(name: "aaa", summary: "s", examples: [example("Zip it")], isCurated: false),
+        CheatProgram(name: "bbb", summary: "s", examples: [example("Zip it")], isCurated: true),
+    ])
+    let tiedHits = CheatIndex(library: tied).search("zip")
+    check(tiedHits.programs.count == 2 && tiedHits.programs[0].score == tiedHits.programs[1].score
+            && tied.programs[tiedHits.programs[0].program].name == "bbb",
+          "equal scores go to the page written for the app: \(tiedHits.programs)")
+    let real = CheatIndex(library: CheatsheetCurated.library)
+    let given = CheatSearchToken()
+    given.cancel()
+    check(real.search("gc", token: given).isEmpty, "a search that was given up returns nothing")
+    check(!real.search("gc", token: CheatSearchToken()).isEmpty, "one that was not still finds what it should")
 }
 
 // MARK: Rail item for the cheatsheet

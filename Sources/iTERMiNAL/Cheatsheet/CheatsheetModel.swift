@@ -35,6 +35,8 @@ struct CheatProgram: Equatable {
     var examples: [CheatExample] = []
     /// Written for this app, as against taken from tldr-pages.
     var isCurated = true
+    /// Where to read more: an http or https address, or nil.
+    var url: String?
 
     /// A run of examples under one heading.
     struct Group: Equatable {
@@ -84,6 +86,41 @@ struct CheatLibrary {
     }
 
     var exampleCount: Int { programs.reduce(0) { $0 + $1.examples.count } }
+
+    /// The heading that tldr-pages' own examples sit under on a page that also
+    /// has ones written for this app, so the two are not run together.
+    static let moreExamplesHeading = "More examples"
+
+    /// The pages written for this app, with tldr-pages' examples added.
+    ///
+    /// Where both have a page for a program, ours is kept — its summary, its
+    /// syntax and its recipes, in the order they were written — and tldr's
+    /// examples follow, without any that give a command we already have. A
+    /// program only tldr knows keeps its page as it is.
+    static func merging(curated: [CheatProgram], tldr: [CheatProgram]) -> CheatLibrary {
+        var others = Dictionary(tldr.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        var programs: [CheatProgram] = []
+        programs.reserveCapacity(curated.count + others.count)
+        for var program in curated {
+            if let other = others.removeValue(forKey: program.name) {
+                var seen = Set(program.examples.map { normalized($0.command) })
+                for var example in other.examples where seen.insert(normalized(example.command)).inserted {
+                    if example.section == nil { example.section = moreExamplesHeading }
+                    program.examples.append(example)
+                }
+                if program.url == nil { program.url = other.url }
+            }
+            programs.append(program)
+        }
+        programs.append(contentsOf: others.values)
+        return CheatLibrary(programs: programs)
+    }
+
+    /// A command with its runs of spaces made single, so two spellings of the
+    /// same command are the same one.
+    private static func normalized(_ command: String) -> String {
+        command.split(separator: " ").joined(separator: " ")
+    }
 }
 
 /// A command split for showing: which stretches are a `{{placeholder}}` to
