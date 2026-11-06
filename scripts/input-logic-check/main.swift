@@ -2197,6 +2197,8 @@ do {
           "every item is exactly one of always-on or pinnable")
     check(RailItem.defaultPinned.allSatisfy(\.isPinnable), "the default pins are all pinnable")
     check(Set(RailItem.allCases.map(\.icon)).count == RailItem.allCases.count, "each item has its own icon")
+    check(Set(RailItem.allCases.map(\.title)).count == RailItem.allCases.count, "each item has its own title")
+    check(RailItem.terminal.title == "Home", "the house icon is labelled Home")
 }
 
 // MARK: Frame style

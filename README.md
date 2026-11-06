@@ -339,7 +339,7 @@ A tour of the app in thirty-four pictures, in five groups.
   beat it, and a line with no note is not thereby safe.
 - **Framed window with an icon rail** — one top bar and an icon rail down the
   left edge frame the content, which sits in a rounded card. The rail holds
-  Terminal, Workspaces and Connect, with a `···` menu for the rest (Tasks,
+  Home, Workspaces and Connect, with a `···` menu for the rest (Tasks,
   Automations, Skills): each has a pin that puts its icon on the rail. The
   Workspaces panel opens beside the content and can be pinned there, or left
   unpinned to float over it until you pick something or click away (⌃⌘S shows
