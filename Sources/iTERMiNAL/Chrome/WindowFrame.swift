@@ -131,7 +131,7 @@ private struct BarIconButton: View {
 enum RailNavigation {
     static func open(_ item: RailItem, store: WorkspaceStore, settings: AppSettings) {
         switch item {
-        case .terminal: store.detailMode = .terminal
+        case .terminal: store.goHome()
         case .workspaces: withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
         case .tasks: store.detailMode = .tasks
         case .automations: store.detailMode = .automations
@@ -218,7 +218,7 @@ struct SidebarRail: View {
 
     private func isActive(_ item: RailItem) -> Bool {
         switch item {
-        case .terminal: return store.detailMode == .terminal
+        case .terminal: return store.isHome
         case .workspaces: return settings.railPanelOpen
         case .tasks: return store.detailMode == .tasks
         case .automations: return store.detailMode == .automations
