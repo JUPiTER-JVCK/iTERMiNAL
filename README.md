@@ -340,7 +340,7 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Framed window with an icon rail** — one top bar and an icon rail down the
   left edge frame the content, which sits in a rounded card. The rail holds
   Terminal, Workspaces and Connect, with a `···` menu for the rest (Tasks,
-  Automations, Skills): each has a pin that puts its icon on the rail. The
+  Automations, Skills, Cheatsheet): each has a pin that puts its icon on the rail. The
   Workspaces panel opens beside the content and can be pinned there, or left
   unpinned to float over it until you pick something or click away (⌃⌘S shows
   or hides it). A button at the bottom left of the frame toggles the terminal
@@ -427,6 +427,32 @@ A tour of the app in thirty-four pictures, in five groups.
   with the warnings about risky commands applying as they do to anything typed.
   Text with a control character in it (an escape, say) is refused. Skills stay
   on this Mac. Automations, on the page next to it, is still to come.
+- **Cheatsheet** — a page under the rail's `···` menu (pin it to the rail, or
+  open it from the command palette): programs on the left and, for the one you
+  pick, its flags and the commands people reach for, each with a line on what it
+  does. 48 programs have pages written for this app, for the BSD versions of the
+  tools macOS ships, and their flags are the table the composer completes from
+  when you press Tab, so they are written down once; about 3,500 more come from
+  [tldr-pages](#bundled-tools). Typing narrows the list as fzf does — `gcm` finds
+  `git commit -m` — with the best match already open and its matching letters
+  emphasised; ↑ ↓ move down the list, Return inserts the best command, Esc
+  clears. Typing a sentence — "undo my last commit", "find big files" — searches
+  by what the words mean instead, offline: nothing leaves the Mac. A control sets
+  Letters, Words or Auto, and Auto says which it chose. **Insert** takes a command
+  back to the terminal and puts it in the composer's input, as Skills does: it is
+  not run, Return is still what runs it, and a `{{placeholder}}` is left in place
+  for you to fill in, so an unedited Return fails rather than guesses. Measured on
+  45 questions it had not been tuned on, before fixing what they showed, the
+  offline search put the right program first 78% of the time and in the top
+  three 87%; the method, and what the misses were, are in
+  [`docs/design/cheatsheet.md`](docs/design/cheatsheet.md).
+  **Ask AI** is optional and never happens by itself: with an assistant set up
+  (Settings → AI), it asks that assistant to choose among the 40 commands the
+  search found closest — it is not asked to write one — after a sheet that names
+  the host and can show every character. What goes is your question, with keys
+  and passwords masked, and those 40 lines; nothing from your terminal. A number
+  the assistant answers with that is not on the list is dropped, and the picks are
+  only ever shown.
 - **Quick connect** — the sidebar's Connect menu lists saved hosts, saved
   screen-sharing endpoints, and whatever the local network is advertising right
   now. VNC and RDP open through the system's own client; SSH, SFTP and web open
@@ -1525,6 +1551,10 @@ Sources/
 │   │                shared-sign-in control socket, jump hosts and agent
 │   │                forwarding (what a saved host adds to an ssh command line)
 │   ├── Remote/      Proxmox VE client, Bonjour discovery, remote services
+│   ├── Cheatsheet/  the Cheatsheet page: the hand-written pages and their parser,
+│   │                tldr-pages' data, search by letters and by meaning, the
+│   │                optional assistant question — Foundation-only apart from
+│   │                the page and its store
 │   ├── API/         Unix-socket server, message envelope, command router
 │   ├── Security/    keychain wrapper
 │   ├── Backup/      workspace snapshot archive, export/import
@@ -1585,6 +1615,17 @@ and the composer's **+** menu.
   recursively, uses `sudo`, pipes a download into a shell, overwrites a file,
   force-pushes, or similar carries a short plain warning. No warning does not
   mean safe; it only reads for a few well-known dangers.
+- **The Cheatsheet's Ask AI.** On the Cheatsheet page, **Ask AI** uses the same
+  endpoint, and only when you press it. A sheet names the host ("stays on this
+  Mac" for a loopback model) and can show every character first. It sends what you
+  typed in the search field — keys and passwords masked, cut at 300 characters —
+  and the 40 commands the page's own search found closest, one line each, cut at
+  160 characters a field. Nothing from your terminal is in it. The assistant is
+  asked to answer with the numbers of the commands that fit, and the page shows
+  those lines as they are in the cheatsheet: a number that is not on the list is
+  dropped, and nothing in the answer is run. If none fit, one button puts your
+  question in the composer as an `@ai` request, which sends nothing until you
+  press Return.
 
 ### OpenAI
 
@@ -1989,6 +2030,26 @@ that links a library outside `/usr/lib` and `/System/Library`: a binary that
 loads Homebrew's `libstdc++` would run in CI and on no one else's Mac. CI then checks
 both tools *in the finished bundle*: present, executable, both architectures,
 system-only linkage, and that they actually run.
+
+**Cheatsheet examples.** The Cheatsheet page has its own pages for 48 programs and
+takes the rest from [tldr-pages](https://github.com/tldr-pages/tldr) v2.3: the
+English `common` and macOS pages, 3,556 programs and 22,567 examples, licensed
+CC BY 4.0. That licence asks for credit and for changes to be marked, so the
+notice is bundled beside the data (Settings → Advanced opens it), a page that
+uses the examples names the source and marks each one, and the changes are the
+ones listed at the top of `scripts/tldr-convert.py`: the long form of an option
+where tldr offers a choice of short or long, `[c]reate`-style mnemonics and
+backticks dropped, a subcommand's page
+filed under its program, and a macOS page replacing the common one. The archive
+is fetched at the pinned release by `scripts/fetch-tldr.sh`, which refuses it if
+its SHA-256 is not the one in `scripts/tools.env`, and converted to one file of
+about 2.8 MB. The numbers reconcile — the 22,716 examples in those pages, less
+the 149 on the 30 common pages macOS replaces, are the 22,567 — and the
+converter fails the build rather than ship a result with leftovers or far fewer
+pages. CI reads the converted file back before the build, with sixteen plain
+questions put to the search, and `verify-bundle.py` reads it back from the
+finished app. A build made without running the script has none of these
+examples, and the page says so.
 
 **Versions** live in `scripts/tools.env` and move only by a PR that edits it;
 nothing updates itself or is downloaded at runtime. Settings → Advanced lists

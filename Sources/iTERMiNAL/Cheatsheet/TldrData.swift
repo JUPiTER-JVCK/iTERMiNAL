@@ -96,3 +96,46 @@ enum TldrData {
         return text
     }
 }
+
+/// Where tldr-pages' data is kept inside the app, and what travels with it.
+///
+/// `Contents/Resources/Cheatsheets`, put there by project.yml's copy phase from what
+/// scripts/fetch-tldr.sh made. A local build made without running that script has
+/// no such folder, and everything here says so by returning nil, as the font does.
+enum TldrBundle {
+    static let homepage = URL(string: "https://github.com/tldr-pages/tldr")
+
+    static var directory: URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("Cheatsheets", isDirectory: true)
+    }
+
+    /// The data file, when this build has one.
+    static var dataURL: URL? { dataURL(in: directory) }
+
+    /// The CC BY 4.0 notice that ships with it.
+    static var licenseURL: URL? { licenseURL(in: directory) }
+
+    /// The version the fetch script wrote beside the data, not a constant here that
+    /// could drift from what shipped.
+    static var version: String? { version(in: directory) }
+
+    static func dataURL(in directory: URL?) -> URL? {
+        existing(directory?.appendingPathComponent("tldr.json"))
+    }
+
+    static func licenseURL(in directory: URL?) -> URL? {
+        existing(directory?.appendingPathComponent("licenses", isDirectory: true).appendingPathComponent("tldr-pages-LICENSE.md"))
+    }
+
+    static func version(in directory: URL?) -> String? {
+        guard let url = directory?.appendingPathComponent("manifest.json"),
+              let data = try? Data(contentsOf: url),
+              let manifest = try? JSONDecoder().decode([String: String].self, from: data) else { return nil }
+        return manifest["tldr-pages"]
+    }
+
+    private static func existing(_ url: URL?) -> URL? {
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+}

@@ -7528,6 +7528,20 @@ do {
     }
     check(failure(#"{"format":2,"version":"1","pages":[]}"#) == .unsupportedFormat(2), "a newer format is refused, by name")
     check(failure("not json") == .unreadable && failure(#"{"format":1}"#) == .unreadable, "so is something that is not the data")
+    // Where the data lives in the bundle, and what it says about itself.
+    let bundleFolder = FileManager.default.temporaryDirectory.appendingPathComponent("tldr-bundle-check-\(ProcessInfo.processInfo.processIdentifier)")
+    try? FileManager.default.createDirectory(at: bundleFolder.appendingPathComponent("licenses"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: bundleFolder) }
+    check(TldrBundle.dataURL(in: bundleFolder) == nil && TldrBundle.licenseURL(in: bundleFolder) == nil && TldrBundle.version(in: bundleFolder) == nil,
+          "a folder with nothing in it has no data, licence or version")
+    try? Data("{}".utf8).write(to: bundleFolder.appendingPathComponent("tldr.json"))
+    try? Data("licence".utf8).write(to: bundleFolder.appendingPathComponent("licenses/tldr-pages-LICENSE.md"))
+    try? Data(#"{"tldr-pages": "9.9"}"#.utf8).write(to: bundleFolder.appendingPathComponent("manifest.json"))
+    check(TldrBundle.dataURL(in: bundleFolder) != nil && TldrBundle.licenseURL(in: bundleFolder) != nil && TldrBundle.version(in: bundleFolder) == "9.9",
+          "and one with them reports each")
+    try? Data(#"{"other": "1"}"#.utf8).write(to: bundleFolder.appendingPathComponent("manifest.json"))
+    check(TldrBundle.version(in: bundleFolder) == nil && TldrBundle.version(in: nil) == nil, "a manifest for something else gives no version")
+    check(TldrBundle.dataURL(in: nil) == nil, "no folder, no data")
     check(TldrData.webAddress("http://a.example") != nil && TldrData.webAddress("file:///etc/passwd") == nil && TldrData.webAddress(nil) == nil,
           "links are http or https")
 

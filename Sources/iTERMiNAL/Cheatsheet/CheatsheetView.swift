@@ -644,7 +644,7 @@ struct CheatsheetView: View {
             Text("Written by hand for the versions of these tools that macOS ships. Other systems' versions can differ.")
             if program.examples.contains(where: { $0.source == .tldr }) {
                 // CC BY 4.0 asks for credit, a link to the licence, and a note that it was changed.
-                Text("Examples marked tldr are from [tldr-pages](https://github.com/tldr-pages/tldr), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are reformatted here: options are written out in full, descriptions are tidied, and a subcommand's examples are filed under its program.")
+                Text("Examples marked tldr are from [tldr-pages](https://github.com/tldr-pages/tldr), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are reformatted here: where tldr offers a short or a long option, the long one is used; descriptions are tidied; and a subcommand's examples are filed under its program.")
             }
         }
         .font(.system(size: 11))

@@ -128,17 +128,11 @@ final class CheatsheetStore: ObservableObject {
         guard tldr == .notLoaded else { return }
         tldr = .loading
         let curated = CheatsheetCurated.library.programs
-        let url = Self.dataURL
+        let url = TldrBundle.dataURL
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let outcome = Self.load(curated: curated, from: url)
             DispatchQueue.main.async { self?.finishLoading(outcome) }
         }
-    }
-
-    /// Where the bundled data is: `Contents/Resources/Cheatsheets/tldr.json`,
-    /// put there by project.yml's copy phase from what scripts/fetch-tldr.sh made.
-    private static var dataURL: URL? {
-        Bundle.main.resourceURL?.appendingPathComponent("Cheatsheets/tldr.json")
     }
 
     private struct Loaded {

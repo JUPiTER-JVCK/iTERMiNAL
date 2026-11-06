@@ -33,7 +33,8 @@ struct AdvancedSettingsView: View {
                     BundledCommandRow(command: command)
                 }
                 BundledFontRow()
-                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile and ripgrep are upstream's release binaries, checked against their published hashes; bat's is checked against the hash of the file when it was pinned, because upstream publishes none; btop publishes no macOS build, so it is compiled from pinned source. None runs with elevated privileges. rg, bat and imgcat are on the PATH of every local terminal tab, after anything you have installed yourself. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac.")
+                BundledCheatsheetRow()
+                Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile and ripgrep are upstream's release binaries, checked against their published hashes; bat's is checked against the hash of the file when it was pinned, because upstream publishes none; btop publishes no macOS build, so it is compiled from pinned source. None runs with elevated privileges. rg, bat and imgcat are on the PATH of every local terminal tab, after anything you have installed yourself. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac. The Cheatsheet's extra examples are data from tldr-pages, under CC BY 4.0 and reformatted for the page.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -155,6 +156,44 @@ private struct BundledFontRow: View {
         }
         let version = SymbolsFont.bundledVersion.map { "v\($0)" } ?? "version unknown"
         return "\(summary) · \(version) · MIT"
+    }
+}
+
+/// The tldr-pages examples behind the Cheatsheet page: the version that shipped and
+/// their licence, which asks for credit. Laid out like `BundledFontRow`.
+private struct BundledCheatsheetRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "text.book.closed")
+                .frame(width: 18)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Cheatsheet examples")
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let licenseURL = TldrBundle.licenseURL {
+                Button("Licence") {
+                    NSWorkspace.shared.open(licenseURL)
+                }
+            }
+            if let homepage = TldrBundle.homepage {
+                Button("Project") {
+                    NSWorkspace.shared.open(homepage)
+                }
+            }
+        }
+    }
+
+    private var detail: String {
+        let summary = "tldr-pages, for thousands of programs"
+        guard TldrBundle.dataURL != nil else {
+            return "\(summary) · not included in this build"
+        }
+        let version = TldrBundle.version.map { "v\($0)" } ?? "version unknown"
+        return "\(summary) · \(version) · CC BY 4.0"
     }
 }
 
