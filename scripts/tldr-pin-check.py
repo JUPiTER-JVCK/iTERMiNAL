@@ -25,6 +25,9 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONVERT = os.path.join(HERE, "tldr-convert.py")
 
+# Importing the converter would otherwise leave a __pycache__ in scripts/.
+sys.dont_write_bytecode = True
+
 spec = importlib.util.spec_from_file_location("tldr_convert", CONVERT)
 convert = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(convert)
