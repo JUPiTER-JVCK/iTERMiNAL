@@ -1436,10 +1436,13 @@ final class WorkspaceStore: ObservableObject {
 
     /// Makes `panel` the one in front. While one panel fills the region this is
     /// also what swaps which one is on screen, so the strip of panels at the top
-    /// still works like tabs.
+    /// still works like tabs. A click anywhere in a panel calls it
+    /// (`DockClickFocus`), as does a tap on its header.
     func focusPanel(_ panel: SidePanel) {
         guard openPanels.contains(panel) else { return }
-        frontPanel = panel
+        // Only when it changes: a click in the panel that is already in front
+        // would otherwise tell everything that watches the store.
+        if frontPanel != panel { frontPanel = panel }
         guard let fill = dockFill, fill != panel else { return }
         holdTerminalSizes()
         withAnimation(Motion.panel) { dockFill = panel }
