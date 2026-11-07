@@ -5,7 +5,7 @@ enum CheatSearchMode: String, CaseIterable, Identifiable {
     /// Decided from the text: letters for a short or symbolic query, meaning
     /// for a sentence.
     case auto
-    /// The letters typed, in order, as in fzf: "gcm" finds `git commit -m`.
+    /// The letters typed, in order, as in fzf: "gitcm" finds `git commit -m`.
     case fuzzy
     /// The words typed, by what they mean: "undo my last commit" finds
     /// `git reset --soft HEAD~1`.

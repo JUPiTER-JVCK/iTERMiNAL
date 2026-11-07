@@ -452,7 +452,7 @@ A tour of the app in thirty-four pictures, in five groups.
   reads a file, never the program itself; sends nothing anywhere; and reads
   nothing until opened. A program with no page there says so, and **Open in
   terminal** puts `man <name>` in the composer's input, unrun. Typing narrows the
-  list as fzf does — `gcm` finds
+  list as fzf does — `gitcm` finds
   `git commit -m` — with the best match already open and its matching letters
   emphasised; ↑ ↓ move down the list, Return inserts the best command, Esc
   clears. Typing a sentence — "undo my last commit", "find big files" — searches
