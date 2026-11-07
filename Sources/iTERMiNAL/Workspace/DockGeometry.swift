@@ -421,4 +421,131 @@ extension DockLayout {
         )
         return inserting(module, beside: anchor, edge: edge, into: tree)
     }
+
+    // MARK: Dragging a panel
+
+    /// How far in from the region's own edge a pointer is taken to mean "along
+    /// the whole side", rather than beside the panel that happens to be there.
+    static let regionEdgeBand = 16.0
+
+    /// How far in from a panel's edge a pointer means "beside this panel, on
+    /// that side": a third of the panel's width (or height), but never more
+    /// than `panelEdgeBandLimit`, so a large panel still has a middle to swap in.
+    static let panelEdgeFraction = 0.3
+    static let panelEdgeBandLimit = 96.0
+
+    /// Where a panel being dragged would land if it were dropped at `point`
+    /// (both in the region's own coordinates), or nil when dropping there does
+    /// nothing: outside the region, or on the panel being dragged.
+    ///
+    /// The thin strip along the region's edge comes first, and wins even over
+    /// the dragged panel's own area, so a panel can be sent to a side from
+    /// wherever it is. Past that, the pointer is over some other panel: near
+    /// one of its sides it means beside it on that side (the nearest side, in
+    /// proportion to how wide the band is, when it is near two), and in the
+    /// middle it means swapping places. The seam between two panels counts as
+    /// the panel on its near side, so a zone does not flicker off as the
+    /// pointer crosses it.
+    static func dropTarget(
+        at point: DockPoint,
+        dragging: DockModuleID,
+        in frames: DockFrames,
+        region: DockRect
+    ) -> DockDropTarget? {
+        guard region.width > 0, region.height > 0, region.contains(point) else { return nil }
+
+        let sides: [(edge: DockEdge, distance: Double)] = [
+            (.left, point.x - region.x),
+            (.right, region.maxX - point.x),
+            (.top, point.y - region.y),
+            (.bottom, region.maxY - point.y),
+        ]
+        if let nearest = sides.min(by: { $0.distance < $1.distance }), nearest.distance < regionEdgeBand {
+            return .regionEdge(nearest.edge)
+        }
+
+        guard let target = panel(at: point, in: frames), target.module != dragging else { return nil }
+        let rect = target.rect
+        let bandAcross = min(panelEdgeFraction * rect.width, panelEdgeBandLimit)
+        let bandDown = min(panelEdgeFraction * rect.height, panelEdgeBandLimit)
+        let inner: [(edge: DockEdge, distance: Double, band: Double)] = [
+            (.left, point.x - rect.x, bandAcross),
+            (.right, rect.maxX - point.x, bandAcross),
+            (.top, point.y - rect.y, bandDown),
+            (.bottom, rect.maxY - point.y, bandDown),
+        ]
+        // How far into its band each side is, from 0 at the edge to 1 at the
+        // band's inner limit. The shallowest wins, so a pointer near a corner
+        // goes to the side it is closer to.
+        let within = inner.filter { $0.band > 0 && $0.distance < $0.band }
+        if let side = within.min(by: { $0.distance / $0.band < $1.distance / $1.band }) {
+            return .beside(target.module, side.edge)
+        }
+        return .swap(target.module)
+    }
+
+    /// The panel under `point`, or — for a point on a divider, between panels —
+    /// the first one within a few points of it.
+    private static func panel(at point: DockPoint, in frames: DockFrames) -> DockLeafFrame? {
+        if let hit = frames.leaves.first(where: { $0.rect.contains(point) }) { return hit }
+        let slack = 4.0
+        return frames.leaves.first { leaf in
+            point.x >= leaf.rect.x - slack && point.x < leaf.rect.maxX + slack
+                && point.y >= leaf.rect.y - slack && point.y < leaf.rect.maxY + slack
+        }
+    }
+
+    /// The area to light up for `target`: the half of the panel the dragged one
+    /// would take, the whole panel it would swap with, or a third of the region
+    /// along the side it would go to. Only a picture of where it lands — the
+    /// sizes it really gets are worked out by `dropping`.
+    static func dropHighlight(for target: DockDropTarget, in frames: DockFrames, region: DockRect) -> DockRect? {
+        switch target {
+        case .swap(let module):
+            return frames.rect(of: module)
+        case .beside(let module, let edge):
+            guard let rect = frames.rect(of: module) else { return nil }
+            return portion(of: rect, edge: edge, fraction: 0.5)
+        case .regionEdge(let edge):
+            return portion(of: region, edge: edge, fraction: 1.0 / 3.0)
+        }
+    }
+
+    private static func portion(of rect: DockRect, edge: DockEdge, fraction: Double) -> DockRect {
+        let width = rect.width * fraction
+        let height = rect.height * fraction
+        switch edge {
+        case .left:
+            return DockRect(x: rect.x, y: rect.y, width: width, height: rect.height)
+        case .right:
+            return DockRect(x: rect.maxX - width, y: rect.y, width: width, height: rect.height)
+        case .top:
+            return DockRect(x: rect.x, y: rect.y, width: rect.width, height: height)
+        case .bottom:
+            return DockRect(x: rect.x, y: rect.maxY - height, width: rect.width, height: height)
+        }
+    }
+
+    /// The tree after `module` is dropped on `target`: the same moves and swaps
+    /// the Move menu makes, so a drag and a menu choice end up in the same place.
+    static func dropping(_ module: DockModuleID, onto target: DockDropTarget, in root: DockNode?) -> DockNode? {
+        switch target {
+        case .beside(let other, let edge):
+            return moving(module, beside: other, edge: edge, in: root)
+        case .swap(let other):
+            return swapping(module, other, in: root)
+        case .regionEdge(let edge):
+            return moving(module, toRegionEdge: edge, in: root)
+        }
+    }
+}
+
+/// Where a dragged panel would land.
+enum DockDropTarget: Equatable {
+    /// Beside another panel, on one of its sides, taking half of its room.
+    case beside(DockModuleID, DockEdge)
+    /// In another panel's place, and that one in this one's.
+    case swap(DockModuleID)
+    /// Along one side of the whole region.
+    case regionEdge(DockEdge)
 }

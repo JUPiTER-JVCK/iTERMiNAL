@@ -1,8 +1,8 @@
 # Design: tiling the right-hand panels
 
-Status: **PR 1 implemented** (arrangement, Move and Fill menu, persistence).
-**PR 2 not started** (dragging a panel's header to re-dock it). Kept as the
-design record; update *What shipped differently* when either lands.
+Status: **implemented** in two changes: PR 1 (#86: arrangement, Move and Fill
+menu, persistence) and PR 2 (dragging a panel's header to re-dock it). Kept as
+the design record; see *What shipped differently* at the end.
 
 ## Goal
 
@@ -111,19 +111,48 @@ Layout" is a command-palette row only.
 4. The Move and Fill menu, and the palette row. *(PR 1)*
 5. Drag a panel's header onto another panel's edge. *(PR 2)*
 
-### PR 2: dragging
+### Dragging a panel's header
 
-A `DragGesture` on the header's title, in the region's coordinate space, rather
-than SwiftUI's `draggable` / `dropDestination`: the web view and the terminal
+A `DragGesture` on the title and the room after it (it takes 6 points of
+movement to start, so a click still brings the panel to the front), rather than
+SwiftUI's `draggable` / `dropDestination`: the web view and the terminal
 register their own drag types and can swallow a drop meant for SwiftUI, and a
 gesture that began on the header keeps receiving the pointer wherever it goes.
-A ghost of the header follows the pointer, and the zone under it — an edge band
-of the panel beneath, its centre, or a strip along the region's edge — is
-highlighted from a pure `DockLayout.dropTarget`. Releasing commits through the
-same `moving` / `swapping` the menu uses; Esc cancels. It is off while one panel
-is on screen.
+The gesture reports the pointer in the window's coordinates and the region
+subtracts its own origin, read the same way, so both are in one space.
+
+Where a panel would land is a pure function, `DockLayout.dropTarget`, checked
+off a Mac. From the pointer's place in the region:
+
+- Within 16 points of the region's edge: along that whole side
+  (`.regionEdge`). This wins even over the dragged panel's own area, so a panel
+  can be sent to a side from wherever it is.
+- Otherwise over some other panel (the seam between two counts as the one beside
+  it): within a band of its edge, a third of its width or height but at most 96
+  points, it goes beside that panel on that side (`.beside`), and near two sides
+  it goes to the one it is further into the band of; in the middle it swaps
+  places (`.swap`).
+- Over the dragged panel, or outside the region: nowhere.
+
+`DockLayout.dropping` carries a target out with the same `moving` / `swapping`
+the Move menu uses, so a drag and a menu choice end in the same arrangement, and
+`dropHighlight` gives the area to light.
+
+`DockDragModel` holds the drag and is kept in `@State` by the region, which keeps
+it without watching it; only `DockDropOverlay` observes it, so the pointer moving
+redraws a highlight and a ghost of the title, not the panels. The overlay dims the
+dragged panel, lights the target in the accent colour, and is never hit-tested.
+Escape cancels while a drag is under way, by a local key monitor that exists only
+for the length of a drag, so it reaches the terminal the rest of the time; the
+region resets the model if it goes away mid-drag.
+
+Only a panel with a header of its own can be dragged — that is, when two or more
+share the region. A lone panel, or one filling the region, has the strip of tabs.
+The Move menu stays as the way to arrange without a pointer.
 
 ## Known limits
+
+- Dragging needs a pointer. The Move menu does the same without one.
 
 - A click inside the browser's web view does not reach the store, so it does not
   make Browser the panel in front. The browser becomes the focused panel through
@@ -133,4 +162,11 @@ is on screen.
 
 ## What shipped differently
 
-*(To be filled in when the pull requests land.)*
+- PR 1: the plan was to guard `closeFocusedPane` so a tool hidden by a fill would
+  not capture ⇧⌘W. That would have closed the whole tab when focus was stale, so
+  the store instead releases focus from a tool when a fill hides it, and
+  `closeFocusedPane` is unchanged.
+- PR 2: the plan had the drag in the region's named coordinate space. It reads the
+  pointer in the window's coordinates instead and subtracts the region's origin,
+  since nothing in the codebase had used a named space with `DragGesture` and a
+  compile cost a cycle to find out.
