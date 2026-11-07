@@ -30,6 +30,11 @@ struct DockRegionView: View {
     /// moving does not redraw the panels.
     @State private var drag = DockDragModel()
 
+    /// Hears every mouse-down while the region is on screen and says which panel
+    /// it fell in (see `DockClickFocus`), so a click anywhere in a panel, even in
+    /// the web view or a terminal, makes it the one in front.
+    @State private var clickFocus = DockClickFocus()
+
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         GeometryReader { proxy in
@@ -40,9 +45,14 @@ struct DockRegionView: View {
         .background(theme.background)
         // A panel closing mid-drag changes the arrangement under the drag.
         .onChange(of: store.dockLayout) { _, _ in liveLayout = nil }
-        // No release is reported to a view that has gone, and a drag left
-        // standing would keep swallowing Escape.
-        .onDisappear { drag.reset() }
+        .onAppear { clickFocus.start { panel in store.focusPanel(panel) } }
+        .onDisappear {
+            // No release is reported to a view that has gone, and a drag left
+            // standing would keep swallowing Escape. The click monitor goes with
+            // the region too, not left listening for panels that are away.
+            drag.reset()
+            clickFocus.stop()
+        }
     }
 
     /// `origin` is where the region starts in the window. A drag reports the
@@ -204,6 +214,8 @@ private struct DockLeaf: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background)
+        // Fills the panel's rectangle, so a click can be matched to it.
+        .background(DockLeafMarker(panel: panel))
         .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(panel.title)

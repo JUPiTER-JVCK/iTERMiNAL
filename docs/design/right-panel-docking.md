@@ -153,12 +153,24 @@ The Move menu stays as the way to arrange without a pointer.
 ## Known limits
 
 - Dragging needs a pointer. The Move menu does the same without one.
-
-- A click inside the browser's web view does not reach the store, so it does not
-  make Browser the panel in front. The browser becomes the focused panel through
-  its header, or by being opened; a tool becomes it by taking focus. This only
-  matters for which panel the next one opens beside.
+- Which panel is in front follows clicks, headers, opening a panel and a tool's
+  terminal taking focus. It does not follow the keyboard: tabbing into a panel, or
+  a shortcut that moves focus there, leaves the one that was in front as it was.
+  It only matters for which panel the next one opens beside.
 - Heights in `SidePanel.dockMinimum` are a first guess, to be tuned by eye.
+
+### Which panel is in front
+
+A panel opened next goes beside the one in front, and a panel's header is brighter
+when it is. The first version set it from a header's tap, from opening a panel and
+from a tool's terminal taking focus, and left a click inside the browser, Files,
+Notes or the HTTP client doing nothing. SwiftUI gestures cannot hear a click inside
+the browser's web view or a terminal, which take the mouse themselves, so
+`DockClickFocus` does it the other way: each panel carries an invisible AppKit view
+behind it, filling its rectangle (`DockLeafMarker`), and one local monitor on the
+app's mouse-downs asks which of those rectangles the click fell in, in the window's
+own coordinates, and calls `focusPanel`. The monitor only listens, so the click goes
+on to what it was aimed at, and it exists only while the region is on screen.
 
 ## What shipped differently
 
@@ -166,6 +178,9 @@ The Move menu stays as the way to arrange without a pointer.
   not capture ⇧⌘W. That would have closed the whole tab when focus was stale, so
   the store instead releases focus from a tool when a fill hides it, and
   `closeFocusedPane` is unchanged.
+- Which panel is in front: PR 1 documented the gap as "a click inside the browser's
+  web view", which understated it; a click in Files, Notes or the HTTP client did
+  nothing either. Fixed in a later change (see above).
 - PR 2: the plan had the drag in the region's named coordinate space. It reads the
   pointer in the window's coordinates instead and subtracts the region's origin,
   since nothing in the codebase had used a named space with `DragGesture` and a
