@@ -348,9 +348,14 @@ A tour of the app in thirty-four pictures, in five groups.
   thickness, whether it is translucent or outlined, and the interface
   typeface; a preview there shows the change as you make it.
 - **Dockable panels** — a terminal dock along the bottom and a browser, file,
-  notes or HTTP panel down the right, opened from the one button at the top
-  right (each can also open in full view, across the whole content area), with
-  draggable dividers whose sizes persist. A dock tab can be a local shell, a
+  notes, HTTP or tool panel down the right, opened from the one button at the
+  top right (each can also open in full view, across the whole content area),
+  with draggable dividers whose sizes persist. The panels down the right can be
+  tiled: open one beside another, or below it, and once two are open a panel's
+  ··· menu moves it to the left, right, top or bottom edge of the region, or has
+  it fill the region or the window. A new panel goes below the one in front in
+  a narrow region and beside it in a wide one; "Reset Panel Layout" in the
+  command palette puts them back in one column. A dock tab can be a local shell, a
   saved connection, or a running shell moved down from a pane, and it reopens
   as whatever it was.
 - **Task manager** — every shell the app is running, wherever it lives: tab
@@ -1551,7 +1556,9 @@ Sources/
 │   ├── Input/       the composer's input: shell tokenizer, completion, history
 │   │                search, suggestions — Foundation-only where it can be
 │   ├── Workspace/   Workspace → Tab → PaneNode split tree, persistence, the
-│   │                order a dragged tab lands in
+│   │                order a dragged tab lands in, and the arrangement of the
+│   │                right-hand panels (DockLayout, DockGeometry — Foundation
+│   │                only — and the view that draws it)
 │   ├── Panels/      scriptable browser pane, file pane, notes, HTTP client pane
 │   │                with the site explorer and the Extract tab (previews, crawler,
 │   │                assistant)

@@ -250,6 +250,8 @@ jobs:
             Sources/iTERMiNAL/Terminal/TerminalDrop.swift \
             Sources/iTERMiNAL/Security/SecureInputState.swift \
             Sources/iTERMiNAL/Workspace/TabOrder.swift \
+            Sources/iTERMiNAL/Workspace/DockLayout.swift \
+            Sources/iTERMiNAL/Workspace/DockGeometry.swift \
             Sources/iTERMiNAL/App/OpenFolders.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"

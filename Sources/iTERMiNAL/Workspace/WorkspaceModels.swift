@@ -180,6 +180,17 @@ struct PanelStateSnapshot: Codable {
     var dockTabs: [DockTabSnapshot]?
     var rightPanelWidth: Double?
     var bottomDockHeight: Double?
+    /// How the trailing region's panels are arranged. Optional, so a state file
+    /// from before they could be tiled still decodes — the arrangement is then
+    /// built from `openPanels` — and a file written by this build still reads
+    /// in an older one, which ignores it and shows the panels as tabs.
+    ///
+    /// Read leniently (see `DockLayoutField`): a layout that will not decode is
+    /// not allowed to take every workspace down with it.
+    var dockLayout: DockLayoutField?
+    /// The panel that was standing alone in the region, if one was. Absent means
+    /// the panels were arranged side by side.
+    var dockFill: String?
 }
 
 /// One dock tab, and what it reconnects to.

@@ -159,7 +159,11 @@ struct DetailView: View {
                         PanelResizeHandle(
                             axis: .horizontal,
                             value: effectivePanelWidth,
-                            range: panelWidthFloor...1200,
+                            // Capped at the top of the range: several tools
+                            // tiled side by side need more than 1200, and a
+                            // range whose lower bound is above its upper one
+                            // is a runtime trap, not an empty range.
+                            range: min(panelWidthFloor, 1200)...1200,
                             inverted: true,
                             resetTo: 420,
                             available: size.width,
@@ -213,11 +217,13 @@ struct DetailView: View {
     }
 
     /// Width for the trailing panel against the space actually available.
-    /// The narrowest the front panel may be. A bundled tool raises it: btop
-    /// and superfile show a "too small" message instead of their interface
-    /// when squeezed, and 280pt squeezes them.
+    /// The narrowest the region may be: what the panels on screen need between
+    /// them. A bundled tool raises it — btop and superfile show a "too small"
+    /// message instead of their interface when squeezed, and 280pt squeezes
+    /// them — and tiled panels side by side add up, where a column of them
+    /// needs only the widest.
     private var panelWidthFloor: Double {
-        store.visiblePanel?.minimumWidth ?? 280
+        DockLayout.minimumSize(of: store.effectiveDockLayout, metrics: SidePanel.dockMetrics).width
     }
 
     /// The requested width, raised to the front panel's floor. The stored
@@ -385,7 +391,7 @@ private struct SystemMetricsReadout: View {
 /// dock, the settings window — and wrote UserDefaults besides. The caller now
 /// keeps the in-flight value in its own state and only stores the result, so a
 /// drag repaints the column being resized and nothing else.
-private struct PanelResizeHandle: View {
+struct PanelResizeHandle: View {
     enum Axis { case horizontal, vertical }
 
     let axis: Axis
@@ -1060,89 +1066,54 @@ private struct SectionPageView: View {
     }
 }
 
-/// The trailing region. It holds every open panel at once: a small tab strip
-/// appears when more than one is in there, so opening Files no longer pushes
-/// the browser out of the way.
+/// The trailing region. Every open panel is in it at once, arranged as the
+/// person has set them up (see `DockRegionView`), so opening Files no longer
+/// pushes the browser out of the way. Empty, it offers the panel picker.
 struct RightPanelView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 0) {
-            header(theme: theme)
-            FadedDivider()
-            content
+        Group {
+            if store.effectiveDockLayout == nil {
+                emptyRegion(theme: theme)
+            } else {
+                DockRegionView()
+            }
         }
         .background(theme.background)
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch store.visiblePanel {
-        case .browser:
-            BrowserPanelView(model: store.panelBrowserTabs)
-        case .files:
-            FilePaneView(model: store.panelFiles)
-        case .notes:
-            NotesPaneView(model: store.panelNotes)
-        case .superfile:
-            ToolPanelView(tool: .superfile)
-        case .btop:
-            ToolPanelView(tool: .btop)
-        case .http:
-            HTTPClientPaneView(model: store.panelHTTPClient)
-        case nil:
+    /// Open but with nothing in it: the choice of panels, and a way to put the
+    /// region away.
+    private func emptyRegion(theme: Theme) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Button {
+                    store.closeRightRegion()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close panel")
+                .accessibilityLabel("Close panel")
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 38)
+            FadedDivider()
             PanelPicker()
         }
-    }
-
-    private func header(theme: Theme) -> some View {
-        HStack(spacing: 6) {
-            ForEach(store.orderedOpenPanels) { panel in
-                PanelTabChip(
-                    panel: panel,
-                    isSelected: store.visiblePanel == panel,
-                    onSelect: { store.frontPanel = panel },
-                    onClose: { store.closePanel(panel) }
-                )
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                store.toggleRightPanelExpanded()
-            } label: {
-                Image(systemName: store.rightPanelExpanded
-                      ? "arrow.down.right.and.arrow.up.left"
-                      : "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(store.rightPanelExpanded ? "Collapse panel" : "Expand panel")
-
-            Button {
-                store.closeRightRegion()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close panel")
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 38)
     }
 }
 
 /// One panel tab in the trailing region's strip.
-private struct PanelTabChip: View {
+struct PanelTabChip: View {
     let panel: SidePanel
     let isSelected: Bool
     let onSelect: () -> Void
@@ -1191,7 +1162,7 @@ private struct PanelTabChip: View {
 /// Hosts the same `TerminalPaneView` a tab pane uses, so a tool that exits or
 /// fails to launch gets the same banner and Restart button a shell does,
 /// rather than a second implementation of both.
-private struct ToolPanelView: View {
+struct ToolPanelView: View {
     let tool: TerminalTool
     @EnvironmentObject private var store: WorkspaceStore
 
@@ -1215,7 +1186,7 @@ private struct ToolPanelView: View {
     }
 }
 
-private struct PanelPicker: View {
+struct PanelPicker: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
