@@ -120,6 +120,7 @@ final class ScreenshotRun {
         await scene("landing") { await self.landing() }
         await scene("dock") { await self.dock() }
         await scene("tasks") { await self.tasks() }
+        await scene("cheatsheet") { await self.cheatsheet() }
         await probeActivity("after the dock and the task manager")
 
         await scene("browser") { await self.browser() }
@@ -1608,6 +1609,118 @@ final class ScreenshotRun {
         let taken = capture("tasks")
         store.detailMode = .terminal
         return taken
+    }
+
+    /// The Cheatsheet page, used the way the README says it is used, with what the
+    /// app did put in the log.
+    ///
+    /// More a check than a picture. Nothing else runs the page against the real
+    /// tldr-pages data, and what the README claims for it is behaviour — the best
+    /// match opens, a sentence is searched by meaning, a manual page is read from
+    /// the Mac, Insert leaves the command unrun in the composer — which a picture of
+    /// the page cannot show. Each claim is a line that starts `cheatsheet:` and says
+    /// ok or NOT OK, and the last says how many held. A claim that does not hold
+    /// does not fail the run, which exists to take pictures: the log is what is read.
+    private func cheatsheet() async -> Bool {
+        await baseline()
+        let cheats = CheatsheetStore.shared
+        var held = 0
+        var total = 0
+
+        func expect(_ condition: Bool, _ claim: String) {
+            total += 1
+            if condition { held += 1 }
+            say("cheatsheet: \(condition ? "ok" : "NOT OK") — \(claim)")
+        }
+
+        /// Types into the search field and waits for the answer, which is worked out
+        /// off the main thread and takes a few milliseconds.
+        func search(_ text: String) async {
+            cheats.query = text
+            await pause(1.5)
+        }
+
+        store.detailMode = .cheatsheet
+        // The page reads tldr-pages' examples in the background when it opens.
+        var waited = 0.0
+        while waited < 20, cheats.tldr == .notLoaded || cheats.tldr == .loading {
+            await pause(0.5)
+            waited += 0.5
+        }
+        if case .loaded(let version) = cheats.tldr {
+            expect(cheats.library.programs.count > 3000,
+                   "tldr-pages \(version) is loaded: \(cheats.library.programs.count) programs")
+        } else {
+            expect(false, "tldr-pages did not load: \(cheats.tldr)")
+        }
+
+        // "gcm finds git commit -m, with the best match already open."
+        await search("gcm")
+        let best = cheats.bestExampleInSelection?.command ?? ""
+        say("cheatsheet: gcm: rows \(cheats.rows.prefix(4).map(\.name)), open \(cheats.selectedProgram ?? "nothing"), best \(best)")
+        expect(cheats.resolvedMode == .fuzzy, "`gcm` is searched by its letters")
+        expect(cheats.selectedProgram == "git" && best.hasPrefix("git commit") && best.contains("-m"),
+               "`gcm` opens git with `git commit -m` as its best command")
+        let found = capture("cheatsheet")
+
+        // "Typing a sentence searches by what the words mean instead."
+        await search("undo my last commit")
+        let undo = cheats.bestExampleInSelection?.command ?? ""
+        say("cheatsheet: undo my last commit: rows \(cheats.rows.prefix(4).map(\.name)), open \(cheats.selectedProgram ?? "nothing"), best \(undo)")
+        expect(cheats.resolvedMode == .natural, "a sentence is searched by what its words mean")
+        expect(cheats.rows.prefix(3).contains { $0.name == "git" }, "\"undo my last commit\" finds git among the first three programs")
+        _ = capture("cheatsheet-sentence")
+
+        await search("find big files")
+        say("cheatsheet: find big files: rows \(cheats.rows.prefix(5).map(\.name)), best \(cheats.bestExampleInSelection?.command ?? "none")")
+
+        // A program tldr-pages has a page for and the app has none of its own.
+        await search("")
+        cheats.selectedProgram = "ipconfig"
+        expect(cheats.selection?.name == "ipconfig", "ipconfig has a page")
+
+        // "The manual page as installed on this Mac, read when the section is opened."
+        func manual(_ name: String) async -> CheatsheetStore.ManualState? {
+            cheats.loadManual(name)
+            var state: CheatsheetStore.ManualState?
+            var tries = 0
+            repeat {
+                await pause(0.5)
+                tries += 1
+                state = cheats.manuals[name]
+            } while (state == nil || state == .loading) && tries < 20
+            return state
+        }
+        let ipconfig = await manual("ipconfig")
+        if case .found(let excerpt)? = ipconfig {
+            let text = excerpt.sections.map { $0.text }.joined(separator: "\n")
+            say("cheatsheet: ipconfig's manual: sections \(excerpt.sections.map { $0.title }), \(text.count) characters, truncated \(excerpt.isTruncated)")
+            expect(text.contains("getifaddr"), "ipconfig's manual page is read from this Mac and lists its subcommands")
+        } else {
+            expect(false, "ipconfig's manual page is read from this Mac: \(String(describing: ipconfig))")
+        }
+        let nothing = await manual("nosuchprogramxyz")
+        expect(nothing == .missing, "a program with no manual page says so: \(String(describing: nothing))")
+
+        // "Insert takes a command back to the terminal and puts it in the composer's
+        // input. It is not run, and a {{placeholder}} is left in place."
+        await search("gcm")
+        if let example = cheats.bestExampleInSelection {
+            store.insertIntoComposer(example.command)
+            await pause(1.5)
+            let typed = ScreenshotMode.composerField(in: window)?.string
+            say("cheatsheet: Insert: \(example.command.debugDescription) went to the composer as \(String(describing: typed))")
+            expect(store.detailMode == .terminal, "Insert goes back to the terminal")
+            expect(typed == example.command, "Insert puts the command in the composer exactly as it is, placeholders and all")
+        } else {
+            expect(false, "there is a command to insert")
+        }
+
+        say("cheatsheet: \(held) of \(total) claims held")
+        await search("")
+        compose("")
+        store.detailMode = .terminal
+        return found
     }
 
     // MARK: Panels

@@ -11,6 +11,11 @@ name: Screenshots
 # thirty-four pictures the README shows into docs/images/. The artifact holds more
 # than that — each file is named for what it shows, and app.log says what the
 # app saw while it took them.
+#
+# One scene, `cheatsheet`, is as much a check as a picture: it uses the Cheatsheet
+# page the way the README says it is used, against the real tldr-pages data, and says
+# in the log, on lines that start `cheatsheet:`, whether each claim held (ok or NOT
+# OK, and how many in all). Nothing there fails the run.
 on:
   # Retake them by hand after the interface changes. Unlike build.yml's manual
   # run, this one releases nothing.
@@ -121,6 +126,11 @@ jobs:
 
           scripts/fetch-symbols-font.sh Vendor/Fonts
           ls -la Vendor/Fonts
+
+          # The Cheatsheet page's examples. The Cheatsheet scene runs the page against
+          # them; without them it would have only the pages written for the app.
+          scripts/fetch-tldr.sh Vendor/Cheatsheets
+          ls -la Vendor/Cheatsheets
 
       - name: Generate Xcode project
         run: xcodegen generate
