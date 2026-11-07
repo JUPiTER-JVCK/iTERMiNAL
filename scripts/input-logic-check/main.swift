@@ -7971,5 +7971,437 @@ do {
     check(RailPins.decode(["cheatsheet", "tasks", "cheatsheet", "bogus"]) == [.cheatsheet, .tasks], "it is kept when pins are read back")
 }
 
+// MARK: Dock layout
+
+// The right-hand region's arrangement: a tree of splits whose leaves are panels
+// (Workspace/DockLayout.swift, DockGeometry.swift). The tree is the saved state
+// and the thing every drag and menu choice edits, so each rule is pinned here.
+
+do {
+    func dLeaf(_ id: String) -> DockNode { .leaf(id) }
+    func dRow(_ children: [(Double, DockNode)]) -> DockNode {
+        .split(.horizontal, children.map { DockChild(weight: $0.0, node: $0.1) })
+    }
+    func dCol(_ children: [(Double, DockNode)]) -> DockNode {
+        .split(.vertical, children.map { DockChild(weight: $0.0, node: $0.1) })
+    }
+    /// The shape of a tree: h(...) is a row, v(...) a column.
+    func dShape(_ node: DockNode?) -> String {
+        guard let node else { return "nil" }
+        switch node {
+        case .leaf(let id):
+            return id
+        case .split(let axis, let children):
+            return (axis == .horizontal ? "h" : "v") + "(" + children.map { dShape($0.node) }.joined(separator: ",") + ")"
+        }
+    }
+    /// The weights of the root split, or [] for a leaf.
+    func dWeights(_ node: DockNode?) -> [Double] {
+        guard case .split(_, let children)? = node else { return [] }
+        return children.map { $0.weight }
+    }
+    func dNear(_ a: Double, _ b: Double, _ tolerance: Double = 1e-9) -> Bool { abs(a - b) <= tolerance }
+    func dNearAll(_ a: [Double], _ b: [Double], _ tolerance: Double = 1e-9) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { dNear($0, $1, tolerance) }
+    }
+    /// Every invariant normal form promises.
+    func dValid(_ node: DockNode?, parent: DockAxis? = nil) -> Bool {
+        guard let node else { return true }
+        switch node {
+        case .leaf(let id):
+            return !id.isEmpty
+        case .split(let axis, let children):
+            guard children.count >= 2, axis != parent else { return false }
+            guard children.allSatisfy({ $0.weight.isFinite && $0.weight > 0 }) else { return false }
+            guard abs(children.reduce(0.0) { $0 + $1.weight } - 1) < 1e-9 else { return false }
+            return children.allSatisfy { dValid($0.node, parent: axis) }
+        }
+    }
+    func dValidTree(_ node: DockNode?) -> Bool {
+        guard dValid(node) else { return false }
+        let modules = node?.modules ?? []
+        return Set(modules).count == modules.count
+    }
+    /// Panels and dividers fill the region exactly: inside it, none negative,
+    /// and their areas add up to its own.
+    func dTiles(_ frames: DockFrames, _ rect: DockRect) -> Bool {
+        let rects = frames.leaves.map { $0.rect } + frames.dividers.map { $0.rect }
+        let inside = rects.allSatisfy {
+            $0.width >= 0 && $0.height >= 0
+                && $0.x >= rect.x - 1e-9 && $0.y >= rect.y - 1e-9
+                && $0.maxX <= rect.maxX + 1e-9 && $0.maxY <= rect.maxY + 1e-9
+        }
+        let area = rects.reduce(0.0) { $0 + $1.width * $1.height }
+        return inside && abs(area - rect.width * rect.height) < 1e-6
+    }
+
+    let a = dLeaf("a"), b = dLeaf("b"), c = dLeaf("c")
+
+    // Normal form.
+    check(DockLayout.normalized(nil) == nil, "no layout stays no layout")
+    check(DockLayout.normalized(dRow([(1, a)])) == a, "a split with one child is that child")
+    check(DockLayout.normalized(.split(.horizontal, [])) == nil, "a split with none is nothing")
+    check(dShape(DockLayout.normalized(dRow([(0.5, a), (0.5, dRow([(0.5, b), (0.5, c)]))]))) == "h(a,b,c)",
+          "a row inside a row is folded into it")
+    check(dNearAll(dWeights(DockLayout.normalized(dRow([(0.5, a), (0.5, dRow([(0.5, b), (0.5, c)]))]))), [0.5, 0.25, 0.25]),
+          "and its weights are scaled by the slot it had")
+    check(dShape(DockLayout.normalized(dRow([(0.5, a), (0.5, dCol([(0.5, b), (0.5, c)]))]))) == "h(a,v(b,c))",
+          "a column inside a row stays")
+    check(dShape(DockLayout.normalized(dRow([(1, a), (1, b), (1, a)]))) == "h(a,b)", "a panel named twice is kept once")
+    check(dShape(DockLayout.normalized(dRow([(1, dLeaf("")), (1, a), (1, b)]))) == "h(a,b)", "a panel with no name is dropped")
+    check(dShape(DockLayout.normalized(dCol([(1, dRow([(1, a)])), (1, b)]))) == "v(a,b)", "a one-child split inside another collapses first")
+    check(dShape(DockLayout.normalized(dRow([(1, dCol([(1, a), (1, a)])), (1, b)]))) == "h(a,b)",
+          "a split emptied down to one child by duplicates collapses too")
+    let damaged = DockLayout.normalized(dRow([(.nan, a), (0, b), (-3, c), (.infinity, dLeaf("d"))]))
+    check(dValidTree(damaged) && dShape(damaged) == "h(a,b,c,d)" && dNearAll(dWeights(damaged), [0.25, 0.25, 0.25, 0.25]),
+          "weights that are not numbers, zero, negative or infinite are repaired to an even share")
+    let partlyDamaged = DockLayout.normalized(dRow([(3, a), (.nan, b), (1, c)]))
+    check(dNearAll(dWeights(partlyDamaged), [3.0 / 6, 2.0 / 6, 1.0 / 6]),
+          "a damaged weight takes the average of the others and the rest keep their proportions")
+    let uneven = DockLayout.normalized(dRow([(2, a), (6, b)]))
+    check(dNearAll(dWeights(uneven), [0.25, 0.75]), "weights are scaled to sum to 1")
+    let once = DockLayout.normalized(dRow([(0.5, a), (0.5, dRow([(0.5, b), (0.5, dCol([(1, c), (1, dLeaf("d"))]))]))]))
+    check(DockLayout.normalized(once) == once, "normalising twice changes nothing more")
+
+    // Building.
+    check(DockLayout.stacked([]) == nil && DockLayout.stacked(["", ""]) == nil, "nothing to stack is no layout")
+    check(DockLayout.stacked(["a"]) == a, "one panel is a leaf")
+    check(dShape(DockLayout.stacked(["a", "b", "c"])) == "v(a,b,c)" && dNearAll(dWeights(DockLayout.stacked(["a", "b", "c"])), [1.0 / 3, 1.0 / 3, 1.0 / 3]),
+          "panels are stacked top to bottom, sharing equally")
+    check(dShape(DockLayout.stacked(["a", "b", "a"], axis: .horizontal)) == "h(a,b)", "stacking keeps a repeated panel once")
+
+    // Inserting beside a panel.
+    check(DockLayout.inserting("a", beside: "x", edge: .right, into: nil) == a, "into nothing, the panel is the layout")
+    check(dShape(DockLayout.inserting("b", beside: "a", edge: .right, into: a)) == "h(a,b)", "beside a lone panel, on its right")
+    check(dShape(DockLayout.inserting("b", beside: "a", edge: .left, into: a)) == "h(b,a)", "on its left")
+    check(dShape(DockLayout.inserting("b", beside: "a", edge: .top, into: a)) == "v(b,a)", "above it")
+    check(dShape(DockLayout.inserting("b", beside: "a", edge: .bottom, into: a)) == "v(a,b)", "below it")
+    check(dNearAll(dWeights(DockLayout.inserting("b", beside: "a", edge: .bottom, into: a)), [0.5, 0.5]), "taking half of what it had")
+    let wide = dRow([(0.6, a), (0.4, b)])
+    let wideRight = DockLayout.inserting("c", beside: "b", edge: .right, into: wide)
+    check(dShape(wideRight) == "h(a,b,c)" && dNearAll(dWeights(wideRight), [0.6, 0.2, 0.2]),
+          "along a row, the neighbour splits its own share and nothing else resizes")
+    let wideLeft = DockLayout.inserting("c", beside: "a", edge: .left, into: wide)
+    check(dShape(wideLeft) == "h(c,a,b)" && dNearAll(dWeights(wideLeft), [0.3, 0.3, 0.4]), "and on the leading side")
+    let across = DockLayout.inserting("c", beside: "b", edge: .bottom, into: wide)
+    check(dShape(across) == "h(a,v(b,c))" && dNearAll(dWeights(across), [0.6, 0.4]),
+          "across a row, the neighbour's slot becomes a column and the row is unchanged")
+    check(dShape(DockLayout.inserting("d", beside: "b", edge: .top, into: across)) == "h(a,v(d,b,c))",
+          "beside a panel in a column, along that column, joins it")
+    check(dShape(DockLayout.inserting("d", beside: "b", edge: .right, into: across)) == "h(a,v(h(b,d),c))",
+          "and across it makes a row inside the column")
+    check(DockLayout.inserting("c", beside: "b", edge: .right, into: wide).map { dValidTree($0) } == true, "the result is in normal form")
+    check(dShape(DockLayout.inserting("z", beside: "missing", edge: .right, into: wide)) == "h(a,b,z)",
+          "beside a panel that is not there, it goes on that side of the whole region")
+    check(DockLayout.inserting("a", beside: "b", edge: .right, into: wide) == wide, "a panel already there leaves the layout alone")
+    check(DockLayout.inserting("", beside: "b", edge: .right, into: wide) == wide, "a nameless panel is not added")
+
+    // Inserting along the region's edge.
+    check(dShape(DockLayout.inserting("b", atRegionEdge: .right, into: a)) == "h(a,b)" && dNearAll(dWeights(DockLayout.inserting("b", atRegionEdge: .right, into: a)), [0.5, 0.5]),
+          "along the edge of a lone panel it takes half")
+    let three = DockLayout.stacked(["a", "b", "c"], axis: .horizontal)
+    let fourth = DockLayout.inserting("d", atRegionEdge: .right, into: three)
+    check(dShape(fourth) == "h(a,b,c,d)" && dNearAll(dWeights(fourth), [0.25, 0.25, 0.25, 0.25]),
+          "along a row of three it takes a quarter")
+    check(dShape(DockLayout.inserting("d", atRegionEdge: .left, into: three)) == "h(d,a,b,c)", "or goes first, on the left")
+    let rowAbove = DockLayout.inserting("c", atRegionEdge: .bottom, into: dRow([(0.5, a), (0.5, b)]))
+    check(dShape(rowAbove) == "v(h(a,b),c)" && dNearAll(dWeights(rowAbove), [2.0 / 3, 1.0 / 3]),
+          "across a row it spans the whole width and takes a third")
+    check(dShape(DockLayout.inserting("c", atRegionEdge: .top, into: DockLayout.stacked(["a", "b"]))) == "v(c,a,b)",
+          "on the top of a column it is one more row")
+    let squeezed = DockLayout.inserting("d", atRegionEdge: .right, into: dRow([(0.6, a), (0.4, dCol([(0.5, b), (0.5, c)]))]))
+    check(dNearAll(dWeights(squeezed), [0.4, 0.4 * 2.0 / 3, 1.0 / 3]), "the others keep their proportions in what remains")
+    check(DockLayout.inserting("a", atRegionEdge: .right, into: wide) == wide, "a panel already there is not added twice")
+    check(DockLayout.inserting("a", atRegionEdge: .right, into: nil) == a, "into nothing, it is the layout")
+
+    // Removing.
+    let middle = dRow([(0.2, a), (0.3, b), (0.5, c)])
+    let withoutMiddle = DockLayout.removing("b", from: middle)
+    check(dShape(withoutMiddle) == "h(a,c)" && dNearAll(dWeights(withoutMiddle), [0.5, 0.5]),
+          "removing from the middle gives its space to the one before")
+    let withoutFirst = DockLayout.removing("a", from: middle)
+    check(dShape(withoutFirst) == "h(b,c)" && dNearAll(dWeights(withoutFirst), [0.5, 0.5]),
+          "removing the first gives its space to the one after")
+    let withoutLast = DockLayout.removing("c", from: middle)
+    check(dNearAll(dWeights(withoutLast), [0.2, 0.8]), "removing the last gives its space to the one before")
+    check(DockLayout.removing("b", from: dRow([(0.5, a), (0.5, b)])) == a, "two panels become one")
+    check(DockLayout.removing("a", from: a) == nil, "the last panel leaves nothing")
+    check(DockLayout.removing("zzz", from: middle) == middle, "removing what is not there changes nothing")
+    let nested = dRow([(0.5, a), (0.5, dCol([(0.5, b), (0.5, c)]))])
+    let nestedRemoved = DockLayout.removing("b", from: nested)
+    check(dShape(nestedRemoved) == "h(a,c)" && dNearAll(dWeights(nestedRemoved), [0.5, 0.5]),
+          "a column left with one panel gives way to it")
+    let deep = dRow([(0.5, a), (0.5, dCol([(0.5, b), (0.5, dRow([(0.5, c), (0.5, dLeaf("d"))]))]))])
+    let deepRemoved = DockLayout.removing("b", from: deep)
+    check(dShape(deepRemoved) == "h(a,c,d)" && dNearAll(dWeights(deepRemoved), [0.5, 0.25, 0.25]),
+          "a row freed up inside a row is folded into it")
+    check(DockLayout.removing("a", from: nil) == nil, "nothing to remove from")
+
+    // Moving beside a panel.
+    let strip = DockLayout.stacked(["a", "b", "c"], axis: .horizontal)
+    let movedBeside = DockLayout.moving("a", beside: "c", edge: .right, in: strip)
+    check(dShape(movedBeside) == "h(b,c,a)" && dNearAll(dWeights(movedBeside), [2.0 / 3, 1.0 / 6, 1.0 / 6]),
+          "moving takes a panel out, gives its space away, and puts it beside the other")
+    check(DockLayout.moving("a", beside: "a", edge: .right, in: strip) == strip, "moving a panel beside itself changes nothing")
+    check(DockLayout.moving("zzz", beside: "a", edge: .right, in: strip) == strip, "moving a panel that is not there changes nothing")
+    check(DockLayout.moving("a", beside: "zzz", edge: .right, in: strip) == strip, "moving beside one that is not there changes nothing")
+    check(dShape(DockLayout.moving("c", beside: "a", edge: .top, in: strip)) == "h(v(c,a),b)", "moving above another makes a column")
+    check(dShape(DockLayout.moving("a", beside: "b", edge: .bottom, in: DockLayout.stacked(["a", "b"]))) == "v(b,a)", "swapping places in a stack")
+
+    // Moving to the region's edge.
+    let toLeft = DockLayout.moving("c", toRegionEdge: .left, in: strip)
+    check(dShape(toLeft) == "h(c,a,b)" && dNearAll(dWeights(toLeft), [1.0 / 3, 2.0 / 9, 4.0 / 9]),
+          "to the left edge it is first, full height")
+    check(DockLayout.moving("a", toRegionEdge: .left, in: strip) == strip, "a panel already on that edge stays, at its size")
+    check(DockLayout.moving("c", toRegionEdge: .right, in: strip) == strip, "and so does the last on the right edge")
+    check(dShape(DockLayout.moving("a", toRegionEdge: .top, in: dRow([(0.5, a), (0.5, b)]))) == "v(a,b)", "a row's panel to the top makes a column")
+    check(DockLayout.moving("a", toRegionEdge: .top, in: dCol([(0.5, a), (0.5, dRow([(0.5, b), (0.5, c)]))])) == dCol([(0.5, a), (0.5, dRow([(0.5, b), (0.5, c)]))]),
+          "a panel already along the top stays when the rest is arranged below it")
+    check(DockLayout.moving("a", toRegionEdge: .left, in: a) == a, "a lone panel has nowhere to go")
+    check(DockLayout.moving("zzz", toRegionEdge: .left, in: strip) == strip, "moving what is not there changes nothing")
+
+    // Swapping.
+    let swapped = DockLayout.swapping("a", "c", in: dRow([(0.6, a), (0.4, dCol([(0.5, b), (0.5, c)]))]))
+    check(dShape(swapped) == "h(c,v(b,a))" && dNearAll(dWeights(swapped), [0.6, 0.4]), "swapping trades places and keeps every share")
+    check(DockLayout.swapping("a", "a", in: strip) == strip && DockLayout.swapping("a", "zzz", in: strip) == strip,
+          "swapping with itself or with nothing changes nothing")
+
+    // Reconciling a saved layout with what is open.
+    let known: Set<String> = ["a", "b", "c", "d"]
+    let trimmed = DockLayout.reconciled(strip, open: ["a", "c"], known: known)
+    check(dShape(trimmed) == "h(a,c)" && dNearAll(dWeights(trimmed), [2.0 / 3, 1.0 / 3]), "a panel that is no longer open is taken out")
+    check(dShape(DockLayout.reconciled(nil, open: ["b", "a"], known: known)) == "v(b,a)", "with no layout, the open panels are stacked in order")
+    check(dShape(DockLayout.reconciled(dRow([(0.5, a), (0.5, b)]), open: ["a", "b", "c"], known: known)) == "v(h(a,b),c)",
+          "an open panel the layout lacks goes along the bottom")
+    check(DockLayout.reconciled(a, open: ["a", "zzz"], known: known) == a, "a name this build does not know is ignored")
+    check(DockLayout.reconciled(dRow([(0.5, a), (0.5, dLeaf("old"))]), open: ["a"], known: known) == a, "and one in the layout is dropped")
+    check(DockLayout.reconciled(strip, open: [], known: known) == nil, "nothing open is no layout")
+    check(DockLayout.reconciled(dRow([(0.5, a), (0.5, a)]), open: ["a", "b"], known: known).map { dValidTree($0) } == true, "a damaged layout is repaired")
+
+    // Restoring from a saved state.
+    let allKnown: Set<String> = ["a", "b", "c", "d"]
+    let fromTabs = DockLayout.restoring(saved: nil, savedFill: nil, open: ["a", "b", "c"], front: "b", known: allKnown)
+    check(dShape(fromTabs.root) == "v(b,a,c)" && fromTabs.fill == "b",
+          "a state from before tiling stacks the open panels, the one in front first, and fills the region with it")
+    check(DockLayout.restoring(saved: nil, savedFill: nil, open: ["a"], front: "a", known: allKnown) == DockLayout.Restoration(root: a, fill: nil),
+          "a single open panel needs no fill")
+    check(DockLayout.restoring(saved: nil, savedFill: nil, open: [], front: nil, known: allKnown) == DockLayout.Restoration(root: nil, fill: nil),
+          "nothing open restores nothing")
+    check(dShape(DockLayout.restoring(saved: nil, savedFill: nil, open: ["a", "zzz", "b"], front: "zzz", known: allKnown).root) == "v(a,b)",
+          "a panel this build does not know is ignored, even the one that was in front")
+    let savedTree = dRow([(0.6, a), (0.4, b)])
+    let keptAsSaved = DockLayout.restoring(saved: savedTree, savedFill: nil, open: ["a", "b"], front: "a", known: allKnown)
+    check(keptAsSaved.root == savedTree && keptAsSaved.fill == nil, "a saved arrangement comes back as it was")
+    let keptFilled = DockLayout.restoring(saved: savedTree, savedFill: "b", open: ["a", "b"], front: "b", known: allKnown)
+    check(keptFilled.root == savedTree && keptFilled.fill == "b", "and so does the panel that was filling the region")
+    check(DockLayout.restoring(saved: savedTree, savedFill: "zzz", open: ["a", "b"], front: "a", known: allKnown).fill == nil,
+          "a fill that is not in the arrangement is dropped")
+    check(DockLayout.restoring(saved: savedTree, savedFill: "b", open: ["a"], front: "a", known: allKnown) == DockLayout.Restoration(root: a, fill: nil),
+          "so is one that is no longer open")
+    check(dShape(DockLayout.restoring(saved: savedTree, savedFill: nil, open: ["a", "b", "c"], front: "a", known: allKnown).root) == "v(h(a,b),c)",
+          "a panel opened since goes along the bottom")
+    let unusable = DockLayout.restoring(saved: .split(.horizontal, []), savedFill: nil, open: ["a", "b"], front: "a", known: allKnown)
+    check(dShape(unusable.root) == "v(a,b)", "a saved layout with nothing in it is rebuilt from what was open")
+
+    // Frames.
+    let region = DockRect(x: 0, y: 0, width: 400, height: 600)
+    let pair = DockLayout.frames(of: DockLayout.stacked(["a", "b"]), in: region)
+    check(pair.leaves.count == 2 && pair.dividers.count == 1, "two stacked panels have one divider between them")
+    check(pair.rect(of: "a") == DockRect(x: 0, y: 0, width: 400, height: 300)
+          && pair.dividers[0].rect == DockRect(x: 0, y: 300, width: 400, height: 1)
+          && pair.rect(of: "b") == DockRect(x: 0, y: 301, width: 400, height: 299),
+          "they split the height at whole points, the last taking the odd one")
+    check(dTiles(pair, region), "and fill the region exactly")
+    check(pair.dividers[0].path == [] && pair.dividers[0].index == 0 && pair.dividers[0].axis == .vertical, "a divider says which split it is in")
+    let mixed = dRow([(0.5, a), (0.5, dCol([(0.3, b), (0.7, c)]))])
+    let mixedFrames = DockLayout.frames(of: mixed, in: DockRect(x: 0, y: 0, width: 1001, height: 703))
+    check(dTiles(mixedFrames, DockRect(x: 0, y: 0, width: 1001, height: 703)), "a row of a panel and a column fills an odd-sized region exactly")
+    check(mixedFrames.dividers.count == 2 && mixedFrames.dividers.contains { $0.path == [1] && $0.index == 0 }, "the inner divider is found by its path")
+    let smallMinimums = DockMetrics(fallbackMinimum: DockSize(width: 50, height: 50))
+    let weightedFrames = DockLayout.frames(of: dRow([(0.5, a), (0.3, b), (0.2, c)]), in: DockRect(x: 0, y: 0, width: 1002, height: 400), metrics: smallMinimums)
+    check(weightedFrames.rect(of: "a")?.width == 500 && weightedFrames.rect(of: "b")?.width == 300 && weightedFrames.rect(of: "c")?.width == 200,
+          "weights decide the widths")
+    check(dTiles(weightedFrames, DockRect(x: 0, y: 0, width: 1002, height: 400)), "and the divider's room is accounted for")
+
+    // Minimums.
+    let metrics = DockMetrics(minimums: ["btop": DockSize(width: 640, height: 360), "wide": DockSize(width: 400, height: 200)])
+    let lopsided = DockLayout.frames(of: dRow([(0.9, a), (0.1, b)]), in: DockRect(x: 0, y: 0, width: 1000, height: 500), metrics: metrics)
+    check(lopsided.rect(of: "b")?.width == 280 && lopsided.rect(of: "a")?.width == 719, "a panel that would be too small is held at its minimum, the other taking the rest")
+    check(dTiles(lopsided, DockRect(x: 0, y: 0, width: 1000, height: 500)), "and the region is still filled")
+    let heldTwice = DockLayout.frames(of: dRow([(0.1, a), (0.1, b), (0.8, dLeaf("wide"))]), in: DockRect(x: 0, y: 0, width: 1000, height: 500), metrics: metrics)
+    check(heldTwice.rect(of: "a")?.width == 280 && heldTwice.rect(of: "b")?.width == 280 && heldTwice.rect(of: "wide")?.width == 438,
+          "several held at once leave the rest to the others")
+    let crushed = DockLayout.frames(of: dRow([(0.5, a), (0.5, b)]), in: DockRect(x: 0, y: 0, width: 400, height: 500), metrics: metrics)
+    check(dTiles(crushed, DockRect(x: 0, y: 0, width: 400, height: 500)) && crushed.rect(of: "a")?.width == 200 && crushed.rect(of: "b")?.width == 199,
+          "when the minimums cannot fit they shrink together, never below nothing")
+    check(crushed.dividers[0].leadingRange == nil, "and a squeezed divider has no range to drag over")
+    let none = DockLayout.frames(of: dRow([(0.5, a), (0.5, b)]), in: DockRect(x: 0, y: 0, width: 0, height: 0))
+    check(none.leaves.count == 2 && none.leaves.allSatisfy { $0.rect.width == 0 && $0.rect.height == 0 }, "a region with no size gives every panel none")
+    check(DockLayout.frames(of: nil, in: region).leaves.isEmpty, "an empty layout has no frames")
+    check(DockLayout.frames(of: a, in: region).rect(of: "a") == region, "a lone panel fills the region")
+
+    // The region's own floor.
+    check(DockLayout.minimumSize(of: nil, metrics: metrics) == DockSize(width: 280, height: 160), "an empty region needs the fallback")
+    check(DockLayout.minimumSize(of: a, metrics: metrics) == DockSize(width: 280, height: 160), "a lone panel needs its own minimum")
+    check(DockLayout.minimumSize(of: dRow([(0.5, a), (0.5, b)]), metrics: metrics) == DockSize(width: 561, height: 160), "a row adds widths and a divider")
+    check(DockLayout.minimumSize(of: dCol([(0.5, a), (0.5, b)]), metrics: metrics) == DockSize(width: 280, height: 321), "a column adds heights and takes the widest")
+    check(DockLayout.minimumSize(of: dCol([(0.5, dLeaf("btop")), (0.5, a)]), metrics: metrics).width == 640, "a tool in a column sets the width")
+    check(DockLayout.minimumSize(of: dRow([(0.5, dLeaf("btop")), (0.5, a)]), metrics: metrics).width == 921, "beside another panel it adds to it")
+    check(DockLayout.minimumSize(of: dRow([(0.5, a), (0.5, dCol([(0.5, b), (0.5, c)]))]), metrics: metrics) == DockSize(width: 561, height: 321),
+          "nested splits combine both ways")
+
+    // Resizing.
+    let squareRegion = DockRect(x: 0, y: 0, width: 1000, height: 600)
+    let halves = DockLayout.stacked(["a", "b"], axis: .horizontal)
+    let dragged = DockLayout.resizing(halves, splitPath: [], dividerIndex: 0, leadingExtent: 700, in: squareRegion)
+    let draggedFrames = DockLayout.frames(of: dragged, in: squareRegion)
+    check(draggedFrames.rect(of: "a")?.width == 700 && draggedFrames.rect(of: "b")?.width == 299, "dragging a divider sets the width of the panel before it")
+    check(dValidTree(dragged), "and leaves the layout in normal form")
+    let tooSmall = DockLayout.frames(of: DockLayout.resizing(halves, splitPath: [], dividerIndex: 0, leadingExtent: 50, in: squareRegion), in: squareRegion)
+    check(tooSmall.rect(of: "a")?.width == 280, "it will not go below the minimum")
+    let tooBig = DockLayout.frames(of: DockLayout.resizing(halves, splitPath: [], dividerIndex: 0, leadingExtent: 5000, in: squareRegion), in: squareRegion)
+    check(tooBig.rect(of: "b")?.width == 280, "or leave the other below its own")
+    let hold = dRow([(0.8, a), (0.1, b), (0.1, c)])
+    let holdBefore = DockLayout.frames(of: hold, in: squareRegion)
+    check(holdBefore.rect(of: "b")?.width == 280 && holdBefore.rect(of: "c")?.width == 280, "two panels are drawn at their minimum though their weights are smaller")
+    let holdAfter = DockLayout.frames(of: DockLayout.resizing(hold, splitPath: [], dividerIndex: 0, leadingExtent: 400, in: squareRegion), in: squareRegion)
+    check(holdAfter.rect(of: "a")?.width == 400 && holdAfter.rect(of: "c")?.width == 280 && holdAfter.rect(of: "b")?.width == 318,
+          "dragging one divider leaves a panel that was held at its minimum where it is drawn")
+    check(DockLayout.resizing(halves, splitPath: [], dividerIndex: 5, leadingExtent: 700, in: squareRegion) == halves, "a divider that is not there changes nothing")
+    check(DockLayout.resizing(halves, splitPath: [3], dividerIndex: 0, leadingExtent: 700, in: squareRegion) == halves, "nor does a split that is not there")
+    check(DockLayout.resizing(halves, splitPath: [], dividerIndex: 0, leadingExtent: .nan, in: squareRegion) == halves, "nor a size that is not a number")
+    let innerResized = DockLayout.resizing(
+        dRow([(0.5, a), (0.5, dCol([(0.5, b), (0.5, c)]))]),
+        splitPath: [1], dividerIndex: 0, leadingExtent: 400, in: squareRegion
+    )
+    let innerFrames = DockLayout.frames(of: innerResized, in: squareRegion)
+    check(innerFrames.rect(of: "b")?.height == 400 && innerFrames.rect(of: "a")?.width == 500, "a divider inside a column resizes only that column")
+    check(DockLayout.resizing(nil, splitPath: [], dividerIndex: 0, leadingExtent: 10, in: squareRegion) == nil, "nothing to resize")
+
+    // Where a newly opened panel goes.
+    let defaults = DockMetrics()
+    let toolMetrics = DockMetrics(minimums: ["btop": DockSize(width: 640, height: 360)])
+    func dEdge(_ width: Double, _ height: Double, new: DockSize = DockSize(width: 280, height: 160), metrics: DockMetrics = DockMetrics()) -> DockEdge {
+        DockLayout.smartEdge(
+            focused: DockRect(x: 0, y: 0, width: width, height: height),
+            focusedMinimum: DockSize(width: 280, height: 160), newMinimum: new, metrics: metrics
+        )
+    }
+    check(dEdge(420, 600) == .bottom, "in a region at its default width, a new panel goes below")
+    check(dEdge(719, 600) == .bottom && dEdge(720, 600) == .right, "and beside from 720")
+    check(dEdge(900, 600) == .right && dEdge(900, 200) == .right, "a wide panel is split side by side however tall")
+    check(dEdge(900, 600, new: DockSize(width: 640, height: 360), metrics: toolMetrics) == .bottom, "a tool that needs 640 does not fit beside a 900-wide panel")
+    check(dEdge(1000, 600, new: DockSize(width: 640, height: 360), metrics: toolMetrics) == .right, "but does beside a wider one")
+    check(dEdge(600, 200) == .right, "a short panel too narrow to be split wide but with room beside is split sideways")
+    check(dEdge(300, 200) == .bottom, "one with room for neither goes below")
+
+    check(DockLayout.smartInserting("a", near: nil, regionSize: DockSize(width: 420, height: 700), into: nil, metrics: defaults) == a, "the first panel is the layout")
+    let narrowTwo = DockLayout.smartInserting("b", near: "a", regionSize: DockSize(width: 420, height: 700), into: a, metrics: defaults)
+    check(dShape(narrowTwo) == "v(a,b)", "in a narrow region a second panel goes below")
+    let wideTwo = DockLayout.smartInserting("b", near: "a", regionSize: DockSize(width: 900, height: 700), into: a, metrics: defaults)
+    check(dShape(wideTwo) == "h(a,b)", "in a wide one it goes beside")
+    check(dShape(DockLayout.smartInserting("c", near: "b", regionSize: DockSize(width: 900, height: 700), into: wideTwo, metrics: defaults)) == "h(a,v(b,c))",
+          "the third goes below the second, which is only half the width")
+    check(dShape(DockLayout.smartInserting("c", near: "zzz", regionSize: DockSize(width: 420, height: 700), into: narrowTwo, metrics: defaults)) == "v(a,c,b)",
+          "with no focused panel it goes by the first, which is the one it lands below")
+    check(DockLayout.smartInserting("a", near: "b", regionSize: DockSize(width: 900, height: 700), into: wideTwo, metrics: defaults) == wideTwo,
+          "a panel already open stays where it is")
+
+    // Saving and reading back.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let decoder = JSONDecoder()
+    let saved = DockLayoutField(root: dRow([(0.55, a), (0.45, dCol([(0.5, b), (0.5, c)]))]))
+    if let data = try? encoder.encode(saved), let text = String(data: data, encoding: .utf8) {
+        check((try? decoder.decode(DockLayoutField.self, from: data)) == saved, "a layout survives being written and read")
+        check(text.contains("\"module\":\"a\"") && text.contains("\"axis\":\"horizontal\"") && !text.contains("_0"),
+              "and is written with names a person can read: \(text)")
+    } else {
+        check(false, "a layout can be encoded")
+    }
+    func dDecode(_ json: String) -> DockLayoutField? {
+        try? decoder.decode(DockLayoutField.self, from: Data(json.utf8))
+    }
+    check(dDecode("{\"version\":1,\"root\":{\"module\":\"a\"}}")?.root == a, "a leaf is read")
+    check(dDecode("{\"root\":{\"module\":\"a\"}}")?.root == a, "a missing version is read as the current one")
+    check(dDecode("{\"version\":1,\"root\":{\"axis\":\"sideways\",\"children\":[]}}")?.root == nil, "an unknown axis is no layout, not an error")
+    check(dDecode("{\"version\":1,\"root\":5}")?.root == nil, "a root of the wrong type is no layout")
+    check(dDecode("{\"version\":1,\"root\":{\"axis\":\"horizontal\",\"children\":[{\"weight\":\"x\",\"node\":{\"module\":\"a\"}}]}}")?.root == nil,
+          "a child of the wrong shape is no layout")
+    check(dDecode("5") != nil && dDecode("5")?.root == nil, "a value that is not an object is no layout")
+    check(dDecode("[1,2]")?.root == nil, "an array is no layout")
+    check(dDecode("{}")?.root == nil, "an empty object is no layout")
+    check(dDecode("{\"version\":99,\"root\":{\"module\":\"a\"}}")?.root == nil, "a layout from a newer version is not guessed at")
+
+    struct DockHolder: Codable { var name: String; var dockLayout: DockLayoutField? }
+    check((try? decoder.decode(DockHolder.self, from: Data("{\"name\":\"x\"}".utf8)))?.dockLayout == nil, "a state file from before this existed still reads")
+    let holderDamaged = try? decoder.decode(DockHolder.self, from: Data("{\"name\":\"x\",\"dockLayout\":{\"root\":{\"axis\":1}}}".utf8))
+    check(holderDamaged?.name == "x" && holderDamaged?.dockLayout?.root == nil, "and a damaged layout does not stop the rest of the file being read")
+    let holderWrongType = try? decoder.decode(DockHolder.self, from: Data("{\"name\":\"x\",\"dockLayout\":\"oops\"}".utf8))
+    check(holderWrongType?.name == "x" && holderWrongType?.dockLayout?.root == nil, "even when it is not an object at all")
+
+    // Whatever is done, the layout stays well-formed and keeps every panel it should.
+    var seed: UInt64 = 0x9E3779B97F4A7C15
+    func dNext(_ bound: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int((seed >> 33) % UInt64(bound))
+    }
+    let names = ["a", "b", "c", "d", "e", "f"]
+    let edges = DockEdge.allCases
+    var tree: DockNode? = nil
+    var expected = Set<String>()
+    var wellFormed = true
+    var holdsPanels = true
+    var tiled = true
+    var firstFailure = ""
+    let arena = DockRect(x: 0, y: 0, width: 900, height: 700)
+    for step in 0..<600 {
+        let name = names[dNext(names.count)]
+        let other = names[dNext(names.count)]
+        let edge = edges[dNext(edges.count)]
+        let operation: String
+        switch dNext(7) {
+        case 0:
+            operation = "insert \(name) beside \(other) \(edge)"
+            tree = DockLayout.inserting(name, beside: other, edge: edge, into: tree)
+            expected.insert(name)
+        case 1:
+            operation = "insert \(name) at region \(edge)"
+            tree = DockLayout.inserting(name, atRegionEdge: edge, into: tree)
+            expected.insert(name)
+        case 2:
+            operation = "remove \(name)"
+            tree = DockLayout.removing(name, from: tree)
+            expected.remove(name)
+        case 3:
+            operation = "move \(name) beside \(other) \(edge)"
+            tree = DockLayout.moving(name, beside: other, edge: edge, in: tree)
+        case 4:
+            operation = "move \(name) to region \(edge)"
+            tree = DockLayout.moving(name, toRegionEdge: edge, in: tree)
+        case 5:
+            operation = "swap \(name) \(other)"
+            tree = DockLayout.swapping(name, other, in: tree)
+        default:
+            let drawn = DockLayout.frames(of: tree, in: arena)
+            if let divider = drawn.dividers.first {
+                let target = Double(dNext(900))
+                operation = "resize \(divider.path) \(divider.index) to \(target)"
+                tree = DockLayout.resizing(tree, splitPath: divider.path, dividerIndex: divider.index, leadingExtent: target, in: arena)
+            } else {
+                operation = "smart insert \(name)"
+                tree = DockLayout.smartInserting(name, near: other, regionSize: DockSize(width: Double(300 + dNext(900)), height: 700), into: tree, metrics: defaults)
+                expected.insert(name)
+            }
+        }
+        if wellFormed, !dValidTree(tree) { wellFormed = false; firstFailure = "step \(step): \(operation) left \(dShape(tree))" }
+        if holdsPanels, Set(tree?.modules ?? []) != expected { holdsPanels = false; firstFailure = "step \(step): \(operation) left \(dShape(tree)), expected \(expected.sorted())" }
+        if tiled, !dTiles(DockLayout.frames(of: tree, in: arena), arena) && tree != nil { tiled = false; firstFailure = "step \(step): \(operation) left frames that do not fill the region" }
+    }
+    check(wellFormed, "600 random edits always leave the layout in normal form (\(firstFailure))")
+    check(holdsPanels, "and always hold exactly the panels that were added and not removed (\(firstFailure))")
+    check(tiled, "and always lay out to fill the region (\(firstFailure))")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

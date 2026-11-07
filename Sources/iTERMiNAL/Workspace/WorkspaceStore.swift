@@ -66,6 +66,36 @@ enum SidePanel: String, CaseIterable, Identifiable {
     var minimumWidth: Double? {
         isTool ? 640 : nil
     }
+
+    /// The least this panel is given as one tile among several, header
+    /// included. The heights are a first guess at what each can be used in and
+    /// are meant to be tuned by eye; the widths for the tools are the floor
+    /// above, so a tool in a column still raises the region to 640.
+    ///
+    /// The HTTP client has its own history list and builder side by side
+    /// inside it, which is why it is asked for a little more width than the
+    /// rest.
+    var dockMinimum: DockSize {
+        switch self {
+        case .browser: return DockSize(width: 280, height: 220)
+        case .files: return DockSize(width: 280, height: 180)
+        case .notes: return DockSize(width: 280, height: 160)
+        case .http: return DockSize(width: 360, height: 340)
+        case .superfile, .btop: return DockSize(width: minimumWidth ?? 640, height: 360)
+        }
+    }
+
+    /// What the layout needs to know about every panel, keyed the way the
+    /// layout names them.
+    static let dockMetrics = DockMetrics(
+        minimums: Dictionary(uniqueKeysWithValues: SidePanel.allCases.map { ($0.rawValue, $0.dockMinimum) })
+    )
+}
+
+/// How one panel sits in the trailing region, as the Move and Fill menu offers
+/// it: arranged with the others, filling the region, or filling the window.
+enum DockArrangement: Equatable {
+    case tiled, fillRegion, fillWindow
 }
 
 /// What the detail column is showing: the terminal surface, or one of the
@@ -139,29 +169,59 @@ final class WorkspaceStore: ObservableObject {
             }
         }
     }
-    /// Panels currently in the trailing region. A set rather than one
-    /// optional, so opening Files no longer evicts the browser — every panel
-    /// keeps its place until you close it yourself.
+    /// How the panels in the trailing region are arranged: a tree of splits
+    /// whose leaves are panels (see `DockLayout`). Every panel keeps its place
+    /// until you close it yourself, so opening Files does not evict the browser.
     ///
-    /// A bundled tool whose panel leaves this set is stopped here, and only
-    /// here. `togglePanel`, `closePanel` and a snapshot import each take panels
-    /// out their own way; putting the stop in the didSet means none of them
+    /// Which panels are open is read off this tree (`openPanels`), so the two
+    /// cannot disagree. Changes go through `setDockLayout`, which puts the tree
+    /// back in normal form and saves.
+    ///
+    /// A bundled tool whose panel leaves the tree is stopped here, and only
+    /// here. Closing, moving a panel out and a snapshot import each take panels
+    /// away their own way; putting the stop in the didSet means none of them
     /// can forget to, and a btop nobody can see is never left polling the
-    /// machine. Hiding the whole region does not touch this set, so tools keep
+    /// machine. Hiding the whole region does not touch the tree, so tools keep
     /// running while it is merely put away.
-    @Published private(set) var openPanels: Set<SidePanel> = [] {
+    @Published private(set) var dockLayout: DockNode? = nil {
         didSet {
-            for panel in oldValue.subtracting(openPanels) {
-                if let tool = panel.tool { stopToolSession(tool) }
+            let before = Set(oldValue?.modules ?? [])
+            let after = Set(dockLayout?.modules ?? [])
+            for id in before.subtracting(after) {
+                if let tool = SidePanel(rawValue: id)?.tool { stopToolSession(tool) }
             }
         }
     }
+
+    /// Panels currently in the trailing region, however they are arranged.
+    var openPanels: Set<SidePanel> {
+        Set(panelsInReadingOrder)
+    }
+
+    /// The panel standing alone in the region while the others are set aside
+    /// (their models and any running tool stay alive, as when a tab strip
+    /// switched between them), or nil while they are all arranged side by
+    /// side. Whether it also covers the terminal is `rightPanelExpanded`.
+    @Published private(set) var dockFill: SidePanel?
+
+    /// How big the region was last laid out. Written by the region as it
+    /// resizes and only read when a panel is opened, to choose which side of
+    /// the focused one it goes on; not published, so a drag does not repaint
+    /// everything that watches the store.
+    var dockRegionSize = DockSize(width: 0, height: 0)
     /// Whether the trailing region is showing, tracked separately from what
     /// is in it: the region can be open and empty (offering the picker), and
     /// hiding it keeps its panels so reopening restores them where they were.
     @Published private(set) var rightRegionOpen = false
-    /// Which open panel is in front when more than one shares the region.
-    @Published var frontPanel: SidePanel?
+    /// The panel the person is working in — the one a new panel opens beside,
+    /// and the one that stands alone while the region is filled. Saved, which
+    /// the property did not use to be: a click on a panel's tab only reached
+    /// disk with the next unrelated save.
+    @Published var frontPanel: SidePanel? {
+        didSet {
+            if oldValue != frontPanel { scheduleSave() }
+        }
+    }
     /// True while the trailing region is expanded over the main surface.
     @Published private(set) var rightPanelExpanded = false
     @Published private(set) var bottomDockOpen = false
@@ -459,6 +519,17 @@ final class WorkspaceStore: ObservableObject {
             // Already focused, so the didSet will not fire — but clicking back
             // into a pane still dismisses its mark.
             session.clearAttention()
+        }
+        // A tool's terminal taking focus makes its panel the focused one, which
+        // is what a panel opened next goes beside. Only a tool can say so: a
+        // click inside the browser's web view never reaches here, so the
+        // browser becomes the focused panel through its header, or by being
+        // opened.
+        if let tool = session.kind.tool,
+           let panel = SidePanel.allCases.first(where: { $0.tool == tool }),
+           openPanels.contains(panel),
+           frontPanel != panel {
+            frontPanel = panel
         }
     }
 
@@ -946,7 +1017,7 @@ final class WorkspaceStore: ObservableObject {
             resetComposerSession()
         case .panel(let panel):
             // Stopping means what closing means here too: the panel goes, and
-            // openPanels' didSet ends the process. Not filed under Recents —
+            // the arrangement's didSet ends the process. Not filed under Recents —
             // that list is shells to reopen, and a tool reopens from its icon.
             closePanel(panel)
         }
@@ -1197,25 +1268,54 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: Side panels
 
-    /// Open panels in a stable order, so the tab strip doesn't reshuffle.
+    /// Open panels in a stable order — the order they are declared in — so a
+    /// strip of them doesn't reshuffle when the arrangement changes.
     var orderedOpenPanels: [SidePanel] {
         SidePanel.allCases.filter { openPanels.contains($0) }
     }
 
-    /// The panel the trailing region is currently showing.
+    /// Open panels as they read in the arrangement: left to right, top to
+    /// bottom.
+    var panelsInReadingOrder: [SidePanel] {
+        (dockLayout?.modules ?? []).compactMap(SidePanel.init(rawValue:))
+    }
+
+    /// The panel the person is working in: the one in front, or the first in
+    /// the arrangement when none is.
     var visiblePanel: SidePanel? {
         if let frontPanel, openPanels.contains(frontPanel) { return frontPanel }
-        return orderedOpenPanels.first
+        return panelsInReadingOrder.first
+    }
+
+    /// What the region draws right now: the whole arrangement, or only the
+    /// panel filling it.
+    var effectiveDockLayout: DockNode? {
+        if let dockFill, dockLayout?.contains(dockFill.rawValue) == true {
+            return .leaf(dockFill.rawValue)
+        }
+        return dockLayout
+    }
+
+    /// Where `panel` stands in the Move and Fill menu.
+    func arrangement(of panel: SidePanel) -> DockArrangement {
+        guard dockFill == panel else { return .tiled }
+        return rightPanelExpanded ? .fillWindow : .fillRegion
     }
 
     /// Shortcut and top-strip semantics: turning a panel off that was the
     /// only one also puts the region away, so the toggle stays predictable.
     func togglePanel(_ panel: SidePanel) {
         if rightRegionOpen, openPanels.contains(panel) {
-            withAnimation(Motion.panel) {
-                _ = openPanels.remove(panel)
-                if frontPanel == panel { frontPanel = orderedOpenPanels.first }
-                if openPanels.isEmpty {
+            // While one panel fills the region the others are set aside, not on
+            // screen. Closing one the person cannot see would be a surprise, so
+            // the shortcut brings it forward instead.
+            if let fill = dockFill, fill != panel {
+                focusPanel(panel)
+                return
+            }
+            closePanel(panel)
+            if openPanels.isEmpty {
+                withAnimation(Motion.panel) {
                     rightRegionOpen = false
                     rightPanelExpanded = false
                 }
@@ -1226,12 +1326,30 @@ final class WorkspaceStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Brings `panel` into the region and makes it the one in front.
+    ///
+    /// A panel that is not open yet is placed beside the one in front, on the
+    /// side `DockLayout.smartEdge` picks for the region's current size; one that
+    /// is open keeps its place in the arrangement.
     func openPanel(_ panel: SidePanel) {
+        let wasFilling = dockFill != nil
         withAnimation(Motion.panel) {
-            _ = openPanels.insert(panel)
+            if !openPanels.contains(panel) {
+                setDockLayout(DockLayout.smartInserting(
+                    panel.rawValue,
+                    near: visiblePanel?.rawValue,
+                    regionSize: smartPlacementSize,
+                    into: dockLayout,
+                    metrics: SidePanel.dockMetrics
+                ))
+            }
             frontPanel = panel
+            // The panels set aside by a fill are not on screen, so one opened
+            // over a fill takes its place rather than arriving out of sight.
+            if wasFilling { dockFill = panel }
             rightRegionOpen = true
         }
+        releaseFocusFromHiddenTool()
         if panel == .browser, panelBrowserTabs.tabs.isEmpty {
             panelBrowserTabs.newTab()
         }
@@ -1255,10 +1373,24 @@ final class WorkspaceStore: ObservableObject {
     /// Closing a panel from its own tab leaves the region up, so emptying it
     /// lands on the picker rather than collapsing the layout out from under
     /// the pointer that just clicked.
+    ///
+    /// Closing the panel that is in front, or the one filling the region, hands
+    /// that role to the next panel in the arrangement (the previous one, for the
+    /// last), and closing a panel that is not open does nothing.
     func closePanel(_ panel: SidePanel) {
+        let order = panelsInReadingOrder
+        var successor: SidePanel?
+        if let index = order.firstIndex(of: panel) {
+            if index + 1 < order.count {
+                successor = order[index + 1]
+            } else if index > 0 {
+                successor = order[index - 1]
+            }
+        }
         withAnimation(Motion.panel) {
-            _ = openPanels.remove(panel)
-            if frontPanel == panel { frontPanel = orderedOpenPanels.first }
+            if dockFill == panel { dockFill = successor }
+            if frontPanel == panel { frontPanel = successor }
+            setDockLayout(DockLayout.removing(panel.rawValue, from: dockLayout))
             // Nothing left to expand over the main surface.
             if openPanels.isEmpty { rightPanelExpanded = false }
         }
@@ -1293,7 +1425,138 @@ final class WorkspaceStore: ObservableObject {
     /// area — the "full view" of the panels menu.
     func openPanelExpanded(_ panel: SidePanel) {
         openPanel(panel)
-        withAnimation(Motion.panel) { rightPanelExpanded = true }
+        withAnimation(Motion.panel) {
+            dockFill = panel
+            rightPanelExpanded = true
+        }
+        scheduleSave()
+    }
+
+    // MARK: Arranging the panels
+
+    /// Makes `panel` the one in front. While one panel fills the region this is
+    /// also what swaps which one is on screen, so the strip of panels at the top
+    /// still works like tabs.
+    func focusPanel(_ panel: SidePanel) {
+        guard openPanels.contains(panel) else { return }
+        frontPanel = panel
+        guard let fill = dockFill, fill != panel else { return }
+        holdTerminalSizes()
+        withAnimation(Motion.panel) { dockFill = panel }
+        releaseFocusFromHiddenTool()
+        scheduleSave()
+    }
+
+    /// The Fill and arrange row of a panel's menu.
+    func setArrangement(_ arrangement: DockArrangement, for panel: SidePanel) {
+        guard openPanels.contains(panel) else { return }
+        holdTerminalSizes()
+        withAnimation(Motion.panel) {
+            frontPanel = panel
+            switch arrangement {
+            case .tiled:
+                // Already arranged side by side: nothing to undo, and the
+                // expand toggle is what undoes an expanded region.
+                if dockFill != nil {
+                    dockFill = nil
+                    rightPanelExpanded = false
+                }
+            case .fillRegion:
+                dockFill = panel
+                rightPanelExpanded = false
+            case .fillWindow:
+                dockFill = panel
+                rightPanelExpanded = true
+            }
+        }
+        releaseFocusFromHiddenTool()
+        scheduleSave()
+    }
+
+    /// The Move row of a panel's menu: the panel goes along one side of the
+    /// region, full height or full width. Moving means arranging, so a fill is
+    /// undone.
+    func movePanel(_ panel: SidePanel, toRegionEdge edge: DockEdge) {
+        guard openPanels.contains(panel) else { return }
+        withAnimation(Motion.panel) {
+            dockFill = nil
+            setDockLayout(DockLayout.moving(panel.rawValue, toRegionEdge: edge, in: dockLayout))
+            frontPanel = panel
+        }
+        scheduleSave()
+    }
+
+    /// Stores an arrangement the region has finished editing — a divider that
+    /// was dragged. Ignored when the panels in it are no longer the open ones,
+    /// which is what a drag that outlived a closing panel would otherwise
+    /// resurrect.
+    func commitDockLayout(_ layout: DockNode?) {
+        guard Set(layout?.modules ?? []) == Set(dockLayout?.modules ?? []) else { return }
+        setDockLayout(layout)
+    }
+
+    /// Back to every open panel in a single column, sharing the height equally.
+    func resetDockLayout() {
+        withAnimation(Motion.panel) {
+            dockFill = nil
+            setDockLayout(DockLayout.stacked(panelsInReadingOrder.map { $0.rawValue }))
+        }
+        scheduleSave()
+    }
+
+    /// The one place the arrangement is replaced after launch: puts it in normal
+    /// form, and keeps the fill and the panel in front pointing at panels that
+    /// are still in it.
+    private func setDockLayout(_ proposed: DockNode?) {
+        let layout = DockLayout.normalized(proposed)
+        guard layout != dockLayout else { return }
+        holdTerminalSizes()
+        dockLayout = layout
+        let open = panelsInReadingOrder
+        if let fill = dockFill, !open.contains(fill) { dockFill = nil }
+        if let front = frontPanel, !open.contains(front) { frontPanel = open.first }
+        scheduleSave()
+    }
+
+    /// Which side of the focused panel a newcomer goes on depends on how much
+    /// room there is. The region's own measurement is used while it is on
+    /// screen at its tiled size; otherwise the width it opens at.
+    private var smartPlacementSize: DockSize {
+        let measured = dockRegionSize
+        if rightRegionOpen, !rightPanelExpanded, measured.width > 0, measured.height > 0 {
+            return measured
+        }
+        return DockSize(
+            width: AppSettings.shared.rightPanelWidth,
+            height: measured.height > 0 ? measured.height : 700
+        )
+    }
+
+    /// A rearrangement animates panels from one size to another, and every
+    /// frame of that is a new column count for a terminal — a SIGWINCH for
+    /// btop to redraw its whole screen on. Terminals keep the size they had
+    /// until the animation is over, as they do during a divider drag, and catch
+    /// up once.
+    ///
+    /// Nothing is held when a seam drag already holds them, so this cannot cut
+    /// a real drag short.
+    private func holdTerminalSizes() {
+        guard !SeamDrag.isActive else { return }
+        SeamDrag.begin()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { SeamDrag.end() }
+    }
+
+    /// A fill puts the other panels out of sight, and focus must not stay
+    /// inside one: ⇧⌘W would close a tool the person cannot see, and when
+    /// focus is in no pane of the tab at all it closes the whole tab.
+    private func releaseFocusFromHiddenTool() {
+        guard let focused = focusedSessionID,
+              let tool = toolSessions.first(where: { $0.value.id == focused })?.key,
+              let panel = SidePanel.allCases.first(where: { $0.tool == tool }) else { return }
+        let showing = rightRegionOpen && effectiveDockLayout?.contains(panel.rawValue) == true
+        if !showing {
+            focusedSessionID = selectedTab?.root.firstTerminal()?.id
+        }
     }
 
     // MARK: Bottom terminal dock
@@ -1464,7 +1727,9 @@ final class WorkspaceStore: ObservableObject {
                 )
             },
             rightPanelWidth: settings.rightPanelWidth,
-            bottomDockHeight: settings.bottomDockHeight
+            bottomDockHeight: settings.bottomDockHeight,
+            dockLayout: DockLayoutField(root: dockLayout),
+            dockFill: dockFill?.rawValue
         )
     }
 
@@ -1473,8 +1738,7 @@ final class WorkspaceStore: ObservableObject {
     /// died with the app.
     private func applyPanelSnapshot(_ snapshot: PanelStateSnapshot?) {
         guard let snapshot else { return }
-        openPanels = Set(snapshot.openPanels.compactMap(SidePanel.init(rawValue:)))
-        frontPanel = snapshot.frontPanel.flatMap(SidePanel.init(rawValue:))
+        restoreDockLayout(from: snapshot)
         rightRegionOpen = snapshot.rightRegionOpen && !openPanels.isEmpty
         if openPanels.contains(.browser), panelBrowserTabs.tabs.isEmpty {
             panelBrowserTabs.newTab()
@@ -1516,6 +1780,25 @@ final class WorkspaceStore: ObservableObject {
         }
         bottomDockOpen = snapshot.bottomDockOpen && !dockSessions.isEmpty
         selectedDockSessionID = dockSessions.first?.id
+    }
+
+    /// Sets the arrangement of the trailing region, and the panel in front,
+    /// from a saved state. `DockLayout.restoring` decides what the arrangement
+    /// is, including for a file written before panels could be tiled.
+    private func restoreDockLayout(from snapshot: PanelStateSnapshot) {
+        let restored = DockLayout.restoring(
+            saved: snapshot.dockLayout?.root,
+            savedFill: snapshot.dockFill,
+            open: snapshot.openPanels,
+            front: snapshot.frontPanel,
+            known: Set(SidePanel.allCases.map { $0.rawValue })
+        )
+        dockLayout = restored.root
+        dockFill = restored.fill.flatMap(SidePanel.init(rawValue:))
+        frontPanel = snapshot.frontPanel.flatMap(SidePanel.init(rawValue:))
+        if let front = frontPanel, !openPanels.contains(front) {
+            frontPanel = panelsInReadingOrder.first
+        }
     }
 
     /// Replaces every workspace with the contents of a snapshot, shutting down

@@ -323,6 +323,9 @@ struct CommandPaletteView: View {
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()
             },
+            PaletteAction(id: "panels.resetLayout", title: "Reset Panel Layout", subtitle: "Put the open panels in one column, sharing the height", systemImage: "square.grid.2x2") {
+                store.resetDockLayout()
+            },
             PaletteAction(id: "sidebar.toggle", title: "Toggle Sidebar", subtitle: "Show or hide the spaces panel", systemImage: "sidebar.left", shortcut: "⌃⌘S") {
                 withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
             },
