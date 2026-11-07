@@ -24,8 +24,11 @@ the command whose text shares none of them.
    no program or command twice, no description over 90 characters or ending in a full
    stop, no `{{` without its `}}`.
 3. **tldr-pages** (CC BY 4.0), English `common` and `osx`: 3,556 programs and 22,567
-   examples after the conversion in `scripts/tldr-convert.py`. Pinned by SHA-256 in
-   `scripts/tools.env`, fetched by `scripts/fetch-tldr.sh`, never in git. The licence
+   examples after the conversion in `scripts/tldr-convert.py`. Pinned in
+   `scripts/tools.env` as a commit and by a SHA-256 of the pages the conversion reads
+   (not of the release's `tldr.zip`, which tldr-pages re-uploads whenever it merges, so a
+   hash of it stops matching within hours), fetched by `scripts/fetch-tldr.sh`, never in
+   git. The licence
    asks for credit and for changes to be marked, so the notice is bundled, each page
    names the source, each example carries a badge, and the changes are listed at the top
    of the converter. Where both sources have a program, the page written for the app

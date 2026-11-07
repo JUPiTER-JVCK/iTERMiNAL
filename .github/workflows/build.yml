@@ -271,6 +271,12 @@ jobs:
       - name: Check imgcat
         run: python3 scripts/imgcat-check.py
 
+      # What decides whether the tldr-pages data may be used: the hash of its
+      # pages, which has to survive GitHub packing a commit differently and has
+      # to change when a page does. Nothing is downloaded.
+      - name: Check tldr pin
+        run: python3 scripts/tldr-pin-check.py
+
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
       # had nothing to do with this project. Taking the tool straight from its
@@ -340,8 +346,8 @@ jobs:
           ls -la Vendor/Fonts Vendor/Fonts/licenses
 
           # The Cheatsheet page's examples for thousands of programs: tldr-pages,
-          # fetched at the pinned release, checked against its hash and converted
-          # to the one file the page reads. Vendor/Cheatsheets goes to
+          # fetched at the pinned commit, its pages checked against their hash and
+          # converted to the one file the page reads. Vendor/Cheatsheets goes to
           # Contents/Resources/Cheatsheets by project.yml's copy phase.
           scripts/fetch-tldr.sh Vendor/Cheatsheets
           ls -la Vendor/Cheatsheets Vendor/Cheatsheets/licenses
