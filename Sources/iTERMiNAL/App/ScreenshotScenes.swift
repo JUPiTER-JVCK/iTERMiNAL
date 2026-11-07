@@ -1654,13 +1654,16 @@ final class ScreenshotRun {
             expect(false, "tldr-pages did not load: \(cheats.tldr)")
         }
 
-        // "gcm finds git commit -m, with the best match already open."
-        await search("gcm")
+        // "gitcm finds git commit -m, with the best match already open." Not `gcm`:
+        // against all of tldr-pages a program whose name holds those letters in order
+        // (gchmod, gcomm, gcksum) ranks above one whose examples do, and git is the
+        // second kind. Letters of git's own name put it first.
+        await search("gitcm")
         let best = cheats.bestExampleInSelection?.command ?? ""
-        say("cheatsheet: gcm: rows \(cheats.rows.prefix(4).map(\.name)), open \(cheats.selectedProgram ?? "nothing"), best \(best)")
-        expect(cheats.resolvedMode == .fuzzy, "`gcm` is searched by its letters")
+        say("cheatsheet: gitcm: rows \(cheats.rows.prefix(4).map(\.name)), open \(cheats.selectedProgram ?? "nothing"), best \(best)")
+        expect(cheats.resolvedMode == .fuzzy, "`gitcm` is searched by its letters")
         expect(cheats.selectedProgram == "git" && best.hasPrefix("git commit") && best.contains("-m"),
-               "`gcm` opens git with `git commit -m` as its best command")
+               "`gitcm` opens git with `git commit -m` as its best command")
         let found = capture("cheatsheet")
 
         // "Typing a sentence searches by what the words mean instead."
@@ -1704,8 +1707,10 @@ final class ScreenshotRun {
 
         // "Insert takes a command back to the terminal and puts it in the composer's
         // input. It is not run, and a {{placeholder}} is left in place."
-        await search("gcm")
-        if let example = cheats.bestExampleInSelection {
+        // `git commit -m "{{message}}"`: a command with a placeholder, which is the
+        // case the claim is about.
+        await search("gitcm")
+        if let example = cheats.bestExampleInSelection, example.command.contains("{{") {
             store.insertIntoComposer(example.command)
             await pause(1.5)
             let typed = ScreenshotMode.composerField(in: window)?.string
@@ -1713,7 +1718,7 @@ final class ScreenshotRun {
             expect(store.detailMode == .terminal, "Insert goes back to the terminal")
             expect(typed == example.command, "Insert puts the command in the composer exactly as it is, placeholders and all")
         } else {
-            expect(false, "there is a command to insert")
+            expect(false, "there is a command with a {{placeholder}} to insert: \(String(describing: cheats.bestExampleInSelection?.command))")
         }
 
         say("cheatsheet: \(held) of \(total) claims held")

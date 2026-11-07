@@ -97,7 +97,7 @@ struct CheatsheetView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 210)
-            .help("Letters finds what contains them in order, as fzf does: gcm finds git commit -m. Words finds what a sentence means: undo my last commit. Auto decides from what you typed.")
+            .help("Letters finds what contains them in order, as fzf does: gitcm finds git commit -m. Words finds what a sentence means: undo my last commit. Auto decides from what you typed.")
             if let caption = modeCaption {
                 Text(caption)
                     .font(.system(size: 11))
