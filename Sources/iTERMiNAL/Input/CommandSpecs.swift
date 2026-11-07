@@ -664,6 +664,327 @@ enum CommandSpecs {
     sub import | Read a domain from a plist
     sub read-type | Print the type of a setting
 
+    # --- macOS system tools --------------------------------------------------
+    # Written from Apple's published manual pages for these tools, and checked
+    # against them: every flag and subcommand below is one the page documents,
+    # with one exception, `ipconfig getiflist`, which the tool's own usage text
+    # prints and tldr-pages uses though its page does not list it. Apple's pages
+    # are for one release, so a Mac may have more than is here; the Cheatsheet
+    # also shows the manual page installed on the Mac itself.
+    cmd ipconfig
+    sub getiflist | List the network interfaces
+    sub getifaddr | Print the IPv4 address of an interface
+    sub ifcount | Print how many interfaces can be configured
+    sub getsummary | Show the IP configuration of an interface
+    sub getoption | Print one DHCP option the interface was given
+    sub getpacket | Print the DHCP packet the interface was given
+    sub getv6packet | Print the DHCPv6 packet the interface was given
+    sub getra | Print the IPv6 router advertisement received
+    sub getdhcpduid | Print this Mac's DHCP unique identifier
+    sub getdhcpiaid | Print the DHCPv6 identity association id of an interface
+    sub waitall | Wait until every network service has finished configuring
+    sub set | Give an interface a temporary configuration (needs root)
+    sub setverbose | Turn verbose agent logging on or off (needs root)
+
+    cmd ifconfig
+    opt | -a | Show every interface, including ones that are down
+    opt | -l | List only the names of the interfaces
+    opt | -u | With -a or -l, only interfaces that are up
+    opt | -d | With -a or -l, only interfaces that are down
+    opt | -v | Show more detail
+    opt | -L | Show how long each address is valid
+    opt | -m | Show the media types an interface supports
+    opt | -r | Show routing information for the interface
+
+    cmd networksetup
+    opt | -listallnetworkservices | List every network service
+    opt | -listallhardwareports | List hardware ports with their devices and MAC addresses
+    opt | -listnetworkserviceorder | List the services in the order they are tried
+    opt | -getinfo <service> | Show a service's IP address, subnet mask, router and MAC
+    opt | -getdnsservers <service> | Show the DNS servers a service uses
+    opt | -setdnsservers <service> | Set a service's DNS servers (Empty clears them)
+    opt | -getsearchdomains <service> | Show a service's search domains
+    opt | -setdhcp <service> | Use DHCP on a service
+    opt | -setmanual <service> | Give a service a fixed address, mask and router
+    opt | -getwebproxy <service> | Show a service's HTTP proxy
+    opt | -setwebproxy <service> | Set a service's HTTP proxy
+    opt | -setwebproxystate <service> | Turn a service's HTTP proxy on or off
+    opt | -setsecurewebproxystate <service> | Turn a service's HTTPS proxy on or off
+    opt | -getairportpower <device> | Show whether Wi-Fi is on
+    opt | -setairportpower <device> | Turn Wi-Fi on or off
+    opt | -getairportnetwork <device> | Show the Wi-Fi network joined
+    opt | -setairportnetwork <device> | Join a Wi-Fi network
+    opt | -listpreferredwirelessnetworks <device> | List the Wi-Fi networks remembered
+    opt | -setnetworkserviceenabled <service> | Turn a network service on or off
+    opt | -getcomputername | Show this Mac's computer name
+    opt | -setcomputername | Set this Mac's computer name
+    opt | -detectnewhardware | Look for network hardware that was added
+
+    cmd scutil
+    opt | --get <pref> | Print a name: ComputerName, LocalHostName or HostName
+    opt | --set <pref> | Set one of those names
+    opt | --dns | Show the DNS configuration
+    opt | --proxy | Show the proxy configuration
+    opt | --nc | Work with network connections such as VPNs
+    opt | --renew <interface> | Renew the DHCP lease on an interface
+    opt | -r <host> | Check whether a host or address is reachable
+    opt | -W | With -r, keep watching and report changes
+    opt | -w <key> | Wait for a dynamic store key to appear
+    opt | -t <seconds> | How long -w waits
+
+    cmd route
+    opt | -n | Show addresses as numbers, without looking up names
+    opt | -v | Print more detail
+    opt | -q | Print nothing
+    opt | -d | Debug: do not change the routing tables
+    opt | -t | Test: do not send the change to the kernel
+    sub get | Show the route used to reach a destination
+    sub add | Add a route
+    sub delete | Delete a route
+    sub change | Change a route
+    sub flush | Delete all gateway routes
+    sub monitor | Watch routing changes as they happen
+    sopt add, delete, change, get | -net | The destination is a network
+    sopt add, delete, change, get | -host | The destination is a host
+    sopt add, delete, change, get | -inet6 | Use IPv6 addresses
+    sopt add, delete, change | -netmask <mask> | The netmask of the destination
+    sopt add, delete, change | -interface | The gateway is an interface of this Mac
+
+    cmd arp
+    opt | -a | Show every entry in the ARP table
+    opt | -n | Show addresses as numbers, without looking up names
+    opt | -d <host> | Delete an entry (use -a instead of a host for all)
+    opt | -s <host> | Add a static entry: the host, then its Ethernet address
+    opt | -S <host> | Like -s, but replace an entry that is already there
+    opt | -i <interface> | Limit to one interface
+    opt | -l | Show link-layer reachability
+    opt | -x | Show the extended link-layer reachability
+    opt | -f <file> | Add the entries listed in a file
+
+    cmd netstat
+    opt | -a | Show all sockets, including listening ones
+    opt | -n | Show addresses and ports as numbers
+    opt | -r | Show the routing table
+    opt | -i | Show the network interfaces and their traffic
+    opt | -I <interface> | Limit to one interface
+    opt | -s | Show statistics for each protocol
+    opt | -p <protocol> | Show one protocol, such as tcp or udp
+    opt | -f <family> | Show one address family: inet, inet6 or unix
+    opt | -b | With -i, show the bytes in and out
+    opt | -m | Show memory buffer (mbuf) statistics
+    opt | -L | Show the sizes of the listen queues
+    opt | -w <seconds> | Repeat the interface display at this interval
+    opt | -v | Show more detail
+
+    cmd traceroute
+    opt | -n | Print addresses as numbers, without looking up names
+    opt | -m <max_ttl> | The most hops to try
+    opt | -q <nqueries> | How many probes to send for each hop
+    opt | -w <seconds> | How long to wait for each reply
+    opt | -I | Use ICMP echo requests instead of UDP
+    opt | -P <protocol> | Send probes using this protocol
+    opt | -p <port> | The port to probe
+    opt | -f <first_ttl> | Start at this hop
+    opt | -s <address> | Use this source address
+    opt | -i <interface> | Send probes from this interface
+    opt | -a | Look up the AS number of each hop
+    opt | -S | Summarise how many probes went unanswered for each hop
+    opt | -v | Show every ICMP packet received
+
+    cmd pmset
+    opt | -g | Show settings and state: try batt, log, assertions or sched
+    opt | -a | Apply settings to every power source
+    opt | -b | Apply settings to battery power
+    opt | -c | Apply settings to the charger
+    opt | -u | Apply settings to the UPS
+    sub sleepnow | Sleep right now
+    sub displaysleepnow | Turn the display off right now
+    sub schedule | Schedule a one-time sleep, wake or power on
+    sub repeat | Schedule a repeating sleep, wake or power on
+    sub noidle | Keep the Mac from idle sleeping while this runs
+    sub restoredefaults | Put every power setting back to its default
+
+    cmd launchctl
+    sub list | List the jobs that are loaded
+    sub print | Print the state of a service, a domain or the whole system
+    sub print-disabled | List the services that are disabled in a domain
+    sub bootstrap | Load a service from a property list into a domain
+    sub bootout | Unload a service from a domain
+    sub enable | Let a service load
+    sub disable | Stop a service loading, and remember that across restarts
+    sub kickstart | Start a service now
+    sub kill | Send a signal to a service
+    sub load | Load a property list (the older form of bootstrap)
+    sub unload | Unload a property list (the older form of bootout)
+    sub start | Start a job by its label
+    sub stop | Stop a job by its label
+    sub remove | Remove a job by its label
+    sub blame | Say why a service was started
+    sub error | Explain an error code
+    sopt kickstart | -k | Kill the service first if it is running
+    sopt kickstart | -p | Print the process id afterwards
+    sopt load, unload | -w | Also record that the job is enabled or disabled
+
+    cmd mdutil
+    opt | -s | Show the indexing status
+    opt | -a | Apply to every volume
+    opt | -i <on|off> | Turn Spotlight indexing on or off
+    opt | -E | Erase the index and rebuild it
+    opt | -d | Turn Spotlight searches off for the volume
+    opt | -p | Publish the index of a network volume
+    opt | -v | Print more detail
+
+    cmd softwareupdate
+    opt | -l, --list | List the updates that are available
+    opt | -i, --install | Install the updates named, or those chosen by the flags below
+    opt | -d, --download | Download updates without installing them
+    opt | -a, --all | Every update that applies to this Mac
+    opt | -r, --recommended | Only the recommended updates
+    opt | -R, --restart | Restart afterwards if the install needs it
+    opt | --os-only | Only macOS updates
+    opt | --safari-only | Only Safari updates
+    opt | --list-full-installers | List the full macOS installers on offer
+    opt | --install-rosetta | Install Rosetta, for apps built for Intel
+    opt | --agree-to-license | With --install-rosetta, accept the licence
+
+    cmd tmutil
+    sub startbackup | Start a backup
+    sub stopbackup | Stop the backup that is running
+    sub enable | Turn automatic backups on
+    sub disable | Turn automatic backups off
+    sub listbackups | List the backups on the destination
+    sub latestbackup | Print the path of the newest backup
+    sub destinationinfo | Show the backup destinations
+    sub localsnapshot | Make a local snapshot now
+    sub listlocalsnapshots | List the local snapshots of a volume
+    sub deletelocalsnapshots | Delete the local snapshot made on a given date
+    sub thinlocalsnapshots | Free space by thinning local snapshots
+    sub addexclusion | Leave a file or folder out of backups
+    sub removeexclusion | Put an excluded file or folder back
+    sub isexcluded | Say whether a file or folder is excluded
+    sub restore | Restore a file or folder from a backup
+    sub compare | Compare a backup with the current files
+    sopt startbackup | -a, --auto | Behave like an automatic backup
+    sopt startbackup | -b, --block | Wait until the backup finishes
+    sopt addexclusion | -p | Exclude by path, so it applies wherever the item moves
+
+    cmd hdiutil
+    sub attach | Mount a disk image
+    sub detach | Unmount and eject a disk image
+    sub create | Make a new disk image
+    sub convert | Convert a disk image to another format
+    sub resize | Change the size of a disk image
+    sub verify | Check a disk image for errors
+    sub info | Show the images that are attached
+    sub imageinfo | Show information about a disk image
+    sub eject | Eject a disk image or disk
+    sub compact | Reclaim space from a sparse image
+    sub checksum | Print the checksum of a disk image
+    sub chpass | Change the password of an encrypted image
+    sopt attach | -readonly | Mount it read-only
+    sopt attach | -mountpoint <path> | Mount it here
+    sopt attach | -nobrowse | Keep it out of Finder's sidebar
+    sopt attach | -noverify | Skip checking the image first
+    sopt detach | -force | Eject even if files are open
+    sopt create | -size <size> | How big the image is
+    sopt create | -srcfolder <path> | Fill it from this folder
+    sopt create | -volname <name> | The volume name
+    sopt create | -fs <filesystem> | The filesystem, such as APFS or HFS+
+    sopt create | -format <format> | The image format, such as UDZO
+    sopt create | -encryption | Encrypt the image
+    sopt create | -ov | Overwrite a file that is already there
+    sopt convert | -format <format> | The format to convert to
+    sopt convert | -o <file> | Where to write the result
+
+    cmd plutil
+    opt | -p | Print a property list in a readable form
+    opt | -lint | Check a property list for errors
+    opt | -convert <format> | Convert to xml1, binary1, json, swift, objc or raw
+    opt | -extract <keypath> <format> | Print the value at a key path
+    opt | -insert <keypath> | Add a value at a key path
+    opt | -replace <keypath> | Replace the value at a key path
+    opt | -remove <keypath> | Remove the value at a key path
+    opt | -type <keypath> | Print the type of the value at a key path
+    opt | -create <format> | Create an empty property list
+    opt | -o <file> | Write the result to this file
+    opt | -s | Print nothing when it succeeds
+    opt | -r | Add whitespace to JSON output to make it readable
+
+    cmd xattr
+    opt | -l | Print the names and the values
+    opt | -p <name> | Print one attribute
+    opt | -w <name> | Set an attribute to the value that follows
+    opt | -d <name> | Delete one attribute
+    opt | -c | Clear every attribute
+    opt | -r | Go into folders
+    opt | -s | Act on a symbolic link itself, not what it points to
+    opt | -v | Always print the file name
+    opt | -x | Read and print values as hexadecimal
+
+    cmd say
+    opt | -v <voice>, --voice=<voice> | The voice to use (-v '?' lists them)
+    opt | -r <rate>, --rate=<rate> | The speed, in words per minute
+    opt | -f <file>, --input-file=<file> | Speak the contents of a file
+    opt | -o <file>, --output-file=<file> | Write the speech to an audio file
+    opt | -a <device>, --audio-device=<device> | Play through this audio device
+    opt | --file-format=<format> | The format of the file to write
+    opt | --progress | Show a progress meter
+    opt | -i, --interactive | Print the text and highlight words as they are spoken
+
+    cmd screencapture
+    opt | -c | Send the picture to the clipboard
+    opt | -i | Pick an area or a window with the mouse
+    opt | -x | Do not play the shutter sound
+    opt | -T <seconds> | Wait this long before taking it
+    opt | -t <format> | The image format, such as png or jpg
+    opt | -w | Only allow choosing a window
+    opt | -s | Only allow choosing an area
+    opt | -R <x,y,w,h> | Capture this rectangle
+    opt | -l <windowid> | Capture the window with this id
+    opt | -m | Only capture the main display
+    opt | -C | Include the pointer
+    opt | -o | Leave the window's shadow out
+    opt | -P | Open the picture in Preview afterwards
+
+    cmd sips
+    opt | -g <key>, --getProperty <key> | Print a property such as pixelWidth or format
+    opt | -s <key> <value>, --setProperty <key> <value> | Set a property
+    opt | -z <height> <width>, --resampleHeightWidth <height> <width> | Resize to a height and width
+    opt | -Z <size>, --resampleHeightWidthMax <size> | Fit within a size, keeping the proportions
+    opt | -r <degrees>, --rotate <degrees> | Rotate clockwise
+    opt | -f <direction>, --flip <direction> | Flip horizontally or vertically
+    opt | -c <height> <width>, --cropToHeightWidth <height> <width> | Crop to a height and width
+    opt | -o <path>, --out <path> | Write the result here and leave the original alone
+
+    cmd diskutil
+    sub list | List the disks and their partitions
+    sub info | Show details of a disk or volume
+    sub mount | Mount a volume
+    sub mountDisk | Mount every volume on a disk
+    sub unmount | Unmount a volume
+    sub unmountDisk | Unmount every volume on a disk
+    sub eject | Eject a disk
+    sub eraseDisk | Erase a whole disk and give it a new format
+    sub eraseVolume | Erase a volume and give it a new format
+    sub partitionDisk | Divide a disk into partitions
+    sub rename | Rename a volume
+    sub verifyVolume | Check a volume for errors
+    sub repairVolume | Repair a volume
+    sub verifyDisk | Check a disk's partition map
+    sub repairDisk | Repair a disk's partition map
+    sub apfs | Work with APFS containers and volumes
+    sub listFilesystems | List the formats a disk can be given
+    sopt list, info | -plist | Print as a property list
+
+    cmd caffeinate
+    opt | -d | Keep the display from sleeping
+    opt | -i | Keep the Mac from idle sleeping
+    opt | -m | Keep the disk from idle sleeping
+    opt | -s | Keep the Mac from sleeping while on the charger
+    opt | -u | Say the user is active, which wakes the display
+    opt | -t <seconds> | Stop after this long
+    opt | -w <pid> | Stop when this process ends
+
     # --- build tools ---------------------------------------------------------
     cmd make
     opt | -j, --jobs | Run jobs in parallel (give a number, for example -j8)

@@ -155,6 +155,17 @@ jobs:
             Sources/iTERMiNAL/Input/CommandSpecs.swift \
             Sources/iTERMiNAL/Input/OptionCompleter.swift \
             Sources/iTERMiNAL/Input/Skill.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetModel.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
+            Sources/iTERMiNAL/Cheatsheet/TldrData.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetQuery.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
+            Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
+            Sources/iTERMiNAL/Cheatsheet/ManPage.swift \
+            Sources/iTERMiNAL/Cheatsheet/ManPageReader.swift \
             Sources/iTERMiNAL/Chrome/ShellHistory.swift \
             Sources/iTERMiNAL/AI/SecretRedactor.swift \
             Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -325,6 +336,19 @@ jobs:
           # The terminal's fallback for the icons superfile draws.
           scripts/fetch-symbols-font.sh Vendor/Fonts
           ls -la Vendor/Fonts Vendor/Fonts/licenses
+
+          # The Cheatsheet page's examples for thousands of programs: tldr-pages,
+          # fetched at the pinned release, checked against its hash and converted
+          # to the one file the page reads. Vendor/Cheatsheets goes to
+          # Contents/Resources/Cheatsheets by project.yml's copy phase.
+          scripts/fetch-tldr.sh Vendor/Cheatsheets
+          ls -la Vendor/Cheatsheets Vendor/Cheatsheets/licenses
+
+      # The data is not in the repo, so what it holds is checked here, with the
+      # harness built above: a conversion that quietly lost half of it would
+      # otherwise ship with the page looking fine.
+      - name: Check cheatsheet data
+        run: '"$RUNNER_TEMP/input-logic-check" --check-cheatsheets Vendor/Cheatsheets'
 
       - name: Generate Xcode project
         run: xcodegen generate

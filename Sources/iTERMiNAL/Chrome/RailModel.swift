@@ -7,7 +7,7 @@ import Foundation
 enum RailItem: String, CaseIterable, Identifiable {
     /// Home, the landing page. Still named `.terminal` from when it only
     /// switched the detail column back to the terminal surface.
-    case terminal, workspaces, tasks, automations, skills
+    case terminal, workspaces, tasks, automations, skills, cheatsheet
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum RailItem: String, CaseIterable, Identifiable {
         case .tasks: return "Tasks"
         case .automations: return "Automations"
         case .skills: return "Skills"
+        case .cheatsheet: return "Cheatsheet"
         }
     }
 
@@ -29,6 +30,7 @@ enum RailItem: String, CaseIterable, Identifiable {
         case .tasks: return "list.bullet.rectangle"
         case .automations: return "clock"
         case .skills: return "book"
+        case .cheatsheet: return "text.book.closed"
         }
     }
 
@@ -40,7 +42,7 @@ enum RailItem: String, CaseIterable, Identifiable {
     var isPinnable: Bool {
         switch self {
         case .terminal, .workspaces: return false
-        case .tasks, .automations, .skills: return true
+        case .tasks, .automations, .skills, .cheatsheet: return true
         }
     }
 
@@ -48,7 +50,7 @@ enum RailItem: String, CaseIterable, Identifiable {
     static let pinnable: [RailItem] = allCases.filter(\.isPinnable)
 
     /// Tasks carries a live badge of running shells, which is worth having in
-    /// view; the other two are placeholder pages.
+    /// view; the rest wait behind "···" until someone wants them there.
     static let defaultPinned: [RailItem] = [.tasks]
 }
 

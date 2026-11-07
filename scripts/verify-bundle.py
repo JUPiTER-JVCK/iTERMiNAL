@@ -12,6 +12,7 @@ Exits non-zero and prints one ::error:: line per failed invariant.
 # 3.10, and the Python that ships with Apple's command line tools is 3.9.
 from __future__ import annotations
 
+import json
 import os
 import plistlib
 import struct
@@ -181,6 +182,37 @@ def main() -> int:
         failures.append("missing from the bundled tools: bin/imgcat")
     elif not os.access(imgcat, os.X_OK):
         failures.append("bundled bin/imgcat is not executable")
+
+    # The Cheatsheet page's tldr-pages examples. Read, not just found: a data file
+    # that is there but empty or cut short would let the page look fine while listing a
+    # fraction of the programs. The floors are scripts/tldr-convert.py's own, and the
+    # licence that asks for credit must travel with the data it covers. A local build
+    # without Vendor/ ships without them and the page says so; a release must not.
+    cheatsheets = app / "Contents/Resources/Cheatsheets"
+    data_file = cheatsheets / "tldr.json"
+    if not data_file.exists():
+        failures.append("missing from the bundle: Cheatsheets/tldr.json")
+    else:
+        try:
+            data = json.loads(data_file.read_text(encoding="utf-8"))
+            pages = data["pages"]
+            examples = sum(len(page["x"]) for page in pages)
+        except (ValueError, KeyError, TypeError) as error:
+            failures.append(f"Cheatsheets/tldr.json cannot be read: {error!r}")
+        else:
+            print(f"cheatsheets                = tldr-pages {data.get('version')}: {len(pages)} programs, {examples} examples")
+            if data.get("format") != 1:
+                failures.append(f"Cheatsheets/tldr.json is format {data.get('format')!r}; the app reads format 1")
+            if len(pages) < 3000 or examples < 20000:
+                failures.append(
+                    f"Cheatsheets/tldr.json holds only {len(pages)} programs and {examples} examples; "
+                    "the conversion lost most of tldr-pages"
+                )
+    licence = cheatsheets / "licenses/tldr-pages-LICENSE.md"
+    if not licence.exists():
+        failures.append("missing from the bundle: Cheatsheets/licenses/tldr-pages-LICENSE.md")
+    elif "Creative Commons Attribution 4.0" not in licence.read_text(encoding="utf-8"):
+        failures.append("Cheatsheets/licenses/tldr-pages-LICENSE.md is not the CC BY 4.0 notice it should be")
 
     plist_path = app / "Contents/Info.plist"
     if plist_path.exists():

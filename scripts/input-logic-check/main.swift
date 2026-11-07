@@ -14,6 +14,18 @@
 //     Sources/iTERMiNAL/Input/AutoPairing.swift \
 //     Sources/iTERMiNAL/Input/CommandNotes.swift \
 //     Sources/iTERMiNAL/Input/SuggestionState.swift \
+//     Sources/iTERMiNAL/Input/CommandSpecs.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetModel.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
+//     Sources/iTERMiNAL/Cheatsheet/TldrData.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetQuery.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
+//     Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
+//     Sources/iTERMiNAL/Cheatsheet/ManPage.swift \
+//     Sources/iTERMiNAL/Cheatsheet/ManPageReader.swift \
 //     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
 //     Sources/iTERMiNAL/AI/SecretRedactor.swift \
 //     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
@@ -53,6 +65,74 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--write-shell-
         print("could not write them: \(error)")
         exit(1)
     }
+}
+
+// `input-logic-check --check-cheatsheets <folder>` reads the tldr-pages data that
+// scripts/fetch-tldr.sh wrote into <folder> and checks it, then stops; none of the
+// checks below run. CI runs it after the fetch, because the data is not in the repo and
+// a conversion that quietly lost half of it would otherwise ship.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--check-cheatsheets" {
+    let folder = CommandLine.arguments[2]
+    var problems: [String] = []
+    func expect(_ condition: Bool, _ message: @autoclosure () -> String) {
+        if !condition { problems.append(message()) }
+    }
+    do {
+        let loaded = try TldrData.decode(try Data(contentsOf: URL(fileURLWithPath: folder + "/tldr.json")))
+        let examples = loaded.programs.reduce(0) { $0 + $1.examples.count }
+        print("tldr-pages \(loaded.version): \(loaded.programs.count) programs, \(examples) examples")
+        expect(loaded.programs.count >= 3000, "only \(loaded.programs.count) programs")
+        expect(examples >= 20000, "only \(examples) examples")
+
+        let names = Set(loaded.programs.map(\.name))
+        expect(names.count == loaded.programs.count, "a program is on two pages")
+        for name in ["git", "docker", "kubectl", "tar", "ssh-keygen", "open", "brew", "aws", "curl"] {
+            expect(names.contains(name), "\(name) is missing")
+        }
+        expect(!names.contains("git-reset") && !names.contains("docker-compose"), "a subcommand page was not filed under its program")
+        expect(loaded.programs.allSatisfy { !$0.isCurated && !$0.summary.isEmpty && !$0.examples.isEmpty }, "a page is empty or claims to be ours")
+        expect(loaded.programs.allSatisfy { $0.examples.allSatisfy { $0.source == .tldr && !$0.description.isEmpty && !$0.command.isEmpty && !$0.command.contains("\n") } },
+               "an example is empty, over two lines, or not marked as tldr's")
+        expect(loaded.programs.allSatisfy { $0.examples.allSatisfy { !$0.command.contains("{{[-") && !$0.command.contains("`") } },
+               "an example still holds markup the conversion should have removed")
+        expect(loaded.programs.first { $0.name == "git" }.map { $0.examples.contains { $0.section == "reset" } } == true, "git has no reset section")
+        expect(loaded.programs.first { $0.name == "open" }?.examples.contains { $0.command == "open ." } == true, "open is not the macOS page")
+
+        let merged = CheatLibrary.merging(curated: CheatsheetCurated.library.programs, tldr: loaded.programs)
+        expect(merged.programs.count >= loaded.programs.count, "merging lost programs")
+        let unlisted = CommandSpecs.toolNames.filter { merged.program(named: $0) == nil }
+        expect(unlisted.isEmpty, "tools the composer completes that the Cheatsheet does not list, so their flags are never shown: \(unlisted)")
+        expect(merged.program(named: "git").map { $0.isCurated && $0.examples.first?.source == .curated && $0.examples.count > 300 } == true,
+               "git's page should start with ours and go on with tldr's")
+        let index = CheatIndex(library: merged)
+        for (query, wanted) in [("docker ps", "docker"), ("kubectl", "kubectl"), ("tar", "tar")] {
+            let top = index.search(query).programs.first.map { merged.programs[$0.program].name }
+            expect(top == wanted, "searching \(query) puts \(top ?? "nothing") first, not \(wanted)")
+        }
+
+        // The ranking against the whole of tldr-pages: sixteen plain questions, each with the program
+        // that answers it first. Nothing was bent to make these pass; they are the ones a person asks.
+        for (question, answers) in [
+            ("undo last commit", ["git"]), ("find big files", ["find", "du", "mdfind"]), ("kill process on port 3000", ["kill", "lsof"]),
+            ("compress a folder", ["tar", "zip"]), ("delete a directory", ["rm"]), ("copy files to a remote server", ["scp", "rsync"]),
+            ("show disk usage", ["du", "df"]), ("search text in files", ["grep"]), ("rename a file", ["mv"]),
+            ("extract a zip file", ["unzip"]), ("create a new branch", ["git"]), ("download a file from a url", ["curl"]),
+            ("stop a docker container", ["docker"]), ("install a package with homebrew", ["brew"]),
+            ("change file permissions", ["chmod"]), ("generate an ssh key", ["ssh-keygen"]),
+        ] {
+            let top = index.searchNatural(question).examples.first.map { merged.programs[$0.program].name }
+            expect(top.map { answers.contains($0) } == true, "\"\(question)\" answers with \(top ?? "nothing"), not one of \(answers)")
+        }
+
+        let licence = try String(contentsOfFile: folder + "/licenses/tldr-pages-LICENSE.md", encoding: .utf8)
+        expect(licence.contains("Creative Commons Attribution 4.0"), "the licence that travels with the data is not CC BY 4.0")
+        expect(FileManager.default.fileExists(atPath: folder + "/manifest.json"), "no manifest")
+    } catch {
+        problems.append("could not read the data: \(error)")
+    }
+    for problem in problems { print("FAIL  \(problem)") }
+    print(problems.isEmpty ? "cheatsheet data ok" : "\(problems.count) problems with the cheatsheet data")
+    exit(problems.isEmpty ? 0 : 1)
 }
 
 // MARK: Tokenizer
@@ -686,6 +766,26 @@ do {
     func head(_ text: String, _ count: Int = 3) -> [String]? {
         words(text).map { Array($0.prefix(count)) }
     }
+
+    // ipconfig showed two results while a Mac's own usage text lists thirteen subcommands; the table now has them all,
+    // and so Tab and the Cheatsheet's Flags list do.
+    let ipconfigWanted: Set<String> = ["waitall", "getifaddr", "ifcount", "getoption", "getiflist", "getsummary", "getpacket",
+                                       "getv6packet", "getra", "getdhcpduid", "getdhcpiaid", "set", "setverbose"]
+    let ipconfigHas = Set(CommandSpecs.spec(named: "ipconfig")?.subcommands.map { $0.names[0] } ?? [])
+    check(ipconfigHas == ipconfigWanted, "ipconfig has exactly the thirteen subcommands macOS prints: missing \(ipconfigWanted.subtracting(ipconfigHas).sorted()), extra \(ipconfigHas.subtracting(ipconfigWanted).sorted())")
+    check(Set(words("ipconfig get") ?? []) == ["getiflist", "getifaddr", "getsummary", "getoption", "getpacket", "getv6packet", "getra", "getdhcpduid", "getdhcpiaid"],
+          "Tab at ipconfig get offers the nine get commands: \(String(describing: words("ipconfig get")))")
+    check(words("ipconfig set") == ["set", "setverbose"], "and at set, both: \(String(describing: words("ipconfig set")))")
+    for tool in ["ipconfig", "ifconfig", "networksetup", "scutil", "route", "arp", "netstat", "traceroute", "pmset", "launchctl", "mdutil",
+                 "softwareupdate", "tmutil", "hdiutil", "plutil", "xattr", "say", "screencapture", "sips", "diskutil", "caffeinate"] {
+        let spec = CommandSpecs.spec(named: tool)
+        check(spec.map { !$0.options.isEmpty || $0.hasSubcommands } == true, "\(tool) has flags or subcommands in the table")
+    }
+    check(CommandSpecs.toolNames.count >= 54, "the table covers the tools it was extended with: \(CommandSpecs.toolNames.count)")
+    check(words("route ")?.prefix(2).sorted() != nil && words("route ")?.contains("get") == true, "route lists its subcommands")
+    check(head("launchctl kickstart -", 2) == ["-k", "-p"], "a subcommand's flags: \(String(describing: head("launchctl kickstart -", 2)))")
+    check(words("networksetup -getinfo ") == nil, "a flag that takes a value is followed by the value, so nothing is offered")
+    check(words("caffeinate -")?.count == 7, "caffeinate's seven flags: \(String(describing: words("caffeinate -")))")
 
     // Subcommands.
     let subs = words("git ")
@@ -7266,6 +7366,609 @@ do {
           "coordinates that can't be are left out")
     check(GeoProvider.allCases.contains(.rirDelegations) && !GeoProvider.rirDelegations.leavesTheMac,
           "the registries' files are read on this Mac")
+}
+
+// MARK: The cheatsheet
+
+// The Cheatsheet page's data and its search. The hand-written table has to be sound and has to cover
+// every tool the composer completes (a program's flags are read from that table, so a page for each is
+// how they get shown); then how the table's text is read, how a command is split into its placeholders,
+// and what a search finds and says about it.
+do {
+    // The table.
+    let library = CheatsheetCurated.library
+    check(CheatsheetCurated.problems.isEmpty, "the cheatsheet table is sound: \(CheatsheetCurated.problems)")
+    check(library.programs.count >= 40, "it covers a useful number of programs: \(library.programs.count)")
+    check(Set(library.programs.map(\.name)).count == library.programs.count, "no program is on two pages")
+    check(library.programs.map { $0.name.lowercased() } == library.programs.map { $0.name.lowercased() }.sorted(),
+          "the programs are in order, ignoring case")
+    // Nineteen of the tools the composer completes have no page written for the app: tldr-pages has one
+    // for each, and the real data is checked for that by --check-cheatsheets. They are named here, so
+    // adding a tool to the table without a page is a decision and not an accident.
+    let tldrOnly: Set<String> = [
+        "ipconfig", "ifconfig", "networksetup", "scutil", "route", "arp", "netstat", "traceroute", "pmset", "launchctl",
+        "mdutil", "softwareupdate", "tmutil", "hdiutil", "plutil", "xattr", "say", "screencapture", "sips",
+    ]
+    let ownPages = Set(library.programs.map(\.name))
+    let pageless = Set(CommandSpecs.toolNames).subtracting(ownPages).subtracting(tldrOnly)
+    check(pageless.isEmpty, "every tool the composer completes has a page, ours or tldr's: \(pageless.sorted())")
+    check(tldrOnly.isSubset(of: Set(CommandSpecs.toolNames)) && tldrOnly.isDisjoint(with: ownPages),
+          "the list of tools left to tldr-pages is all in the table and none has a page of ours: \(tldrOnly.subtracting(CommandSpecs.toolNames).sorted()) \(tldrOnly.intersection(ownPages).sorted())")
+    let thin = library.programs.filter { $0.examples.count < 4 }.map(\.name)
+    check(thin.isEmpty, "every page has recipes to show: \(thin)")
+    for program in library.programs {
+        let broken = program.examples.filter { $0.description.isEmpty || $0.command.isEmpty || $0.command.contains("\n") }
+        check(broken.isEmpty, "\(program.name) has a recipe with nothing in it, or over two lines")
+    }
+    for tool in ["git", "tar", "grep", "ssh", "docker", "find", "sed", "kill"] {
+        check(library.program(named: tool) != nil, "\(tool) has a page")
+    }
+    check(library.program(named: "nonesuch") == nil, "a program that is not there has no page")
+
+    // How the text is read.
+    let sample = CheatsheetCurated.parse("""
+    # a note to whoever edits this
+
+    prog tool | Does a thing
+    use tool [options]
+    tags helper
+    sec First
+    ? Do it
+    $ tool --go | tee out
+    ~ run start
+    ? Do it twice
+    $ tool --go --twice
+    sec Second
+    ? Undo it
+    $ tool --undo {{file}}
+    """)
+    check(sample.problems.isEmpty, "a small table reads: \(sample.problems)")
+    if let tool = sample.programs.first {
+        check(sample.programs.count == 1 && tool.name == "tool" && tool.summary == "Does a thing", "the program and its summary")
+        check(tool.syntax == ["tool [options]"] && tool.tags == ["helper"], "its syntax and tags")
+        check(tool.examples.count == 3, "three recipes: \(tool.examples.count)")
+        check(tool.examples.first?.command == "tool --go | tee out", "a command may hold a pipe, which the pipe-separated tables could not")
+        check(tool.examples.first?.intent == "run start" && tool.examples[1].intent.isEmpty, "other words go with the recipe above them")
+        check(tool.examples.map(\.section) == ["First", "First", "Second"], "headings: \(tool.examples.map { $0.section ?? "-" })")
+        check(tool.groups().map(\.section) == ["First", "Second"] && tool.groups().map { $0.items.count } == [2, 1],
+              "recipes are grouped under their headings")
+        check(tool.groups(only: [1, 2]).map { $0.items.map(\.index) } == [[1], [2]], "a group can be limited to some recipes, keeping their places")
+    } else {
+        check(false, "the sample table has its program")
+    }
+    func problems(_ text: String) -> [String] { CheatsheetCurated.parse(text).problems }
+    check(!problems("prog a | Fine.\n? x\n$ a").isEmpty, "a summary with a full stop is refused")
+    check(!problems("prog a | Fine\n? x.\n$ a").isEmpty, "so is a description with one")
+    check(!problems("prog a | Fine\n? \(String(repeating: "x", count: 91))\n$ a").isEmpty, "and one that is too long")
+    check(!problems("prog a | Fine\n? x\n? y\n$ a").isEmpty, "a description with no command under it")
+    check(!problems("prog a | Fine\n$ a").isEmpty, "a command with no description")
+    check(!problems("prog a | Fine\n? x\n$ a\n~ one\n~ two").isEmpty, "other words are for the recipe directly above only")
+    check(!problems("prog a | Fine\n? x\n$ a\n? y\n$ a").isEmpty, "a command given twice")
+    check(!problems("prog a | Fine\n? x\n$ a\nprog a | Again\n? x\n$ a").isEmpty, "a program given twice")
+    check(!problems("prog a | Fine").isEmpty, "a program with no recipes")
+    check(!problems("prog a | Fine\n? x\n$ a {{b").isEmpty, "a {{ with no }}")
+    check(!problems("prog a | Fine\n? x\n$ a {{}}").isEmpty, "an empty placeholder")
+    check(!problems("prog a | Fine\nuse b --x\n? x\n$ a").isEmpty, "a syntax line for some other program")
+    check(problems("prog a | Fine\ntags b\nuse b --x\n? x\n$ a").isEmpty, "unless it is filed under a tag")
+    check(!problems("prog a b | Fine\n? x\n$ a").isEmpty, "a name with a space in it")
+    check(!problems("? x\n$ a").isEmpty, "a recipe outside any program")
+    check(!problems("prog a | Fine\nwhat is this\n? x\n$ a").isEmpty, "an unknown directive")
+
+    // Commands: what to fill in, and what a search matched.
+    check(CheatCommand.placeholders(in: "scp {{file}} {{user}}@{{host}}:{{path}}") == ["file", "user", "host", "path"],
+          "the placeholders of a command")
+    check(CheatCommand.placeholders(in: "ls -l").isEmpty, "a command without any")
+    check(CheatCommand.placeholders(in: "x {{a}}{{b}}") == ["a", "b"], "two side by side are two")
+    check(CheatCommand.placeholders(in: "echo {{oops") .isEmpty, "a {{ that is never closed is just text")
+    check(CheatCommand.placeholders(in: "awk '{print $1}'").isEmpty, "single braces are not placeholders")
+    let sampleCommand = "git add {{file}} -p"
+    let runs = CheatCommand.runs(sampleCommand, matched: [0, 1, 2, 8])
+    check(runs.map(\.text).joined() == sampleCommand, "the runs are the command, whole and in order")
+    check(runs.filter(\.isPlaceholder).map(\.text).joined() == "{{file}}", "the placeholder's braces stay in its run")
+    check(runs.filter(\.isMatch).map(\.text).joined() == "git{", "the matched characters are marked: \(runs)")
+    check(CheatCommand.runs("").isEmpty && CheatCommand.runs("ls").count == 1, "an empty command has no runs, a plain one has one")
+    for program in library.programs {
+        for example in program.examples where CheatCommand.runs(example.command).map(\.text).joined() != example.command {
+            check(false, "the runs of \(example.command) are not the command")
+        }
+    }
+
+    // Searching a small library, where every answer can be worked out by hand.
+    let small = CheatLibrary(programs: [
+        CheatProgram(name: "tar", summary: "archives", examples: [
+            CheatExample(description: "Unpack a .tar.gz", command: "tar -xzf {{archive.tar.gz}}"),
+        ]),
+        CheatProgram(name: "git", summary: "version control", examples: [
+            CheatExample(description: "Undo the last commit", command: "git reset --soft HEAD~1"),
+            CheatExample(description: "Commit what is staged", command: "git commit -m \"{{message}}\""),
+        ]),
+    ])
+    let index = CheatIndex(library: small)
+    check(small.programs.map(\.name) == ["git", "tar"], "a library sorts its programs")
+    check(index.search("").isEmpty && index.search("   ").isEmpty, "nothing typed finds nothing")
+    check(index.search("qqq").isEmpty, "letters that are nowhere find nothing")
+    let byName = index.search("git")
+    check(byName.programs.first.map { small.programs[$0.program].name } == "git" && byName.programs.first?.nameIndices == [0, 1, 2]
+            && byName.programs.first?.matchCount == 2, "a name finds its program, with its letters: \(byName.programs)")
+    let undo = index.search("undo")
+    check(undo.examples.first.map { small.programs[$0.program].examples[$0.example].description } == "Undo the last commit",
+          "a word finds the recipe it is in")
+    check(undo.examples.first?.descriptionIndices == [0, 1, 2, 3] && undo.examples.first?.commandIndices.isEmpty == true,
+          "and says which of its letters: \(String(describing: undo.examples.first))")
+    let soft = index.search("soft")
+    check(soft.examples.first?.commandIndices == [12, 13, 14, 15], "a word in a command: \(String(describing: soft.examples.first?.commandIndices))")
+    check(index.search("UNDO") == undo, "case does not matter")
+    let joined = index.search("git undo")
+    check(joined.examples.first.map { small.programs[$0.program].name } == "git" && joined.examples.first?.example == 0
+            && joined.examples.first?.nameIndices.isEmpty == false && joined.examples.first?.descriptionIndices.isEmpty == false,
+          "a program's name and a word from its recipe, read together: \(String(describing: joined.examples.first))")
+    check(index.search("gcm").examples.first.map { small.programs[$0.program].examples[$0.example].command } == "git commit -m \"{{message}}\"",
+          "initials find a command, as in fzf")
+    let oneLetter = index.search("a")
+    check(oneLetter.programs.map { small.programs[$0.program].name } == ["tar"] && oneLetter.examples.isEmpty && oneLetter.exampleTotal == 0,
+          "one letter narrows the programs by name and does not search the examples: \(oneLetter.programs)")
+    let capped = index.search("ta", programLimit: 1, exampleLimit: 1)
+    check(capped.programs.count == 1 && capped.examples.count == 1 && capped.exampleTotal == 3,
+          "the lists can be cut short, and the total says how many there were: \(capped.exampleTotal)")
+    check(byName.hits(inProgram: 0).count == 2 && byName.hits(inProgram: 0).allSatisfy { $0.program == 0 },
+          "hits can be read back by program: \(byName.hits(inProgram: 0).count)")
+
+    // Searching the real library: a program's name finds it, and what a hit says is true.
+    let real = CheatIndex(library: library)
+    for (position, program) in library.programs.enumerated() {
+        let found = real.search(program.name)
+        check(found.programs.first?.program == position, "typing \(program.name) puts \(program.name) first, not \(found.programs.first.map { library.programs[$0.program].name } ?? "nothing")")
+    }
+    for query in ["a", "gc", "rm", "dock", "ssh t", "sed i", "kill 3000", "ñ", "Git", "--force", "{{", "~/"] {
+        let found = real.search(query)
+        let needle = FuzzyMatcher.needle(query)
+        var wrong: [String] = []
+        for hit in found.examples {
+            let program = library.programs[hit.program], example = program.examples[hit.example]
+            let inRange = hit.nameIndices.allSatisfy { $0 < program.name.count }
+                && hit.descriptionIndices.allSatisfy { $0 < example.description.count }
+                && hit.commandIndices.allSatisfy { $0 < example.command.count }
+            let counted = hit.nameIndices.count + hit.descriptionIndices.count + hit.commandIndices.count == needle.count
+            if !inRange || !counted { wrong.append("\(program.name): \(example.command)") }
+        }
+        check(wrong.isEmpty, "every hit for \"\(query)\" says where its letters are: \(wrong.prefix(3))")
+        check(zip(found.examples, found.examples.dropFirst()).allSatisfy { $0.score >= $1.score }, "hits for \"\(query)\" are best first")
+        check(zip(found.programs, found.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs for \"\(query)\"")
+    }
+}
+
+// The tldr-pages data, as the converter writes it, and how it joins the pages written for the app.
+do {
+    let fixture = """
+    {"format":1,"version":"9.9","pages":[
+      {"n":"tool","p":"common","s":"A tool","u":"https://example.com/tool",
+       "x":[["Do it","tool --go"],["Do it again","tool --again","again"],["bad"],["","x"],["No section","cmd",""]]},
+      {"n":"empty","p":"common","s":"nothing","x":[]},
+      {"n":"","p":"common","s":"no name","x":[["a","b"]]},
+      {"n":"odd","p":"osx","s":"s","u":"javascript:alert(1)","x":[["a","b"]]}
+    ]}
+    """
+    func decoded(_ text: String) -> TldrData.Loaded? { try? TldrData.decode(Data(text.utf8)) }
+    func failure(_ text: String) -> TldrData.Failure? {
+        do { _ = try TldrData.decode(Data(text.utf8)); return nil } catch { return error as? TldrData.Failure }
+    }
+    if let loaded = decoded(fixture) {
+        check(loaded.version == "9.9" && loaded.programs.map(\.name) == ["tool", "odd"], "pages with no name or no examples are left out: \(loaded.programs.map(\.name))")
+        let tool = loaded.programs[0]
+        check(tool.examples.map(\.command) == ["tool --go", "tool --again", "cmd"], "an example that is not [description, command] is left out: \(tool.examples.map(\.command))")
+        check(tool.examples.map(\.section) == [nil, "again", nil], "the third item is the section, and an empty one is none")
+        check(tool.examples.allSatisfy { $0.source == .tldr } && !tool.isCurated, "everything read is marked as tldr's")
+        check(tool.url == "https://example.com/tool" && loaded.programs[1].url == nil, "only a web address is kept as a link")
+    } else {
+        check(false, "the sample data reads")
+    }
+    check(failure(#"{"format":2,"version":"1","pages":[]}"#) == .unsupportedFormat(2), "a newer format is refused, by name")
+    check(failure("not json") == .unreadable && failure(#"{"format":1}"#) == .unreadable, "so is something that is not the data")
+    // Where the data lives in the bundle, and what it says about itself.
+    let bundleFolder = FileManager.default.temporaryDirectory.appendingPathComponent("tldr-bundle-check-\(ProcessInfo.processInfo.processIdentifier)")
+    try? FileManager.default.createDirectory(at: bundleFolder.appendingPathComponent("licenses"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: bundleFolder) }
+    check(TldrBundle.dataURL(in: bundleFolder) == nil && TldrBundle.licenseURL(in: bundleFolder) == nil && TldrBundle.version(in: bundleFolder) == nil,
+          "a folder with nothing in it has no data, licence or version")
+    try? Data("{}".utf8).write(to: bundleFolder.appendingPathComponent("tldr.json"))
+    try? Data("licence".utf8).write(to: bundleFolder.appendingPathComponent("licenses/tldr-pages-LICENSE.md"))
+    try? Data(#"{"tldr-pages": "9.9"}"#.utf8).write(to: bundleFolder.appendingPathComponent("manifest.json"))
+    check(TldrBundle.dataURL(in: bundleFolder) != nil && TldrBundle.licenseURL(in: bundleFolder) != nil && TldrBundle.version(in: bundleFolder) == "9.9",
+          "and one with them reports each")
+    try? Data(#"{"other": "1"}"#.utf8).write(to: bundleFolder.appendingPathComponent("manifest.json"))
+    check(TldrBundle.version(in: bundleFolder) == nil && TldrBundle.version(in: nil) == nil, "a manifest for something else gives no version")
+    check(TldrBundle.dataURL(in: nil) == nil, "no folder, no data")
+    check(TldrData.webAddress("http://a.example") != nil && TldrData.webAddress("file:///etc/passwd") == nil && TldrData.webAddress(nil) == nil,
+          "links are http or https")
+
+    // Joining the two.
+    let ours = [CheatProgram(name: "git", summary: "ours", syntax: ["git x"],
+                             examples: [CheatExample(description: "Ours", command: "git  status")])]
+    let theirs = [
+        CheatProgram(name: "git", summary: "theirs", examples: [
+            CheatExample(description: "Dup", command: "git status", source: .tldr),
+            CheatExample(description: "New", command: "git log", source: .tldr),
+            CheatExample(description: "Sub", command: "git add .", source: .tldr, section: "add"),
+        ], isCurated: false, url: "https://git-scm.com"),
+        CheatProgram(name: "zed", summary: "z", examples: [CheatExample(description: "Z", command: "zed", source: .tldr)], isCurated: false),
+    ]
+    let merged = CheatLibrary.merging(curated: ours, tldr: theirs)
+    check(merged.programs.map(\.name) == ["git", "zed"], "both libraries' programs, in order: \(merged.programs.map(\.name))")
+    if let git = merged.program(named: "git") {
+        check(git.summary == "ours" && git.syntax == ["git x"] && git.isCurated, "where both have a page, ours is kept")
+        check(git.examples.map(\.command) == ["git  status", "git log", "git add ."], "tldr's examples follow ours, without a repeat of one we have: \(git.examples.map(\.command))")
+        check(git.examples.map(\.source) == [.curated, .tldr, .tldr], "and are marked as theirs")
+        check(git.examples.map(\.section) == [nil, CheatLibrary.moreExamplesHeading, "add"], "kept apart from ours by a heading, keeping their own: \(git.examples.map { $0.section ?? "-" })")
+        check(git.url == "https://git-scm.com", "a link is taken from tldr if we have none")
+    }
+    check(merged.program(named: "zed").map { !$0.isCurated } == true, "a program only tldr has keeps its page")
+    check(CheatLibrary.merging(curated: ours, tldr: []).programs == ours && CheatLibrary.merging(curated: [], tldr: theirs).programs.count == 2,
+          "either side can be empty")
+
+    // Searching: a tie goes to the page we wrote, and a search can be given up.
+    func example(_ text: String) -> CheatExample { CheatExample(description: text, command: "x") }
+    let tied = CheatLibrary(programs: [
+        CheatProgram(name: "aaa", summary: "s", examples: [example("Zip it")], isCurated: false),
+        CheatProgram(name: "bbb", summary: "s", examples: [example("Zip it")], isCurated: true),
+    ])
+    let tiedHits = CheatIndex(library: tied).search("zip")
+    check(tiedHits.programs.count == 2 && tiedHits.programs[0].score == tiedHits.programs[1].score
+            && tied.programs[tiedHits.programs[0].program].name == "bbb",
+          "equal scores go to the page written for the app: \(tiedHits.programs)")
+    let real = CheatIndex(library: CheatsheetCurated.library)
+    let given = CheatSearchToken()
+    given.cancel()
+    check(real.search("gc", token: given).isEmpty, "a search that was given up returns nothing")
+    check(!real.search("gc", token: CheatSearchToken()).isEmpty, "one that was not still finds what it should")
+}
+
+// Finding a command by what its words mean: the words, the router that chooses between letters and
+// meaning, the ranking, and the assistant's part. The ranking is checked on the pages written for
+// the app, where every answer is known, and again against the real tldr-pages data by
+// --check-cheatsheets (above), where it has to tell the right command from thousands of others.
+do {
+    // Words.
+    check(CheatText.words("Undo the last commit!") == ["undo", "the", "last", "commit"], "words are lower-cased and stripped of marks")
+    check(CheatText.words("git cherry-pick HEAD~1 --soft") == ["git", "cherry", "pick", "head", "1", "soft"], "a hyphen or a tilde is a gap")
+    check(CheatText.tokens(Array("git add")).map { [$0.start, $0.end] } == [[0, 3], [4, 7]], "tokens say where they are")
+    check(CheatText.words("Ünïcode café").count == 2, "letters need not be ASCII")
+    for family in [["delete", "deletes", "deleted", "deleting"], ["file", "files"], ["directory", "directories"],
+                   ["process", "processes", "processing"], ["archive", "archives", "archiving", "archived"],
+                   ["match", "matches", "matching"], ["box", "boxes"]] {
+        check(Set(family.map { CheatText.stem($0) }).count == 1, "\(family) are one word: \(family.map { CheatText.stem($0) })")
+    }
+    check(CheatText.stem("ls") == "ls" && CheatText.stem("rm") == "rm" && CheatText.stem("cat") == "cat", "short words are left alone")
+    check(CheatText.stem("process") != CheatText.stem("proc"), "words that are different stay different")
+    check(CheatText.queryTerms("How do I delete the files in a folder?") == ["delete", "file", "folder"].map { CheatText.stem($0) },
+          "a question is its meaningful words, as stems: \(CheatText.queryTerms("How do I delete the files in a folder?"))")
+    check(CheatText.queryTerms("copy copy copies").count == 1, "a repeated word is one")
+    check(CheatText.queryTerms("the a of").isEmpty, "a question of nothing but small words has no terms")
+
+    // Families of words.
+    check(CheatSynonyms.related(to: CheatText.stem("delete")).contains(CheatText.stem("remove")), "delete and remove are one family")
+    check(CheatSynonyms.related(to: CheatText.stem("undo")).contains(CheatText.stem("reset")), "so are undo and reset")
+    check(!CheatSynonyms.related(to: CheatText.stem("delete")).contains(CheatText.stem("delete")), "a word is not its own synonym")
+    check(CheatSynonyms.related(to: "zzzz").isEmpty && !CheatSynonyms.knows("zzzz"), "a word with no family has none")
+    for word in ["delete", "undo", "folder", "kill", "download", "remote", "monitor", "readable"] {
+        let stem = CheatText.stem(word)
+        for other in CheatSynonyms.related(to: stem) {
+            check(CheatSynonyms.related(to: other).contains(stem), "\(word) is a synonym of \(other) only one way round")
+        }
+    }
+
+    // Letters or meaning.
+    check(CheatQuery.resolve("gcm", mode: .auto) == .fuzzy && CheatQuery.resolve("git", mode: .auto) == .fuzzy, "one word is letters")
+    check(CheatQuery.resolve("docker ps", mode: .auto) == .fuzzy && CheatQuery.resolve("ls -la", mode: .auto) == .fuzzy
+            && CheatQuery.resolve("sudo rm", mode: .auto) == .fuzzy, "two words that are a command are letters, even when a command's name is also a word for what it does")
+    check(CheatQuery.resolve("git commit -m", mode: .auto) == .fuzzy && CheatQuery.resolve("~/.ssh", mode: .auto) == .fuzzy
+            && CheatQuery.resolve("ls --all", mode: .auto) == .fuzzy && CheatQuery.resolve("$HOME path", mode: .auto) == .fuzzy,
+          "a flag, a path or a variable is a command being recalled")
+    check(CheatQuery.resolve("undo my last commit", mode: .auto) == .natural && CheatQuery.resolve("how do I rename a file", mode: .auto) == .natural,
+          "three words or more are a sentence")
+    check(CheatQuery.resolve("kill port", mode: .auto) == .natural && CheatQuery.resolve("delete folder", mode: .auto) == .natural,
+          "two words that a sentence is made of are one")
+    check(CheatQuery.resolve("", mode: .auto) == .fuzzy && CheatQuery.resolve("   ", mode: .auto) == .fuzzy, "nothing is not a sentence")
+    check(CheatQuery.resolve("docker ps", mode: .natural) == .natural && CheatQuery.resolve("undo my last commit", mode: .fuzzy) == .fuzzy,
+          "the person's choice overrides the guess")
+    check(CheatSearchMode.allCases.count == 3 && Set(CheatSearchMode.allCases.map(\.title)).count == 3, "three ways to search, each named")
+
+    // A slip of the keyboard.
+    func edit(_ a: String, _ b: String) -> Bool { CheatNaturalIndex.withinOneEdit(Array(a), Array(b)) }
+    check(edit("permission", "permission") && edit("permision", "permission") && edit("permisssion", "permission"), "a letter missing, repeated or right")
+    check(edit("permisison", "permission") && edit("pemission", "permission") && edit("permissoon", "permission"), "two swapped, one dropped, one wrong")
+    check(!edit("permission", "permit") && !edit("abc", "xyz") && !edit("ab", "abcd") && !edit("", "abc"), "but not words that are further apart")
+    check(edit("", "") && edit("a", "") && edit("", "a") && !edit("ab", ""), "and the empty cases do not trap")
+
+    // Ranking, on the pages written for the app.
+    let curated = CheatIndex(library: CheatsheetCurated.library)
+    func first(_ question: String, in index: CheatIndex = curated, library: CheatLibrary = CheatsheetCurated.library) -> String? {
+        index.searchNatural(question).examples.first.map { library.programs[$0.program].name }
+    }
+    for (question, answers) in [
+        ("undo my last commit", ["git"]), ("find big files", ["find", "du", "mdfind"]), ("kill the process on port 3000", ["kill", "lsof"]),
+        ("compress a folder", ["tar", "zip"]), ("delete a directory", ["rm"]), ("copy files to a remote server", ["scp", "rsync"]),
+        ("show disk usage", ["du", "df"]), ("search text in files", ["grep"]), ("change file permissions", ["chmod"]),
+        ("rename a file", ["mv"]), ("make a directory", ["mkdir"]), ("extract a zip file", ["unzip"]),
+        ("download a file from a url", ["curl"]), ("generate an ssh key", ["ssh-keygen"]), ("keep the mac awake", ["caffeinate"]),
+        ("copy to the clipboard", ["pbcopy"]), ("count the lines in a file", ["wc"]), ("create a symbolic link", ["ln"]),
+        ("stop a docker container", ["docker"]), ("install something with homebrew", ["brew"]),
+    ] {
+        let got = first(question)
+        check(got.map { answers.contains($0) } == true, "\"\(question)\" answers with \(got ?? "nothing"), not one of \(answers)")
+    }
+    check(first("permisions") == "chmod" || first("permisions") == "chown", "a misspelt word still finds its page: \(first("permisions") ?? "nothing")")
+    check(first("the a of") == nil && first("") == nil && first("zzzzqqqq") == nil, "a question with nothing to find finds nothing")
+
+    let undo = curated.searchNatural("undo my last commit")
+    check(undo.exampleTotal >= undo.examples.count && !undo.examples.isEmpty && undo.programs.first.map { CheatsheetCurated.library.programs[$0.program].name } == "git",
+          "the programs found are led by the one with the answer")
+    check(zip(undo.examples, undo.examples.dropFirst()).allSatisfy { $0.score >= $1.score }, "answers are best first")
+    check(zip(undo.programs, undo.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs")
+    if let top = undo.examples.first {
+        let example = CheatsheetCurated.library.programs[top.program].examples[top.example]
+        let emphasised = String(top.descriptionIndices.map { Array(example.description)[$0] })
+        check(!top.descriptionIndices.isEmpty && top.descriptionIndices.allSatisfy { $0 < example.description.count },
+              "the words that matched are marked: \(emphasised)")
+        check(top.nameIndices.isEmpty, "a program's name is not marked by a word in the description")
+    }
+    let capped = curated.searchNatural("file", programLimit: 2, exampleLimit: 3)
+    check(capped.programs.count <= 2 && capped.examples.count <= 3 && capped.exampleTotal > 3, "natural results can be cut short too: \(capped.exampleTotal)")
+    check(curated.search("undo my last commit", as: .natural) == undo && curated.search("gcm", as: .fuzzy) == curated.search("gcm"),
+          "searching as a mode is searching that way")
+    let givenUp = CheatSearchToken()
+    givenUp.cancel()
+    check(curated.searchNatural("undo my last commit", token: givenUp).isEmpty, "a question that was given up returns nothing")
+
+    // The page written for the app counts for more than one from tldr-pages that says the same.
+    let rival = CheatLibrary(programs: [
+        CheatProgram(name: "aaa", summary: "s", examples: [CheatExample(description: "Remove a folder", command: "aaa", source: .tldr)], isCurated: false),
+        CheatProgram(name: "bbb", summary: "s", examples: [CheatExample(description: "Remove a folder", command: "bbb")], isCurated: true),
+    ])
+    check(rival.programs.map(\.name) == ["aaa", "bbb"] && CheatIndex(library: rival).searchNatural("remove a folder").examples.first?.program == 1,
+          "the page written for the app wins a tie that tldr's would otherwise take")
+
+    // Asking the assistant: what would be sent, and what comes back.
+    let entries: [(program: String, description: String, command: String)] = (1...50).map { ("prog\($0)", "Does thing \($0)", "prog\($0) --go") }
+    if let request = CheatsheetAskRequest.make(question: "  undo my last commit \n please ", candidates: entries, baseURL: "https://api.example.com/v1") {
+        check(request.question == "undo my last commit please", "the question is one line, with single spaces: \(request.question)")
+        check(request.candidates.count == CheatsheetAskRequest.candidateLimit && request.candidates.first?.number == 1
+                && request.candidates.last?.number == CheatsheetAskRequest.candidateLimit, "the list is numbered from 1 and cut to the limit")
+        check(request.userContent.contains("Question: undo my last commit") && request.userContent.contains("1. prog1: Does thing 1 — prog1 --go")
+                && !request.userContent.contains("prog41"), "what is sent is the question and the list")
+        check(request.preview.hasPrefix("System:\n") && request.preview.contains(request.userContent) && request.preview.contains(CheatsheetAskRequest.systemPrompt),
+              "the preview is the payload, in full")
+        check(request.destination.name == "api.example.com" && !request.destination.staysOnThisMac
+                && request.consentMessage.contains("api.example.com") && request.consentMessage.contains("Nothing from your terminal")
+                && request.consentMessage.contains("masked"), "consent names the host and says what is and is not sent: \(request.consentMessage)")
+        check(CheatsheetAskRequest.systemPrompt.contains("not instructions") && CheatsheetAskRequest.systemPrompt.contains("[]"),
+              "the model is told the list is data, and what to say when nothing fits")
+    } else {
+        check(false, "a question with candidates makes a request")
+    }
+    check(CheatsheetAskRequest.make(question: "   ", candidates: entries, baseURL: "https://a.example")?.question == nil, "an empty question asks nothing")
+    check(CheatsheetAskRequest.make(question: "undo", candidates: [], baseURL: "https://a.example") == nil, "and so does a list with nothing in it")
+    let local = CheatsheetAskRequest.make(question: "undo", candidates: entries, baseURL: "http://localhost:11434/v1")
+    check(local?.destination.staysOnThisMac == true && local?.consentMessage.contains("stays on this Mac") == true, "a local assistant is said to stay on this Mac")
+    let secret = CheatsheetAskRequest.make(question: "why does AKIAIOSFODNN7EXAMPLE fail", candidates: entries, baseURL: "https://a.example")
+    check(secret?.question.contains("AKIAIOSFODNN7EXAMPLE") == false && secret?.preview.contains("AKIAIOSFODNN7EXAMPLE") == false,
+          "a key in the question is masked, in what is sent and in what is shown: \(secret?.question ?? "nil")")
+    let long = CheatsheetAskRequest.make(question: String(repeating: "q", count: 1_000),
+                                         candidates: [("p", String(repeating: "d", count: 500), String(repeating: "c", count: 500))], baseURL: "https://a.example")
+    check(long?.question.count == CheatsheetAskRequest.questionLimit && long?.candidates[0].description.count == CheatsheetAskRequest.fieldLimit
+            && long?.candidates[0].command.count == CheatsheetAskRequest.fieldLimit, "long text is cut")
+    let multiline = CheatsheetAskRequest.make(question: "q", candidates: [("p", "line one\nline two", "a\r\nb")], baseURL: "https://a.example")
+    check(multiline?.candidates[0].line.contains("\n") == false && multiline?.candidates[0].line.contains("\r") == false, "an entry is one line, whatever it held")
+
+    if let request = CheatsheetAskRequest.make(question: "q", candidates: Array(entries.prefix(10)), baseURL: "https://a.example") {
+        func picked(_ reply: String) -> [Int] { request.picks(from: reply).map(\.number) }
+        check(picked("[3, 1, 7]") == [3, 1, 7], "the reply's order is kept")
+        check(picked("```json\n[2, 4]\n```") == [2, 4] && picked("The best are [5, 6] I think.") == [5, 6], "a fence or words around the array do not matter")
+        check(picked("[3, 3, 3, 1]") == [3, 1], "a repeat is one")
+        check(picked("[99, 0, -1, 2]") == [2], "a number that is not on the list is dropped")
+        check(picked(#"["2", " 4 ", "x"]"#) == [2, 4] && picked("[2.0, 3.5]") == [2], "numbers written as text, or as 2.0, are read; 3.5 is not a number on the list")
+        check(picked("[]").isEmpty && picked("none of them").isEmpty && picked("").isEmpty && picked("[1, 2").isEmpty, "no array, or a broken one, picks nothing")
+        check(picked("Pick 3 or 4").isEmpty, "numbers are never scraped out of prose")
+        check(picked("see [1] — answer: [2, 3]") == [2, 3], "a bracket before the array does not hide it")
+        check(picked("[1,2,3,4,5,6,7,8,9,10]").count == CheatsheetAskRequest.pickLimit, "at most \(CheatsheetAskRequest.pickLimit) are shown")
+        check(request.picks(from: "[2]").first?.program == "prog2" && request.picks(from: "[2]").first?.command == "prog2 --go",
+              "a pick is the entry that was on the list, not text the model wrote")
+        check(picked(#"[{"n": 1}]"#).isEmpty && picked("[[1]]").isEmpty && picked("[null, true]").count <= 1, "an array of anything else picks nothing sensible")
+    }
+}
+
+// The manual page: the Cheatsheet reads `man` on the Mac and shows the parts that say how a program is called. The page
+// below is written the way mandoc writes one, which was checked against its real output (bold is each letter twice with a
+// backspace between, underline an underscore, a backspace and the letter), and run through everything that follows.
+do {
+    func bold(_ s: String) -> String { s.map { "\($0)\u{8}\($0)" }.joined() }
+    func under(_ s: String) -> String { s.map { "_\u{8}\($0)" }.joined() }
+    check(bold("fakeip") == "f\u{8}fa\u{8}ak\u{8}ke\u{8}ei\u{8}ip\u{8}p" && under("name") == "_\u{8}n_\u{8}a_\u{8}m_\u{8}e",
+          "the fixture writes bold and underline as mandoc's own output does")
+
+    let page = [
+        "FAKEIP(8)                   System Manager's Manual                  FAKEIP(8)",
+        "",
+        bold("NAME"),
+        "     " + bold("fakeip") + " - view and control IP configuration state",
+        "",
+        bold("SYNOPSIS"),
+        "     " + bold("fakeip") + " " + bold("waitall"),
+        "     " + bold("fakeip") + " " + bold("getifaddr") + " " + under("interface-name"),
+        "     " + bold("fakeip") + " " + bold("set") + " " + under("interface-name") + " {" + bold("DHCP") + " | " + bold("BOOTP") + "}",
+        "",
+        bold("DESCRIPTION"),
+        "     " + bold("fakeip") + " is a utility that communicates with the configuration agent to",
+        "     retrieve and set IP configuration parameters.",
+        "",
+        bold("COMMANDS"),
+        "     " + bold("waitall"),
+        "             Wait for all interfaces to finish configuring.",
+        "",
+        "     " + bold("getifaddr") + " " + under("interface-name"),
+        "             Print the IPv4 address of the interface.",
+        "",
+        bold("OPTIONS"),
+        "     " + bold("-v") + "      Be verbose.",
+        "",
+        "     " + bold("-o") + " " + under("file"),
+        "             Write the result to " + under("file") + " instead.",
+        "",
+        bold("SEE ALSO"),
+        "     ifconfig(8), scutil(8)",
+        "",
+        "Debian                           June 3, 2020                           Debian",
+    ].joined(separator: "\n")
+
+    // Cleaning.
+    let cleaned = ManPage.clean(page)
+    check(!cleaned.contains("\u{8}") && cleaned.hasPrefix("FAKEIP(8)") && cleaned.contains("     fakeip waitall\n"),
+          "bold and underline become plain text")
+    check(cleaned.contains("     fakeip set interface-name {DHCP | BOOTP}"), "a line made of both reads as it would on paper")
+    check(ManPage.clean(cleaned) == cleaned, "cleaning clean text changes nothing")
+    check(ManPage.clean("a\u{8}ab\u{8}b") == "ab" && ManPage.clean("_\u{8}x_\u{8}y") == "xy", "a backspace takes back the letter before it")
+    check(ManPage.clean("\u{8}x") == "x", "a backspace with nothing before it does nothing")
+    check(ManPage.clean("a\n\u{8}b") == "a\nb", "and never takes back a line end")
+    check(ManPage.clean("a\r\nb\rc") == "a\nb\nc", "CRLF and CR are line ends")
+    check(ManPage.clean("a\tb") == "a        b", "a tab is spaces")
+    check(ManPage.clean("\u{1B}[1mbold\u{1B}[0m") == "bold", "escape sequences are dropped")
+    check(ManPage.clean("a\u{7}b\u{0}c\u{7F}d") == "abcd", "so are the other control characters")
+    check(ManPage.clean("a   \nb  ") == "a\nb", "trailing spaces go")
+    check(ManPage.clean("a\n\n\n\n\nb") == "a\n\nb", "and a run of blank lines is one")
+    check(ManPage.clean("\n\n  \nx\n\n\n") == "x", "blank lines at either end go: \(ManPage.clean("\n\n  \nx\n\n\n").debugDescription)")
+    check(ManPage.clean("") == "" && ManPage.clean("\u{8}\u{8}") == "", "nothing in, nothing out")
+    check(ManPage.clean("naïve ✓ 日本語") == "naïve ✓ 日本語", "other languages are left alone")
+
+    // Headings, and what is not one.
+    for heading in ["NAME", "SYNOPSIS", "SEE ALSO", "EXIT STATUS", "ENVIRONMENT VARIABLES", "STANDARDS", "AUTHORS", "C++ NOTES"] {
+        check(ManPage.isHeading(heading), "\(heading) heads a section")
+    }
+    for notHeading in ["FAKEIP(8)                   System Manager's Manual                  FAKEIP(8)", "Debian    June 3, 2020    Debian",
+                       "macOS 14.0   June 3, 2020   macOS 14.0", "  NAME", "", "A", "12345", "Name", "NAME ", "ls(1)", "BSD 4.4 (old)"] {
+        check(!ManPage.isHeading(notHeading), "\(notHeading.debugDescription) does not")
+    }
+
+    // Sections.
+    let sections = ManPage.sections(cleaned)
+    check(sections.map(\.title) == ["NAME", "SYNOPSIS", "DESCRIPTION", "COMMANDS", "OPTIONS", "SEE ALSO"],
+          "the page's sections, without its title line or footer: \(sections.map(\.title))")
+    let synopsis = sections.first { $0.title == "SYNOPSIS" }
+    check(synopsis?.lines == ["fakeip waitall", "fakeip getifaddr interface-name", "fakeip set interface-name {DHCP | BOOTP}"],
+          "a section loses the indent they all share: \(String(describing: synopsis?.lines))")
+    let commands = sections.first { $0.title == "COMMANDS" }
+    check(commands?.lines.first == "waitall" && commands?.lines[1].hasPrefix("        Wait") == true && commands?.lines.contains("") == true,
+          "and keeps the indent of what is under something: \(String(describing: commands?.lines))")
+    check(ManPage.sections("no headings here\njust text").isEmpty && ManPage.sections("").isEmpty, "text with no heading has no sections")
+    check(ManPage.sections("NAME\nSYNOPSIS\n   x").map(\.lines) == [[], ["x"]], "a heading with nothing under it has no lines")
+
+    // The excerpt.
+    let excerpt = ManPage.excerpt(fromRaw: page)
+    check(excerpt?.sections.map(\.title) == ["SYNOPSIS", "COMMANDS", "OPTIONS"] && excerpt?.isTruncated == false,
+          "the synopsis, the commands and the options: \(String(describing: excerpt?.sections.map(\.title)))")
+    let noReference = ["NAME", "   x - y", "SYNOPSIS", "   x [-a]", "DESCRIPTION", "   The -a flag does a thing.", "SEE ALSO", "   y(1)"].joined(separator: "\n")
+    check(ManPage.excerpt(fromRaw: noReference)?.sections.map(\.title) == ["SYNOPSIS", "DESCRIPTION"],
+          "a page that lists its flags under DESCRIPTION shows that instead")
+    check(ManPage.excerpt(fromRaw: "NAME\n   x\nDESCRIPTION\n   only this")?.sections.map(\.title) == ["DESCRIPTION"], "with no synopsis, the description")
+    check(ManPage.excerpt(fromRaw: "just text\nand more")?.sections == [ManPage.Section(title: "", lines: ["just text", "and more"])],
+          "a page with no headings is shown from the top")
+    check(ManPage.excerpt(fromRaw: "") == nil && ManPage.excerpt(fromRaw: " \n\u{8}\n") == nil, "nothing to show is nil")
+
+    let twelve = (1...12).map { "   ipconfig command\($0) interface-name" }
+    let big = ManPage.excerpt(fromRaw: (["SYNOPSIS"] + twelve).joined(separator: "\n"))
+    check(big?.sections.first?.lines.count == 12 && big?.isTruncated == false, "twelve synopsis lines all fit in the default limit")
+
+    // Cut to length, at a line.
+    let longOptions = ["SYNOPSIS", "   x [-a]", "OPTIONS"] + (1...200).map { "   -o\($0)    Option number \($0) does something" }
+    let cut = ManPage.excerpt(fromRaw: longOptions.joined(separator: "\n"), limit: 400)
+    let cutLines = cut?.sections.flatMap(\.lines) ?? []
+    check(cut?.isTruncated == true && cut?.sections.map(\.title) == ["SYNOPSIS", "OPTIONS"], "a long page is cut short and says so")
+    check((cut?.sections.reduce(0) { $0 + $1.title.count + $1.text.count + 1 } ?? 999) <= 420, "to about the limit: \(cut?.sections.reduce(0) { $0 + $1.text.count } ?? -1)")
+    check(cutLines.first == "x [-a]" && cutLines.dropFirst().allSatisfy { $0.hasPrefix("-o") && $0.hasSuffix("does something") },
+          "cut at a whole line: \(cutLines.suffix(2))")
+    let cutAtOnce = ManPage.excerpt(fromRaw: "SYNOPSIS\n   " + String(repeating: "x", count: 100), limit: 10)
+    check(cutAtOnce?.isTruncated == true && cutAtOnce?.sections.first?.lines.first?.count == 10, "a first line over the limit is shown, cut")
+    check(ManPage.excerpt(fromRaw: longOptions.joined(separator: "\n"), limit: 25)?.sections.last?.title != "OPTIONS",
+          "a heading is not shown with nothing under it")
+
+    // Which names may be asked for.
+    for name in ["ipconfig", "g++", "7z", "git-reset", "python3.12", "c_", "X", String(repeating: "a", count: 64)] {
+        check(ManPage.isSafeName(name), "\(name) may be asked for")
+    }
+    for name in ["", "-x", "--help", "-", ".hidden", "a b", "../etc/passwd", "a/b", "a;b", "a\nb", "$(x)", "a|b", "é", "a`b`", "a'b", "a\"b",
+                 "a\u{8}b", "a\0b", String(repeating: "a", count: 65)] {
+        check(!ManPage.isSafeName(name), "\(name.debugDescription) may not")
+    }
+
+    // Where man looks.
+    check(ManPage.searchPath(base: nil) == "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin", "no path is the system's, with Homebrew's added")
+    check(ManPage.searchPath(base: "") == ManPage.searchPath(base: nil), "so is an empty one")
+    check(ManPage.searchPath(base: "/usr/bin:/usr/local/bin") == "/usr/bin:/usr/local/bin:/opt/homebrew/bin", "what is there is not added twice")
+    check(ManPage.searchPath(base: "/a:/opt/homebrew/bin:/usr/local/bin") == "/a:/opt/homebrew/bin:/usr/local/bin", "and a full one is left as it is")
+
+    // Reading a page.
+    final class Calls { var names: [String] = [] }
+    func reader(_ calls: Calls, _ outcome: ManPageReader.Outcome?) -> ManPageReader {
+        ManPageReader { name in
+            calls.names.append(name)
+            return outcome
+        }
+    }
+    let good = ManPageReader.Outcome(status: 0, output: page, timedOut: false)
+    let calls = Calls()
+    let found = reader(calls, good)
+    if case .found(let result) = found.read("fakeip") {
+        check(result.sections.map(\.title) == ["SYNOPSIS", "COMMANDS", "OPTIONS"], "a page is read and cut down")
+    } else {
+        check(false, "a page that is there is found")
+    }
+    _ = found.read("fakeip")
+    check(calls.names == ["fakeip"] && found.hasAnswer(for: "fakeip") && !found.hasAnswer(for: "other"), "and asked for once, then remembered")
+    if case .found(let small) = found.read("fakeip", limit: 100) {
+        check(small.sections.first?.title == "SYNOPSIS", "a remembered page is not asked for again for another limit")
+    }
+
+    let none = Calls()
+    let refusing = reader(none, good)
+    for name in ["-x", "a b", "../etc/passwd", "", "a;b"] {
+        check(refusing.read(name) == .missing, "\(name.debugDescription) is missing without asking")
+    }
+    check(none.names.isEmpty, "a name that may not be asked for never reaches man: \(none.names)")
+
+    let exit1 = Calls()
+    let absent = reader(exit1, ManPageReader.Outcome(status: 1, output: "", timedOut: false))
+    check(absent.read("nosuch") == .missing && absent.read("nosuch") == .missing && exit1.names.count == 1, "a page man does not have is missing, and that is remembered")
+    for said in ["No manual entry for nosuch", "man: No entry for nosuch in the manual.\n", "\n\nNo manual entry for nosuch\n"] {
+        check(reader(Calls(), ManPageReader.Outcome(status: 0, output: said, timedOut: false)).read("x") == .missing, "\(said.debugDescription) is missing even with a zero status")
+    }
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: "", timedOut: false)).read("x") == .missing, "an empty page is missing")
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: " \n\u{8}\n", timedOut: false)).read("x") == .missing, "and so is one of nothing but blanks")
+
+    let slow = Calls()
+    let timing = reader(slow, ManPageReader.Outcome(status: 0, output: page, timedOut: true))
+    check(timing.read("x") == .failed("man took too long") && timing.read("x") == .failed("man took too long") && slow.names.count == 2 && !timing.hasAnswer(for: "x"),
+          "a man that is too slow is a failure, and is tried again")
+    let broken = Calls()
+    let cannot = reader(broken, nil)
+    check(cannot.read("x") == .failed("man could not be run") && cannot.read("x") == .failed("man could not be run") && broken.names.count == 2,
+          "so is one that could not be started")
+
+    // A page is told by its headings, not by what man says about its absence.
+    check(ManPage.looksLikePage(page) && ManPage.looksLikePage("NAME\n   x - y") && ManPage.looksLikePage(noReference), "a page has a NAME, a SYNOPSIS or a DESCRIPTION")
+    for notAPage in ["", "No manual entry for foo", "man: foo: not found", "just\nsome text\nwith lines", "SEE ALSO\n   x(1)", "   NAME\n   x"] {
+        check(!ManPage.looksLikePage(notAPage), "\(notAPage.debugDescription) is not a page")
+    }
+    // What a real man printed, with a zero status, on a system with no manual pages (this was found by running it).
+    let minimized = "This system has been minimized by removing packages and content that are\nnot required on a system that users do not log into.\n\nTo restore this content, including manpages, you can run the 'unminimize'\ncommand. You will still need to ensure the 'man-db' package is installed.\n"
+    check(!ManPage.looksLikePage(minimized), "the notice a stripped-down system prints is not a page")
+    check(reader(Calls(), ManPageReader.Outcome(status: 0, output: minimized, timedOut: false)).read("ipconfig") == .missing,
+          "and so is missing, though man exited zero")
+}
+
+// MARK: Rail item for the cheatsheet
+
+do {
+    check(RailItem.cheatsheet.isPinnable && !RailItem.defaultPinned.contains(.cheatsheet),
+          "the cheatsheet can be pinned, and starts out under the menu")
+    check(RailPins.decode(["cheatsheet", "tasks", "cheatsheet", "bogus"]) == [.cheatsheet, .tasks], "it is kept when pins are read back")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

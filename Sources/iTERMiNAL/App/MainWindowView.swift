@@ -258,6 +258,8 @@ struct DetailView: View {
             TaskManagerView()
         case .skills:
             SkillsView()
+        case .cheatsheet:
+            CheatsheetView()
         case .terminal:
             terminalSurface
         }

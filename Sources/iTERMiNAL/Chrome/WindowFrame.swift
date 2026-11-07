@@ -89,6 +89,7 @@ struct TopBar: View {
         case .tasks: return RailItem.tasks.title
         case .automations: return RailItem.automations.title
         case .skills: return RailItem.skills.title
+        case .cheatsheet: return RailItem.cheatsheet.title
         }
     }
 }
@@ -135,6 +136,7 @@ enum RailNavigation {
         case .tasks: store.detailMode = .tasks
         case .automations: store.detailMode = .automations
         case .skills: store.detailMode = .skills
+        case .cheatsheet: store.detailMode = .cheatsheet
         }
     }
 }
@@ -221,6 +223,7 @@ struct SidebarRail: View {
         case .tasks: return store.detailMode == .tasks
         case .automations: return store.detailMode == .automations
         case .skills: return store.detailMode == .skills
+        case .cheatsheet: return store.detailMode == .cheatsheet
         }
     }
 }
