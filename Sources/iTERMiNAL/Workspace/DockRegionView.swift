@@ -25,19 +25,30 @@ struct DockRegionView: View {
     /// nothing that watches the store.
     @State private var liveLayout: DockNode?
 
+    /// A panel being dragged by its header. Held in `@State`, which keeps it
+    /// without watching it: only the overlay observes it, so the pointer
+    /// moving does not redraw the panels.
+    @State private var drag = DockDragModel()
+
     var body: some View {
         let theme = Theme.current(for: colorScheme)
         GeometryReader { proxy in
-            region(in: proxy.size)
+            region(in: proxy.size, origin: proxy.frame(in: .global).origin)
                 .onAppear { report(proxy.size) }
                 .onChange(of: proxy.size) { _, newSize in report(newSize) }
         }
         .background(theme.background)
         // A panel closing mid-drag changes the arrangement under the drag.
         .onChange(of: store.dockLayout) { _, _ in liveLayout = nil }
+        // No release is reported to a view that has gone, and a drag left
+        // standing would keep swallowing Escape.
+        .onDisappear { drag.reset() }
     }
 
-    private func region(in size: CGSize) -> some View {
+    /// `origin` is where the region starts in the window. A drag reports the
+    /// pointer in the window's coordinates, and everything here is measured
+    /// from the region's own corner.
+    private func region(in size: CGSize, origin: CGPoint) -> some View {
         let rect = DockRect(x: 0, y: 0, width: Double(size.width), height: Double(size.height))
         let frames = DockLayout.frames(
             of: liveLayout ?? store.effectiveDockLayout,
@@ -54,7 +65,8 @@ struct DockRegionView: View {
                 DockLeaf(
                     panel: panel,
                     showsStrip: visible.count == 1,
-                    carriesRegionControls: panel.rawValue == corner
+                    carriesRegionControls: panel.rawValue == corner,
+                    dragHandlers: dragHandlers(for: panel, frames: frames, region: rect, origin: origin)
                 )
                 .frame(width: placed.width, height: placed.height)
                 .offset(x: placed.minX, y: placed.minY)
@@ -65,8 +77,37 @@ struct DockRegionView: View {
             ForEach(Array(frames.dividers.enumerated()), id: \.offset) { entry in
                 dividerView(entry.element, in: rect)
             }
+            // Over everything, and never in the way of the pointer.
+            DockDropOverlay(drag: drag)
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    /// What a panel's header calls as it is dragged. The pointer comes in the
+    /// window's coordinates and is turned into the region's before anything
+    /// else sees it. Letting go over a place a panel can go moves it there.
+    private func dragHandlers(
+        for panel: SidePanel,
+        frames: DockFrames,
+        region: DockRect,
+        origin: CGPoint
+    ) -> DockDragHandlers {
+        DockDragHandlers(
+            changed: { location in
+                drag.update(
+                    panel: panel,
+                    at: CGPoint(x: location.x - origin.x, y: location.y - origin.y),
+                    frames: frames,
+                    region: region
+                )
+            },
+            ended: { location in
+                let released = CGPoint(x: location.x - origin.x, y: location.y - origin.y)
+                if let landing = drag.finish(at: released) {
+                    store.dropPanel(landing.panel, onto: landing.target)
+                }
+            }
+        )
     }
 
     private func placement(of panel: SidePanel, in frames: DockFrames) -> CGRect {
@@ -126,6 +167,13 @@ struct DockRegionView: View {
     }
 }
 
+/// What a panel's header reports while it is dragged, with the pointer in the
+/// window's coordinates.
+private struct DockDragHandlers {
+    var changed: (CGPoint) -> Void
+    var ended: (CGPoint) -> Void
+}
+
 /// One panel in the region: a header and the panel itself.
 private struct DockLeaf: View {
     let panel: SidePanel
@@ -136,6 +184,9 @@ private struct DockLeaf: View {
     /// The panel in the region's top-right corner carries the controls that
     /// belong to the region rather than to a panel.
     let carriesRegionControls: Bool
+    /// Used by the header a panel has when it shares the region; the strip of
+    /// tabs a lone panel has cannot be dragged anywhere.
+    let dragHandlers: DockDragHandlers
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
@@ -201,19 +252,12 @@ private struct DockLeaf: View {
         .frame(height: 38)
     }
 
-    /// This panel's own title, with its menu and close button.
+    /// This panel's own title, with its menu and close button. The title, and the
+    /// room after it, is the handle the panel is dragged by.
     private func tileHeader(theme: Theme) -> some View {
         let isFocused = store.visiblePanel == panel
         return HStack(spacing: 6) {
-            Image(systemName: panel.icon)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.textSecondary)
-            Text(panel.title)
-                .font(.system(size: 12))
-                .foregroundStyle(isFocused ? theme.textPrimary : theme.textSecondary)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
+            dragHandle(theme: theme, isFocused: isFocused)
 
             DockArrangeMenuButton(panel: panel)
             if carriesRegionControls {
@@ -225,6 +269,30 @@ private struct DockLeaf: View {
         .frame(height: 32)
         .contentShape(Rectangle())
         .onTapGesture { store.focusPanel(panel) }
+    }
+
+    /// The icon and title, stretched to fill the header up to its buttons. A drag
+    /// of a few points picks it up; anything shorter is still a click, which
+    /// brings the panel to the front.
+    private func dragHandle(theme: Theme, isFocused: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: panel.icon)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textSecondary)
+            Text(panel.title)
+                .font(.system(size: 12))
+                .foregroundStyle(isFocused ? theme.textPrimary : theme.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                .onChanged { dragHandlers.changed($0.location) }
+                .onEnded { dragHandlers.ended($0.location) }
+        )
+        .help("Drag to move \(panel.title)")
     }
 
     private var expandButton: some View {

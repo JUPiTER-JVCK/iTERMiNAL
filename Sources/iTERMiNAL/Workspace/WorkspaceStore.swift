@@ -1486,6 +1486,19 @@ final class WorkspaceStore: ObservableObject {
         scheduleSave()
     }
 
+    /// A panel whose header was dragged and let go over a place it can go. The
+    /// same moves and swaps as the Move menu (`DockLayout.dropping`), so a drag
+    /// and a menu choice end in the same arrangement. Only panels sharing the
+    /// region can be dragged, so there is no fill to undo.
+    func dropPanel(_ panel: SidePanel, onto target: DockDropTarget) {
+        guard openPanels.contains(panel) else { return }
+        withAnimation(Motion.panel) {
+            setDockLayout(DockLayout.dropping(panel.rawValue, onto: target, in: dockLayout))
+            frontPanel = panel
+        }
+        scheduleSave()
+    }
+
     /// Stores an arrangement the region has finished editing — a divider that
     /// was dragged. Ignored when the panels in it are no longer the open ones,
     /// which is what a drag that outlived a closing panel would otherwise

@@ -8401,6 +8401,98 @@ do {
     check(wellFormed, "600 random edits always leave the layout in normal form (\(firstFailure))")
     check(holdsPanels, "and always hold exactly the panels that were added and not removed (\(firstFailure))")
     check(tiled, "and always lay out to fill the region (\(firstFailure))")
+
+    // Dragging a panel: where it would land.
+    let pair2 = DockLayout.stacked(["a", "b"], axis: .horizontal)
+    let bounds = DockRect(x: 0, y: 0, width: 1000, height: 600)
+    let pairFrames = DockLayout.frames(of: pair2, in: bounds)
+    check(pairFrames.rect(of: "a")?.width == 500 && pairFrames.rect(of: "b")?.x == 501, "the two panels sit side by side, a divider between them")
+    func dTarget(_ x: Double, _ y: Double, dragging: String = "a", in frames: DockFrames = pairFrames, region: DockRect = bounds) -> DockDropTarget? {
+        DockLayout.dropTarget(at: DockPoint(x: x, y: y), dragging: dragging, in: frames, region: region)
+    }
+    check(dTarget(750, 300) == .swap("b"), "over the middle of another panel it swaps places with it")
+    check(dTarget(520, 300) == .beside("b", .left), "near its left side it goes beside it on the left")
+    check(dTarget(980, 300) == .beside("b", .right), "near its right side, on the right")
+    check(dTarget(750, 20) == .beside("b", .top), "near the top, above it")
+    check(dTarget(750, 580) == .beside("b", .bottom), "near the bottom, below it")
+    check(dTarget(750, 300 - 1) == .swap("b") && dTarget(750, 300 + 1) == .swap("b"), "and the middle is a middle either side of the centre line")
+    check(dTarget(500 + 1 + 96, 300) == .swap("b") && dTarget(500 + 1 + 95, 300) == .beside("b", .left),
+          "a side's band is 96 points wide on a big panel")
+    check(dTarget(990, 300) == .regionEdge(.right) && dTarget(10, 300) == .regionEdge(.left), "within 16 points of the region's edge it is the whole side")
+    check(dTarget(750, 5) == .regionEdge(.top) && dTarget(750, 595) == .regionEdge(.bottom), "top and bottom too")
+    check(dTarget(984, 300) == .beside("b", .right) && dTarget(983.9, 300) == .beside("b", .right), "the strip is exactly the outer 16 points")
+    check(dTarget(250, 300) == nil, "over the panel being dragged there is nothing to do")
+    check(dTarget(250, 5) == .regionEdge(.top) && dTarget(5, 300) == .regionEdge(.left), "except along the region's edge, which is open to it")
+    check(dTarget(-5, 300) == nil && dTarget(1000, 300) == nil && dTarget(500, 600) == nil, "outside the region it is nothing")
+    check(dTarget(530, 40) == .beside("b", .left) && dTarget(560, 30) == .beside("b", .top),
+          "near a corner it goes to the side it is nearer, by how far into each band it is")
+    check(dTarget(500.5, 300, dragging: "b") == .beside("a", .right), "on the divider it counts as the panel next to it")
+    check(dTarget(500.5, 300, dragging: "a") == .beside("b", .left) || dTarget(500.5, 300, dragging: "a") == nil,
+          "and as nothing when that panel is the one being dragged")
+    let column = DockLayout.frames(of: DockLayout.stacked(["a", "b", "c"]), in: DockRect(x: 0, y: 0, width: 400, height: 900))
+    check(dTarget(200, 880, dragging: "a", in: column, region: DockRect(x: 0, y: 0, width: 400, height: 900)) == .beside("c", .bottom), "below the last panel of a column")
+    check(dTarget(200, 450, dragging: "a", in: column, region: DockRect(x: 0, y: 0, width: 400, height: 900)) == .swap("b"), "and swapping with the middle one")
+    check(DockLayout.dropTarget(at: DockPoint(x: 5, y: 5), dragging: "a", in: pairFrames, region: DockRect(x: 0, y: 0, width: 0, height: 0)) == nil, "a region with no size takes nothing")
+    check(DockLayout.dropTarget(at: DockPoint(x: 250, y: 300), dragging: "a", in: DockFrames(leaves: [], dividers: []), region: bounds) == nil, "with no panels there is nothing to drop on")
+    let shifted = DockRect(x: 100, y: 50, width: 1000, height: 600)
+    let shiftedFrames = DockLayout.frames(of: pair2, in: shifted)
+    check(dTarget(105, 300, in: shiftedFrames, region: shifted) == .regionEdge(.left) && dTarget(850, 350, in: shiftedFrames, region: shifted) == .swap("b"),
+          "a region that does not start at the origin is measured from its own edge")
+
+    // The picture of it.
+    let beside2 = DockLayout.dropHighlight(for: .beside("b", .left), in: pairFrames, region: bounds)
+    check(beside2 == DockRect(x: 501, y: 0, width: 249.5, height: 600), "beside lights the half of the panel it would take")
+    check(DockLayout.dropHighlight(for: .beside("b", .bottom), in: pairFrames, region: bounds) == DockRect(x: 501, y: 300, width: 499, height: 300), "the bottom half")
+    check(DockLayout.dropHighlight(for: .beside("b", .right), in: pairFrames, region: bounds) == DockRect(x: 750.5, y: 0, width: 249.5, height: 600), "the right half")
+    check(DockLayout.dropHighlight(for: .beside("b", .top), in: pairFrames, region: bounds) == DockRect(x: 501, y: 0, width: 499, height: 300), "the top half")
+    check(DockLayout.dropHighlight(for: .swap("b"), in: pairFrames, region: bounds) == pairFrames.rect(of: "b"), "a swap lights the whole panel")
+    let edgeStrip = DockLayout.dropHighlight(for: .regionEdge(.right), in: pairFrames, region: bounds)
+    check(edgeStrip.map { abs($0.width - 1000.0 / 3) < 1e-9 && $0.x + $0.width == 1000 && $0.height == 600 } == true, "a side of the region lights a third of it")
+    check(DockLayout.dropHighlight(for: .regionEdge(.top), in: pairFrames, region: bounds) == DockRect(x: 0, y: 0, width: 1000, height: 200), "the top third")
+    check(DockLayout.dropHighlight(for: .swap("zzz"), in: pairFrames, region: bounds) == nil && DockLayout.dropHighlight(for: .beside("zzz", .left), in: pairFrames, region: bounds) == nil,
+          "a panel that is not there lights nothing")
+
+    // Dropping.
+    let row3 = DockLayout.stacked(["a", "b", "c"], axis: .horizontal)
+    check(DockLayout.dropping("a", onto: .beside("c", .right), in: row3) == DockLayout.moving("a", beside: "c", edge: .right, in: row3), "dropping beside a panel is the same move the menu makes")
+    check(DockLayout.dropping("a", onto: .swap("c"), in: row3) == DockLayout.swapping("a", "c", in: row3), "a swap is a swap")
+    check(DockLayout.dropping("c", onto: .regionEdge(.left), in: row3) == DockLayout.moving("c", toRegionEdge: .left, in: row3), "and a side of the region is the Move menu's")
+    check(dShape(DockLayout.dropping("a", onto: .swap("c"), in: row3)) == "h(c,b,a)", "swapping the ends of a row")
+    check(DockLayout.dropping("a", onto: .swap("zzz"), in: row3) == row3 && DockLayout.dropping("zzz", onto: .swap("a"), in: row3) == row3,
+          "a panel that is not there changes nothing")
+
+    // Whatever the pointer does, the result is a layout that holds the same panels.
+    var landedWell = true
+    var landingFailure = ""
+    var landings = 0
+    for round in 0..<40 {
+        var shapeTree = DockLayout.stacked(["a", "b", "c", "d"], axis: round % 2 == 0 ? .horizontal : .vertical)
+        for _ in 0..<(1 + dNext(4)) {
+            shapeTree = DockLayout.moving(names[dNext(4)], beside: names[dNext(4)], edge: edges[dNext(4)], in: shapeTree)
+        }
+        let field = DockRect(x: 0, y: 0, width: Double(500 + dNext(600)), height: Double(500 + dNext(400)))
+        let drawn = DockLayout.frames(of: shapeTree, in: field)
+        for _ in 0..<80 {
+            let dragged = names[dNext(4)]
+            let point = DockPoint(x: Double(dNext(Int(field.width) + 40)) - 20, y: Double(dNext(Int(field.height) + 40)) - 20)
+            guard let landing = DockLayout.dropTarget(at: point, dragging: dragged, in: drawn, region: field) else { continue }
+            landings += 1
+            if case .beside(let other, _) = landing, other == dragged { landedWell = false; landingFailure = "\(point) dropped \(dragged) beside itself" }
+            if case .swap(let other) = landing, other == dragged { landedWell = false; landingFailure = "\(point) swapped \(dragged) with itself" }
+            let after = DockLayout.dropping(dragged, onto: landing, in: shapeTree)
+            if !dValidTree(after) || Set(after?.modules ?? []) != Set(shapeTree?.modules ?? []) {
+                landedWell = false
+                landingFailure = "\(landing) for \(dragged) turned \(dShape(shapeTree)) into \(dShape(after))"
+            }
+            if let light = DockLayout.dropHighlight(for: landing, in: drawn, region: field),
+               light.width < 0 || light.height < 0 || light.x < field.x - 1e-9 || light.maxX > field.maxX + 1e-9 || light.y < field.y - 1e-9 || light.maxY > field.maxY + 1e-9 {
+                landedWell = false
+                landingFailure = "\(landing) lights \(light), outside the region"
+            }
+        }
+    }
+    check(landings > 500, "the random drags found places to land (\(landings))")
+    check(landedWell, "any drop leaves a valid layout of the same panels, never on the dragged one, with its picture inside the region (\(landingFailure))")
 }
 
 print("\(checks - failures)/\(checks) checks passed")
