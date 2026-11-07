@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Turns the tldr-pages archive into the one JSON file the Cheatsheet page reads.
 
-    scripts/tldr-convert.py tldr.zip OUTPUT_DIR VERSION
+    scripts/tldr-convert.py ARCHIVE OUTPUT_DIR VERSION [CONTENT_SHA256]
 
-Reads the English `common` and `osx` pages out of the release's `tldr.zip` and
-writes, into OUTPUT_DIR:
+Reads the English `common` and `osx` pages out of a tldr-pages archive — GitHub's
+source archive of one commit (`tldr-<commit>/pages/...`), or the release's own
+`tldr.zip` (`pages/...`) — and writes, into OUTPUT_DIR:
 
     tldr.json                         every page, in the shape TldrData reads
     licenses/tldr-pages-LICENSE.md    the licence, as the archive carries it
@@ -29,9 +30,18 @@ What is changed, and nothing else:
   * Where macOS has its own page for a command, that one replaces the common
     one, as tldr's own clients do on a Mac.
 
+With a CONTENT_SHA256 the pages are checked against it before anything is
+converted or written, and a mismatch is an error. It is a hash of the pages this
+script reads (see `content_digest`), not of the archive: the same commit comes
+back in a zip that differs byte for byte whenever GitHub packs it differently,
+and a hash of the file would then refuse data that has not changed. Without one
+the digest is printed and the conversion goes ahead, which is how the digest for
+a new commit is found.
+
 Standard library only, and nothing here needs a Mac, so the whole script can be
 proven anywhere.
 """
+import hashlib
 import json
 import re
 import sys
@@ -108,19 +118,63 @@ def parse_page(text: str):
     return title, " ".join(summary), url, examples
 
 
-def read_pages(archive: zipfile.ZipFile):
-    pages = {}
+def archive_root(names) -> str:
+    """The folder every entry sits in, with its trailing slash — "tldr-<commit>/"
+    for GitHub's source archive of a commit — or "" for an archive laid out from
+    the top, as the release's own tldr.zip is."""
+    if any(name.startswith("pages/") for name in names):
+        return ""
+    tops = {name.split("/", 1)[0] for name in names if "/" in name}
+    if len(tops) != 1:
+        raise ValueError("this does not look like a tldr-pages archive: there is no pages/ folder, "
+                         "and no single folder that holds one")
+    return tops.pop() + "/"
+
+
+def page_names(archive: zipfile.ZipFile, root: str):
+    """(platform, entry name) of every page the conversion reads, in a fixed order."""
+    found = []
     for platform in PLATFORMS:
-        prefix = f"pages/{platform}/"
-        for name in archive.namelist():
+        prefix = f"{root}pages/{platform}/"
+        for name in sorted(archive.namelist()):
             if name.startswith(prefix) and name.endswith(".md") and "/" not in name[len(prefix):]:
-                stem = name[len(prefix):-3]
-                pages[stem] = (platform, archive.read(name).decode("utf-8"))
+                found.append((platform, name))
+    return found
+
+
+def content_digest(archive: zipfile.ZipFile, root: str) -> str:
+    """SHA-256 of what this script reads, and of nothing about how it was packed.
+
+    Every page it converts, by its path from the top of the archive and its
+    bytes, and the licence that travels with them. The archive's own folder, the
+    order of its entries, their dates and how they are compressed do not count,
+    and neither do the other platforms, the translations and everything else in
+    the archive, which are never read. A page changed, added, removed, renamed or
+    moved between `common` and `osx` does count.
+
+    Each file contributes its path, a zero byte and the 32 bytes of its own
+    SHA-256, so where one file ends and the next begins cannot be mistaken.
+    """
+    files = [(name[len(root):], archive.read(name)) for _, name in page_names(archive, root)]
+    files.append(("LICENSE.md", archive.read(f"{root}LICENSE.md")))
+    digest = hashlib.sha256()
+    for path, data in sorted(files):
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
+def read_pages(archive: zipfile.ZipFile, root: str):
+    pages = {}
+    for platform, name in page_names(archive, root):
+        stem = name[len(f"{root}pages/{platform}/"):-3]
+        pages[stem] = (platform, archive.read(name).decode("utf-8"))
     return pages
 
 
-def convert(archive: zipfile.ZipFile):
-    raw = read_pages(archive)
+def convert(archive: zipfile.ZipFile, root: str = ""):
+    raw = read_pages(archive, root)
     parsed = {name: parse_page(text) for name, (_, text) in raw.items()}
 
     # A page whose title is "git reset" and whose file is git-reset belongs to
@@ -161,13 +215,28 @@ def convert(archive: zipfile.ZipFile):
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        print(__doc__.split("\n\n")[0], file=sys.stderr)
+    if len(sys.argv) not in (4, 5):
+        print("usage: tldr-convert.py ARCHIVE OUTPUT_DIR VERSION [CONTENT_SHA256]", file=sys.stderr)
         return 2
     archive_path, out_dir, version = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+    expected = sys.argv[4].strip().lower() if len(sys.argv) == 5 else None
     with zipfile.ZipFile(archive_path) as archive:
-        pages = convert(archive)
-        licence = archive.read("LICENSE.md").decode("utf-8")
+        try:
+            root = archive_root(archive.namelist())
+            if f"{root}LICENSE.md" not in archive.namelist():
+                raise ValueError("the archive has no LICENSE.md, which has to travel with the pages")
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        got = content_digest(archive, root)
+        print(f"content sha256 {got}")
+        if expected is not None and got != expected:
+            print("error: the pages in the archive are not the pinned ones", file=sys.stderr)
+            print(f"  expected {expected}", file=sys.stderr)
+            print(f"  got      {got}", file=sys.stderr)
+            return 1
+        pages = convert(archive, root)
+        licence = archive.read(f"{root}LICENSE.md").decode("utf-8")
 
     if "Creative Commons Attribution 4.0" not in licence:
         print("error: the archive's LICENSE.md does not look like CC BY 4.0", file=sys.stderr)

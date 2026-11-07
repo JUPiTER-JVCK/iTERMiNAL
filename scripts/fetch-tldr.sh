@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Downloads the pinned tldr-pages release, verifies it against the hash in
-# tools.env, and converts the English common and macOS pages into the one file
+# Downloads the pinned tldr-pages commit, checks the pages in it against the hash
+# in tools.env, and converts the English common and macOS pages into the one file
 # the Cheatsheet page reads.
 #
 #   scripts/fetch-tldr.sh [OUTPUT_DIR]
@@ -24,27 +24,18 @@ out="${1:-$root/Vendor/Cheatsheets}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    shasum -a 256 "$1" | awk '{print $1}'
-  fi
-}
-
-url="https://github.com/tldr-pages/tldr/releases/download/v${TLDR_VERSION}/tldr.zip"
+# GitHub's source archive of one commit, not the release's tldr.zip: a commit
+# cannot change, and tldr-pages re-uploads that file to its latest release every
+# time it merges something, so a hash of it stopped matching within hours. The
+# archive's bytes are not pinned either, since GitHub does not promise to pack a
+# commit into the same bytes twice. What is pinned is the pages in it, and
+# tldr-convert.py refuses the archive, before it writes anything, unless they
+# hash to TLDR_CONTENT_SHA256.
+url="https://github.com/tldr-pages/tldr/archive/${TLDR_COMMIT}.zip"
 curl -fsSL --retry 3 -o "$work/tldr.zip" "$url"
-got="$(sha256 "$work/tldr.zip")"
-if [ "$got" != "$TLDR_SHA256" ]; then
-  echo "error: tldr.zip hash mismatch" >&2
-  echo "  expected $TLDR_SHA256" >&2
-  echo "  got      $got" >&2
-  exit 1
-fi
-echo "verified tldr.zip"
 
 mkdir -p "$out"
-python3 "$root/scripts/tldr-convert.py" "$work/tldr.zip" "$out" "$TLDR_VERSION"
+python3 "$root/scripts/tldr-convert.py" "$work/tldr.zip" "$out" "$TLDR_VERSION" "$TLDR_CONTENT_SHA256"
 chmod 644 "$out/tldr.json" "$out/manifest.json" "$out/licenses/"*
 
-echo "tldr-pages $TLDR_VERSION -> $out/tldr.json"
+echo "tldr-pages $TLDR_VERSION (${TLDR_COMMIT:0:12}) -> $out/tldr.json"

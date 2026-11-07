@@ -2063,8 +2063,11 @@ ones listed at the top of `scripts/tldr-convert.py`: the long form of an option
 where tldr offers a choice of short or long, `[c]reate`-style mnemonics and
 backticks dropped, a subcommand's page
 filed under its program, and a macOS page replacing the common one. The archive
-is fetched at the pinned release by `scripts/fetch-tldr.sh`, which refuses it if
-its SHA-256 is not the one in `scripts/tools.env`, and converted to one file of
+is fetched at a pinned commit by `scripts/fetch-tldr.sh`, which refuses it unless
+the pages the conversion reads hash to the SHA-256 in `scripts/tools.env` (a hash of
+the pages, not of the zip: tldr-pages re-uploads its release's `tldr.zip` whenever it
+merges something, so a hash of that file stops matching within hours, and GitHub does
+not promise to pack a commit into the same bytes twice), and converted to one file of
 about 2.8 MB. The numbers reconcile — the 22,716 examples in those pages, less
 the 149 on the 30 common pages macOS replaces, are the 22,567 — and the
 converter fails the build rather than ship a result with leftovers or far fewer
