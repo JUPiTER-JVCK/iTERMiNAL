@@ -1,45 +1,19 @@
-// Checks the composer's pure logic — the command-line tokenizer, the syntax
-// palette, fuzzy matching, the history index and shell-history parsing, and path
-// completion, the suggestion state machine, and the assistant helpers (secret
-// masking, failure signatures, reply parsing, command warnings) — on their own, so a mistake in any fails in seconds rather than
-// after the app build, and so they can be proven off a Mac:
+// Checks the app's pure logic on its own, away from AppKit and the app build, so a
+// mistake in it fails in seconds rather than after the build, and can be shown off a
+// Mac. Among it: the composer (tokenizer, palette, completion, suggestions), the
+// Cheatsheet, the assistant's helpers, the HTTP client's parsers and extractors, SSH
+// and remote-session rules, terminal and workspace logic, and the API's request lines.
 //
-//   swiftc -o input-logic-check \
-//     Sources/iTERMiNAL/Input/ColorMath.swift \
-//     Sources/iTERMiNAL/Input/ShellTokenizer.swift \
-//     Sources/iTERMiNAL/Input/SyntaxPalette.swift \
-//     Sources/iTERMiNAL/Input/FuzzyMatcher.swift \
-//     Sources/iTERMiNAL/Input/CommandHistoryIndex.swift \
-//     Sources/iTERMiNAL/Input/PathCompleter.swift \
-//     Sources/iTERMiNAL/Input/AutoPairing.swift \
-//     Sources/iTERMiNAL/Input/CommandNotes.swift \
-//     Sources/iTERMiNAL/Input/SuggestionState.swift \
-//     Sources/iTERMiNAL/Input/CommandSpecs.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetModel.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCurated.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetCuratedData.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetIndex.swift \
-//     Sources/iTERMiNAL/Cheatsheet/TldrData.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetQuery.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetSynonyms.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetNatural.swift \
-//     Sources/iTERMiNAL/Cheatsheet/CheatsheetAsk.swift \
-//     Sources/iTERMiNAL/Cheatsheet/ManPage.swift \
-//     Sources/iTERMiNAL/Cheatsheet/ManPageReader.swift \
-//     Sources/iTERMiNAL/Chrome/ShellHistory.swift \
-//     Sources/iTERMiNAL/AI/SecretRedactor.swift \
-//     Sources/iTERMiNAL/AI/ContextSanitizer.swift \
-//     Sources/iTERMiNAL/AI/FailureSignature.swift \
-//     Sources/iTERMiNAL/AI/AssistReply.swift \
-//     Sources/iTERMiNAL/AI/CommandRisk.swift \
-//     Sources/iTERMiNAL/AI/AssistantDestination.swift \
-//     Sources/iTERMiNAL/AI/AssistantProvider.swift \
-//     Sources/iTERMiNAL/AI/ErrorHelp.swift \
-//     scripts/input-logic-check/main.swift
+// The files it compiles are listed once, in the "Check input logic" step of
+// .github/workflows/build.yml. Compile them and this file with swiftc, then run it:
+//
+//   swiftc -o input-logic-check <those files> scripts/input-logic-check/main.swift
 //   ./input-logic-check
 //
 // Everything compiled here must import nothing but Foundation — except
 // Remote/RFBAuth.swift, which uses CommonCrypto's DES and so only compiles on a Mac.
+// Elsewhere, leave that file out: its checks below are compiled only where CommonCrypto
+// exists. A few checks also need the machine's own `ssh`, and fail without it.
 import Foundation
 
 var failures = 0
@@ -6907,7 +6881,10 @@ do {
             && RFB.keysym(forCharacter: "€") == 0x0100_20AC, "characters become keysyms")
     check(RFB.keysym(forCharacter: "\r") == nil && RFB.keysym(forCharacter: "\u{F700}") == nil, "control and arrow-key characters are not text")
 
-    // The password check: the standard DES test vector, and VNC's own quirks.
+    // The password check: the standard DES test vector, and VNC's own quirks. Only where
+    // CommonCrypto exists — on a Mac, as in CI — since RFBAuth.swift needs it; a build
+    // elsewhere leaves that file out and these checks with it.
+    #if canImport(CommonCrypto)
     check(RFBAuth.reversedBits(0x01) == 0x80 && RFBAuth.reversedBits(0xF0) == 0x0F && RFBAuth.reversedBits(0xA5) == 0xA5,
           "VNC reverses the bits of each key byte")
     check(RFBAuth.key(forPassword: "ab") == [0x86, 0x46, 0, 0, 0, 0, 0, 0], "a short password is padded with zeros")
@@ -6921,6 +6898,7 @@ do {
             && RFBAuth.response(challenge: challenge, password: "secret") != RFBAuth.response(challenge: challenge, password: "Secret"),
           "the answer is 16 bytes, and depends on the password")
     check(RFBAuth.response(challenge: [1, 2, 3], password: "x") == nil, "a challenge that is not 16 bytes gets no answer")
+    #endif
 }
 
 // MARK: Reading a log for the assistant

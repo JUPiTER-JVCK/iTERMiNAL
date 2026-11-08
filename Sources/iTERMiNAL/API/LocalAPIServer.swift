@@ -39,6 +39,15 @@ final class LocalAPIServer {
     private let clientsLock = NSLock()
     private var clients: Set<Int32> = []
 
+    /// How many connections may be open at once, subscriptions included. Each
+    /// holds a worker thread from the shared global queues for as long as it
+    /// is open, and up to a request line's worth of buffer
+    /// (`RequestLineBuffer.defaultLimit`), so without this the line cap bounded
+    /// one connection but not how many a process could open. Kept low because
+    /// the rest of the app runs its own work on those queues. Only this user's
+    /// processes can connect, so this is robustness, not access control.
+    static let maxConnections = 32
+
     private init() {}
 
     // MARK: Paths
@@ -223,7 +232,14 @@ final class LocalAPIServer {
                 // about the signal.
                 var noSignal: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
-                self.track(client)
+                guard self.track(client) else {
+                    // One short line to a socket nothing has written to yet,
+                    // so this does not wait on the client.
+                    let message = "Too many connections to iTERMiNAL are open (\(LocalAPIServer.maxConnections)). Close one and try again."
+                    self.write(fd: client, data: APIResponse.failure(id: nil, message: message).jsonLine())
+                    Darwin.close(client)
+                    continue
+                }
                 DispatchQueue.global(qos: .userInitiated).async {
                     self.serve(client: client)
                 }
@@ -354,10 +370,13 @@ final class LocalAPIServer {
 
     // MARK: Open connections
 
-    private func track(_ fd: Int32) {
+    /// Adds a connection to the list, unless `maxConnections` are open already.
+    private func track(_ fd: Int32) -> Bool {
         clientsLock.lock()
+        defer { clientsLock.unlock() }
+        guard clients.count < Self.maxConnections else { return false }
         clients.insert(fd)
-        clientsLock.unlock()
+        return true
     }
 
     private func untrack(_ fd: Int32) {

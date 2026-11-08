@@ -7,6 +7,10 @@
 - `APIRouter.commands`, which `help` replies with, holds every command a
   `switch request.command` answers (the router's, and the server's own for
   `subscribe` and `unsubscribe`), and nothing none of them answers;
+- the README's command table (under "## Scripting API") names every command
+  in `commands` and nothing else. It may shorten a run in one namespace, as in
+  `browser.open` / `newTab`: a name with no dot after " / " takes the
+  namespace of the name before it;
 - the README's event table (under "### Event stream") names every event in
   `allEvents`, each written out in full, and nothing else.
 
@@ -22,9 +26,6 @@ rather than passes: an `APIEvent(` whose name is not a string literal, a
 `case` in a command switch that is not one, or a list that is not an array of
 literals. It does not understand Swift regex literals (`/…/`): a quote or a
 brace inside one would throw it off.
-
-The README's command table abbreviates (`browser.open` / `newTab` / …) and is
-not checked.
 
 Standard library only, so CI runs it on the macOS runner as it is.
 """
@@ -222,27 +223,59 @@ def command_switches(tokens):
     return switches
 
 
-def readme_events(text):
-    """The names in the first column of the table under "### Event stream"."""
+def first_cells(text, heading, header):
+    """The first column of the first table under `heading` (before the next
+    heading) whose header cell is `header`; None if there is no such table."""
     lines = text.split("\n")
     try:
-        start = lines.index("### Event stream")
+        start = lines.index(heading)
     except ValueError:
         return None
-    names = []
-    in_table = False
+    cells = None
     for row in lines[start + 1:]:
         if row.startswith("#"):
             break
         if not row.startswith("|"):
-            if in_table:
+            if cells is not None:
                 break
             continue
-        in_table = True
         cell = row.split("|")[1].strip()
-        if cell == "Event" or set(cell) <= set("-: "):
-            continue
-        names += re.findall(r"`([^`]+)`", cell)
+        if cells is None:
+            if cell != header:
+                return None
+            cells = []
+        elif not set(cell) <= set("-: "):
+            cells.append(cell)
+    return cells
+
+
+def readme_events(text):
+    """The names in the first column of the table under "### Event stream"."""
+    cells = first_cells(text, "### Event stream", "Event")
+    if cells is None:
+        return None
+    return [name for cell in cells for name in re.findall(r"`([^`]+)`", cell)]
+
+
+def readme_commands(text):
+    """The commands in the first column of the table under "## Scripting API".
+
+    That table shortens a run of commands in one namespace: in "`browser.open` /
+    `newTab`", a name with no dot that follows " / " shares the namespace of the
+    name before it. Names separated any other way are taken as written."""
+    cells = first_cells(text, "## Scripting API", "Command")
+    if cells is None:
+        return None
+    names = []
+    for cell in cells:
+        parts = re.split(r"`([^`]+)`", cell)
+        previous = ""
+        for index in range(1, len(parts), 2):
+            name = parts[index]
+            if "." not in name and parts[index - 1].strip() == "/" and "." in previous:
+                name = previous.rsplit(".", 1)[0] + "." + name
+            names.append(name)
+            previous = name
     return names
 
 
@@ -301,6 +334,14 @@ for broken in ['let s = "never ends', "/* never ends", 'let s = "\\(f(x"', 'let 
         check(True, "")
 check(readme_events("### Event stream\n\n| Event | Fires when |\n| --- | --- |\n| `a.b` / `a.c` | x `not.this` |\n| `d` | y |\n\nAfter.\n| `e` | z |")
       == ["a.b", "a.c", "d"], "the README table's first column is read, and nothing after the table")
+check(readme_events("### Event stream\n\n| Name | x |\n| --- | --- |\n| `a.b` | y |") is None,
+      "a table under the heading with another header is not taken for the event table")
+commands_table = ("## Scripting API\n\n| Command | Parameters |\n| --- | --- |\n"
+                  "| `help`, `ping`, `app.info` | — |\n| `browser.open` / `newTab` / `tab.list` | `url` |\n"
+                  "| `subscribe` / `unsubscribe` | `events` |\n| `a.b`, `c` | — |\n\n### Next\n| `zzz` | — |")
+check(readme_commands(commands_table) == ["help", "ping", "app.info", "browser.open", "browser.newTab", "tab.list",
+                                          "subscribe", "unsubscribe", "a.b", "c"],
+      "the README command table's short names are read in full, and only after ` / ` (%s)" % readme_commands(commands_table))
 
 
 # The real thing.
@@ -361,8 +402,17 @@ for name in sorted(set(commands) - set(handled)):
 for name in duplicates(commands):
     check(False, "APIRouter.commands lists %s twice" % name)
 
-documented = readme_events(read(os.path.join(ROOT, "README.md")))
-check(documented is not None, "README.md has an \"### Event stream\" section")
+readme = read(os.path.join(ROOT, "README.md"))
+documented = readme_commands(readme)
+check(documented is not None, "README.md has a command table (header `Command`) under \"## Scripting API\"")
+documented = documented or []
+for name in sorted(set(commands) - set(documented)):
+    check(False, "README.md's command table does not list %s" % name)
+for name in sorted(set(documented) - set(commands)):
+    check(False, "README.md's command table lists %s, which is not in APIRouter.commands" % name)
+
+documented = readme_events(readme)
+check(documented is not None, "README.md has an event table (header `Event`) under \"### Event stream\"")
 documented = documented or []
 for name in sorted(set(all_events) - set(documented)):
     check(False, "README.md's event table does not list %s" % name)

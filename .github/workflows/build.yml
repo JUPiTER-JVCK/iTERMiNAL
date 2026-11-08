@@ -134,10 +134,14 @@ jobs:
           fi
           echo "$tag is free."
 
-      # The composer's pure logic — the command-line tokenizer and the colour
-      # palette — compiled and run on its own. It takes seconds, so a mistake
-      # in either fails here rather than after the app build, and the files it
-      # compiles import nothing but Foundation, which is what keeps that true.
+      # The app's pure logic — the composer, the Cheatsheet, the assistant's
+      # helpers, the HTTP parsers, SSH and terminal rules and more (the header
+      # of scripts/input-logic-check/main.swift says what) — compiled and run on
+      # its own. It takes seconds, so a mistake in any of it fails here rather
+      # than after the app build. The files it compiles import nothing but
+      # Foundation, which is what keeps that true; Remote/RFBAuth.swift is the
+      # one exception (CommonCrypto), so its checks only build on a Mac. This
+      # list is the only list of these files: keep new ones here.
       - name: Check input logic
         run: |
           set -euo pipefail
@@ -281,8 +285,8 @@ jobs:
 
       # What `help` and `subscribe` tell a client is two lists written by hand:
       # the commands the router answers and the events the app publishes. This
-      # reads the Swift and fails when either list, or the README's event
-      # table, no longer matches the code.
+      # reads the Swift and fails when either list, or the README's command or
+      # event table, no longer matches the code.
       - name: Check API lists
         run: python3 scripts/api-lists-check.py
 
