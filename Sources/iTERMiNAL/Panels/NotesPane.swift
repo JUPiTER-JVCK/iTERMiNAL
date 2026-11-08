@@ -256,9 +256,10 @@ final class NotesModel: ObservableObject {
 struct NotesPaneView: View {
     @ObservedObject var model: NotesModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             tabStrip(theme: theme)
             FadedDivider()
@@ -402,9 +403,10 @@ private struct NoteTabChip: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Text(title)
                 .font(.system(size: 12))

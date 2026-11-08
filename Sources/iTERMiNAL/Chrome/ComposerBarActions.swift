@@ -20,9 +20,10 @@ struct ComposerActionsPopover: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 2) {
             sectionHeader("This composer", theme: theme)
 
@@ -183,10 +184,11 @@ struct ComposerActionRow: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.composerActionDismiss) private var dismiss
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button {
             action()
             dismiss()

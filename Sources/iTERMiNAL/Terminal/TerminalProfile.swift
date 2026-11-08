@@ -34,7 +34,8 @@ struct TerminalProfile: Codable, Equatable, Identifiable {
     /// existed reads as following all three. They apply to a shell opened with
     /// the profile and, through a saved host's profile, to that host's tabs.
     ///
-    /// A theme id as `TerminalTheme` knows it, or `"auto"` to match the system.
+    /// A theme id as `TerminalTheme` knows it, or `"auto"` to match the app theme
+    /// (its paired scheme for light or dark).
     var themeID: String?
     /// A font family; empty is the system monospaced font.
     var fontName: String?

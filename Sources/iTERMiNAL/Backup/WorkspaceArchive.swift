@@ -18,6 +18,9 @@ struct WorkspaceArchive: Codable {
 
 struct PreferencesArchive: Codable {
     var theme: String
+    /// The app theme (`AppThemes`). Optional so archives written before
+    /// themes existed still decode, and leave the current theme as it is.
+    var appThemeID: String?
     var accentID: String
     var backgroundOpacity: Double
     var shellPath: String
@@ -97,6 +100,7 @@ struct PreferencesArchive: Codable {
 
     init(settings: AppSettings) {
         theme = settings.theme.rawValue
+        appThemeID = settings.appThemeID
         accentID = settings.accentID
         backgroundOpacity = settings.backgroundOpacity
         shellPath = settings.shellPath
@@ -156,6 +160,7 @@ struct PreferencesArchive: Codable {
 
     func apply(to settings: AppSettings) {
         settings.theme = AppSettings.ThemeChoice(rawValue: theme) ?? .system
+        if let appThemeID { settings.appThemeID = appThemeID }
         settings.accentID = accentID
         settings.backgroundOpacity = backgroundOpacity
         // Both of these are absolute paths, and the Mac this archive came from

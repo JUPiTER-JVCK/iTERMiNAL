@@ -18,6 +18,7 @@ import SwiftUI
 struct DockRegionView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     /// The arrangement while a divider is being dragged. The store is written
     /// once, when the drag ends — the same arrangement `liveRightPanelWidth`
@@ -36,7 +37,7 @@ struct DockRegionView: View {
     @State private var clickFocus = DockClickFocus()
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         GeometryReader { proxy in
             region(in: proxy.size, origin: proxy.frame(in: .global).origin)
                 .onAppear { report(proxy.size) }
@@ -200,9 +201,10 @@ private struct DockLeaf: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             if showsStrip {
                 stripHeader(theme: theme)
@@ -315,7 +317,7 @@ private struct DockLeaf: View {
     }
 
     private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         return Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))

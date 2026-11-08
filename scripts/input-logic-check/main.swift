@@ -200,29 +200,16 @@ do {
 
 // MARK: Palette
 
-// The opaque field the command is typed in: Theme.darkInputFieldHex and
-// Theme.lightInputFieldHex. This file cannot import Theme, so it repeats them.
-// Read them from the source and compare, so a change to the field cannot
-// silently leave the tuning behind. Run from the repository root, as CI does.
+// The opaque field the command is typed in, in the default app theme. The
+// fallbacks were tuned against these two values, so a change to the field
+// cannot silently leave the tuning behind.
 let darkField: UInt32 = 0x1D1D21
 let lightField: UInt32 = 0xF1F1F3
 
-do {
-    let path = "Sources/iTERMiNAL/Chrome/Theme.swift"
-    if let source = try? String(contentsOfFile: path, encoding: .utf8) {
-        func declared(_ name: String) -> UInt32? {
-            guard let range = source.range(of: "\(name): UInt32 = 0x") else { return nil }
-            let digits = source[range.upperBound...].prefix { $0.isHexDigit }
-            return UInt32(digits, radix: 16)
-        }
-        check(declared("darkInputFieldHex") == darkField,
-              "Theme.darkInputFieldHex is \(String(describing: declared("darkInputFieldHex"))); the fallbacks were tuned for \(ColorMath.hex(darkField))")
-        check(declared("lightInputFieldHex") == lightField,
-              "Theme.lightInputFieldHex is \(String(describing: declared("lightInputFieldHex"))); the fallbacks were tuned for \(ColorMath.hex(lightField))")
-    } else {
-        check(false, "could not read \(path): run this from the repository root")
-    }
-}
+check(AppThemes.iterminal.dark.inputField == darkField,
+      "the default theme's dark field is \(ColorMath.hex(AppThemes.iterminal.dark.inputField)); the fallbacks were tuned for \(ColorMath.hex(darkField))")
+check(AppThemes.iterminal.light.inputField == lightField,
+      "the default theme's light field is \(ColorMath.hex(AppThemes.iterminal.light.inputField)); the fallbacks were tuned for \(ColorMath.hex(lightField))")
 
 func all(_ c: SyntaxColors) -> [(String, UInt32)] {
     [("command", c.command), ("flag", c.flag), ("string", c.string),
@@ -295,6 +282,88 @@ do {
 do {
     let colors = SyntaxPalette.colors(ansi: [], foreground: 0xFFFFFF, background: darkField, darkBackground: true)
     check(colors.command == SyntaxPalette.darkFallback.command, "empty palette should fall back")
+}
+
+// MARK: App themes
+
+// The chrome's look, chosen in Settings → Appearance. Every theme has a light and
+// a dark variant, its text reads on every colour it is drawn on, the default is
+// the look the app always had, and what a terminal shows when it matches the
+// theme is a scheme that exists.
+do {
+    let themes = AppThemes.all
+    let ids = themes.map(\.id)
+    check(Set(ids).count == ids.count && !ids.contains(""), "every app theme has its own id: \(ids)")
+    check(Set(themes.map(\.name)).count == themes.count, "every app theme has its own name")
+    check(themes.first?.id == AppThemes.defaultID, "the default theme comes first in the picker")
+    check(AppThemes.theme(id: "no-such-theme").id == AppThemes.defaultID && AppThemes.theme(id: "").id == AppThemes.defaultID,
+          "an id this build does not know is the default theme")
+    check(themes.allSatisfy { AppThemes.theme(id: $0.id) == $0 }, "each theme is found by its id")
+    check(themes.allSatisfy { !$0.summary.isEmpty }, "each theme says in a line what it is")
+
+    // The default is the look as it was before there were themes, value for value.
+    let before = (
+        dark: AppThemePalette(background: 0x131316, sidebar: 0x0C0C0E, surface: 0x1D1D21, surfaceHover: 0x26262B,
+                              textPrimary: 0xEDEDEF, textSecondary: 0x9C9CA5, floatingSurface: 0x25252B,
+                              inputField: 0x1D1D21, terminalSchemeID: "codex-dark"),
+        light: AppThemePalette(background: 0xFFFFFF, sidebar: 0xF7F7F8, surface: 0xF1F1F3, surfaceHover: 0xE8E8EB,
+                               textPrimary: 0x0D0D0F, textSecondary: 0x60606A, floatingSurface: 0xFDFDFE,
+                               inputField: 0xF1F1F3, terminalSchemeID: "codex-light")
+    )
+    check(AppThemes.iterminal.dark == before.dark && AppThemes.iterminal.light == before.light,
+          "the default theme is the app's look as it was, value for value")
+
+    for theme in themes {
+        for (variant, palette) in [("dark", theme.dark), ("light", theme.light)] {
+            let name = "\(theme.id) \(variant)"
+            let primary = palette.grounds.map { ColorMath.contrast(palette.textPrimary, $0) }.min() ?? 0
+            let secondary = palette.grounds.map { ColorMath.contrast(palette.textSecondary, $0) }.min() ?? 0
+            check(primary >= AppThemes.minimumTextContrast,
+                  "\(name): text is \(String(format: "%.2f", primary)):1 on its faintest ground, under \(AppThemes.minimumTextContrast)")
+            check(secondary >= AppThemes.minimumSecondaryContrast,
+                  "\(name): secondary text is \(String(format: "%.2f", secondary)):1 on its faintest ground, under \(AppThemes.minimumSecondaryContrast)")
+            check(palette.surface != palette.background && palette.surfaceHover != palette.surface,
+                  "\(name): a card and a hovered card can be told from the page")
+            // Dark is darker than its text, light lighter: the variant is what it says.
+            let darkGround = ColorMath.contrast(palette.background, 0x000000) < ColorMath.contrast(palette.background, 0xFFFFFF)
+            check(darkGround == (variant == "dark"), "\(name): the background is \(darkGround ? "dark" : "light")")
+
+            // Whatever the terminal theme, every colour the composer paints a
+            // command in reads on this theme's field: the fallbacks are shaded
+            // until they do.
+            let fallback = SyntaxPalette.readable(variant == "dark" ? SyntaxPalette.darkFallback : SyntaxPalette.lightFallback,
+                                                  on: palette.inputField, darkBackground: variant == "dark")
+            for (kind, color) in all(fallback) {
+                let ratio = ColorMath.contrast(color, palette.inputField)
+                check(ratio >= SyntaxPalette.minimumContrast,
+                      "\(name): the \(kind) fallback \(ColorMath.hex(color)) is \(String(format: "%.2f", ratio)):1 on the field")
+            }
+        }
+    }
+
+    // On the fields they were tuned for, the fallbacks come back as they are.
+    check(SyntaxPalette.readable(SyntaxPalette.darkFallback, on: darkField, darkBackground: true) == SyntaxPalette.darkFallback
+          && SyntaxPalette.readable(SyntaxPalette.lightFallback, on: lightField, darkBackground: false) == SyntaxPalette.lightFallback,
+          "the fallbacks are left alone on the default fields")
+    // A fallback that would not read is moved toward white on a dark field.
+    let shaded = SyntaxPalette.readable(SyntaxPalette.darkFallback, on: 0x3B4252, darkBackground: true)
+    check(shaded.comment != SyntaxPalette.darkFallback.comment && ColorMath.contrast(shaded.comment, 0x3B4252) >= 4.5,
+          "a fallback too faint for a theme's field is lightened until it reads")
+
+    // "Match app theme" shows the scheme each variant names, so each has to be
+    // one the terminal knows. TerminalTheme needs AppKit, so read its ids.
+    let path = "Sources/iTERMiNAL/Chrome/TerminalTheme.swift"
+    if let source = try? String(contentsOfFile: path, encoding: .utf8) {
+        let idPattern = try! NSRegularExpression(pattern: #"\bid: "([a-z0-9-]+)""#)
+        let text = source as NSString
+        let schemeIDs = Set(idPattern.matches(in: source, range: NSRange(location: 0, length: text.length))
+            .map { text.substring(with: $0.range(at: 1)) })
+        check(schemeIDs.count >= 30, "the terminal schemes were read (\(schemeIDs.count))")
+        let missing = themes.flatMap { [$0.dark.terminalSchemeID, $0.light.terminalSchemeID] }.filter { !schemeIDs.contains($0) }
+        check(missing.isEmpty, "app themes pair with terminal schemes that do not exist: \(missing)")
+    } else {
+        check(false, "could not read \(path): run this from the repository root")
+    }
 }
 
 // MARK: Fuzzy matching

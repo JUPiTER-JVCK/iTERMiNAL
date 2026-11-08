@@ -9,12 +9,13 @@ struct MainWindowView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
     private let process = ProcessMetrics.shared
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         ZStack {
             FrameSurface()
 
@@ -117,6 +118,7 @@ struct DetailView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Sizes while a seam is being dragged, kept here rather than written
@@ -140,7 +142,7 @@ struct DetailView: View {
     }
 
     private func detailColumn(in size: CGSize) -> some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         return VStack(spacing: 0) {
             // The trailing panel can never take so much width that the
             // terminal is squeezed to a sliver — clamped against what is
@@ -339,11 +341,12 @@ private struct DetailBottomStrip: View {
 /// them either.
 private struct SystemMetricsReadout: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @ObservedObject private var system = SystemMetrics.shared
     @ObservedObject private var process = ProcessMetrics.shared
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 14) {
             MetricReadout(label: "CPU", value: system.cpuText, theme: theme)
             MetricReadout(label: "RAM", value: system.memoryText, theme: theme)
@@ -513,115 +516,232 @@ private struct TabContentView: View {
     }
 }
 
-/// The "no tab open" landing: centered glyph, a heading naming the current
-/// workspace, recent commands pulled from the user's shell history, and
-/// quick-start cards.
+/// Home: what shows when no tab is open.
+///
+/// One column, centred, that scrolls when the window is short: who and where
+/// (a greeting, the space, a way to switch it), then what to start — terminals
+/// and panels, the two bundled tools, the last few commands from shell
+/// history — each with the keys that do the same from anywhere, and at the
+/// bottom the two ways to find everything else.
 private struct LandingView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     @State private var recentCommands: [String] = []
 
+    /// Wide enough for three tiles a row; the column never stretches past it,
+    /// however wide the window.
+    private static let columnWidth: CGFloat = 720
+    private let tileColumns = [GridItem(.adaptive(minimum: 200), spacing: 10)]
+
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "apple.terminal")
-                .font(.system(size: 38, weight: .light))
-                .foregroundStyle(theme.textPrimary)
-
-            Text(heading)
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
-                .multilineTextAlignment(.center)
-
-            Menu {
-                ForEach(store.workspaces) { workspace in
-                    Button(workspace.name) { store.newTab(in: workspace) }
-                }
-                Divider()
-                Button("New Space") { store.newWorkspace() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11))
-                    Text(store.currentWorkspace?.name ?? "Space")
-                        .font(.system(size: 12, weight: .medium))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundStyle(theme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(theme.surface))
-                .overlay(Capsule().strokeBorder(theme.surfaceBorder))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-
-            if !recentCommands.isEmpty {
-                VStack(spacing: 4) {
-                    ForEach(recentCommands, id: \.self) { command in
-                        RecentCommandRow(command: command, theme: theme) {
-                            run(command)
-                        }
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header(theme)
+                    section("Start", theme: theme) { startTiles(theme) }
+                    section("Tools", theme: theme) { toolTiles(theme) }
+                    if !recentCommands.isEmpty {
+                        section("Recent commands", theme: theme) { recentList(theme) }
                     }
+                    footer(theme)
                 }
-                .frame(maxWidth: 520)
-                .padding(.top, 6)
+                .frame(maxWidth: Self.columnWidth)
+                .padding(.horizontal, 32)
+                .padding(.top, 36)
+                // The composer floats over the bottom of this page; its pill is
+                // short, the open card is not.
+                .padding(.bottom, settings.composerEnabled && !settings.composerCollapsed ? 210 : 84)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
-
-            // Cards of one width, wrapped to the room there is and centred row
-            // by row, so the group sits under the heading whether it is one
-            // row of five or two rows when the dock and right panel take the
-            // width. An adaptive grid packs from the left and leaves its
-            // leftover space on the right, which read as off-centre.
-            CenteredWrapLayout(itemWidth: 170, spacing: 12) {
-                SuggestionCard(icon: "terminal", tint: settings.accentColor, title: "Open a new terminal") {
-                    store.openTab()
-                }
-                SuggestionCard(icon: "rectangle.split.2x1", tint: Color(hex: 0x3B82F6), title: "Start with split panes") {
-                    store.newTab()
-                    store.splitFocusedPane(.horizontal, kind: .terminal)
-                }
-                SuggestionCard(icon: "globe", tint: Color(hex: 0x8B5CF6), title: "Browse the web") {
-                    store.togglePanel(.browser)
-                }
-                SuggestionCard(icon: "folder", tint: Color(hex: 0xF97316), title: "Explore your files") {
-                    store.togglePanel(.files)
-                }
-                // The panels the cards above don't cover: notes, the two
-                // bundled tools and the HTTP client.
-                Menu {
-                    ForEach([SidePanel.notes, .http, .superfile, .btop]) { panel in
-                        Button {
-                            store.openPanel(panel)
-                        } label: {
-                            Label(panel.title, systemImage: panel.icon)
-                        }
-                    }
-                } label: {
-                    SuggestionCardFace(icon: "square.grid.2x2", tint: Color(hex: 0x14B8A6), title: "More panels")
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-            }
-            .frame(maxWidth: 940)
-            .padding(.horizontal, 24)
-            .padding(.top, 6)
-
-            Spacer()
+            .scrollIndicators(.automatic)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             // Read once per appearance; the file rarely changes mid-session.
             if recentCommands.isEmpty {
-                recentCommands = ShellHistory.recentCommands(limit: 3)
+                recentCommands = ShellHistory.recentCommands(limit: 4)
             }
+        }
+    }
+
+    // MARK: Parts
+
+    private func header(_ theme: Theme) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [settings.accentColor.opacity(0.28), settings.accentColor.opacity(0.10)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(settings.accentColor.opacity(0.35), lineWidth: 1)
+                Image(systemName: "apple.terminal")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(settings.accentColor)
+            }
+            .frame(width: 52, height: 52)
+            .accessibilityHidden(true)
+            .padding(.bottom, 4)
+
+            Text(greeting)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.textSecondary)
+
+            Text(heading)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(theme.textPrimary)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+
+            spaceMenu(theme)
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func spaceMenu(_ theme: Theme) -> some View {
+        Menu {
+            ForEach(store.workspaces) { workspace in
+                Button(workspace.name) { store.newTab(in: workspace) }
+            }
+            Divider()
+            Button("New Space") { store.newWorkspace() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(settings.accentColor)
+                Text(store.currentWorkspace?.name ?? "Space")
+                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .foregroundStyle(theme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(theme.surface))
+            .overlay(Capsule().strokeBorder(theme.surfaceBorder))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Open a new tab in another space")
+    }
+
+    private func section<Content: View>(
+        _ title: String,
+        theme: Theme,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+    }
+
+    private func startTiles(_ theme: Theme) -> some View {
+        LazyVGrid(columns: tileColumns, alignment: .leading, spacing: 10) {
+            LandingTile(icon: "terminal", tint: settings.accentColor, title: "New terminal",
+                        subtitle: "A shell in this space", shortcut: "⌘T", theme: theme) {
+                store.openTab()
+            }
+            LandingTile(icon: "rectangle.split.2x1", tint: Color(hex: 0x3B82F6), title: "Split panes",
+                        subtitle: "Two terminals side by side", shortcut: nil, theme: theme) {
+                store.newTab()
+                store.splitFocusedPane(.horizontal, kind: .terminal)
+            }
+            panelTile(.browser, tint: Color(hex: 0x8B5CF6), subtitle: "Web pages beside your work", theme: theme)
+            panelTile(.files, tint: Color(hex: 0xF97316), subtitle: "Browse this Mac or a server", theme: theme)
+            panelTile(.notes, tint: Color(hex: 0xEAB308), subtitle: "A scratchpad that stays put", theme: theme)
+            panelTile(.http, tint: Color(hex: 0x14B8A6), subtitle: "Send requests, explore a site", theme: theme)
+        }
+    }
+
+    private func panelTile(_ panel: SidePanel, tint: Color, subtitle: String, theme: Theme) -> some View {
+        LandingTile(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
+                    shortcut: panel.shortcutHint, theme: theme) {
+            store.openPanel(panel)
+        }
+    }
+
+    /// The two programs that ship inside the app, each with a second button
+    /// for full view — the same as their ⌥⇧⌘ shortcuts.
+    private func toolTiles(_ theme: Theme) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], alignment: .leading, spacing: 10) {
+            toolTile(.btop, tint: Color(hex: 0xEC4899), subtitle: "CPU, memory, disks and processes",
+                     fullView: "⌥⇧⌘P", theme: theme)
+            toolTile(.superfile, tint: Color(hex: 0x10B981), subtitle: "A fast file manager, keyboard first",
+                     fullView: "⌥⇧⌘S", theme: theme)
+        }
+    }
+
+    private func toolTile(_ panel: SidePanel, tint: Color, subtitle: String, fullView: String, theme: Theme) -> some View {
+        LandingTile(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
+                    shortcut: panel.shortcutHint, theme: theme, trailing: AnyView(
+                        LandingIconButton(icon: "arrow.up.left.and.arrow.down.right", theme: theme,
+                                          help: "Open \(panel.title) in full view (\(fullView))") {
+                            store.openPanelExpanded(panel)
+                        }
+                    )) {
+            store.openPanel(panel)
+        }
+    }
+
+    private func recentList(_ theme: Theme) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(recentCommands.enumerated()), id: \.offset) { index, command in
+                if index > 0 {
+                    Rectangle()
+                        .fill(theme.divider)
+                        .frame(height: 1)
+                        .padding(.leading, 38)
+                }
+                RecentCommandRow(command: command, theme: theme) {
+                    run(command)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(theme.surface.opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(theme.surfaceBorder)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func footer(_ theme: Theme) -> some View {
+        HStack(spacing: 18) {
+            LandingHint(keys: "⌘K", label: "Command palette", theme: theme) {
+                store.showCommandPalette = true
+            }
+            LandingHint(keys: "⌘/", label: "Keyboard shortcuts", theme: theme) {
+                store.showShortcuts()
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Words
+
+    private var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: return "Good morning"
+        case 12..<18: return "Good afternoon"
+        default: return "Good evening"
         }
     }
 
@@ -638,7 +758,126 @@ private struct LandingView: View {
     }
 }
 
-/// One recent command from shell history.
+/// One thing to start from Home: a tinted icon, what it is, a line on what it
+/// is for, and the keys that do the same from anywhere.
+private struct LandingTile: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+    let shortcut: String?
+    let theme: Theme
+    var trailing: AnyView? = nil
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(tint.opacity(0.16))
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(tint)
+                    }
+                    .frame(width: 32, height: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if let shortcut {
+                        KeyCaps(keys: shortcut, theme: theme)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityHint(subtitle)
+
+            if let trailing { trailing }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(hovering ? theme.surfaceHover : theme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(hovering ? tint.opacity(0.45) : theme.surfaceBorder)
+        )
+        .animation(Motion.hover, value: hovering)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Keys as small caps, the way the menus print them: "⌥⌘B".
+private struct KeyCaps: View {
+    let keys: String
+    let theme: Theme
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(theme.textSecondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(theme.background.opacity(0.7))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(theme.surfaceBorder)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
+/// A small square button inside a tile.
+private struct LandingIconButton: View {
+    let icon: String
+    let theme: Theme
+    let help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hovering ? theme.background.opacity(0.8) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// One recent command from shell history: click to run it in a new tab.
 private struct RecentCommandRow: View {
     let command: String
     let theme: Theme
@@ -648,130 +887,60 @@ private struct RecentCommandRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 10))
+            HStack(spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.textSecondary)
+                    .frame(width: 18)
                 Text(command)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
+                Text("Run")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .opacity(hovering ? 1 : 0)
+                Image(systemName: "return")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+                    .opacity(hovering ? 1 : 0)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(hovering ? theme.surfaceHover : theme.surface.opacity(0.5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(theme.surfaceBorder)
-            )
+            .padding(.vertical, 9)
+            .background(hovering ? theme.surfaceHover : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .animation(Motion.hover, value: hovering)
         .onHover { hovering = $0 }
         .help("Run in a new terminal")
+        .accessibilityLabel("Run \(command) in a new terminal")
     }
 }
 
-private struct SuggestionCard: View {
-    let icon: String
-    let tint: Color
-    let title: String
+/// "⌘K Command palette": a key and what it does, which also does it.
+private struct LandingHint: View {
+    let keys: String
+    let label: String
+    let theme: Theme
     let action: () -> Void
+
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            SuggestionCardFace(icon: icon, tint: tint, title: title)
+            HStack(spacing: 6) {
+                KeyCaps(keys: keys, theme: theme)
+                Text(label)
+                    .font(.system(size: 12))
+                    .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-/// How a landing card looks, with no opinion on what clicking it does — so a
-/// plain button and a menu can both wear it.
-private struct SuggestionCardFace: View {
-    let icon: String
-    let tint: Color
-    let title: String
-
-    @State private var hovering = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = Theme.current(for: colorScheme)
-        // Icon pinned to the top, title to the bottom — the reference
-        // app's card anatomy, and the inverse of what this used to do.
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 15))
-                .foregroundStyle(tint)
-            Spacer(minLength: 8)
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.textPrimary)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 95, alignment: .topLeading)
-        .elevated(
-            cornerRadius: 12,
-            radius: hovering ? 14 : 8,
-            y: hovering ? 5 : 2,
-            fill: hovering ? theme.surfaceHover : theme.surface
-        )
-        .animation(Motion.disclosure, value: hovering)
-        .contentShape(Rectangle())
         .onHover { hovering = $0 }
-    }
-}
-
-/// Lays children out at one width, wrapping to the room offered, with each row
-/// centred on its own.
-private struct CenteredWrapLayout: Layout {
-    let itemWidth: CGFloat
-    let spacing: CGFloat
-
-    private func rows(_ subviews: Subviews, width: CGFloat) -> [[Int]] {
-        let perRow = max(1, Int((width + spacing) / (itemWidth + spacing)))
-        return stride(from: 0, to: subviews.count, by: perRow).map {
-            Array($0..<min($0 + perRow, subviews.count))
-        }
-    }
-
-    private func height(of index: Int, _ subviews: Subviews) -> CGFloat {
-        subviews[index].sizeThatFits(ProposedViewSize(width: itemWidth, height: nil)).height
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? CGFloat(subviews.count) * (itemWidth + spacing)
-        let wrapped = rows(subviews, width: width)
-        let heights = wrapped.map { $0.map { height(of: $0, subviews) }.max() ?? 0 }
-        let total = heights.reduce(0, +) + spacing * CGFloat(max(0, wrapped.count - 1))
-        return CGSize(width: width, height: total)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in rows(subviews, width: bounds.width) {
-            let rowWidth = CGFloat(row.count) * itemWidth + CGFloat(row.count - 1) * spacing
-            var x = bounds.midX - rowWidth / 2
-            let rowHeight = row.map { height(of: $0, subviews) }.max() ?? 0
-            for index in row {
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y),
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(width: itemWidth, height: rowHeight)
-                )
-                x += itemWidth + spacing
-            }
-            y += rowHeight + spacing
-        }
     }
 }
 
@@ -780,6 +949,7 @@ private struct CenteredWrapLayout: Layout {
 private struct TaskManagerView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     /// Uptime has to be recomputed to tick; nothing else here needs a timer.
     @State private var now = Date()
     @State private var filter = ""
@@ -789,7 +959,7 @@ private struct TaskManagerView: View {
     private static let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let all = store.allTasks()
         let tasks = matching(all)
 
@@ -923,6 +1093,7 @@ private struct TaskRow: View {
     @ObservedObject private var session: TerminalSession
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
 
     init(task: RunningTask, now: Date) {
@@ -932,7 +1103,7 @@ private struct TaskRow: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 12) {
             Circle()
                 .fill(session.isRunning ? Color(p3: 0x3FB68B) : theme.textSecondary.opacity(0.4))
@@ -1030,9 +1201,10 @@ private struct SectionPageView: View {
     let emptyCaption: String
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
@@ -1072,9 +1244,10 @@ private struct SectionPageView: View {
 struct RightPanelView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Group {
             if store.effectiveDockLayout == nil {
                 emptyRegion(theme: theme)
@@ -1121,9 +1294,10 @@ struct PanelTabChip: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Image(systemName: panel.icon)
                 .font(.system(size: 11))
@@ -1189,9 +1363,10 @@ struct ToolPanelView: View {
 struct PanelPicker: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 4) {
             Spacer()
             ForEach(SidePanel.allCases) { panel in
@@ -1262,9 +1437,10 @@ struct TerminalDockView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1360,9 +1536,10 @@ private struct DockTabChip: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Image(systemName: session.isRemote ? "network" : "apple.terminal")
                 .font(.system(size: 10))

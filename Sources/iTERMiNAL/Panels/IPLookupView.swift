@@ -274,6 +274,7 @@ struct IPLookupView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject private var rirFiles = RIRDelegationStore.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @FocusState private var focused: Bool
 
     private var currentConfig: IPLookupConfig {
@@ -284,7 +285,7 @@ struct IPLookupView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 TextField("Name or IP address", text: $model.query)

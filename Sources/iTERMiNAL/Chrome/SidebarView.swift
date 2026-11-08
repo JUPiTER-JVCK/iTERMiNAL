@@ -8,6 +8,7 @@ struct SidebarView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var query = ""
@@ -26,7 +27,7 @@ struct SidebarView: View {
     private let collapsedTabLimit = 5
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 0) {
             header(theme: theme)
 
@@ -375,6 +376,7 @@ private struct SidebarSectionHeader<Accessory: View>: View {
     let accessory: Accessory
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
 
     init(
@@ -390,7 +392,7 @@ private struct SidebarSectionHeader<Accessory: View>: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 4) {
             Button {
                 withAnimation(Motion.disclosure) { isExpanded.toggle() }
@@ -448,9 +450,10 @@ struct SidebarRowContent: View {
     var isHovering = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 9) {
             Image(systemName: icon)
                 .font(.system(size: 14))
@@ -561,6 +564,7 @@ private struct SidebarNoteRow: View {
     let onDelete: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
 
     private var secondLine: String {
@@ -571,7 +575,7 @@ private struct SidebarNoteRow: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button(action: onOpen) {
             HStack(spacing: 8) {
                 Image(systemName: "note.text")
@@ -627,10 +631,11 @@ private struct WorkspaceFolderRow: View {
     let onDelete: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Button(action: onToggle) {
                 HStack(spacing: 6) {
@@ -681,12 +686,13 @@ private struct SidebarTabRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
     /// A tab is being dragged over this row: it would land just above it.
     @State private var dropTargeted = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         // A real Button for the row — it keeps keyboard activation and the
         // VoiceOver button role — with the pin and close controls overlaid
         // as siblings rather than nested inside its label.
@@ -776,9 +782,10 @@ private struct SessionRowContent: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             ZStack {
                 if let color = activityDotColor {
@@ -884,10 +891,11 @@ private struct SidebarRecentRow: View {
     let onReopen: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button(action: onReopen) {
             HStack(spacing: 6) {
                 Image(systemName: recent.isRemote ? "network" : "arrow.uturn.left")
@@ -930,10 +938,11 @@ private struct SidebarStatusRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @ObservedObject private var metrics = ProcessMetrics.shared
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             FadedDivider()
             HStack(spacing: 8) {

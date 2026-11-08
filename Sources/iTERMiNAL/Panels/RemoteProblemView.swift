@@ -14,6 +14,7 @@ struct RemoteProblemView: View {
 
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var outputExpanded = false
     @State private var copiedCommand: String?
 
@@ -103,7 +104,7 @@ struct RemoteProblemView: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme)))
+                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID)))
         )
     }
 

@@ -82,7 +82,7 @@ struct TerminalSettingsView: View {
         Form {
             Section("Colors") {
                 Picker("Terminal theme", selection: $settings.terminalThemeID) {
-                    Text("Match system appearance").tag("auto")
+                    Text("Match app theme").tag("auto")
                     Divider()
                     ForEach(TerminalTheme.available) { theme in
                         Text(theme.name).tag(theme.id)

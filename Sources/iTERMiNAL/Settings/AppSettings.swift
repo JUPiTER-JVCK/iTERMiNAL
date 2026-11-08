@@ -53,6 +53,9 @@ final class AppSettings: ObservableObject {
             applyAppearance()
         }
     }
+    /// The app theme (`AppThemes`): what the chrome looks like in light and in
+    /// dark. Which of the two is showing is still `theme`'s to say.
+    @Published var appThemeID: String { didSet { defaults.set(appThemeID, forKey: "appThemeID") } }
     @Published var accentID: String { didSet { defaults.set(accentID, forKey: "accentID") } }
     @Published var backgroundOpacity: Double { didSet { defaults.set(backgroundOpacity, forKey: "backgroundOpacity") } }
     /// The reference app draws a flat sidebar; macOS vibrancy is offered as
@@ -101,9 +104,9 @@ final class AppSettings: ObservableObject {
     /// The flat color of the top bar, rail and workspaces panel: the theme's
     /// chrome color, untouched when there is no tint.
     func frameColor(for scheme: ColorScheme) -> Color {
-        guard frameTintHex != nil else { return Theme.current(for: scheme).sidebar }
+        guard frameTintHex != nil else { return Theme.current(for: scheme, themeID: appThemeID).sidebar }
         return Color(p3: FrameStyle.frameHex(
-            base: Theme.sidebarHex(for: scheme),
+            base: Theme.sidebarHex(for: scheme, themeID: appThemeID),
             source: frameTintSource,
             accentHex: resolvedAccentHex,
             customHex: frameCustomValue,
@@ -428,7 +431,8 @@ final class AppSettings: ObservableObject {
         defaultDirectory = defaults.string(forKey: "defaultDirectory") ?? ""
 
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
-        accentID = defaults.string(forKey: "accentID") ?? "green"
+        appThemeID = defaults.string(forKey: "appThemeID") ?? AppThemes.defaultID
+        accentID = defaults.string(forKey: "accentID") ?? Accents.defaultID
         backgroundOpacity = defaults.object(forKey: "backgroundOpacity") as? Double ?? 1.0
         sidebarTranslucent = defaults.bool(forKey: "sidebarTranslucent")
         showSystemMetrics = defaults.object(forKey: "showSystemMetrics") as? Bool ?? true
@@ -749,8 +753,14 @@ final class AppSettings: ObservableObject {
         resolvedTerminalTheme(id: terminalThemeID, darkMode: darkMode)
     }
 
+    /// "auto" — "Match app theme" in the pickers — is the scheme the app theme pairs
+    /// with this appearance; any other id is that scheme.
     func resolvedTerminalTheme(id: String, darkMode: Bool) -> TerminalTheme {
-        TerminalTheme.theme(id: id, darkMode: darkMode)
+        if id == "auto" || id.isEmpty {
+            let paired = AppThemes.theme(id: appThemeID).palette(dark: darkMode).terminalSchemeID
+            return TerminalTheme.theme(id: paired, darkMode: darkMode)
+        }
+        return TerminalTheme.theme(id: id, darkMode: darkMode)
     }
 
     /// The shell binary, launch args, and argv[0] override for new sessions.
@@ -821,7 +831,8 @@ final class AppSettings: ObservableObject {
         editorCustomCommand = ""
         defaultDirectory = ""
         theme = .system
-        accentID = "green"
+        appThemeID = AppThemes.defaultID
+        accentID = Accents.defaultID
         backgroundOpacity = 1.0
         resetFrame()
         uiFontDesign = .system

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export the app's terminal palettes as Ghostty themes and companion configs.
 
-TerminalTheme.swift is the single source of truth for iTERMiNAL's twenty
+TerminalTheme.swift is the single source of truth for iTERMiNAL's thirty-four
 colour schemes. Ghostty wants the same data as one file per theme, so this
 reads the Swift literals and writes `themes/iterminal-<id>`.
 

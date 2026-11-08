@@ -9,12 +9,13 @@ struct SiteExplorerView: View {
     @ObservedObject var explorer: SiteExplorerModel
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @FocusState private var promptFocused: Bool
 
     private static let bottomID = "explorer-bottom"
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {

@@ -14,6 +14,7 @@ struct CheatsheetView: View {
     @EnvironmentObject private var workspace: WorkspaceStore
     @ObservedObject private var cheats = CheatsheetStore.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.openSettings) private var openSettings
 
     @FocusState private var searchFocused: Bool
@@ -23,7 +24,7 @@ struct CheatsheetView: View {
     @State private var manualOpen: Set<String> = []
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 0) {
             header(theme: theme)
             FadedDivider()

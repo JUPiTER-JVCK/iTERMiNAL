@@ -149,6 +149,7 @@ jobs:
             Sources/iTERMiNAL/Input/ColorMath.swift \
             Sources/iTERMiNAL/Input/ShellTokenizer.swift \
             Sources/iTERMiNAL/Input/SyntaxPalette.swift \
+            Sources/iTERMiNAL/Chrome/AppThemes.swift \
             Sources/iTERMiNAL/Input/FuzzyMatcher.swift \
             Sources/iTERMiNAL/Input/CommandHistoryIndex.swift \
             Sources/iTERMiNAL/Input/PathCompleter.swift \

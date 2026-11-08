@@ -152,6 +152,7 @@ final class ScreenshotRun {
 
         await scene("light-theme") { await self.lightTheme() }
         await scene("custom-look") { await self.customLook() }
+        await scene("app-themes") { await self.appThemes() }
         await probeActivity("after the themes")
 
         await scene("ai-assistant") { await self.assistantReply() }
@@ -1946,6 +1947,51 @@ final class ScreenshotRun {
         settings.accentID = "green"
         settings.terminalThemeID = "auto"
         settings.uiFontDesign = .system
+        await pause(1.5)
+        return taken
+    }
+
+    /// The app themes: Home in light, then a few themes in each appearance, on
+    /// the terminal (whose scheme follows the theme) and on Home. Everything is
+    /// put back to the default theme, dark, after.
+    private func appThemes() async -> Bool {
+        func home(_ name: String) async -> Bool {
+            settings.railPanelOpen = false
+            settings.composerCollapsed = true
+            store.selectedTabID = nil
+            await pause(2)
+            guard store.selectedTab == nil else {
+                say("\(name): a tab is still selected")
+                return false
+            }
+            let taken = capture(name)
+            store.selectedTabID = server?.id
+            settings.railPanelOpen = true
+            settings.composerCollapsed = false
+            return taken
+        }
+
+        await baseline()
+        settings.theme = .light
+        var taken = await home("landing-light")
+
+        let looks: [(String, AppSettings.ThemeChoice)] = [
+            ("nord", .dark), ("tokyo-night", .light), ("catppuccin", .dark),
+            ("rose-pine", .light), ("gruvbox", .dark), ("github", .light),
+        ]
+        for (id, appearance) in looks {
+            await baseline()
+            await showHistory()
+            settings.appThemeID = id
+            settings.theme = appearance
+            await pause(2.5)
+            let name = "theme-\(id)-\(appearance == .dark ? "dark" : "light")"
+            taken = capture(name) && taken
+            taken = await home("landing-\(id)-\(appearance == .dark ? "dark" : "light")") && taken
+        }
+
+        settings.appThemeID = AppThemes.defaultID
+        settings.theme = .dark
         await pause(1.5)
         return taken
     }

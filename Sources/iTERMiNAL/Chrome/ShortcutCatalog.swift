@@ -114,11 +114,12 @@ struct ShortcutChord: Hashable {
 
 /// How the window groups what it lists, in the order it lists it.
 enum ShortcutSection: CaseIterable, Hashable {
-    case general, tabsAndPanes, panels, terminal, composer, http, palette, macOS
+    case general, tools, tabsAndPanes, panels, terminal, composer, http, palette, macOS
 
     var title: String {
         switch self {
         case .general: return "General"
+        case .tools: return "Tools"
         case .tabsAndPanes: return "Tabs and panes"
         case .panels: return "Panels"
         case .terminal: return "Terminal"
@@ -223,6 +224,18 @@ enum ShortcutCatalog {
                       detail: "Every shell this app is running"),
         ShortcutEntry("sidebar.toggle", "Show or hide the sidebar", [ShortcutChord("s", [control, cmd])], in: .general),
 
+        // MARK: Tools
+        // The two programs that come with the app, near the top so they are
+        // found without scrolling. Each runs in a panel of its own.
+        ShortcutEntry("tool.btop", "btop", [ShortcutChord("p", [option, cmd])], in: .tools,
+                      detail: "Resource monitor, in a panel. Opening starts it; closing ends it"),
+        ShortcutEntry("tool.btop.full", "btop in full view", [ShortcutChord("p", [option, shift, cmd])], in: .tools,
+                      detail: "The same, across the whole content area"),
+        ShortcutEntry("tool.superfile", "superfile", [ShortcutChord("s", [option, cmd])], in: .tools,
+                      detail: "File manager, in a panel. Opening starts it; closing ends it"),
+        ShortcutEntry("tool.superfile.full", "superfile in full view", [ShortcutChord("s", [option, shift, cmd])], in: .tools,
+                      detail: "The same, across the whole content area"),
+
         // MARK: Tabs and panes
         ShortcutEntry("tab.new", "New terminal tab", [ShortcutChord("t", cmd)], in: .tabsAndPanes),
         ShortcutEntry("workspace.new", "New workspace", [ShortcutChord("n", [shift, cmd])], in: .tabsAndPanes),
@@ -239,10 +252,6 @@ enum ShortcutCatalog {
         ShortcutEntry("panel.files", "Files panel", [ShortcutChord("f", [option, cmd])], in: .panels),
         ShortcutEntry("panel.notes", "Notes panel", [ShortcutChord("n", [option, cmd])], in: .panels),
         ShortcutEntry("panel.http", "HTTP client panel", [ShortcutChord("r", [option, cmd])], in: .panels),
-        ShortcutEntry("tool.superfile", "superfile", [ShortcutChord("s", [option, cmd])], in: .panels,
-                      detail: "Opening starts it; closing ends it"),
-        ShortcutEntry("tool.btop", "btop", [ShortcutChord("p", [option, cmd])], in: .panels,
-                      detail: "Opening starts it; closing ends it"),
 
         // MARK: Terminal
         ShortcutEntry("font.bigger", "Bigger text", [ShortcutChord("+", cmd)], in: .terminal),

@@ -76,6 +76,8 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// none of it has changed — see the guard there for why that matters.
     private struct StylingInputs: Equatable {
         var themeID: String
+        /// What "auto" (Match app) resolves through.
+        var appThemeID: String
         var darkMode: Bool
         var fontName: String
         var fontSize: Double
@@ -591,6 +593,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         )
         let inputs = StylingInputs(
             themeID: look.themeID,
+            appThemeID: settings.appThemeID,
             darkMode: darkMode,
             fontName: look.fontName,
             fontSize: look.fontSize,

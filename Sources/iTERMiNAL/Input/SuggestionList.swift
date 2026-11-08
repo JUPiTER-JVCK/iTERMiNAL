@@ -11,6 +11,7 @@ struct SuggestionList: View {
     let accent: Color
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Shared by the selected row's highlight, so it glides from row to row
     /// rather than disappearing from one and appearing on the next.
@@ -49,7 +50,7 @@ struct SuggestionList: View {
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 // Opaque, so the text on it is read against one known colour.
-                .fill(Color(p3: Theme.floatingSurfaceHex(for: colorScheme)))
+                .fill(Color(p3: Theme.floatingSurfaceHex(for: colorScheme, themeID: appThemeID)))
                 .shadow(color: theme.elevatedShadow, radius: 16, y: 6)
         )
         .overlay(

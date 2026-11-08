@@ -291,8 +291,10 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions; drag a tab to put it where you want it, or onto
-  another project to move it there); a landing screen with quick-start cards and
-  recent commands from your shell history; and a floating composer that types
+  another project to move it there); a Home page with tiles for a terminal, split
+  panes, each panel and the two bundled tools — btop and superfile, which open in
+  a panel or in full view — each showing its shortcut, and the last few commands
+  from your shell history; and a floating composer that types
   into whichever terminal has focus — drag it anywhere, minimise it to a pill,
   and recall earlier commands with the arrow keys. It colours what you type —
   commands, flags, strings, variables, pipes — in your terminal theme's colours,
@@ -347,6 +349,17 @@ A tour of the app in thirty-four pictures, in five groups.
   dock. Settings → Appearance sets the frame's tint, corner radius and edge
   thickness, whether it is translucent or outlined, and the interface
   typeface; a preview there shows the change as you make it.
+- **App themes and accents** — Settings → Appearance → Theme recolours the whole
+  window — frame, rail, cards, panels, menus and the composer — in one of ten
+  themes: iTERMiNAL (the original look), Midnight, Nord, Solarized, Catppuccin,
+  Gruvbox, Tokyo Night, Rosé Pine, GitHub and Everforest. Each has a light and a
+  dark variant, and System / Light / Dark still picks which you see. Text is held
+  to 7:1 contrast and secondary text to 4.5:1 on every surface of every theme,
+  checked in CI. A terminal set to *Match app theme* takes the theme's own colour
+  scheme. Twelve accent colours, or any colour of your own. The command palette
+  switches themes too (type "App Theme"). The terminal has thirty-four colour
+  schemes of its own (Settings → Terminal), among them GitHub, Ayu and Night Owl,
+  and light variants of Nord, Tokyo Night, Rosé Pine, Kanagawa and Everforest.
 - **Dockable panels** — a terminal dock along the bottom and a browser, file,
   notes, HTTP or tool panel down the right, opened from the one button at the
   top right (each can also open in full view, across the whole content area),
@@ -802,7 +815,7 @@ when this was written.
 
 ## Ghostty configuration
 
-The same twenty palettes, exported for [Ghostty](https://ghostty.org), with a
+The same thirty-four palettes, exported for [Ghostty](https://ghostty.org), with a
 config that carries the rest of the design — muted slate-green background over
 the usual black, Nerd Font, padding, translucency, tinted split dividers — plus
 matching btop, starship, yazi, fzf and fastfetch configs.
@@ -1305,7 +1318,7 @@ off drawing bold text in bright colors, and set the line height from 0.8× to
 1.6×. **Edit a theme** duplicates the current theme into an editable copy — its
 background, text and all sixteen ANSI colors, with the changes applied as you
 make them — and imported Ghostty themes can be edited the same way. **Settings →
-Appearance** takes any accent color beside the six, and an animation speed from
+Appearance** takes any accent color beside the twelve, and an animation speed from
 0.5× to 2×.
 
 What these cannot do is limited by the terminal engine (SwiftTerm), which has no
@@ -1544,6 +1557,7 @@ bind:
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
+| superfile / btop in full view | ⌥⇧⌘S / ⌥⇧⌘P |
 | Bigger / smaller text, actual size | ⌘+ / ⌘- / ⌘0 |
 | Focus composer | ⇧⌘R |
 | Minimise / expand composer | ⇧⌘M |

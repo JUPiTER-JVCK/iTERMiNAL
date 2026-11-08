@@ -9,11 +9,12 @@ struct PanelsMenuButton: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var isOpen = false
     @State private var hovering = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         // Something is showing that this menu put there.
         let anythingOpen = store.rightRegionOpen || store.bottomDockOpen
         Button {
@@ -48,10 +49,11 @@ private struct PanelsMenuContent: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 2) {
             sectionLabel("Panels", theme: theme)
             ForEach(SidePanel.allCases.filter { !$0.isTool }) { panel in
@@ -141,9 +143,10 @@ private struct PanelsMenuRow: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 4) {
             Button(action: action) {
                 HStack(spacing: 10) {

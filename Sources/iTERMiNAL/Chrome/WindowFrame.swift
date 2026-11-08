@@ -40,9 +40,10 @@ struct TopBar: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 10) {
             BarIconButton(
                 icon: "sidebar.left",
@@ -102,9 +103,10 @@ private struct BarIconButton: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 13))
@@ -148,6 +150,7 @@ struct SidebarRail: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var moreOpen = false
 
     /// Live shells, shown as a badge on Tasks so the count is visible without
@@ -157,7 +160,7 @@ struct SidebarRail: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let pinned = settings.pinnedRailItems
         VStack(spacing: 6) {
             railButton(.terminal)
@@ -236,9 +239,10 @@ struct RailIconLabel: View {
     var badge: Int? = nil
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Image(systemName: icon)
             .font(.system(size: 16))
             .foregroundStyle(isActive ? theme.textPrimary : theme.textSecondary)
@@ -322,9 +326,10 @@ private struct RailMoreRow: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 4) {
             Button(action: onOpen) {
                 HStack(spacing: 10) {

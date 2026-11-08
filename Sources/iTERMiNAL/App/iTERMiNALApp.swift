@@ -15,6 +15,8 @@ struct ITerminalApp: App {
                 .environmentObject(settings)
                 .environmentObject(store)
                 .preferredColorScheme(settings.preferredColorScheme)
+                // What every view draws its chrome in; see `EnvironmentValues.appThemeID`.
+                .environment(\.appThemeID, settings.appThemeID)
                 // Without this the accent setting governed almost nothing:
                 // every stock control — toggles, sliders, pickers, list
                 // selection — falls back to the *system* accent unless the
@@ -40,6 +42,7 @@ struct ITerminalApp: App {
         WindowGroup("Remote Desktop", for: UUID.self) { $sessionID in
             RemoteDesktopWindow(sessionID: sessionID)
                 .preferredColorScheme(settings.preferredColorScheme)
+                .environment(\.appThemeID, settings.appThemeID)
         }
         .defaultSize(width: 1024, height: 720)
         // Opened only by `openWindow(value:)`, so it claims no external events —
@@ -52,6 +55,7 @@ struct ITerminalApp: App {
                 .environmentObject(settings)
                 .environmentObject(store)
                 .preferredColorScheme(settings.preferredColorScheme)
+                .environment(\.appThemeID, settings.appThemeID)
                 .tint(settings.accentColor)
                 .fontDesign(settings.uiFontDesign.design)
         }
@@ -262,6 +266,18 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.togglePanel(.btop)
             }
             .keyboardShortcut("p", modifiers: [.command, .option])
+
+            // The same two across the whole content area: the panels menu's
+            // "full view". Shift is the only difference from the toggles above.
+            Button("superfile in Full View") {
+                WorkspaceStore.shared.openPanelExpanded(.superfile)
+            }
+            .keyboardShortcut("s", modifiers: [.command, .option, .shift])
+
+            Button("btop in Full View") {
+                WorkspaceStore.shared.openPanelExpanded(.btop)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option, .shift])
 
             Divider()
 

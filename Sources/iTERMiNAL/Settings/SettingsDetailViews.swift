@@ -100,9 +100,13 @@ struct AppearanceSettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                AppThemePicker()
+                Text("A theme sets the colours of the window, its panels and its menus, in light and in dark; Appearance still decides which of the two you see. A terminal set to Match app theme takes the theme's own colour scheme.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Accent") {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     ForEach(Accents.all) { option in
                         Button {
                             settings.accentID = option.id
@@ -227,9 +231,10 @@ struct AppearanceSettingsView: View {
 private struct FramePreview: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let card = RoundedRectangle(cornerRadius: settings.frameCornerRadius, style: .continuous)
         ZStack(alignment: .topLeading) {
             settings.frameColor(for: colorScheme)
@@ -277,5 +282,116 @@ private struct FramePreview: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
         .accessibilityHidden(true)
+    }
+}
+
+/// Settings → Appearance → Theme: one small window per app theme, drawn in its
+/// own colours for the appearance showing now, so the choice is made by
+/// looking rather than by name.
+struct AppThemePicker: View {
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let columns = [GridItem(.adaptive(minimum: 112, maximum: 160), spacing: 12)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            ForEach(AppThemes.all) { theme in
+                AppThemeSwatch(
+                    theme: theme,
+                    dark: colorScheme == .dark,
+                    accent: settings.accentColor,
+                    isSelected: settings.appThemeID == theme.id
+                ) {
+                    settings.appThemeID = theme.id
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AppThemeSwatch: View {
+    let theme: AppThemeDefinition
+    let dark: Bool
+    let accent: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        let palette = theme.palette(dark: dark)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                preview(palette)
+                    .frame(height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(isSelected ? accent : Color.primary.opacity(hovering ? 0.25 : 0.12),
+                                          lineWidth: isSelected ? 2 : 1)
+                    )
+                HStack(spacing: 4) {
+                    Text(theme.name)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(accent)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(theme.summary)
+        .accessibilityLabel("\(theme.name) theme")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// A rail, a card with two lines of text, and a dot of the accent: enough
+    /// to tell the themes apart at a glance.
+    private func preview(_ palette: AppThemePalette) -> some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 5) {
+                ForEach(0..<3) { _ in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(p3: palette.textSecondary).opacity(0.55))
+                        .frame(width: 8, height: 8)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 8)
+            .frame(width: 20)
+            .frame(maxHeight: .infinity)
+            .background(Color(p3: palette.sidebar))
+
+            VStack(alignment: .leading, spacing: 5) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(p3: palette.textPrimary))
+                    .frame(width: 44, height: 5)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(p3: palette.textSecondary))
+                    .frame(width: 30, height: 4)
+                Spacer(minLength: 0)
+                HStack(spacing: 4) {
+                    Circle().fill(accent).frame(width: 7, height: 7)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(p3: palette.textSecondary).opacity(0.7))
+                        .frame(width: 24, height: 4)
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color(p3: palette.surface))
+                    .padding(5)
+            )
+            .background(Color(p3: palette.background))
+        }
     }
 }

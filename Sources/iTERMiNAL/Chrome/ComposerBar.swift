@@ -17,6 +17,7 @@ struct ComposerBar: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     @State private var text = ""
     @StateObject private var ai = ComposerAIController()
@@ -159,7 +160,7 @@ struct ComposerBar: View {
     // MARK: Collapsed
 
     private var collapsedPill: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         return Button {
             settings.composerCollapsed = false
         } label: {
@@ -191,7 +192,7 @@ struct ComposerBar: View {
         VStack(spacing: 0) {
             cardStack
             if trayShown {
-                ComposerStatusTray(theme: Theme.current(for: colorScheme))
+                ComposerStatusTray(theme: Theme.current(for: colorScheme, themeID: appThemeID))
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -199,7 +200,7 @@ struct ComposerBar: View {
     }
 
     private var cardStack: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         return VStack(spacing: 8) {
             if let banner = ai.banner {
                 // A dismiss (and, while a request is in flight, a stop) —
@@ -609,7 +610,7 @@ struct ComposerBar: View {
         )
         // Opaque and sRGB, so the colours chosen for it are checked against
         // exactly what is drawn. The focus change is the accent hairline.
-        .background(shape.fill(Color(hex: Theme.inputFieldHex(for: colorScheme))))
+        .background(shape.fill(Color(hex: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID))))
         .overlay(
             shape.strokeBorder(
                 inputFocused ? settings.accentColor.opacity(0.55) : theme.surfaceBorder,
@@ -638,7 +639,7 @@ struct ComposerBar: View {
         let colors = SyntaxPalette.colors(
             ansi: terminal.ansi,
             foreground: terminal.foreground,
-            background: Theme.inputFieldHex(for: colorScheme),
+            background: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID),
             darkBackground: dark
         )
         return CommandInputStyle(

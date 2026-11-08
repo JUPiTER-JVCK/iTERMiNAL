@@ -17,7 +17,8 @@ struct SyntaxColors: Equatable {
 /// no better. So each colour is checked against the field's background, and one
 /// that would not read is replaced by a value tuned for it instead.
 ///
-/// That background must be a single opaque colour — `Theme.inputFieldHex` — for
+/// That background must be a single opaque colour — `Theme.inputFieldHex`, the
+/// app theme's `inputField` — for
 /// the check to mean anything: against a translucent fill the real background
 /// would depend on what is behind the composer.
 enum SyntaxPalette {
@@ -29,7 +30,7 @@ enum SyntaxPalette {
     /// ANSI slots: green commands, cyan flags, yellow strings, magenta
     /// variables, blue operators. Unquoted arguments keep the body colour.
     static func colors(ansi: [UInt32], foreground: UInt32, background: UInt32, darkBackground: Bool) -> SyntaxColors {
-        let fallback = darkBackground ? darkFallback : lightFallback
+        let fallback = readable(darkBackground ? darkFallback : lightFallback, on: background, darkBackground: darkBackground)
 
         func pick(_ slot: Int, _ backup: UInt32) -> UInt32 {
             guard ansi.indices.contains(slot),
@@ -51,7 +52,33 @@ enum SyntaxPalette {
         )
     }
 
-    /// Tuned against `Theme.darkInputFieldHex`.
+    /// The fallbacks are tuned for the default theme's fields. An app theme
+    /// has a field of its own (`AppThemePalette.inputField`), on which one of
+    /// them may not read, so each that falls short is shaded toward white on a
+    /// dark field, or black on a light one, until it does. On the fields they
+    /// were tuned for they reach the floor already and come back unchanged.
+    static func readable(_ colors: SyntaxColors, on background: UInt32, darkBackground: Bool) -> SyntaxColors {
+        func shade(_ color: UInt32) -> UInt32 {
+            let target: UInt32 = darkBackground ? 0xFFFFFF : 0x000000
+            var step = 0
+            var shaded = color
+            while ColorMath.contrast(shaded, background) < minimumContrast && step < 20 {
+                step += 1
+                shaded = ColorMath.mix(color, target, Double(step) / 20)
+            }
+            return shaded
+        }
+        return SyntaxColors(
+            command: shade(colors.command),
+            flag: shade(colors.flag),
+            string: shade(colors.string),
+            variable: shade(colors.variable),
+            op: shade(colors.op),
+            comment: shade(colors.comment)
+        )
+    }
+
+    /// Tuned against the default theme's dark field (`AppThemes.iterminal.dark.inputField`).
     static let darkFallback = SyntaxColors(
         command: 0x7DD3A0,
         flag: 0x6CC7D9,
@@ -61,7 +88,7 @@ enum SyntaxPalette {
         comment: 0x8A8A94
     )
 
-    /// Tuned against `Theme.lightInputFieldHex`.
+    /// Tuned against the default theme's light field (`AppThemes.iterminal.light.inputField`).
     static let lightFallback = SyntaxColors(
         command: 0x1A7448,
         flag: 0x0B7285,

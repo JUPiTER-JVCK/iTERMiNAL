@@ -10,11 +10,12 @@ struct HTTPResponseView: View {
     @ObservedObject var model: HTTPClientModel
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var headersExpanded = false
     @State private var copied = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Group {
             if model.isSending {
                 sendingView(theme: theme)
@@ -163,7 +164,7 @@ struct HTTPResponseView: View {
             // text reads as part of the same family as the rest of the app,
             // the same reasoning `CodeBlockView` already uses for AI replies.
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme)))
+                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID)))
         )
     }
 

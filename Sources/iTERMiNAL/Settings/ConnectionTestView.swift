@@ -10,6 +10,7 @@ struct ConnectionTestRow: View {
     let connection: SSHConnection
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.openWindow) private var openWindow
     @State private var isTesting = false
     @State private var result: Outcome?
@@ -23,7 +24,7 @@ struct ConnectionTestRow: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Button(isTesting ? "Testing…" : "Test File Access") { runTest() }

@@ -33,6 +33,7 @@ struct CommandPaletteView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openSettings) private var openSettings
 
@@ -50,7 +51,7 @@ struct CommandPaletteView: View {
     @State private var rankTask: Task<Void, Never>?
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -244,6 +245,12 @@ struct CommandPaletteView: View {
         actions.append(PaletteAction(id: "tool.btop", title: "Toggle btop", subtitle: "A resource monitor", systemImage: "sidebar.right", shortcut: "⌥⌘P") {
             store.togglePanel(.btop)
         })
+        actions.append(PaletteAction(id: "tool.superfile.full", title: "superfile in Full View", subtitle: "Across the whole content area", systemImage: "arrow.up.left.and.arrow.down.right", shortcut: "⌥⇧⌘S") {
+            store.openPanelExpanded(.superfile)
+        })
+        actions.append(PaletteAction(id: "tool.btop.full", title: "btop in Full View", subtitle: "Across the whole content area", systemImage: "arrow.up.left.and.arrow.down.right", shortcut: "⌥⇧⌘P") {
+            store.openPanelExpanded(.btop)
+        })
 
         actions.append(PaletteAction(
             id: "composer.collapse",
@@ -399,6 +406,17 @@ struct CommandPaletteView: View {
             })
         }
 
+        for theme in AppThemes.all {
+            actions.append(PaletteAction(
+                id: "apptheme.\(theme.id)",
+                title: "App Theme: \(theme.name)",
+                subtitle: theme.summary,
+                systemImage: "paintbrush"
+            ) {
+                settings.appThemeID = theme.id
+            })
+        }
+
         for theme in TerminalTheme.available {
             actions.append(PaletteAction(
                 id: "theme.\(theme.id)",
@@ -412,8 +430,8 @@ struct CommandPaletteView: View {
 
         actions.append(PaletteAction(
             id: "theme.auto",
-            title: "Terminal Theme: Match System",
-            subtitle: "Follow light/dark",
+            title: "Terminal Theme: Match App Theme",
+            subtitle: "Follow the app theme, light or dark",
             systemImage: "circle.lefthalf.filled"
         ) {
             settings.terminalThemeID = "auto"

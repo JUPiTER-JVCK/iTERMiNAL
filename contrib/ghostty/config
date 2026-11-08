@@ -14,7 +14,7 @@
 #
 # Everforest Dark: a muted slate green rather than black, which is the whole
 # point — it gives the panel borders in btop, yazi and neovim something to sit
-# against instead of a void. The themes/ directory holds all twenty of
+# against instead of a void. The themes/ directory holds all thirty-four of
 # iTERMiNAL's schemes; swap the name here for any of them.
 #
 #   iterminal-dark              iterminal-light
@@ -25,6 +25,11 @@
 #   iterminal-nord              iterminal-dracula           iterminal-monokai
 #   iterminal-one-dark          iterminal-one-light         iterminal-rose-pine
 #   iterminal-solarized-dark    iterminal-solarized-light
+#   iterminal-midnight          iterminal-nord-light        iterminal-everforest-light
+#   iterminal-tokyo-night-moon  iterminal-tokyo-night-day   iterminal-kanagawa-lotus
+#   iterminal-rose-pine-moon    iterminal-rose-pine-dawn
+#   iterminal-github-dark       iterminal-github-light      iterminal-night-owl
+#   iterminal-ayu-dark          iterminal-ayu-mirage        iterminal-ayu-light
 #
 theme = iterminal-everforest-dark
 

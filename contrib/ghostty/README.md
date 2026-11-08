@@ -1,6 +1,6 @@
 # Ghostty configuration
 
-A terminal design for [Ghostty](https://ghostty.org): iTERMiNAL's twenty colour
+A terminal design for [Ghostty](https://ghostty.org): iTERMiNAL's thirty-four colour
 schemes exported as Ghostty themes, plus a config that sets up the rest of the
 look — muted slate-green background, Nerd Font, generous padding, translucency,
 tinted split dividers — and matching configs for the TUI tools that make a
@@ -13,7 +13,7 @@ compiled, and nothing talks to the network.
 
 ```sh
 cd contrib/ghostty
-./install.sh                         # Ghostty config + all twenty themes
+./install.sh                         # Ghostty config + all thirty-four themes
 ./install.sh --extras                # also btop, starship, yazi, fzf, fastfetch
 ./install.sh --theme iterminal-nord  # pick a palette
 ./install.sh --dry-run               # print what it would do, touch nothing
@@ -66,7 +66,7 @@ calls itself, which `fc-list : family` (or Font Book) will tell you.
 | File | What it is |
 | --- | --- |
 | `config` | The Ghostty config: theme, font, padding, transparency, splits, keybinds. Commented throughout. |
-| `themes/` | All twenty iTERMiNAL schemes as Ghostty theme files, named `iterminal-*`. |
+| `themes/` | All thirty-four iTERMiNAL schemes as Ghostty theme files, named `iterminal-*`. |
 | `export-themes.py` | Regenerates `themes/` from the Swift source, and emits the companion configs for any one palette. |
 | `extras/starship.toml` | Two-line powerline prompt. Generated. |
 | `extras/btop.theme` | btop theme with a different accent per panel. Generated. |
@@ -106,6 +106,11 @@ iterminal-catppuccin-frappe   iterminal-catppuccin-latte
 iterminal-nord                iterminal-dracula           iterminal-monokai
 iterminal-one-dark            iterminal-one-light         iterminal-rose-pine
 iterminal-solarized-dark      iterminal-solarized-light
+iterminal-midnight            iterminal-nord-light        iterminal-everforest-light
+iterminal-tokyo-night-moon    iterminal-tokyo-night-day   iterminal-kanagawa-lotus
+iterminal-rose-pine-moon      iterminal-rose-pine-dawn
+iterminal-github-dark         iterminal-github-light      iterminal-night-owl
+iterminal-ayu-dark            iterminal-ayu-mirage        iterminal-ayu-light
 ```
 
 The default is `iterminal-everforest-dark` — the muted green-grey that Omarchy

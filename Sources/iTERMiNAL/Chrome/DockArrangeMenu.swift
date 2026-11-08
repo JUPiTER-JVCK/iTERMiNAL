@@ -12,11 +12,12 @@ struct DockArrangeMenuButton: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var isOpen = false
     @State private var hovering = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button {
             isOpen.toggle()
         } label: {
@@ -49,9 +50,10 @@ private struct DockArrangeMenuContent: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let alone = store.panelsInReadingOrder.count < 2
         let current = store.arrangement(of: panel)
         VStack(alignment: .leading, spacing: 4) {
@@ -147,9 +149,10 @@ private struct ArrangeIconButton: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 14))
