@@ -1568,7 +1568,14 @@ bind:
 
 The composer and the site explorer's prompt have keys of their own — ↑ ↓ for
 earlier commands, ⇥ to complete, ⌃R to search history — described under
-Features and listed in the window above. Some actions (Split with Files, Split
+Features and listed in the window above.
+
+The same window lists btop's and superfile's own keys, under **Inside btop** and
+**Inside superfile**: btop 1.4.7's help and superfile 1.6.0's default hotkeys,
+the versions the app bundles, with superfile's own descriptions. They work while
+that tool's panel is in front; the app's ⌘ shortcuts still work there too.
+btop's keys are built in. superfile's can be changed in a `hotkeys.toml` of your
+own, which the list does not read. Some actions (Split with Files, Split
 with HTTP Client) have no shortcut; the command palette finds every action.
 
 ## Architecture

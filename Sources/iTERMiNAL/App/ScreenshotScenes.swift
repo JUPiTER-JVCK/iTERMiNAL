@@ -1898,6 +1898,13 @@ final class ScreenshotRun {
             editor.insertText("shift split", replacementRange: whole)
             await pause(1.0)
             _ = ScreenshotMode.capture(sheet, "keyboard-shortcuts-search", in: directory)
+            // The bundled tools' own keys, each under its tool.
+            for tool in ["btop", "superfile"] {
+                let all = NSRange(location: 0, length: (editor.string as NSString).length)
+                editor.insertText(tool, replacementRange: all)
+                await pause(1.0)
+                _ = ScreenshotMode.capture(sheet, "keyboard-shortcuts-\(tool)", in: directory)
+            }
         } else {
             say("shortcuts: the search field does not have the focus")
         }

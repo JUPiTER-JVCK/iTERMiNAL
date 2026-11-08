@@ -1,0 +1,435 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hotkey list | superfile</title><meta name="description" content="superfile hotkey list"><link rel="canonical" href="https://superfile.dev/list/hotkey-list/"><meta property="og:title" content="Hotkey list | superfile"><meta property="og:description" content="superfile hotkey list"><meta property="og:image" content="https://superfile.dev/og.png?v=1"><meta name="twitter:card" content="summary_large_image"><meta name="astro-view-transitions-enabled" content="true"><meta name="astro-view-transitions-fallback" content="animate"><script type="module" src="/_astro/ClientRouter.astro_astro_type_script_index_0_lang.CAqDO0tx.js"></script> <script type="module">let t=!1;document.addEventListener("astro:before-swap",()=>{t=!0});document.addEventListener("astro:page-load",()=>{t&&(t=!1,document.querySelectorAll('script[src="https://giscus.app/client.js"]').forEach(e=>{const r=e.parentElement;if(!r||r.querySelector(".giscus"))return;const a=document.createElement("script");for(const n of e.attributes)a.setAttribute(n.name,n.value);e.replaceWith(a)}))});</script> <!-- Favicon --> <link rel="icon" href="/logo.svg" type="image/svg+xml"> <!-- Fonts --> <link rel="preconnect" href="https://font.emtech.cc"> <link rel="stylesheet" href="https://font.emtech.cc/css/GenSenRoundedTW"> <link rel="stylesheet" href="https://font.emtech.cc/css/JetBrainsMono"> <!-- Analytics --> <script>(function(){const enableAnalytics = true;
+
+	if (enableAnalytics && ["superfile.dev", "www.superfile.dev"].includes(window.location.hostname)) {
+		window.minimalAnalytics = { trackingId: "G-WFLBCRZ7MC", autoTrack: true };
+	}
+})();</script> <script async src="https://cdn.jsdelivr.net/npm/@minimal-analytics/ga4/dist/index.js" data-analytics="ga4"></script> <script defer src="https://umami.yorukot.me/script.js" data-website-id="8792ee93-9a4a-47be-9e7f-2b1587c3a3d1" data-domains="superfile.dev,www.superfile.dev" data-analytics="umami"></script><link rel="stylesheet" href="/_astro/global.DioHrujN.css">
+<link rel="stylesheet" href="/_astro/_..DCyYy7PH.css"></head> <body> <header class="site-nav" id="site-nav"> <div class="site-nav-inner"> <button class="site-nav-menu-btn" id="docs-menu-btn" aria-label="Toggle menu"> <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"> <rect x="1" y="3" width="14" height="1.5" rx="0.75" fill="currentColor"></rect> <rect x="1" y="7.25" width="14" height="1.5" rx="0.75" fill="currentColor"></rect> <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" fill="currentColor"></rect> </svg> </button> <a href="/" class="site-nav-logo" aria-label="superfile home"> <img src="/_astro/superfile-night.BmDfD6Kw.svg" alt="superfile" width="120" height="24"> </a> <nav class="site-nav-links" role="navigation" aria-label="Main">  <a href="/overview" class="site-nav-link">Docs</a> <a href="https://github.com/yorukot/superfile" class="site-nav-link" target="_blank" rel="noopener noreferrer">GitHub</a> <a href="https://discord.gg/YYtJ23Du7B" class="site-nav-link" target="_blank" rel="noopener noreferrer">Discord</a> </nav> <div class="site-nav-right"> <!-- ── Search trigger button ─────────────────────────────────────────────── --><button class="search-trigger" id="search-trigger" aria-label="Search" aria-haspopup="dialog"> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"> <circle cx="11" cy="11" r="8"></circle> <line x1="21" y1="21" x2="16.65" y2="16.65"></line> </svg> <span class="search-trigger-label">Search</span> <span class="search-trigger-shortcut" aria-hidden="true"> <kbd class="search-trigger-mod">⌘</kbd><kbd>K</kbd> </span> </button> <!-- ── Search overlay + dialog ───────────────────────────────────────────── --> <div class="search-overlay" id="search-overlay" aria-hidden="true"> <div class="search-dialog" id="search-dialog" role="dialog" aria-modal="true" aria-label="Search"> <div class="search-header"> <svg class="search-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"> <circle cx="11" cy="11" r="8"></circle> <line x1="21" y1="21" x2="16.65" y2="16.65"></line> </svg> <input type="search" class="search-input" id="search-input" placeholder="Search docs…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"> <button class="search-esc-btn" id="search-close-btn" aria-label="Close search"> <kbd>ESC</kbd> </button> </div> <div class="search-results" id="search-results" role="listbox"></div> <div class="search-footer"> <span class="search-footer-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate</span> <span class="search-footer-hint"><kbd>↵</kbd> open</span> <span class="search-footer-hint"><kbd>Esc</kbd> close</span> </div> </div> </div>  <script>
+	// Module-level state persists across SPA navigations (attached to window)
+	window.__pagefind = window.__pagefind ?? null;
+
+	async function loadPagefind() {
+		if (window.__pagefind) return window.__pagefind;
+		try {
+			const pf = await import("/pagefind/pagefind.js");
+			await pf.init();
+			window.__pagefind = pf;
+		} catch {
+			window.__pagefind = null;
+		}
+		return window.__pagefind;
+	}
+
+	function escapeHtml(str) {
+		return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+	}
+
+	function initSearch() {
+		const trigger = document.getElementById("search-trigger");
+		const overlay = document.getElementById("search-overlay");
+		const input = document.getElementById("search-input");
+		const resultsEl = document.getElementById("search-results");
+		const closeBtn = document.getElementById("search-close-btn");
+
+		if (!trigger || !overlay || !input || !resultsEl) return;
+
+		// Teleport overlay to <body> so it escapes SiteNav's backdrop-filter
+		// stacking context (which is z-index: 100). Without this, the overlay's
+		// own z-index: 500 is scoped inside SiteNav and images outside it paint
+		// on top of the backdrop.
+		if (overlay.parentElement !== document.body) {
+			document.body.appendChild(overlay);
+		}
+
+		let selectedIndex = -1;
+		let searchTimeout = null;
+
+		function open() {
+			overlay.setAttribute("aria-hidden", "false");
+			document.body.style.overflow = "hidden";
+			requestAnimationFrame(() => input.focus());
+			loadPagefind(); // preload index eagerly
+		}
+
+		function close() {
+			overlay.setAttribute("aria-hidden", "true");
+			document.body.style.overflow = "";
+			input.value = "";
+			resultsEl.innerHTML = "";
+			selectedIndex = -1;
+		}
+
+		trigger.addEventListener("click", open);
+		closeBtn?.addEventListener("click", close);
+
+		overlay.addEventListener("click", e => {
+			if (e.target === overlay) close();
+		});
+
+		function handleKey(e) {
+			if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+				e.preventDefault();
+				overlay.getAttribute("aria-hidden") === "false" ? close() : open();
+				return;
+			}
+			if (overlay.getAttribute("aria-hidden") !== "false") return;
+			if (e.key === "Escape") {
+				close();
+				return;
+			}
+			const items = resultsEl.querySelectorAll(".search-result");
+			if (!items.length) return;
+			if (e.key === "ArrowDown") {
+				e.preventDefault();
+				selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+				updateSelection(items);
+			} else if (e.key === "ArrowUp") {
+				e.preventDefault();
+				selectedIndex = Math.max(selectedIndex - 1, 0);
+				updateSelection(items);
+			} else if (e.key === "Enter" && selectedIndex >= 0) {
+				const link = items[selectedIndex]?.querySelector("a");
+				if (link) {
+					close();
+					link.click();
+				}
+			}
+		}
+
+		document.addEventListener("keydown", handleKey);
+		document.addEventListener("astro:before-swap", () => document.removeEventListener("keydown", handleKey), { once: true });
+
+		function updateSelection(items) {
+			items.forEach((item, i) => {
+				item.classList.toggle("search-result--selected", i === selectedIndex);
+				item.setAttribute("aria-selected", i === selectedIndex ? "true" : "false");
+				if (i === selectedIndex) item.scrollIntoView({ block: "nearest" });
+			});
+		}
+
+		input.addEventListener("input", () => {
+			selectedIndex = -1;
+			const query = input.value.trim();
+			if (searchTimeout) clearTimeout(searchTimeout);
+			if (!query) {
+				resultsEl.innerHTML = "";
+				return;
+			}
+			searchTimeout = setTimeout(() => doSearch(query), 150);
+		});
+
+		async function doSearch(query) {
+			const pf = await loadPagefind();
+			if (!pf) {
+				resultsEl.innerHTML = `<div class="search-no-results">Search index not available — run a build first.</div>`;
+				return;
+			}
+			const search = await pf.search(query);
+			if (!search.results.length) {
+				resultsEl.innerHTML = `<div class="search-no-results">No results found.</div>`;
+				return;
+			}
+			const data = await Promise.all(search.results.slice(0, 8).map(r => r.data()));
+			resultsEl.innerHTML = data
+				.map(
+					r => `
+				<div class="search-result" role="option" aria-selected="false">
+					<a href="${r.url}" class="search-result-link">
+						<span class="search-result-title">${escapeHtml(r.meta?.title ?? "")}</span>
+						<span class="search-result-excerpt">${r.excerpt}</span>
+					</a>
+				</div>`
+				)
+				.join("");
+			resultsEl.querySelectorAll(".search-result-link").forEach(link => {
+				link.addEventListener("click", close);
+			});
+		}
+	}
+
+	document.addEventListener("astro:page-load", initSearch);
+</script> <a href="https://github.com/yorukot/superfile" class="site-nav-stars" id="nav-stars" target="_blank" rel="noopener noreferrer" aria-label="GitHub stars"> <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"> <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path> </svg> <span id="star-count">—</span> </a> <a href="/zh-tw/list/hotkey-list" class="site-nav-lang"> <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"> <circle cx="12" cy="12" r="10"></circle> <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path> </svg> <span>繁體中文</span> </a>  </div> </div> </header>  <script type="module">async function d(){try{let e,n;const a=document.cookie.split("; ").find(t=>t.startsWith("spf_stars="));if(a){const t=JSON.parse(decodeURIComponent(a.slice(10)));e=t.n,n=t.t??""}else{const s=await(await fetch("https://api.github.com/repos/yorukot/superfile")).json();e=s.stargazers_count,n=s.tag_name??s.default_branch??"",document.cookie=`spf_stars=${encodeURIComponent(JSON.stringify({n:e,t:n}))}; max-age=300; path=/; SameSite=Lax`}const o=e>=1e3?`${(e/1e3).toFixed(1)}k`:String(e),c=document.getElementById("star-count");c&&(c.textContent=o),document.querySelectorAll("#stats-stars").forEach(t=>t.textContent=o);const r=document.getElementById("community-stars");r&&(r.textContent=`★ ${o}+`);const i=document.getElementById("stats-version");i&&n&&(i.textContent=n)}catch{}}document.addEventListener("astro:page-load",d);</script> <!-- ── Overlay (mobile) ──────────────────────────────────────────────── --> <div class="docs-overlay" id="docs-overlay"></div> <!-- ── Shell ─────────────────────────────────────────────────────────── --> <div class="docs-shell"> <!-- Sidebar --> <aside class="docs-sidebar" id="docs-sidebar"> <nav class="docs-nav" aria-label="Docs navigation"> <a href="/overview" class="docs-nav-leaf"> Overview </a><details class="docs-nav-section"> <summary> <svg class="docs-nav-section-arrow" viewBox="0 0 12 12" fill="none"> <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </svg> Start Here </summary> <ul class="docs-nav-items"> <li class="docs-nav-item"> <a href="/getting-started/installation">Installation</a> </li><li class="docs-nav-item"> <a href="/getting-started/tutorial">Tutorial</a> </li><li class="docs-nav-item"> <a href="/getting-started/image-preview">Image Preview</a> </li> </ul> </details><details class="docs-nav-section"> <summary> <svg class="docs-nav-section-arrow" viewBox="0 0 12 12" fill="none"> <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </svg> Configure </summary> <ul class="docs-nav-items"> <li class="docs-nav-item"> <a href="/configure/config-file-path">Config File Path</a> </li><li class="docs-nav-item"> <a href="/configure/superfile-config">superfile config</a> </li><li class="docs-nav-item"> <a href="/configure/custom-hotkeys">Custom Hotkeys</a> </li><li class="docs-nav-item"> <a href="/configure/custom-theme">Custom Theme</a> </li><li class="docs-nav-item"> <a href="/configure/enable-plugin">Enable Plugin</a> </li> </ul> </details><details class="docs-nav-section" open> <summary> <svg class="docs-nav-section-arrow" viewBox="0 0 12 12" fill="none"> <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </svg> List </summary> <ul class="docs-nav-items"> <li class="docs-nav-item docs-nav-item--active"> <a href="/list/hotkey-list">Hotkey List</a> </li><li class="docs-nav-item"> <a href="/list/theme-list">Theme List</a> </li><li class="docs-nav-item"> <a href="/list/plugin-list">Plugin List</a> </li> </ul> </details><details class="docs-nav-section"> <summary> <svg class="docs-nav-section-arrow" viewBox="0 0 12 12" fill="none"> <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </svg> Contribute </summary> <ul class="docs-nav-items"> <li class="docs-nav-item"> <a href="/contribute/how-to-contribute">How to Contribute</a> </li><li class="docs-nav-item"> <a href="/contribute/file-struct">File Structure</a> </li><li class="docs-nav-item"> <a href="/contribute/implementation-info">Implementation Info</a> </li> </ul> </details><a href="/troubleshooting" class="docs-nav-leaf"> Troubleshooting </a><a href="/special-thanks" class="docs-nav-leaf"> Special Thanks </a><a href="/notice" class="docs-nav-leaf"> NOTICE </a><a href="/changelog" class="docs-nav-leaf"> Changelog </a> </nav> </aside> <!-- Body: centered content + TOC --> <div class="docs-body"> <div class="docs-body-inner"> <!-- Main --> <main class="docs-main"> <article class="docs-content" data-pagefind-body data-pagefind-meta="title:Hotkey list"> <div class="docs-page-header"> <h1>Hotkey list</h1> <p class="docs-description">superfile hotkey list</p> </div>  <aside class="doc-aside doc-aside--tip" data-type="tip"> <span class="doc-aside-icon" aria-hidden="true"> <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="lucide lucide-lightbulb"> <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M10 22h4"></path>  </svg> </span> <span class="doc-aside-label">tip</span> <p>These are the default hotkeys and you can <a href="/configure/custom-hotkeys">change</a> them all!</p> </aside>
+<h2 id="general">General</h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Function</th><th>Key</th><th>Variable name</th></tr></thead><tbody><tr><td>Open superfile</td><td><code>spf</code></td><td></td></tr><tr><td>Confirm selected item</td><td><code>enter</code>, <code>right</code>, <code>l</code></td><td><code>confirm</code></td></tr><tr><td>Quit typing, modal or superfile</td><td><code>q</code>, <code>esc</code></td><td><code>quit</code></td></tr><tr><td>Quit superfile and cd to current folder</td><td><code>Q</code></td><td><code>cd_quit</code></td></tr><tr><td>Confirm typing</td><td><code>enter</code></td><td><code>confirm_typing</code></td></tr><tr><td>Cancel typing</td><td><code>ctrl+c</code>, <code>esc</code></td><td><code>cancel_typing</code></td></tr><tr><td>Open help menu (hotkey list)</td><td><code>?</code></td><td><code>open_help_menu</code></td></tr><tr><td>Open prompt in shell mode</td><td><code>:</code></td><td><code>open_command_line</code></td></tr><tr><td>Open prompt in spf mode</td><td><code>&gt;</code></td><td><code>open_spf_prompt</code></td></tr><tr><td>Open zoxide navigation modal</td><td><code>z</code></td><td><code>open_zoxide</code></td></tr></tbody></table>
+<aside class="doc-aside doc-aside--note" data-type="note"> <span class="doc-aside-icon" aria-hidden="true"> <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="lucide lucide-info"> <circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>  </svg> </span> <span class="doc-aside-label">note</span> <p>Quit superfile and cd to current folder “cd_quit” requires the same setup as <a href="/configure/superfile-config/#cd_on_quit">“cd_on_quit”</a> setting</p> </aside>
+<h2 id="panel-navigation">Panel navigation</h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Function</th><th>Key</th><th>Variable name</th></tr></thead><tbody><tr><td>Create new file panel</td><td><code>n</code></td><td><code>create_new_file_panel</code></td></tr><tr><td>Split focused file panel</td><td><code>N</code> (shift+n)</td><td><code>split_file_panel</code></td></tr><tr><td>Close the focused file panel</td><td><code>w</code></td><td><code>close_file_panel</code></td></tr><tr><td>Toggle file preview panel</td><td><code>f</code></td><td><code>toggle_file_preview_panel</code></td></tr><tr><td>Open sort options menu</td><td><code>o</code></td><td><code>open_sort_options_menu</code></td></tr><tr><td>Toggle reverse sort</td><td><code>R</code> (shift+r)</td><td><code>toggle_reverse_sort</code></td></tr><tr><td>Toggle footer</td><td><code>F</code> (shift+f)</td><td><code>toggle_footer</code></td></tr><tr><td>Focus on the next file panel</td><td><code>tab</code>, <code>L</code>(shift+l)</td><td><code>next_file_panel</code></td></tr><tr><td>Focus on the previous file panel</td><td><code>shift+left</code>, <code>H</code>(shift+h)</td><td><code>previous_file_panel</code></td></tr><tr><td>Focus on the processbar panel</td><td><code>p</code></td><td><code>focus_on_process_bar</code></td></tr><tr><td>Focus on the sidebar</td><td><code>s</code></td><td><code>focus_on_sidebar</code></td></tr><tr><td>Focus on the metadata panel</td><td><code>m</code></td><td><code>focus_on_metadata</code></td></tr></tbody></table>
+<h2 id="panel-movement">Panel movement</h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Function</th><th>Key</th><th>Variable name</th></tr></thead><tbody><tr><td>Up</td><td><code>up</code>, <code>k</code></td><td><code>list_up</code></td></tr><tr><td>Down</td><td><code>down</code>, <code>j</code></td><td><code>list_down</code></td></tr><tr><td>Page up</td><td><code>pgup</code></td><td><code>page_up</code></td></tr><tr><td>Page down</td><td><code>pgdown</code></td><td><code>page_down</code></td></tr><tr><td>Return to parent folder</td><td><code>h</code>, <code>left</code>, <code>backspace</code></td><td><code>parent_directory</code></td></tr><tr><td>Select all items in focused file panel</td><td><code>A</code> (shift+a)</td><td><code>file_panel_select_all_items</code> (selection mode only)</td></tr><tr><td>Select up from your cursor</td><td><code>shift+up</code>, <code>K</code> (shift+k)</td><td><code>file_panel_select_mode_items_select_up</code> (selection mode only)</td></tr><tr><td>Select down from your cursor</td><td><code>shift+down</code>, <code>J</code> (shift+j)</td><td><code>file_panel_select_mode_items_select_down</code> (selection mode only)</td></tr><tr><td>Toggle dot file display</td><td><code>.</code></td><td><code>toggle_dot_file</code></td></tr><tr><td>Toggle active search bar</td><td><code>/</code></td><td><code>search_bar</code></td></tr><tr><td>Change between selection mode or normal mode</td><td><code>v</code></td><td><code>change_panel_mode</code></td></tr><tr><td>Pin or Unpin folder to sidebar (can be auto saved)</td><td><code>P</code> (shift+p)</td><td><code>pinned_directory</code></td></tr></tbody></table>
+<h2 id="file-operations">File operations</h2>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Function</th><th>Key</th><th>Variable name</th></tr></thead><tbody><tr><td>Create file or folder (end with / to create a folder)</td><td><code>ctrl+n</code></td><td><code>file_panel_item_create</code></td></tr><tr><td>Rename file or folder</td><td><code>ctrl+r</code></td><td><code>file_panel_item_rename</code></td></tr><tr><td>Copy selected items to the clipboard</td><td><code>ctrl+c</code></td><td><code>copy_items</code></td></tr><tr><td>Cut selected items to the clipboard</td><td><code>ctrl+x</code></td><td><code>cut_items</code></td></tr><tr><td>Paste clipboard items into the current file panel</td><td><code>ctrl+v</code>, <code>ctrl+w</code></td><td><code>paste_items</code></td></tr><tr><td>Delete selected items</td><td><code>ctrl+d</code>, <code>delete</code></td><td><code>delete_items</code></td></tr><tr><td>Permanently delete selected items</td><td><code>D</code> (shift+d)</td><td><code>permanently_delete_items</code></td></tr><tr><td>Copy current or selected file/directory paths</td><td><code>ctrl+p</code></td><td><code>copy_path</code></td></tr><tr><td>Copy current working directory</td><td><code>c</code></td><td><code>copy_present_working_directory</code></td></tr><tr><td>Extract compressed file</td><td><code>ctrl+e</code></td><td><code>extract_file</code> (normal mode)</td></tr><tr><td>Zip file or folder to .zip file</td><td><code>ctrl+a</code></td><td><code>compress_file</code> (normal mode)</td></tr><tr><td>Open file with your default editor</td><td><code>e</code></td><td><code>open_file_with_editor</code> (normal mode)</td></tr><tr><td>Open current directory with default editor</td><td><code>E</code> (shift+e)</td><td><code>open_current_directory_with_editor</code> (normal mode)</td></tr></tbody></table>  </article> <!-- Prev / Next --> <nav class="docs-page-nav" aria-label="Page navigation"> <a href="/configure/enable-plugin" class="docs-page-nav-link docs-page-nav-link--prev"> <span class="docs-page-nav-label">← Previous</span> <span class="docs-page-nav-title">Enable Plugin</span> </a> <a href="/list/theme-list" class="docs-page-nav-link docs-page-nav-link--next"> <span class="docs-page-nav-label">Next →</span> <span class="docs-page-nav-title">Theme List</span> </a> </nav> <!-- Giscus comments --> <div class="docs-giscus"> <script src="https://giscus.app/client.js" data-repo="yorukot/superfile" data-repo-id="R_kgDOLil1MA" data-category="Docs Comments" data-category-id="DIC_kwDOLil1MM4CfbH7" data-mapping="specific" data-term="Hotkey list | superfile" data-strict="0" data-reactions-enabled="1" data-emit-metadata="0" data-input-position="top" data-theme="catppuccin_mocha" data-lang="en" data-loading="lazy" crossorigin="anonymous" async></script> </div> </main> <!-- TOC --> <aside class="docs-toc" aria-label="Table of contents"> <p class="docs-toc-title">On this page</p> <ul class="docs-toc-list" id="docs-toc-list"> <li class="docs-toc-item docs-toc-item--h2" data-heading="general"> <a href="#general">General</a> </li><li class="docs-toc-item docs-toc-item--h2" data-heading="panel-navigation"> <a href="#panel-navigation">Panel navigation</a> </li><li class="docs-toc-item docs-toc-item--h2" data-heading="panel-movement"> <a href="#panel-movement">Panel movement</a> </li><li class="docs-toc-item docs-toc-item--h2" data-heading="file-operations"> <a href="#file-operations">File operations</a> </li> </ul> </aside> </div><!-- /.docs-body-inner --> </div><!-- /.docs-body --> </div><!-- /.docs-shell --> <script type="module">let c=null;document.addEventListener("astro:before-swap",()=>{document.body.style.overflow=""});document.addEventListener("astro:page-load",()=>{const a=document.getElementById("docs-menu-btn"),n=document.getElementById("docs-sidebar"),d=document.getElementById("docs-overlay");function i(){n?.classList.add("docs-sidebar--open"),d?.classList.add("docs-overlay--visible"),document.body.style.overflow="hidden"}function s(){n?.classList.remove("docs-sidebar--open"),d?.classList.remove("docs-overlay--visible"),document.body.style.overflow=""}a?.addEventListener("click",()=>{n?.classList.contains("docs-sidebar--open")?s():i()}),d?.addEventListener("click",s),document.querySelectorAll("pre").forEach(t=>{if(t.querySelector(".docs-copy-btn"))return;const e=document.createElement("button");e.className="docs-copy-btn",e.textContent="copy",e.addEventListener("click",()=>{const o=t.querySelector("code");o&&navigator.clipboard.writeText(o.innerText).then(()=>{e.textContent="copied!",setTimeout(()=>e.textContent="copy",2e3)})}),t.appendChild(e)}),c?.disconnect(),c=null;const r=document.querySelectorAll("[data-heading]");if(r.length){const t=Array.from(r).map(e=>document.getElementById(e.dataset.heading)).filter(Boolean);c=new IntersectionObserver(e=>{e.forEach(o=>{const l=o.target.id,m=document.querySelector(`[data-heading="${l}"]`);o.isIntersecting&&(document.querySelectorAll(".docs-toc-item--active").forEach(u=>u.classList.remove("docs-toc-item--active")),m?.classList.add("docs-toc-item--active"))})},{rootMargin:"-20% 0% -60% 0%"}),t.forEach(e=>c.observe(e))}});</script> <!-- Cloudflare Pages Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "24a9caae30bf48f9abb5a110848505b5"}'></script><!-- Cloudflare Pages Analytics --></body> </html>

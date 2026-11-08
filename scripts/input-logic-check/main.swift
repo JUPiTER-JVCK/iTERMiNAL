@@ -4380,6 +4380,13 @@ do {
     check(Chord("n", [.shift, .command]).words == ["Shift", "Command", "N"] && Chord(.return, .command).words == ["Command", "Return"]
           && Chord("-", .command).words == ["Command", "Minus"], "a chord reads out in words")
     check(Chord("d", [.shift, .command]).symbols == ["⇧", "⌘", "D"], "a chord splits into one cap per key")
+    check(Chord(.function(1)).display == "F1" && Chord(.pageUp).display == "⇞" && Chord(.pageDown).display == "⇟"
+          && Chord(.home).display == "↖" && Chord(.end).display == "↘" && Chord(.space).display == "Space"
+          && Chord(.backspace).display == "⌫" && Chord(.forwardDelete).display == "⌦" && Chord(.left, .shift).display == "⇧←",
+          "the keys the bundled tools use print as their caps")
+    check(Chord(.backspace).words == ["Delete"] && Chord(.forwardDelete).words == ["Forward Delete"]
+          && Chord(.function(2)).words == ["F2"] && Chord(.pageUp).words == ["Page Up"],
+          "and read out as a Mac names them")
 
     // The list is well formed.
     let ids = all.map(\.id)
@@ -4391,13 +4398,28 @@ do {
     check(ShortcutCatalog.groups(matching: "").flatMap(\.entries).count == all.count, "an empty query shows everything")
 
     // What a menu binds wins wherever it is bound, so no two may share a chord,
-    // and a key a view handles for itself must not be one a menu already owns.
-    let windowWide = all.filter { $0.source != .view }
+    // and a key a view handles for itself — or a bundled tool reads in its
+    // panel — must not be one a menu already owns. A tool's keys reach only that
+    // tool, so btop and superfile may share one (⌃C quits btop, copies in
+    // superfile).
+    let windowWide = all.filter { $0.source == .bound || $0.source == .system }
     let windowChords = windowWide.flatMap(\.chords)
     check(Set(windowChords).count == windowChords.count,
           "no two menu or system shortcuts share a chord: \(Dictionary(grouping: windowChords, by: \.display).filter { $0.value.count > 1 }.keys.sorted())")
-    let shadowed = all.filter { $0.source == .view }.flatMap(\.chords).filter { windowChords.contains($0) }
-    check(shadowed.isEmpty, "a view shortcut hides behind a menu's: \(shadowed.map(\.display))")
+    let shadowed = all.filter { $0.source == .view || $0.source == .tool }.flatMap(\.chords).filter { windowChords.contains($0) }
+    check(shadowed.isEmpty, "a view's or tool's key hides behind a menu's: \(shadowed.map(\.display))")
+
+    // The tools' own keys are listed under the tool, and nothing else is.
+    let toolSections: Set<ShortcutSection> = [.btop, .superfile]
+    check(all.allSatisfy { ($0.source == .tool) == toolSections.contains($0.section) },
+          "every key a tool reads is in that tool's section, and those sections hold nothing else")
+    check(all.filter { $0.section == .btop }.allSatisfy { $0.id.hasPrefix("btop.") }
+          && all.filter { $0.section == .superfile }.allSatisfy { $0.id.hasPrefix("superfile.") },
+          "a tool's keys have ids named for it")
+    check(all.filter { $0.section == .btop }.count >= 30 && all.filter { $0.section == .superfile }.count >= 40,
+          "btop's and superfile's lists are there (\(all.filter { $0.section == .btop }.count), \(all.filter { $0.section == .superfile }.count))")
+    check(all.filter { $0.source == .tool }.allSatisfy { entry in entry.chords.allSatisfy { !$0.modifiers.contains(.command) } },
+          "no tool key uses ⌘, which the app's menus would take first")
 
     // A chord the standard menus already hold cannot be ours. These are the ones
     // the built app's menu bar listed — the Screenshots workflow logs every key
@@ -4416,9 +4438,9 @@ do {
 
     // Search.
     func found(_ query: String) -> [String] { ShortcutCatalog.groups(matching: query).flatMap(\.entries).map(\.id) }
-    check(found("split") == ["split.right", "split.down", "split.browser"], "a word finds what starts with it")
+    check(found("split") == ["superfile.split", "split.right", "split.down", "split.browser"], "a word finds what starts with it: \(found("split"))")
     check(found("SPLIT") == found("split") && found("  split  ") == found("split"), "case and surrounding space do not matter")
-    check(found("shift split") == ["split.down", "split.browser"], "every word has to match")
+    check(found("shift split") == ["superfile.split", "split.down", "split.browser"], "every word has to match: \(found("shift split"))")
     check(found("⌘d") == ["split.right", "split.down"] && found("⇧⌘d") == ["split.down"], "printed keys find the chords they are in")
     check(found("zzz").isEmpty, "nothing matches nonsense")
     check(found("term").contains("tab.new") && found("term").contains("font.bigger"), "a word finds the section it is in")
