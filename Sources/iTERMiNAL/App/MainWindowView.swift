@@ -518,8 +518,8 @@ private struct TabContentView: View {
 
 /// Home: what shows when no tab is open.
 ///
-/// One column, centred, that scrolls when the window is short: who and where
-/// (a greeting, the space, a way to switch it), then what to start — terminals
+/// One column, centred, that scrolls when the window is short: where (a
+/// greeting, the space, a way to switch it), then what to start — terminals
 /// and panels, the two bundled tools, the last few commands from shell
 /// history — each with the keys that do the same from anywhere, and at the
 /// bottom the two ways to find everything else.
@@ -540,7 +540,7 @@ private struct LandingView: View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         GeometryReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 22) {
                     header(theme)
                     section("Start", theme: theme) { startTiles(theme) }
                     section("Tools", theme: theme) { toolTiles(theme) }
@@ -551,7 +551,7 @@ private struct LandingView: View {
                 }
                 .frame(maxWidth: Self.columnWidth)
                 .padding(.horizontal, 32)
-                .padding(.top, 36)
+                .padding(.top, 28)
                 // The composer floats over the bottom of this page; its pill is
                 // short, the open card is not.
                 .padding(.bottom, settings.composerEnabled && !settings.composerCollapsed ? 210 : 84)
@@ -562,7 +562,7 @@ private struct LandingView: View {
         .onAppear {
             // Read once per appearance; the file rarely changes mid-session.
             if recentCommands.isEmpty {
-                recentCommands = ShellHistory.recentCommands(limit: 4)
+                recentCommands = ShellHistory.recentCommands(limit: 3)
             }
         }
     }
@@ -570,26 +570,7 @@ private struct LandingView: View {
     // MARK: Parts
 
     private func header(_ theme: Theme) -> some View {
-        VStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [settings.accentColor.opacity(0.28), settings.accentColor.opacity(0.10)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(settings.accentColor.opacity(0.35), lineWidth: 1)
-                Image(systemName: "apple.terminal")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(settings.accentColor)
-            }
-            .frame(width: 52, height: 52)
-            .accessibilityHidden(true)
-            .padding(.bottom, 4)
-
+        VStack(spacing: 8) {
             Text(greeting)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(theme.textSecondary)
@@ -662,9 +643,9 @@ private struct LandingView: View {
                 store.splitFocusedPane(.horizontal, kind: .terminal)
             }
             panelTile(.browser, tint: Color(hex: 0x8B5CF6), subtitle: "Web pages beside your work", theme: theme)
-            panelTile(.files, tint: Color(hex: 0xF97316), subtitle: "Browse this Mac or a server", theme: theme)
-            panelTile(.notes, tint: Color(hex: 0xEAB308), subtitle: "A scratchpad that stays put", theme: theme)
-            panelTile(.http, tint: Color(hex: 0x14B8A6), subtitle: "Send requests, explore a site", theme: theme)
+            panelTile(.files, tint: Color(hex: 0xF97316), subtitle: "This Mac or a server", theme: theme)
+            panelTile(.notes, tint: Color(hex: 0xEAB308), subtitle: "Quick notes that stay put", theme: theme)
+            panelTile(.http, tint: Color(hex: 0x14B8A6), subtitle: "Requests, APIs and sites", theme: theme)
         }
     }
 
@@ -785,22 +766,22 @@ private struct LandingTile: View {
                     }
                     .frame(width: 32, height: 32)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(theme.textPrimary)
-                            .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(theme.textPrimary)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            if let shortcut {
+                                KeyCaps(keys: shortcut, theme: theme)
+                            }
+                        }
                         Text(subtitle)
                             .font(.system(size: 11))
                             .foregroundStyle(theme.textSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                    }
-
-                    Spacer(minLength: 6)
-
-                    if let shortcut {
-                        KeyCaps(keys: shortcut, theme: theme)
                     }
                 }
                 .contentShape(Rectangle())
