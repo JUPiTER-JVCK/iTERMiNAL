@@ -76,11 +76,12 @@ rebind of keys without modifiers that would steal typing from the PTY, and
 user-defined chords that conflict with macOS reserved shortcuts (warn and
 block).
 
-### 6. Sync / export
+### 6. Export
 
 Keybinding overrides are preferences, not secrets. Include them in
-`PreferencesArchive` / future iCloud sync once that lands (optional field so
-old archives still decode). Do not sync anything from the keychain.
+`PreferencesArchive`, so snapshot export and import carry them (optional field
+so old archives still decode). There is no sync to feed: iCloud sync was
+removed (see `icloud-sync.md`). Do not export anything from the keychain.
 
 ## Implementation order
 

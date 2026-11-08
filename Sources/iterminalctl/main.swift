@@ -228,12 +228,22 @@ guard var requestData = try? JSONSerialization.data(withJSONObject: payload) els
 }
 requestData.append(0x0A)
 
+// The app can close the connection before the whole request is written — it
+// does for a request line over its limit, after replying with why. Writing to
+// a closed socket raises SIGPIPE, which by default ends this process with no
+// message, so it is ignored: the write fails instead, and what the app said,
+// if anything, is read below.
+signal(SIGPIPE, SIG_IGN)
+var sendFailed = false
 requestData.withUnsafeBytes { buffer in
     guard var base = buffer.baseAddress else { return }
     var remaining = buffer.count
     while remaining > 0 {
         let written = Darwin.write(descriptor, base, remaining)
-        if written <= 0 { fail("Could not send the request") }
+        if written <= 0 {
+            sendFailed = true
+            return
+        }
         remaining -= written
         base = base.advanced(by: written)
     }
@@ -296,7 +306,7 @@ func render(_ result: [String: Any]) {
 }
 
 guard let response = readFrame() else {
-    fail("The app closed the connection without replying")
+    fail(sendFailed ? "Could not send the request" : "The app closed the connection without replying")
 }
 
 if rawOutput {

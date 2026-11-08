@@ -898,6 +898,8 @@ can speak it:
 
 A request is one line of at most 1 MiB (1,048,576 bytes, the newline not
 counted). A longer one is answered with an error and the connection is closed.
+At most 32 connections can be open at once, subscriptions included; one more is
+answered with an error and closed.
 
 A request waits up to 150 seconds for its reply. That is longer than any command
 can be asked to take — `host.exec` and `browser.wait` are both held to 120 — so
