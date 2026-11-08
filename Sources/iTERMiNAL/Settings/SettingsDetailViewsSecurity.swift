@@ -44,7 +44,7 @@ struct SecuritySettingsView: View {
                         Button("Regenerate Token") {
                             tokenMessage = LocalAPIServer.shared.regenerateToken() == nil
                                 ? "Couldn't create a new token in your keychain."
-                                : "New token created. The old one no longer works."
+                                : "New token created. The old one no longer works, and whatever was connected with it has been disconnected."
                         }
                     }
 

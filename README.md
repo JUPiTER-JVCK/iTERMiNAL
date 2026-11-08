@@ -896,6 +896,11 @@ can speak it:
 {"id":"1","ok":true,"result":{"session":"…"}}
 ```
 
+A request waits up to 150 seconds for its reply. That is longer than any command
+can be asked to take — `host.exec` and `browser.wait` are both held to 120 — so
+one given all of its time still reports how it ended, rather than `Command timed
+out.` from the socket.
+
 ### Running a command on a host
 
 `iterminalctl exec web1 uptime` (or the `host.exec` command) runs one command
@@ -940,7 +945,9 @@ you.
 ### Event stream
 
 Subscribe and the connection stays open, pushing a frame per event — this is
-what plugins and agents hook into:
+what plugins and agents hook into. It stays open until the client goes, the app
+quits, or you turn the API off or regenerate its token in Settings → Security:
+either of those ends every open connection, subscriptions included.
 
 ```sh
 iterminalctl subscribe
@@ -1473,7 +1480,10 @@ to `ssh`, never to iTERMiNAL. **Try Again** afterwards.
 - **What reaches a command line is checked first, and refused rather than
   repaired.** Jump hosts must be `[user@]host[:port]`, in the characters `ssh`
   accepts — no quotes, `%` tokens, whitespace or URLs — and a connection whose
-  list fails does not connect at all, instead of connecting directly. The line
+  list fails does not connect at all, instead of connecting directly. A saved
+  host whose address or user name begins with a dash does not connect either:
+  `ssh`, `sftp` and `mosh` would read it as an option, and `-oProxyCommand=…`
+  runs a command on this Mac. The line
   *Edit in Terminal* types names the editor by an absolute path and quotes the
   file's, and a file name with a control character in it is refused (a newline
   would end the line early and run what follows). An imported font must have one
@@ -1977,6 +1987,24 @@ can each make a program run when a tab opens, and nothing that arrives by
 import should. A tab in a snapshot remembers its profile by id; on a Mac without
 that profile it opens as an ordinary tab. Terminal scrollback is excluded too:
 transcripts stay in their own 0600 files on this Mac.
+
+Hosts do travel, and a host can be set to run something on this Mac when a
+terminal tab connects to it — a custom command, or `ssh`'s extra arguments such
+as `-o ProxyCommand=…`. So every host that arrives by import asks before a
+terminal tab first connects to it, including the tabs in the imported layout,
+which would otherwise dial as soon as they appear. The question shows where it
+connects and what it is set to run — the custom command, the extra arguments,
+the jump hosts, and forwarding the agent if it always does — and *Don't
+Connect* is the default. Connecting once answers it for that host. A tab told
+not to connect says why on its banner, and Reconnect there asks again. The file
+browser, the port scan and the forwards use none of those settings — they run
+`ssh` and `sftp` with arguments of their own — so they do not ask.
+
+If this build cannot read the saved layout — one a newer build wrote, say — it
+starts a new one and keeps the old file beside it as
+`state.unreadable-<date>.json` instead of saving over it, and leaves transcripts
+and HTTP history alone while that copy is there. To use it again, quit and
+rename it back to `state.json` in a build that reads it.
 
 There is no background sync and nothing leaves the machine unless you export
 it. An earlier version offered iCloud through CloudKit; it needed an Apple

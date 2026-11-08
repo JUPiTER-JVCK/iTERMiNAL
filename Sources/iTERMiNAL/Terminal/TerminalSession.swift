@@ -68,6 +68,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Set while the question about forwarding the agent is on screen, so a
     /// second start cannot put a second copy of it up.
     private var awaitingAgentAnswer = false
+    /// The same, for the question a host from an imported snapshot asks before
+    /// its first connection — which may also be waiting its turn.
+    private var awaitingImportAnswer = false
 
     /// Everything `applyStyling` reads. Held so the work can be skipped when
     /// none of it has changed — see the guard there for why that matters.
@@ -413,6 +416,24 @@ final class TerminalSession: ObservableObject, Identifiable {
         // Watching from the first remote launch, so that when one drops it is
         // already known whether there is a network to reconnect over.
         if isRemote { NetworkWatch.shared.start() }
+        // A host from an imported snapshot asks before anything else about the
+        // connection, the agent included: whether to make it at all.
+        if let connection = connectionAwaitingConfirmation(settings) {
+            guard !awaitingImportAnswer else { return }
+            awaitingImportAnswer = true
+            ImportedHostPrompt.ask(about: connection.id) { [weak self] confirmed in
+                guard let self else { return }
+                self.awaitingImportAnswer = false
+                // Closed while its question waited its turn: nothing to start.
+                guard !self.endedByUser else { return }
+                if confirmed {
+                    self.launch(agentApproved: agentApproved, unattended: unattended)
+                } else {
+                    self.launchError = ImportedHostPrompt.declinedNote
+                }
+            }
+            return
+        }
         if agentApproved == nil, let connection = connectionThatAsksAboutAgent(settings) {
             guard !awaitingAgentAnswer else { return }
             awaitingAgentAnswer = true
@@ -477,6 +498,20 @@ final class TerminalSession: ObservableObject, Identifiable {
               case .master(let path) = SSHControlSocket.prepare(for: connection, base: NSTemporaryDirectory())
         else { return nil }
         return path
+    }
+
+    /// The saved connection this session is for, when it came in an imported
+    /// snapshot and nobody on this Mac has chosen to connect to it yet. Not one
+    /// that would be refused anyway — no address, or one that cannot go on a
+    /// command line — where the refusal says what to fix, and the question
+    /// waits for a connection that can be made.
+    private func connectionAwaitingConfirmation(_ settings: AppSettings) -> SSHConnection? {
+        guard case .remote(let id) = kind,
+              let connection = settings.sshConnections.first(where: { $0.id == id }),
+              connection.confirmBeforeConnecting,
+              connection.hasHost,
+              connection.connectionRefusal == nil else { return nil }
+        return connection
     }
 
     /// The saved connection this session is for, when it is an ssh one set to

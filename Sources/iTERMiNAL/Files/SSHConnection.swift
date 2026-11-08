@@ -79,6 +79,14 @@ struct SSHConnection: Codable, Identifiable, Hashable {
     /// here, host by host. Never carried in an exported archive, and cleared on
     /// import: a snapshot someone else made does not get to say so.
     var allowScriptedCommands: Bool
+    /// Set on every host an imported snapshot brings in, and cleared the first
+    /// time someone on this Mac chooses to connect to it. Until then a terminal
+    /// tab to it asks first (`ImportedHostPrompt`) instead of dialing as soon as
+    /// it appears, which is what a tab in an imported layout otherwise does. A
+    /// snapshot is a file someone made, and what its hosts are set to run — a
+    /// custom command, or ssh's extra arguments, `ProxyCommand` among them —
+    /// runs on this Mac. Never set by an edit made here.
+    var confirmBeforeConnecting: Bool
 
     init(
         id: UUID = UUID(),
@@ -99,7 +107,8 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         compression: Bool = false,
         keepAliveSeconds: Int = 0,
         forwards: [PortForward] = [],
-        allowScriptedCommands: Bool = false
+        allowScriptedCommands: Bool = false,
+        confirmBeforeConnecting: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -120,6 +129,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         self.keepAliveSeconds = keepAliveSeconds
         self.forwards = forwards
         self.allowScriptedCommands = allowScriptedCommands
+        self.confirmBeforeConnecting = confirmBeforeConnecting
     }
 
     /// Tolerant decoding so connections saved before transports existed still
@@ -147,6 +157,7 @@ struct SSHConnection: Codable, Identifiable, Hashable {
         keepAliveSeconds = try container.decodeIfPresent(Int.self, forKey: .keepAliveSeconds) ?? 0
         forwards = (try? container.decodeIfPresent([PortForward].self, forKey: .forwards)) ?? []
         allowScriptedCommands = try container.decodeIfPresent(Bool.self, forKey: .allowScriptedCommands) ?? false
+        confirmBeforeConnecting = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeConnecting) ?? false
     }
 
     var destination: String {

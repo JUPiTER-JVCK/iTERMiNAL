@@ -8,17 +8,36 @@ import Security
 /// directory (mode 0700) as a 0600 socket, so only this user's processes can
 /// connect at all; every request must additionally carry the token stored in
 /// the keychain. The API can type into live shells, so it stays off until the
-/// user enables it in Settings → Security.
+/// user enables it in Settings → Security. Turning it off, or replacing the
+/// token, ends every connection that is open.
 final class LocalAPIServer {
     static let shared = LocalAPIServer()
 
     static let tokenAccount = "local-api-token"
+
+    /// The longest any one command may be asked to take: `host.exec`'s own
+    /// limit, which `browser.wait` is held to as well.
+    static let longestCommand: TimeInterval = ScriptedCommand.maxTimeout
+
+    /// How long a request waits for its reply. Longer than `longestCommand`, so
+    /// a command that runs to its own limit reports that itself — for
+    /// `host.exec`, exit 124 and what it printed — instead of being cut off here
+    /// a moment before. It was 120 seconds, `host.exec`'s limit exactly, and
+    /// this clock starts first, so a command given all of it never reported.
+    static let replyTimeout: TimeInterval = longestCommand + 30
 
     private let acceptQueue = DispatchQueue(label: "com.jupiterjvck.iterminal.api.accept", qos: .utility)
     private let stateQueue = DispatchQueue(label: "com.jupiterjvck.iterminal.api.state")
 
     private var listenFD: Int32 = -1
     private var running = false
+
+    /// The connections open now, by descriptor, so turning the API off or
+    /// replacing its token can end them. A client that had subscribed to events
+    /// otherwise stayed connected — and went on receiving them — for as long as
+    /// it liked: nothing after `subscribe` asks for the token again.
+    private let clientsLock = NSLock()
+    private var clients: Set<Int32> = []
 
     private init() {}
 
@@ -72,7 +91,12 @@ final class LocalAPIServer {
 
     func regenerateToken() -> String? {
         KeychainStore.delete(Self.tokenAccount)
-        return ensureToken()
+        let token = ensureToken()
+        // What connected with the old token goes with it. A request on an open
+        // connection is checked against the new one anyway; a subscription,
+        // made once, is not.
+        disconnectClients()
+        return token
     }
 
     private func writeTokenMirror(_ token: String) {
@@ -175,6 +199,8 @@ final class LocalAPIServer {
             }
             unlink(socketPath)
         }
+        // Off is off for whoever is already connected, too.
+        disconnectClients()
     }
 
     private func acceptLoop(fd: Int32) {
@@ -190,6 +216,14 @@ final class LocalAPIServer {
                     if errno == EINTR { continue }
                     break
                 }
+                // A client that is gone by the time a reply or an event is
+                // written to it must not take the app with it. Writing to it
+                // raises SIGPIPE, which by default ends the process; with this
+                // the write fails instead, whatever else in the process does
+                // about the signal.
+                var noSignal: Int32 = 1
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+                self.track(client)
                 DispatchQueue.global(qos: .userInitiated).async {
                     self.serve(client: client)
                 }
@@ -220,6 +254,9 @@ final class LocalAPIServer {
             EventBus.shared.unsubscribe(id: connectionID)
             // Drains anything already queued before the descriptor closes.
             writeQueue.sync { alive = false }
+            // Out of the list before it closes, so `disconnectClients` never
+            // shuts down a number the system has since handed to something else.
+            untrack(fd)
             Darwin.close(fd)
         }
 
@@ -299,10 +336,35 @@ final class LocalAPIServer {
                 semaphore.signal()
             }
         }
-        if semaphore.wait(timeout: .now() + 120) == .timedOut {
+        if semaphore.wait(timeout: .now() + Self.replyTimeout) == .timedOut {
             return APIResponse.failure(id: request.id, message: "Command timed out.").jsonLine()
         }
         return reply.jsonLine()
+    }
+
+    // MARK: Open connections
+
+    private func track(_ fd: Int32) {
+        clientsLock.lock()
+        clients.insert(fd)
+        clientsLock.unlock()
+    }
+
+    private func untrack(_ fd: Int32) {
+        clientsLock.lock()
+        clients.remove(fd)
+        clientsLock.unlock()
+    }
+
+    /// Ends every open connection. `shutdown`, not `close`: the thread serving
+    /// each one is waiting in `read`, which then returns, and that thread closes
+    /// its own descriptor — so none is closed twice, or while it is in use.
+    private func disconnectClients() {
+        clientsLock.lock()
+        defer { clientsLock.unlock() }
+        for fd in clients {
+            Darwin.shutdown(fd, SHUT_RDWR)
+        }
     }
 
     private func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {

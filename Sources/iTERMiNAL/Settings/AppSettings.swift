@@ -786,6 +786,15 @@ final class AppSettings: ObservableObject {
         sshConnections.first { $0.id.uuidString == id || $0.name == id }
     }
 
+    /// Clears `confirmBeforeConnecting` for one host, once someone on this Mac
+    /// has chosen to connect to it (`ImportedHostPrompt`). Saved at once, like
+    /// any other change to a host.
+    func confirmConnection(_ id: UUID) {
+        guard let index = sshConnections.firstIndex(where: { $0.id == id }),
+              sshConnections[index].confirmBeforeConnecting else { return }
+        sshConnections[index].confirmBeforeConnecting = false
+    }
+
     private func applyLaunchAtLogin() {
         // Only touch the login item when it actually disagrees with the
         // preference, so launching the app isn't doing pointless work.

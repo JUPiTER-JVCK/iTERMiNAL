@@ -269,3 +269,83 @@ extension SSHConnection {
         return ["-o", "ProxyJump=\(value)"]
     }
 }
+
+// MARK: - The destination
+
+extension SSHConnection {
+    /// Why the host's own name or user name cannot go on a command line, or nil
+    /// when they can.
+    ///
+    /// ssh, sftp and mosh are each given the destination as an argument of its
+    /// own, and one that begins with a dash is read as an option instead: a user
+    /// name of `-oProxyCommand=…` would have ssh run that command on this Mac. No
+    /// host name or address begins with one, and no user name ssh would accept
+    /// does — `JumpHosts` refuses both in a jump host for the same reason — so it
+    /// is refused rather than worked around, whatever the transport.
+    var destinationProblem: String? {
+        if host.hasPrefix("-") {
+            return "The host begins with a dash, which ssh would read as an option, not as an address."
+        }
+        if username.hasPrefix("-") {
+            return "The user name begins with a dash, which ssh would read as an option, not as a name."
+        }
+        return nil
+    }
+
+    /// What a connection that is not made for want of a usable destination is told.
+    static func destinationRefusal(_ problem: String) -> String {
+        "Not connecting: \(problem) Fix it under Settings → Connections."
+    }
+
+    /// Why nothing may be started for this host at all, as the sentence to show,
+    /// or nil when something may: its own address first, then its jump hosts.
+    /// Everything that runs ssh or sftp for a saved host asks this first.
+    var connectionRefusal: String? {
+        if let problem = destinationProblem { return Self.destinationRefusal(problem) }
+        if let problem = jumpHostsProblem { return JumpHosts.refusal(problem) }
+        return nil
+    }
+}
+
+// MARK: - What an imported host says before it first connects
+
+extension SSHConnection {
+    /// The words of the question an imported host puts before its first
+    /// connection (`ImportedHostPrompt`, `confirmBeforeConnecting`): where it
+    /// goes, and each thing it is set to do that runs a program on this Mac or
+    /// lends that host something.
+    ///
+    /// Every value in it came from the snapshot, so each is shown the way a link
+    /// is in the right-click menu (`TerminalLinks.preview`): control and
+    /// invisible characters as a dot, and a long one cut in the middle, so that
+    /// none can read as more than it is or push the rest of the question away.
+    var importReview: String {
+        func shown(_ text: String) -> String { TerminalLinks.preview(text, limit: 160) }
+        let address = port == 22 ? shown(destination) : "\(shown(destination)), port \(port)"
+        var lines: [String] = []
+        switch transport {
+        case .ssh:
+            lines.append("• ssh to \(address)")
+            if case .hops(let hops) = jumpHostsOutcome {
+                lines.append("• through \(shown(hops.joined(separator: ", ")))")
+            }
+        case .mosh:
+            lines.append("• mosh to \(address)")
+        case .custom:
+            lines.append("• this command, on this Mac: \(shown(customCommand))")
+        }
+        // A custom command is given none: it is the whole command line.
+        let extra = extraArguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        if transport != .custom, !extra.isEmpty {
+            lines.append("• with these extra arguments, which can run a program on this Mac: \(shown(extra))")
+        }
+        // Only ssh takes `-A`. "Ask each time" is not mentioned: that question
+        // is put on its own, after this one.
+        if transport == .ssh, agentForwarding == .always {
+            lines.append("• forwarding your SSH agent, so programs on that host can use your keys while it is open")
+        }
+        return "This host came in an imported snapshot, and nothing on this Mac has connected to it yet. Connecting runs:\n\n"
+            + lines.joined(separator: "\n")
+            + "\n\nConnect only if all of it is what you expect. Each imported host asks this once."
+    }
+}

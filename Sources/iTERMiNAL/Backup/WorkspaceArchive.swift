@@ -254,9 +254,16 @@ struct PreferencesArchive: Codable {
         // host with the id of one that was allowed here, since the address
         // that id now points at is the snapshot's to choose. Importing turns it
         // off for every host; it is a checkbox per host to turn back on.
+        //
+        // For the same reason every host asks before it first connects
+        // (`confirmBeforeConnecting`). The layout imported with it is restored
+        // with its terminal tabs, which dial their hosts as soon as they appear,
+        // and what a host is set to run — a custom command, ssh's extra
+        // arguments — is the snapshot's to choose as well.
         settings.sshConnections = connections.map { connection in
             var copy = connection
             copy.allowScriptedCommands = false
+            copy.confirmBeforeConnecting = true
             return copy
         }
     }

@@ -152,9 +152,9 @@ enum PortScanner {
     }
 
     private static func scanHost(_ connection: SSHConnection) -> Result<[ListeningPort], PortToolError> {
-        // Refused, not connected to directly: see `JumpHosts`.
-        if let problem = connection.jumpHostsProblem {
-            return .failure(PortToolError(JumpHosts.refusal(problem)))
+        // Refused, not connected to some other way: see `connectionRefusal`.
+        if let refusal = connection.connectionRefusal {
+            return .failure(PortToolError(refusal))
         }
         guard connection.transport != .custom else {
             return .failure(PortToolError("This host connects with a custom command, so there is no ssh to scan it with."))

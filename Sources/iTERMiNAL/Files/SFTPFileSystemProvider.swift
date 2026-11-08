@@ -152,10 +152,10 @@ final class SFTPFileSystemProvider: FileSystemProvider {
         timeout: TimeInterval = 30,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
-        // Refused, not connected directly: see `JumpHosts`.
-        if let problem = connection.jumpHostsProblem {
+        // Refused, not connected to some other way: see `connectionRefusal`.
+        if let refusal = connection.connectionRefusal {
             DispatchQueue.main.async {
-                completion(.failure(FileProviderError.commandFailed(JumpHosts.refusal(problem))))
+                completion(.failure(FileProviderError.commandFailed(refusal)))
             }
             return
         }

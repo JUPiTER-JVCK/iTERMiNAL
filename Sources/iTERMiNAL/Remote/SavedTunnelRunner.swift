@@ -59,8 +59,8 @@ final class SavedTunnelRunner: ObservableObject {
             states[tunnel.id] = .failed("Choose a host for this tunnel.")
             return
         }
-        if let problem = connection.jumpHostsProblem {
-            states[tunnel.id] = .failed(JumpHosts.refusal(problem))
+        if let refusal = connection.connectionRefusal {
+            states[tunnel.id] = .failed(refusal)
             return
         }
         guard connection.transport != .custom else {

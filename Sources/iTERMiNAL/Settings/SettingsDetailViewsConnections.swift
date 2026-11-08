@@ -39,6 +39,11 @@ struct ConnectionsSettingsView: View {
                     }
                     TextField("Host", text: binding.host)
                     TextField("Username", text: binding.username)
+                    if let problem = binding.wrappedValue.destinationProblem {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     TextField("Port", value: binding.port, format: .number)
                     TextField("Identity file (optional)", text: Binding(
                         get: { binding.wrappedValue.identityFile ?? "" },
