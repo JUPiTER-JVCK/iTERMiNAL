@@ -767,6 +767,7 @@ final class WorkspaceStore: ObservableObject {
     /// disk indefinitely — which for terminal output is the one outcome worth
     /// designing against.
     func pruneOrphanedTranscripts() {
+        guard !unreadableStateIsKept else { return }
         TranscriptStore.pruneAll(keeping: Set(recentSessions.map(\.id)))
     }
 
@@ -776,6 +777,7 @@ final class WorkspaceStore: ObservableObject {
     /// the panes in the layout rather than `allHTTPClients()`, which would
     /// instantiate the side panel's lazy model just to read its ID.
     func pruneOrphanedHTTPHistory() {
+        guard !unreadableStateIsKept else { return }
         var live = Set(workspaces.flatMap { $0.tabs.flatMap { $0.root.allHTTPClients() } }.map(\.id))
         live.insert(HTTPClientModel.sidePanelHistoryID)
         HTTPHistoryStore.pruneAll(keeping: live)
@@ -1870,9 +1872,16 @@ final class WorkspaceStore: ObservableObject {
     }
 
     private func restore() -> Bool {
+        // No file is a first launch. One that is there but cannot be read, or
+        // will not decode — a newer build's, say — is kept rather than saved
+        // over by the new layout that follows: see `UnreadableState`.
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return false }
         guard let data = try? Data(contentsOf: stateURL),
-              let snapshot = try? JSONDecoder().decode(AppStateSnapshot.self, from: data),
-              !snapshot.workspaces.isEmpty else { return false }
+              let snapshot = try? JSONDecoder().decode(AppStateSnapshot.self, from: data) else {
+            keepUnreadableState()
+            return false
+        }
+        guard !snapshot.workspaces.isEmpty else { return false }
 
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
         recentSessions = snapshot.recents ?? []
@@ -1887,6 +1896,23 @@ final class WorkspaceStore: ObservableObject {
         focusedSessionID = selectedTab?.root.firstTerminal()?.id
         applyPanelSnapshot(snapshot.panels)
         return true
+    }
+
+    /// Moves a state file this build cannot read out of the way of the save
+    /// that follows a fresh start, keeping it beside where it was.
+    private func keepUnreadableState() {
+        if let kept = UnreadableState.keep(stateURL) {
+            NSLog("Workspace state could not be read by this build; kept it as \(kept.lastPathComponent) and started a new layout.")
+        } else {
+            NSLog("Workspace state could not be read by this build, and could not be moved aside; the new layout will replace it.")
+        }
+    }
+
+    /// Whether a layout this build could not read is kept beside the state
+    /// file. While one is, transcripts and HTTP history are not pruned: they
+    /// may be that layout's.
+    private var unreadableStateIsKept: Bool {
+        UnreadableState.isKept(in: stateURL.deletingLastPathComponent())
     }
 
     func terminateAllSessions() {

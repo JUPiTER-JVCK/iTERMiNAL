@@ -71,8 +71,8 @@ final class TunnelManager: ObservableObject {
             completion(.success(existing))
             return
         }
-        if let problem = connection.jumpHostsProblem {
-            completion(.failure(PortToolError(JumpHosts.refusal(problem))))
+        if let refusal = connection.connectionRefusal {
+            completion(.failure(PortToolError(refusal)))
             return
         }
         if let problem = TunnelPlan.problem(targetHost: targetHost, targetPort: targetPort) {

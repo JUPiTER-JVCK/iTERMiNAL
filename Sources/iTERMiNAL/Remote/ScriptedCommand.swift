@@ -104,7 +104,7 @@ enum ScriptedCommand {
         guard !connection.host.trimmingCharacters(in: .whitespaces).isEmpty else {
             return "\(name) has no address yet."
         }
-        if let problem = connection.jumpHostsProblem { return JumpHosts.refusal(problem) }
+        if let refusal = connection.connectionRefusal { return refusal }
         return nil
     }
 

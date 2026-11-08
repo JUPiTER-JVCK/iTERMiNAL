@@ -292,7 +292,11 @@ final class APIRouter {
         case "browser.wait":
             withBrowser(request, fail: fail) { browser in
                 guard let selector = request.string("selector") else { return fail("Missing \"selector\".") }
-                browser.waitForSelector(selector, timeout: request.double("timeout", default: 10)) {
+                // No longer than any command may take, so its answer — found,
+                // or not in time — comes inside the time a request waits for
+                // one (`LocalAPIServer.replyTimeout`).
+                let timeout = min(request.double("timeout", default: 10), LocalAPIServer.longestCommand)
+                browser.waitForSelector(selector, timeout: timeout) {
                     Self.deliver($0, ok: ok, fail: fail)
                 }
             }
