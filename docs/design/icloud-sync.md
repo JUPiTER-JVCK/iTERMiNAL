@@ -1,8 +1,16 @@
 # Design: iCloud sync
 
-Status: **implemented** (PR #22). Kept as the design record; see
-*What shipped differently* at the end — including one line of reasoning
-below that should not be reused.
+Status: **implemented, then removed.** CloudKit sync shipped in PR #22 and
+was taken out in PR #27: it needed an Apple Developer iCloud container to
+bind, so every unsigned or self-built copy showed a sync mode it could never
+use. Snapshot export and import (README, *Backup and restore*) do the same
+job without an account. `SyncEngine`, `LocalOnlySyncEngine`,
+`CloudKitSyncEngine`, `SyncEngineProvider`, `applyRemoteSnapshot` and the
+app's entitlements file went with it, and Settings → Sync is now Settings →
+Backup.
+
+Kept as the design record; see *What shipped differently* at the end —
+including one line of reasoning below that should not be reused.
 
 ## Goal
 

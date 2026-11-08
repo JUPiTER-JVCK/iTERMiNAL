@@ -31,9 +31,11 @@ final class EventBus {
         "tab.created", "tab.closed", "tab.selected",
         "workspace.created", "pane.split", "pane.closed",
         "browser.navigated", "browser.tab.created", "browser.tab.closed",
-        "dock.session.created", "dock.session.closed",
+        "dock.session.created", "dock.session.closed", "dock.session.moved",
         "composer.session.created",
-        "http.sent",
+        "tool.started", "tool.stopped",
+        "http.sent", "host.exec",
+        "remote.service.opened",
     ]
 
     private var subscribers: [UUID: (names: Set<String>, deliver: (APIEvent) -> Void)] = [:]

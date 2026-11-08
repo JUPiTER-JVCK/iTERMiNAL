@@ -254,6 +254,7 @@ jobs:
             Sources/iTERMiNAL/Workspace/DockLayout.swift \
             Sources/iTERMiNAL/Workspace/DockGeometry.swift \
             Sources/iTERMiNAL/App/OpenFolders.swift \
+            Sources/iTERMiNAL/API/RequestLineBuffer.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
@@ -277,6 +278,13 @@ jobs:
       # to change when a page does. Nothing is downloaded.
       - name: Check tldr pin
         run: python3 scripts/tldr-pin-check.py
+
+      # What `help` and `subscribe` tell a client is two lists written by hand:
+      # the commands the router answers and the events the app publishes. This
+      # reads the Swift and fails when either list, or the README's event
+      # table, no longer matches the code.
+      - name: Check API lists
+        run: python3 scripts/api-lists-check.py
 
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that

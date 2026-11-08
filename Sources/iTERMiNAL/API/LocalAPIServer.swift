@@ -260,16 +260,26 @@ final class LocalAPIServer {
             Darwin.close(fd)
         }
 
-        var buffer = Data()
+        // This runs before any token is checked, so lines are capped
+        // (`RequestLineBuffer.defaultLimit`): what is buffered for one
+        // connection never passes the cap plus one read.
+        var lines = RequestLineBuffer()
         var chunk = [UInt8](repeating: 0, count: 4096)
 
         while isRunning {
             // Consume any complete lines already buffered.
-            while let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
-                buffer.removeSubrange(buffer.startIndex...newlineIndex)
-                if lineData.isEmpty { continue }
-                send(process(lineData, connectionID: connectionID, send: send))
+            while let next = lines.next() {
+                switch next {
+                case .line(let lineData):
+                    if lineData.isEmpty { continue }
+                    send(process(lineData, connectionID: connectionID, send: send))
+                case .tooLong:
+                    // Said once, then the connection ends: what follows is the
+                    // rest of a line that will not be read. The reply is queued
+                    // ahead of the close in `defer`, which drains the queue.
+                    send(APIResponse.failure(id: nil, message: lines.refusal).jsonLine())
+                    return
+                }
             }
 
             let count = chunk.withUnsafeMutableBytes { pointer -> Int in
@@ -277,7 +287,7 @@ final class LocalAPIServer {
                 return Darwin.read(fd, base, pointer.count)
             }
             if count <= 0 { return }
-            buffer.append(contentsOf: chunk[0..<count])
+            lines.append(chunk[0..<count])
         }
     }
 

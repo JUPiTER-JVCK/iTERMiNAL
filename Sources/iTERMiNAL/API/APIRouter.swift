@@ -25,9 +25,9 @@ final class APIRouter {
         "pane.list", "pane.split", "pane.close",
         "terminal.send", "terminal.capture", "terminal.reconnect",
         "host.exec",
-        "browser.open", "browser.navigate", "browser.eval", "browser.click",
-        "browser.fill", "browser.text", "browser.html", "browser.wait",
-        "browser.screenshot",
+        "browser.open", "browser.newTab", "browser.navigate", "browser.eval",
+        "browser.click", "browser.fill", "browser.text", "browser.html",
+        "browser.wait", "browser.screenshot",
         "files.list",
     ]
 

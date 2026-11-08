@@ -896,6 +896,9 @@ can speak it:
 {"id":"1","ok":true,"result":{"session":"…"}}
 ```
 
+A request is one line of at most 1 MiB (1,048,576 bytes, the newline not
+counted). A longer one is answered with an error and the connection is closed.
+
 A request waits up to 150 seconds for its reply. That is longer than any command
 can be asked to take — `host.exec` and `browser.wait` are both held to 120 — so
 one given all of its time still reports how it ended, rather than `Command timed
@@ -972,8 +975,10 @@ iterminalctl subscribe events=session.exited,tab.created
 | `dock.session.created` / `dock.session.closed` | terminal dock lifecycle (`connection` set on a remote tab) |
 | `composer.session.created` | the composer started a shell of its own |
 | `dock.session.moved` | a running shell was moved from a pane into the dock |
+| `tool.started` / `tool.stopped` | a bundled tool's panel starts its program, or the panel leaves the layout and the program is ended — `tool` (`btop` or `superfile`), and `session` when it starts. Hiding the panel region leaves the tool running and sends neither |
 | `http.sent` | an HTTP client pane's request finished — status on success, error on failure |
 | `host.exec` | a scripted command on a host finished — `host`, and `exit` if it ran (never the command) |
+| `remote.service.opened` | a VNC or RDP service was opened: the built-in viewer started connecting (`viewer` is `built-in`), or its URL was handed to the app registered for it — `kind` and `host`. Handed to another app through a tunnel, `host` is `localhost`. Not sent for SSH, SFTP or web services |
 
 From an unfocused pane (or while the app is in the background), try:
 

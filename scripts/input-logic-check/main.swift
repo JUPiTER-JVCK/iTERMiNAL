@@ -8612,5 +8612,71 @@ do {
     check(first.map { fm.fileExists(atPath: $0.path) } == true, "the first is still there")
 }
 
+// MARK: Request lines on the API socket
+
+do {
+    func bytes(_ text: String) -> Data { Data(text.utf8) }
+    func drain(_ buffer: inout RequestLineBuffer) -> [RequestLineBuffer.Next] {
+        var out: [RequestLineBuffer.Next] = []
+        while let next = buffer.next() {
+            out.append(next)
+            if next == .tooLong { break }
+        }
+        return out
+    }
+
+    check(RequestLineBuffer.defaultLimit == 1_048_576, "a request line may be 1 MiB by default")
+
+    var split = RequestLineBuffer(limit: 16)
+    split.append(bytes(#"{"a":1}"#))
+    check(split.next() == nil, "a line with no newline yet is held")
+    split.append(bytes("\n\n{\"b\":2}\n{\"c\""))
+    check(drain(&split) == [.line(bytes(#"{"a":1}"#)), .line(Data()), .line(bytes(#"{"b":2}"#))],
+          "complete lines come out in order, without their newlines, an empty one included")
+    check(split.pendingCount == 4, "what follows the last newline waits (\(split.pendingCount))")
+    split.append(bytes(":3}\n"))
+    check(drain(&split) == [.line(bytes(#"{"c":3}"#))] && split.pendingCount == 0, "and is joined to what comes after it")
+
+    var exact = RequestLineBuffer(limit: 8)
+    exact.append(bytes("12345678"))
+    check(exact.next() == nil, "a line of exactly the limit is still waited for")
+    exact.append(bytes("\n"))
+    check(exact.next() == .line(bytes("12345678")), "and accepted when its newline comes")
+
+    var over = RequestLineBuffer(limit: 8)
+    over.append(bytes("123456789"))
+    check(over.next() == .tooLong, "one byte past the limit with no newline is refused")
+    over.append(bytes("\nok\n"))
+    check(over.next() == .tooLong && over.next() == .tooLong, "and stays refused, whatever comes after")
+
+    var sameRead = RequestLineBuffer(limit: 8)
+    sameRead.append(bytes("123456789\nok\n"))
+    check(sameRead.next() == .tooLong, "a line past the limit is refused even when its newline came in the same read")
+
+    var before = RequestLineBuffer(limit: 8)
+    before.append(bytes("ok\n" + String(repeating: "x", count: 20)))
+    check(drain(&before) == [.line(bytes("ok")), .tooLong], "lines before an over-long one are still answered first")
+
+    check(RequestLineBuffer(limit: 8).refusal.contains("8 bytes"), "the refusal names the limit")
+
+    // The server's own loop: take every line offered, then read up to 4096 bytes more.
+    // A client that never sends a newline is refused, having had the server hold no more
+    // than the limit plus one read.
+    var server = RequestLineBuffer(limit: 10_000)
+    var most = 0
+    var refusedAfter: Int?
+    var sent = 0
+    reading: while sent < 100_000 {
+        while let next = server.next() {
+            if next == .tooLong { refusedAfter = sent; break reading }
+        }
+        server.append(repeatElement(UInt8(ascii: "x"), count: 4096))
+        sent += 4096
+        most = max(most, server.pendingCount)
+    }
+    check(refusedAfter == 12_288 && most <= 10_000 + 4096,
+          "a line with no end is refused once it passes the limit (after \(refusedAfter ?? -1) bytes, holding at most \(most))")
+}
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
