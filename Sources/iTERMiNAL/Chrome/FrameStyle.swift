@@ -167,7 +167,9 @@ enum FrameStyle {
     static let strengthRange: ClosedRange<Double> = 0...0.35
 
     static let defaultRadius = 10.0
-    static let defaultGap = 6.0
+    /// 8, the same as the rail leaves between its icons and the card, so the
+    /// card sits in an even margin on its left, right and bottom.
+    static let defaultGap = 8.0
     static let defaultStrength = 0.12
     static let defaultCustomHex: UInt32 = 0x3B82F6
 

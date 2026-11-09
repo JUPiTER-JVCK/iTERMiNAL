@@ -66,6 +66,18 @@ enum Motion {
     /// rows. A little give, but settled quickly: it is in the way of typing.
     static var suggestion: Animation { paced(.spring(response: 0.24, dampingFraction: 0.86)) }
 
+    /// Moving between the pages the rail opens — the terminal, Tasks, the
+    /// cheatsheet. Critically damped: a page settling into place should not
+    /// bounce.
+    static var page: Animation {
+        paced(reduceMotion ? shortEase : .spring(response: 0.3, dampingFraction: 1))
+    }
+
+    /// The composer folding to its pill and opening out again.
+    static var morph: Animation {
+        paced(reduceMotion ? shortEase : .spring(response: 0.34, dampingFraction: 0.84))
+    }
+
     /// Pass the view's `@Environment(\.accessibilityReduceMotion)`, not
     /// `Motion.reduceMotion`; see the note above.
     static func panelTransition(reduceMotion: Bool) -> AnyTransition {
@@ -84,6 +96,28 @@ enum Motion {
 
     static func bannerTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
+    }
+
+    /// A page arriving: it fades in while settling the last few points down
+    /// into place; the page it replaces simply fades. A short drift rather
+    /// than a full slide — the whole surface travelling across the window is
+    /// a lot of movement for changing what it shows. Downward, from under
+    /// the card's top edge, which clips it: drifting up from below would pass
+    /// over the dock and the status strip on the way.
+    static func pageTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .asymmetric(
+                insertion: .opacity.combined(with: .offset(y: -8)),
+                removal: .opacity
+            )
+    }
+
+    /// A floating surface growing out of, or shrinking back into, the edge
+    /// it is anchored to — the composer's card and its pill. The scale is
+    /// slight: enough to read as the same object changing shape, not a zoom.
+    static func morphTransition(reduceMotion: Bool, anchor: UnitPoint = .bottom) -> AnyTransition {
+        reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 }
 

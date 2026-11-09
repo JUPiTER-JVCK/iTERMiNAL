@@ -51,11 +51,21 @@ struct SuggestionList: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 // Opaque, so the text on it is read against one known colour.
                 .fill(Color(p3: Theme.floatingSurfaceHex(for: colorScheme, themeID: appThemeID)))
+                .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
                 .shadow(color: theme.elevatedShadow, radius: 16, y: 6)
         )
         .overlay(
+            // Lit like the card it rises from. No sheen across the face:
+            // the fill stays the one colour the text is measured against.
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(theme.surfaceBorder, lineWidth: 1)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [theme.elevatedHighlight, theme.surfaceBorder],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
         )
         .onHover { suggestions.pointerInside = $0 }
         .accessibilityElement(children: .contain)

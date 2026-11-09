@@ -79,7 +79,10 @@ struct TopBar: View {
         // Clear the traffic lights sideways, not downwards: padding down past
         // them would leave an empty band above everything else in the bar.
         .padding(.leading, WindowChrome.trafficLightWidth)
-        .padding(.trailing, 10)
+        // The last button's edge lines up with the content card's right edge
+        // below it — the card is inset by the frame gap — and never closer to
+        // the window edge than the rail's icons are to theirs.
+        .padding(.trailing, max(settings.frameGap, WindowChrome.railIconInset))
         .frame(height: WindowChrome.topBarHeight)
         .background(WindowDragArea())
     }
@@ -238,6 +241,7 @@ struct RailIconLabel: View {
     var isHovering = false
     var badge: Int? = nil
 
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
@@ -251,6 +255,20 @@ struct RailIconLabel: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isActive ? theme.surface : theme.surface.opacity(isHovering ? 0.6 : 0))
             )
+            .overlay(
+                // The selected icon is lit like a raised surface — a hairline
+                // catching the light along its top — rather than a flat tile.
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [theme.elevatedHighlight, .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                    .opacity(isActive ? 1 : 0)
+            )
             .overlay(alignment: .topTrailing) {
                 if let badge, badge > 0 {
                     Text(badge > 99 ? "99+" : "\(badge)")
@@ -258,7 +276,11 @@ struct RailIconLabel: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4)
                         .frame(minWidth: 14, minHeight: 14)
-                        .background(Capsule().fill(Color.accentColor))
+                        // The app's accent, not the system's: the badge is
+                        // the one spot of colour on the rail, and the system
+                        // blue clashed with any other accent.
+                        .background(Capsule().fill(settings.accentColor))
+                        .overlay(Capsule().strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5))
                         .offset(x: 2, y: -2)
                 }
             }
@@ -357,7 +379,9 @@ private struct RailMoreRow: View {
             .help(isPinned ? "Unpin from the rail" : "Pin to the rail")
             .accessibilityLabel(isPinned ? "Unpin \(item.title)" : "Pin \(item.title)")
         }
-        .padding(.leading, 10)
+        // 12 leading against the pin's 24pt frame at 6 trailing: the icon
+        // and the pin glyph sit the same distance from the row's two ends.
+        .padding(.leading, 12)
         .padding(.trailing, 6)
         .frame(height: 32)
         .background(

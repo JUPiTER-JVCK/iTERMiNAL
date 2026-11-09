@@ -125,7 +125,10 @@ struct SidebarView: View {
             .accessibilityLabel(settings.railPanelPinned ? "Unpin spaces panel" : "Pin spaces panel")
         }
         .foregroundStyle(theme.textSecondary)
-        .padding(.horizontal, 12)
+        // The title on the panel's content edge; the buttons' 22pt frames at
+        // 12 from the far side put their glyphs at about the same 17.
+        .padding(.leading, WindowChrome.sidebarContentInset)
+        .padding(.trailing, 12)
         .frame(height: 44)
     }
 
@@ -149,7 +152,8 @@ struct SidebarView: View {
         .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.surface.opacity(0.6)))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.surfaceBorder))
-        .padding(.horizontal, 10)
+        // 8 + 9: the glass sits on the content edge, like the rows below it.
+        .padding(.horizontal, 8)
         .padding(.bottom, 4)
         .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
     }
@@ -421,7 +425,7 @@ private struct SidebarSectionHeader<Accessory: View>: View {
         }
         .animation(Motion.hover, value: hovering)
         .foregroundStyle(theme.textSecondary)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, WindowChrome.sidebarContentInset)
         .padding(.top, 18)
         .padding(.bottom, 6)
         .onHover { hovering = $0 }
@@ -669,7 +673,7 @@ private struct WorkspaceFolderRow: View {
         }
         .animation(Motion.hover, value: hovering)
         .foregroundStyle(theme.textPrimary)
-        .padding(.horizontal, 17)
+        .padding(.horizontal, WindowChrome.sidebarContentInset)
         .frame(height: 30)
         .onHover { hovering = $0 }
     }
@@ -985,8 +989,10 @@ private struct SidebarStatusRow: View {
                 .help("Keyboard shortcuts (⌘/)")
                 .accessibilityLabel("Keyboard shortcuts")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, WindowChrome.sidebarContentInset)
+            // The detail column's bottom strip is the same height, so the two
+            // seams above them run across the card as one line.
+            .frame(height: WindowChrome.bottomStripHeight)
         }
     }
 }
