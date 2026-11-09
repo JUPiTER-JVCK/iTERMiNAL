@@ -120,7 +120,7 @@ private struct ProfileEditor: View {
                 set: { profile.themeID = $0.isEmpty ? nil : $0 }
             )) {
                 Text("Same as Terminal settings").tag("")
-                Text("Match system appearance").tag("auto")
+                Text("Match app theme").tag("auto")
                 Divider()
                 ForEach(TerminalTheme.available) { theme in
                     Text(theme.name).tag(theme.id)

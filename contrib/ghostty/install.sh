@@ -2,7 +2,7 @@
 #
 # Install the iTERMiNAL Ghostty configuration.
 #
-#   ./install.sh                         # Ghostty config + all twenty themes
+#   ./install.sh                         # Ghostty config + all thirty-four themes
 #   ./install.sh --extras                # also btop, starship, yazi, fzf
 #   ./install.sh --theme iterminal-nord  # pick a palette
 #   ./install.sh --dry-run               # print what would happen, touch nothing
@@ -282,5 +282,5 @@ cat <<'NOTES'
     3. To try another palette, re-run with --theme; it re-themes btop,
        starship and yazi to match, not just the terminal:
          ./install.sh --extras --theme iterminal-tokyo-night
-       `ls ~/.config/ghostty/themes` lists all twenty.
+       `ls ~/.config/ghostty/themes` lists all thirty-four.
 NOTES

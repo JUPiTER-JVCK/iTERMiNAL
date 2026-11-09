@@ -234,10 +234,11 @@ struct HTTPClientPaneView: View {
     @ObservedObject var model: HTTPClientModel
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @FocusState private var urlFieldFocused: Bool
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             modeBar(theme: theme)
             FadedDivider()
@@ -381,9 +382,10 @@ struct UnderlinedTabBar<Value: Hashable>: View {
 
     @Namespace private var underline
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 16) {
             ForEach(items, id: \.value) { item in
                 let isSelected = selection == item.value

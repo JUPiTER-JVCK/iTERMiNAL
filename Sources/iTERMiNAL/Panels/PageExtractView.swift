@@ -14,9 +14,10 @@ struct PageExtractView: View {
 
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             switch extraction.phase {
             case .idle, .working:

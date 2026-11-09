@@ -189,6 +189,7 @@ private struct CodeBlockView: View {
     let onInsert: (String) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var copied = false
     @State private var saveNote: String?
 
@@ -230,7 +231,7 @@ private struct CodeBlockView: View {
             // The input field's own opaque colour, so this reads as part of the
             // same family and the text on it is on a colour known up front.
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme)))
+                .fill(Color(hex: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID)))
         )
         .accessibilityElement(children: .contain)
     }

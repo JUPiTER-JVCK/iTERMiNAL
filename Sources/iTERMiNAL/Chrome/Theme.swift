@@ -73,25 +73,26 @@ struct Theme {
     /// painted onto the window behind it.
     let floatingSurface: Color
 
-    static func current(for scheme: ColorScheme) -> Theme {
-        scheme == .dark ? .dark : .light
+    /// The chrome for an appearance, in the chosen app theme (`AppThemes`).
+    ///
+    /// Views pass the `appThemeID` they read from the environment rather than
+    /// the setting itself: reading it is what has SwiftUI draw them again when
+    /// the theme changes (see `EnvironmentValues.appThemeID`).
+    static func current(for scheme: ColorScheme, themeID: String) -> Theme {
+        let dark = scheme == .dark
+        return Theme(palette: AppThemes.theme(id: themeID).palette(dark: dark), dark: dark)
     }
 
     /// The chrome color — the top bar, the rail, and the workspaces panel —
-    /// named once so the frame tint (see `FrameStyle`) mixes into exactly the
-    /// color the theme paints, not a copy that could drift.
-    static let darkSidebarHex: UInt32 = 0x0C0C0E
-    static let lightSidebarHex: UInt32 = 0xF7F7F8
-
-    static func sidebarHex(for scheme: ColorScheme) -> UInt32 {
-        scheme == .dark ? darkSidebarHex : lightSidebarHex
+    /// read from the palette in one place so the frame tint (see `FrameStyle`)
+    /// mixes into exactly the color the theme paints, not a copy that could
+    /// drift.
+    static func sidebarHex(for scheme: ColorScheme, themeID: String) -> UInt32 {
+        AppThemes.theme(id: themeID).palette(dark: scheme == .dark).sidebar
     }
 
-    static let darkFloatingSurfaceHex: UInt32 = 0x25252B
-    static let lightFloatingSurfaceHex: UInt32 = 0xFDFDFE
-
-    static func floatingSurfaceHex(for scheme: ColorScheme) -> UInt32 {
-        scheme == .dark ? darkFloatingSurfaceHex : lightFloatingSurfaceHex
+    static func floatingSurfaceHex(for scheme: ColorScheme, themeID: String) -> UInt32 {
+        AppThemes.theme(id: themeID).palette(dark: scheme == .dark).floatingSurface
     }
 
     /// The composer's input field, as an opaque colour.
@@ -99,46 +100,58 @@ struct Theme {
     /// Opaque on purpose, and in hex: the command colours are chosen for
     /// contrast against exactly this value, which only holds if nothing shows
     /// through it — the card around it can be translucent over arbitrary
-    /// terminal content. Named once so the colour and what is measured against
-    /// it cannot drift apart.
-    static let darkInputFieldHex: UInt32 = 0x1D1D21
-    static let lightInputFieldHex: UInt32 = 0xF1F1F3
-
-    static func inputFieldHex(for scheme: ColorScheme) -> UInt32 {
-        scheme == .dark ? darkInputFieldHex : lightInputFieldHex
+    /// terminal content. Read from the palette so the colour and what is
+    /// measured against it cannot drift apart.
+    static func inputFieldHex(for scheme: ColorScheme, themeID: String) -> UInt32 {
+        AppThemes.theme(id: themeID).palette(dark: scheme == .dark).inputField
     }
 
-    static let dark = Theme(
-        background: Color(p3: 0x131316),
-        sidebar: Color(p3: Theme.darkSidebarHex),
-        surface: Color(p3: 0x1D1D21),
-        surfaceHover: Color(p3: 0x26262B),
-        surfaceBorder: Color.white.opacity(0.07),
-        textPrimary: Color(p3: 0xEDEDEF),
-        textSecondary: Color(p3: 0x9C9CA5),
-        terminalBackground: NSColor(p3: 0x131316),
-        terminalForeground: NSColor(p3: 0xEDEDEF),
-        elevatedShadow: Color.black.opacity(0.55),
-        elevatedHighlight: Color.white.opacity(0.06),
-        divider: Color.white.opacity(0.09),
-        floatingSurface: Color(p3: Theme.darkFloatingSurfaceHex)
-    )
+    /// The opaque colours come from the palette; the translucent ones are
+    /// white or black at an opacity, one set for dark and one for light, which
+    /// reads on any theme's ground.
+    init(palette: AppThemePalette, dark: Bool) {
+        background = Color(p3: palette.background)
+        sidebar = Color(p3: palette.sidebar)
+        surface = Color(p3: palette.surface)
+        surfaceHover = Color(p3: palette.surfaceHover)
+        textPrimary = Color(p3: palette.textPrimary)
+        textSecondary = Color(p3: palette.textSecondary)
+        terminalBackground = NSColor(p3: palette.background)
+        terminalForeground = NSColor(p3: palette.textPrimary)
+        floatingSurface = Color(p3: palette.floatingSurface)
+        if dark {
+            surfaceBorder = Color.white.opacity(0.07)
+            elevatedShadow = Color.black.opacity(0.55)
+            elevatedHighlight = Color.white.opacity(0.06)
+            divider = Color.white.opacity(0.09)
+        } else {
+            surfaceBorder = Color.black.opacity(0.08)
+            elevatedShadow = Color.black.opacity(0.13)
+            elevatedHighlight = Color.white.opacity(0.9)
+            divider = Color.black.opacity(0.08)
+        }
+    }
+}
 
-    static let light = Theme(
-        background: Color(p3: 0xFFFFFF),
-        sidebar: Color(p3: Theme.lightSidebarHex),
-        surface: Color(p3: 0xF1F1F3),
-        surfaceHover: Color(p3: 0xE8E8EB),
-        surfaceBorder: Color.black.opacity(0.08),
-        textPrimary: Color(p3: 0x0D0D0F),
-        textSecondary: Color(p3: 0x60606A),
-        terminalBackground: NSColor.white,
-        terminalForeground: NSColor(p3: 0x0D0D0F),
-        elevatedShadow: Color.black.opacity(0.13),
-        elevatedHighlight: Color.white.opacity(0.9),
-        divider: Color.black.opacity(0.08),
-        floatingSurface: Color(p3: Theme.lightFloatingSurfaceHex)
-    )
+// MARK: - Which theme is showing
+
+private struct AppThemeIDKey: EnvironmentKey {
+    static let defaultValue = AppThemes.defaultID
+}
+
+extension EnvironmentValues {
+    /// The app theme every view draws its chrome in, set once at the root of
+    /// each window from `AppSettings.appThemeID`.
+    ///
+    /// An environment value rather than a read of the setting, because SwiftUI
+    /// draws a view again when an environment value it reads changes, and only
+    /// then: a view that read `AppSettings.shared` directly would keep its old
+    /// colours until something else happened to redraw it. Every view that
+    /// asks `Theme.current(for:themeID:)` reads this beside `colorScheme`.
+    var appThemeID: String {
+        get { self[AppThemeIDKey.self] }
+        set { self[AppThemeIDKey.self] = newValue }
+    }
 }
 
 // MARK: - Depth
@@ -155,9 +168,10 @@ struct ElevatedSurface: ViewModifier {
     var fill: Color?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     func body(content: Content) -> some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -196,9 +210,10 @@ struct FadedDivider: View {
 
     var axis: Axis = .horizontal
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Rectangle()
             .fill(theme.divider)
             .frame(
@@ -256,22 +271,39 @@ enum IdentityPalette {
 }
 
 enum Accents {
+    /// In the order of the spectrum, which is how the picker shows them. The
+    /// ids are what is stored, so the order can change without moving anyone's
+    /// choice.
     static let all: [AccentOption] = [
-        AccentOption(id: "green", name: "Green", hex: 0x10A37F),
-        AccentOption(id: "blue", name: "Blue", hex: 0x3B82F6),
-        AccentOption(id: "purple", name: "Purple", hex: 0x8B5CF6),
+        AccentOption(id: "red", name: "Red", hex: 0xEF4444),
         AccentOption(id: "orange", name: "Orange", hex: 0xF97316),
+        AccentOption(id: "amber", name: "Amber", hex: 0xF59E0B),
+        AccentOption(id: "lime", name: "Lime", hex: 0x65A30D),
+        AccentOption(id: "green", name: "Green", hex: 0x10A37F),
+        AccentOption(id: "teal", name: "Teal", hex: 0x14B8A6),
+        AccentOption(id: "sky", name: "Sky", hex: 0x0EA5E9),
+        AccentOption(id: "blue", name: "Blue", hex: 0x3B82F6),
+        AccentOption(id: "indigo", name: "Indigo", hex: 0x6366F1),
+        AccentOption(id: "purple", name: "Purple", hex: 0x8B5CF6),
         AccentOption(id: "pink", name: "Pink", hex: 0xEC4899),
         AccentOption(id: "graphite", name: "Graphite", hex: 0x8E8EA0),
     ]
 
+    /// What an id this build does not know falls back to: the default accent,
+    /// which is no longer the first in the list.
+    static let defaultID = "green"
+
+    private static func option(for id: String) -> AccentOption {
+        all.first { $0.id == id } ?? all.first { $0.id == defaultID }!
+    }
+
     static func color(for id: String) -> Color {
-        (all.first { $0.id == id } ?? all[0]).color
+        option(for: id).color
     }
 
     /// The accent as 0xRRGGBB, for the frame tint to mix with.
     static func hex(for id: String) -> UInt32 {
-        (all.first { $0.id == id } ?? all[0]).hex
+        option(for: id).hex
     }
 }
 

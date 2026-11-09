@@ -474,6 +474,7 @@ struct FilePaneView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.openSettings) private var openSettings
     @State private var showingProblemDetails = false
 
@@ -485,7 +486,7 @@ struct FilePaneView: View {
     }()
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             toolbar(theme: theme)
             FadedDivider()

@@ -8,12 +8,13 @@ import SwiftUI
 /// sidebar's ? button and the command palette.
 struct KeyboardShortcutsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let groups = ShortcutCatalog.groups(matching: query)
         VStack(spacing: 0) {
             header(theme: theme)
@@ -120,9 +121,10 @@ struct KeyboardShortcutsView: View {
 private struct ShortcutRow: View {
     let entry: ShortcutEntry
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
@@ -149,9 +151,10 @@ private struct ShortcutRow: View {
 struct ShortcutKeys: View {
     let chords: [ShortcutChord]
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             ForEach(Array(chords.enumerated()), id: \.offset) { index, chord in
                 if index > 0 {

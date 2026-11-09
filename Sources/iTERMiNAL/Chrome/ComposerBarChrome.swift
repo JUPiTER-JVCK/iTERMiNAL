@@ -58,9 +58,10 @@ struct ContextChipRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Menu {
                 ForEach(store.workspaces) { workspace in
@@ -161,9 +162,10 @@ struct SessionChip: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Text(label)
             .font(.system(size: 11))
             .foregroundStyle(theme.textSecondary)

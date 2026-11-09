@@ -41,15 +41,27 @@ struct TerminalTheme: Identifiable, Equatable {
         all + AppSettings.shared.importedThemes.map(\.theme)
     }
 
-    /// Twenty schemes, the app's own two plus eighteen widely used open-source
-    /// palettes. Each is only colour data — the values come from the upstream
-    /// projects (Catppuccin, Nord, Dracula, Gruvbox, Tokyo Night, One, Solarized,
-    /// Everforest, Rosé Pine, Kanagawa, Monokai), all permissively licensed.
+    /// Thirty-four schemes: the app's own three, and thirty-one widely used
+    /// open-source palettes. Each is only colour data, all permissively licensed.
+    /// The first eighteen of those came from the upstream projects (Catppuccin,
+    /// Nord, Dracula, Gruvbox, Tokyo Night, One, Solarized, Everforest, Rosé
+    /// Pine, Kanagawa, Monokai). Of the thirteen after them, Tokyo Night Day and
+    /// Moon, Rosé Pine Dawn and Moon, and Kanagawa Lotus are copied from the
+    /// Ghostty themes those projects publish (folke/tokyonight.nvim,
+    /// rose-pine/ghostty, rebelot/kanagawa.nvim); GitHub Dark and Light, Nord
+    /// Light, Everforest Light, the three Ayu and Night Owl from the Ghostty
+    /// files of the iTerm2-Color-Schemes collection (mbadolato/iTerm2-Color-Schemes,
+    /// MIT), value for value.
+    ///
+    /// Each app theme (`AppThemes`) pairs with one of these for light and one
+    /// for dark, which is what a terminal set to "Match app theme" shows.
     static let all: [TerminalTheme] = [
-        .codexDark, .codexLight, .solarizedDark, .solarizedLight, .nord, .dracula,
+        .codexDark, .codexLight, .midnight, .solarizedDark, .solarizedLight, .nord, .nordLight, .dracula,
         .catppuccinMocha, .catppuccinMacchiato, .catppuccinFrappe, .catppuccinLatte,
-        .gruvboxDark, .gruvboxLight, .tokyoNight, .tokyoNightStorm,
-        .oneDark, .oneLight, .everforestDark, .rosePine, .kanagawa, .monokai,
+        .gruvboxDark, .gruvboxLight, .tokyoNight, .tokyoNightStorm, .tokyoNightMoon, .tokyoNightDay,
+        .oneDark, .oneLight, .everforestDark, .everforestLight,
+        .rosePine, .rosePineMoon, .rosePineDawn, .kanagawa, .kanagawaLotus, .monokai,
+        .githubDark, .githubLight, .ayuDark, .ayuMirage, .ayuLight, .nightOwl,
     ]
 
     /// Matches the app chrome's dark palette.
@@ -59,6 +71,22 @@ struct TerminalTheme: Identifiable, Equatable {
         isDark: true,
         background: 0x212121,
         foreground: 0xECECEC,
+        ansi: [
+            0x2B2B2B, 0xE05561, 0x8CC265, 0xD18F52,
+            0x4AA5F0, 0xC162DE, 0x42B3C2, 0xD7D7D7,
+            0x666666, 0xFF6E6E, 0xA5E075, 0xF0A45D,
+            0x63B0F2, 0xD26FEE, 0x54C4D4, 0xFFFFFF,
+        ]
+    )
+
+    /// The Midnight app theme's dark terminal: iTERMiNAL Dark's colours on the
+    /// theme's own near-black.
+    static let midnight = TerminalTheme(
+        id: "midnight",
+        name: "iTERMiNAL Midnight",
+        isDark: true,
+        background: 0x09090B,
+        foreground: 0xF2F2F4,
         ansi: [
             0x2B2B2B, 0xE05561, 0x8CC265, 0xD18F52,
             0x4AA5F0, 0xC162DE, 0x42B3C2, 0xD7D7D7,
@@ -336,6 +364,187 @@ struct TerminalTheme: Identifiable, Equatable {
         ]
     )
 
+    static let tokyoNightDay = TerminalTheme(
+        id: "tokyo-night-day",
+        name: "Tokyo Night Day",
+        isDark: false,
+        background: 0xE1E2E7,
+        foreground: 0x3760BF,
+        ansi: [
+            0xB4B5B9, 0xF52A65, 0x587539, 0x8C6C3E,
+            0x2E7DE9, 0x9854F1, 0x007197, 0x6172B0,
+            0xA1A6C5, 0xFF4774, 0x5C8524, 0xA27629,
+            0x358AFF, 0xA463FF, 0x007EA8, 0x3760BF,
+        ]
+    )
+
+    static let tokyoNightMoon = TerminalTheme(
+        id: "tokyo-night-moon",
+        name: "Tokyo Night Moon",
+        isDark: true,
+        background: 0x222436,
+        foreground: 0xC8D3F5,
+        ansi: [
+            0x1B1D2B, 0xFF757F, 0xC3E88D, 0xFFC777,
+            0x82AAFF, 0xC099FF, 0x86E1FC, 0x828BB8,
+            0x444A73, 0xFF8D94, 0xC7FB6D, 0xFFD8AB,
+            0x9AB8FF, 0xCAABFF, 0xB2EBFF, 0xC8D3F5,
+        ]
+    )
+
+    static let rosePineDawn = TerminalTheme(
+        id: "rose-pine-dawn",
+        name: "Rosé Pine Dawn",
+        isDark: false,
+        background: 0xFAF4ED,
+        foreground: 0x575279,
+        ansi: [
+            0xF2E9E1, 0xB4637A, 0x286983, 0xEA9D34,
+            0x56949F, 0x907AA9, 0xD7827E, 0x575279,
+            0x9893A5, 0xB4637A, 0x286983, 0xEA9D34,
+            0x56949F, 0x907AA9, 0xD7827E, 0x575279,
+        ]
+    )
+
+    static let rosePineMoon = TerminalTheme(
+        id: "rose-pine-moon",
+        name: "Rosé Pine Moon",
+        isDark: true,
+        background: 0x232136,
+        foreground: 0xE0DEF4,
+        ansi: [
+            0x393552, 0xEB6F92, 0x3E8FB0, 0xF6C177,
+            0x9CCFD8, 0xC4A7E7, 0xEA9A97, 0xE0DEF4,
+            0x6E6A86, 0xEB6F92, 0x3E8FB0, 0xF6C177,
+            0x9CCFD8, 0xC4A7E7, 0xEA9A97, 0xE0DEF4,
+        ]
+    )
+
+    static let kanagawaLotus = TerminalTheme(
+        id: "kanagawa-lotus",
+        name: "Kanagawa Lotus",
+        isDark: false,
+        background: 0xF2ECBC,
+        foreground: 0x545464,
+        ansi: [
+            0x1F1F28, 0xC84053, 0x6F894E, 0x77713F,
+            0x4D699B, 0xB35B79, 0x597B75, 0x545464,
+            0x8A8980, 0xD7474B, 0x6E915F, 0x836F4A,
+            0x6693BF, 0x624C83, 0x5E857A, 0x43436C,
+        ]
+    )
+
+    static let githubDark = TerminalTheme(
+        id: "github-dark",
+        name: "GitHub Dark",
+        isDark: true,
+        background: 0x0D1117,
+        foreground: 0xE6EDF3,
+        ansi: [
+            0x484F58, 0xFF7B72, 0x3FB950, 0xD29922,
+            0x58A6FF, 0xBC8CFF, 0x39C5CF, 0xB1BAC4,
+            0x6E7681, 0xFFA198, 0x56D364, 0xE3B341,
+            0x79C0FF, 0xD2A8FF, 0x56D4DD, 0xFFFFFF,
+        ]
+    )
+
+    static let githubLight = TerminalTheme(
+        id: "github-light",
+        name: "GitHub Light",
+        isDark: false,
+        background: 0xFFFFFF,
+        foreground: 0x1F2328,
+        ansi: [
+            0x24292F, 0xCF222E, 0x116329, 0x4D2D00,
+            0x0969DA, 0x8250DF, 0x1B7C83, 0x6E7781,
+            0x57606A, 0xA40E26, 0x1A7F37, 0x633C01,
+            0x218BFF, 0xA475F9, 0x3192AA, 0x8C959F,
+        ]
+    )
+
+    static let nordLight = TerminalTheme(
+        id: "nord-light",
+        name: "Nord Light",
+        isDark: false,
+        background: 0xE5E9F0,
+        foreground: 0x414858,
+        ansi: [
+            0x3B4252, 0xBF616A, 0x96B17F, 0xC5A565,
+            0x81A1C1, 0xB48EAD, 0x7BB3C3, 0xA5ABB6,
+            0x4C566A, 0xBF616A, 0x96B17F, 0xC5A565,
+            0x81A1C1, 0xB48EAD, 0x82AFAE, 0xECEFF4,
+        ]
+    )
+
+    static let everforestLight = TerminalTheme(
+        id: "everforest-light",
+        name: "Everforest Light",
+        isDark: false,
+        background: 0xEFEBD4,
+        foreground: 0x5C6A72,
+        ansi: [
+            0x7A8478, 0xE67E80, 0x9AB373, 0xC1A266,
+            0x7FBBB3, 0xD699B6, 0x83C092, 0xB2AF9F,
+            0xA6B0A0, 0xF85552, 0x8DA101, 0xDFA000,
+            0x3A94C5, 0xDF69BA, 0x35A77C, 0xFFFBEF,
+        ]
+    )
+
+    static let ayuDark = TerminalTheme(
+        id: "ayu-dark",
+        name: "Ayu Dark",
+        isDark: true,
+        background: 0x0B0E14,
+        foreground: 0xBFBDB6,
+        ansi: [
+            0x11151C, 0xEA6C73, 0x7FD962, 0xF9AF4F,
+            0x53BDFA, 0xCDA1FA, 0x90E1C6, 0xC7C7C7,
+            0x686868, 0xF07178, 0xAAD94C, 0xFFB454,
+            0x59C2FF, 0xD2A6FF, 0x95E6CB, 0xFFFFFF,
+        ]
+    )
+
+    static let ayuMirage = TerminalTheme(
+        id: "ayu-mirage",
+        name: "Ayu Mirage",
+        isDark: true,
+        background: 0x1F2430,
+        foreground: 0xCCCAC2,
+        ansi: [
+            0x171B24, 0xED8274, 0x87D96C, 0xFACC6E,
+            0x6DCBFA, 0xDABAFA, 0x90E1C6, 0xC7C7C7,
+            0x686868, 0xF28779, 0xD5FF80, 0xFFD173,
+            0x73D0FF, 0xDFBFFF, 0x95E6CB, 0xFFFFFF,
+        ]
+    )
+
+    static let ayuLight = TerminalTheme(
+        id: "ayu-light",
+        name: "Ayu Light",
+        isDark: false,
+        background: 0xF8F9FA,
+        foreground: 0x5C6166,
+        ansi: [
+            0x000000, 0xEA6C6D, 0x6CBF43, 0xECA944,
+            0x3199E1, 0x9E75C7, 0x46BA94, 0xBABABA,
+            0x686868, 0xF07171, 0x86B300, 0xF2AE49,
+            0x399EE6, 0xA37ACC, 0x4CBF99, 0xD1D1D1,
+        ]
+    )
+
+    static let nightOwl = TerminalTheme(
+        id: "night-owl",
+        name: "Night Owl",
+        isDark: true,
+        background: 0x011627,
+        foreground: 0xD6DEEB,
+        ansi: [
+            0x011627, 0xEF5350, 0x22DA6E, 0xADDB67,
+            0x82AAFF, 0xC792EA, 0x21C7A8, 0xFFFFFF,
+            0x575656, 0xEF5350, 0x22DA6E, 0xFFEB95,
+            0x82AAFF, 0xC792EA, 0x7FDBCA, 0xFFFFFF,
+        ]
+    )
 }
 
 

@@ -6,9 +6,10 @@ import SwiftUI
 struct HTTPRequestBuilderView: View {
     @ObservedObject var model: HTTPClientModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 headersSection(theme: theme)

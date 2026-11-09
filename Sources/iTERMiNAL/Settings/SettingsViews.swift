@@ -6,6 +6,7 @@ struct SettingsRootView: View {
     @State private var selection: SettingsSection
     @State private var query = ""
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     /// Opens on `initialSection`. The Settings scene never passes one; it is
     /// here so the README screenshots can show a section without clicking.
@@ -14,7 +15,7 @@ struct SettingsRootView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         // One surface from edge to edge: the rail, the heading and the page are
         // all `theme.background`, with no divider between them, so nothing in
         // the window reads as a seam. What separates a row from the next is its
@@ -166,9 +167,10 @@ private struct SettingsNavRow: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: section.icon)

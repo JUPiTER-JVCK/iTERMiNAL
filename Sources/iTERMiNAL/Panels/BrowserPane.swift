@@ -482,9 +482,10 @@ private struct BrowserPanelContent: View {
 struct BrowserPaneView: View {
     @ObservedObject var model: BrowserModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Button(action: model.goBack) {
@@ -573,9 +574,10 @@ final class BrowserTabsModel: ObservableObject {
 struct BrowserPanelView: View {
     @ObservedObject var model: BrowserTabsModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             tabStrip(theme: theme)
             FadedDivider()
@@ -634,6 +636,7 @@ private struct BrowserTabChip: View {
 
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     /// Read here, from the tab this chip observes, and not handed down by the
     /// panel: the panel does not redraw when a page names itself, so a title it
@@ -644,7 +647,7 @@ private struct BrowserTabChip: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 6) {
             Image(systemName: "globe")
                 .font(.system(size: 10))
@@ -680,12 +683,13 @@ private struct BrowserTabChip: View {
 private struct BrowserNavigationRow: View {
     @ObservedObject var model: BrowserModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var confirmClearData = false
     @State private var showSource = false
     @State private var showConsole = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 8) {
             Button(action: model.goBack) {
                 Image(systemName: "arrow.left")

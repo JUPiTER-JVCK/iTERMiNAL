@@ -7,10 +7,11 @@ import SwiftUI
 struct HTTPHistoryListView: View {
     @ObservedObject var model: HTTPClientModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var selection: UUID?
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
             if model.history.isEmpty {
                 VStack {

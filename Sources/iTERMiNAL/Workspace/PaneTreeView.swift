@@ -49,10 +49,11 @@ struct TerminalPaneView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let isFocused = store.focusedSessionID == session.id
         // Same reasoning as the dock: tie the hosted view's identity to the
         // session so a restructured tree can never leave a stale terminal.

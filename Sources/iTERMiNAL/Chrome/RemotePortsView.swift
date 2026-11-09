@@ -145,12 +145,13 @@ final class RemotePortsModel: ObservableObject {
 struct RemotePortsButton: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @ObservedObject private var tunnels = TunnelManager.shared
     @StateObject private var model = RemotePortsModel()
     @State private var isOpen = false
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         Button {
             isOpen.toggle()
         } label: {

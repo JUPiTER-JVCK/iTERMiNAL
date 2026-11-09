@@ -19,6 +19,7 @@ struct StatusBarReadout: View {
 private struct StatusBarSession: View {
     @ObservedObject var session: TerminalSession
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     /// Who and where: the saved host's user and name for a remote shell, this
     /// Mac's for a local one.
@@ -32,7 +33,7 @@ private struct StatusBarSession: View {
     }
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme)
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         HStack(spacing: 14) {
             item("person", identity)
             item("folder", session.abbreviatedDirectory)
