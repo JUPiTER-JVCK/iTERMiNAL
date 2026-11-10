@@ -29,6 +29,19 @@ enum WindowChrome {
     /// Width of the icon rail down the left edge, under the top bar.
     static let railWidth: CGFloat = 56
 
+    /// The rail's 40pt icons centred in it leave this much either side — the
+    /// margin the rest of the frame matches.
+    static let railIconInset: CGFloat = 8
+
+    /// Where text and icons start in the workspaces panel: rows sit 8pt in
+    /// from its edge with 9pt inside them, and section headings, the panel's
+    /// title and its search field line up on the same edge.
+    static let sidebarContentInset: CGFloat = 17
+
+    /// The strip along the card's bottom — the workspaces panel's footer and
+    /// the detail column's status strip, which sit side by side and share it.
+    static let bottomStripHeight: CGFloat = 28
+
     /// Width of the workspaces panel, docked beside the content or floating
     /// over it.
     static let panelWidth: CGFloat = 284

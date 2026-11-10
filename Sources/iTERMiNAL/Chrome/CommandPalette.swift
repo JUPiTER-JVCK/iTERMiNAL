@@ -529,16 +529,23 @@ private struct PaletteRow: View {
             }
             Spacer()
             if let shortcut = action.shortcut {
+                // The system face, as menus draw them: the monospaced one
+                // shrank ⇧ ⌥ ⌘ to specks beside the letter they modify.
                 Text(shortcut)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11.5))
+                    .tracking(1)
                     .foregroundStyle(theme.textSecondary)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(
+            // The resting fill is the same colour at no opacity rather than
+            // `Color.clear`, so the highlight eases between rows instead of
+            // passing through grey.
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? theme.surfaceHover : Color.clear)
+                .fill(theme.surfaceHover.opacity(isSelected ? 1 : 0))
         )
+        .animation(Motion.hover, value: isSelected)
     }
 }

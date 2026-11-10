@@ -22,7 +22,10 @@ struct TranscriptResizeHandle: View {
     var body: some View {
         Capsule()
             .fill(theme.textSecondary.opacity(hovering ? 0.45 : 0.2))
-            .frame(width: 44, height: 4)
+            // The same size as the card's move grip, so the two handles read
+            // as one family.
+            .frame(width: 40, height: 4)
+            .animation(Motion.hover, value: hovering)
             .frame(maxWidth: .infinity)
             .frame(height: 12)
             .contentShape(Rectangle())

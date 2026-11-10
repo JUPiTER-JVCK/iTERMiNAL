@@ -66,6 +66,13 @@ struct Theme {
     let elevatedShadow: Color
     /// Hairline that catches light along the top edge of a raised surface.
     let elevatedHighlight: Color
+    /// The tight, dark shadow right under a raised surface's edge — where it
+    /// meets what it floats over. Paired with `elevatedShadow`, the soft,
+    /// wide one, so a surface reads as lit from above rather than smudged.
+    let contactShadow: Color
+    /// Light falling on the top of a raised surface: a wash that fades out
+    /// down its face, which is what makes a flat fill read as glass.
+    let sheen: Color
     /// Structural seams between regions.
     let divider: Color
     /// Fill for surfaces that float over content. Deliberately further from
@@ -121,13 +128,17 @@ struct Theme {
         floatingSurface = Color(p3: palette.floatingSurface)
         if dark {
             surfaceBorder = Color.white.opacity(0.07)
-            elevatedShadow = Color.black.opacity(0.55)
-            elevatedHighlight = Color.white.opacity(0.06)
+            elevatedShadow = Color.black.opacity(0.45)
+            elevatedHighlight = Color.white.opacity(0.10)
+            contactShadow = Color.black.opacity(0.35)
+            sheen = Color.white.opacity(0.035)
             divider = Color.white.opacity(0.09)
         } else {
             surfaceBorder = Color.black.opacity(0.08)
-            elevatedShadow = Color.black.opacity(0.13)
+            elevatedShadow = Color.black.opacity(0.12)
             elevatedHighlight = Color.white.opacity(0.9)
+            contactShadow = Color.black.opacity(0.08)
+            sheen = Color.white.opacity(0.45)
             divider = Color.black.opacity(0.08)
         }
     }
@@ -156,9 +167,12 @@ extension EnvironmentValues {
 
 // MARK: - Depth
 
-/// Lifts a surface off the background: a soft shadow plus a hairline
-/// highlight along the top edge, which is what stops a flat card reading as
-/// a painted rectangle.
+/// Lifts a surface off the background the way light would: a soft, wide
+/// ambient shadow and a tight contact shadow under the edge, a sheen across
+/// the top of its face, and a rim that catches the light along the top edge
+/// and fades into a hairline down the sides. Every floating surface — the
+/// composer, cards, the floating workspaces panel — goes through here, so
+/// they are lit by the same light.
 struct ElevatedSurface: ViewModifier {
     var cornerRadius: CGFloat = 14
     var radius: CGFloat = 14
@@ -172,14 +186,33 @@ struct ElevatedSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(fill ?? theme.surface)
-                    .shadow(color: theme.elevatedShadow, radius: radius, y: y)
+                ZStack {
+                    shape
+                        .fill(fill ?? theme.surface)
+                        // Contact first, then ambient: the second is cast from
+                        // the first's silhouette, which is the same shape.
+                        .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
+                        .shadow(color: theme.elevatedShadow, radius: radius, y: y)
+                    // Light on the face, strongest at the top and gone by the
+                    // middle. Behind the content, so it never washes text out.
+                    shape
+                        .fill(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: theme.sheen, location: 0),
+                                    .init(color: theme.sheen.opacity(0), location: 0.55),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
             )
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                shape
                     .strokeBorder(
                         LinearGradient(
                             colors: [theme.elevatedHighlight, theme.surfaceBorder],
@@ -188,6 +221,7 @@ struct ElevatedSurface: ViewModifier {
                         ),
                         lineWidth: 1
                     )
+                    .allowsHitTesting(false)
             )
     }
 }

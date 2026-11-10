@@ -91,7 +91,14 @@ struct MainWindowView: View {
     @ViewBuilder
     private func floatingPanel(_ theme: Theme) -> some View {
         if settings.railPanelOpen && !settings.railPanelPinned {
-            let shape = RoundedRectangle(cornerRadius: settings.frameCornerRadius, style: .continuous)
+            // Concentric with the card it floats in: inset by `inset`, so its
+            // corners are that much tighter, or the gap between the two
+            // curves would be wider at the corner than along the sides.
+            let inset = 8.0
+            let shape = RoundedRectangle(
+                cornerRadius: max(settings.frameCornerRadius - inset, 6),
+                style: .continuous
+            )
             ZStack(alignment: .topLeading) {
                 Color.clear
                     .contentShape(Rectangle())
@@ -102,9 +109,20 @@ struct MainWindowView: View {
                 SidebarView()
                     .frame(width: WindowChrome.panelWidth)
                     .clipShape(shape)
-                    .overlay(shape.strokeBorder(theme.surfaceBorder))
-                    .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 4)
-                    .padding(8)
+                    .overlay(
+                        // The same lit rim as every other floating surface.
+                        shape.strokeBorder(
+                            LinearGradient(
+                                colors: [theme.elevatedHighlight, theme.surfaceBorder],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                    )
+                    .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
+                    .shadow(color: theme.elevatedShadow, radius: 18, y: 6)
+                    .padding(inset)
                     .transition(Motion.railPanelTransition(reduceMotion: reduceMotion))
             }
         }
@@ -151,6 +169,7 @@ struct DetailView: View {
                 if !store.rightPanelExpanded {
                     mainSurface
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .animation(Motion.page, value: store.detailMode)
                 }
 
                 if store.rightRegionOpen {
@@ -251,8 +270,18 @@ struct DetailView: View {
         return max(0, available * 0.4)
     }
 
-    @ViewBuilder
+    /// The page the rail has open. Each case is its own view, so changing
+    /// page swaps one for the next, and the transition on the group — which a
+    /// `Group` hands to each of its children — fades the new one in.
     private var mainSurface: some View {
+        Group {
+            pageContent
+        }
+        .transition(Motion.pageTransition(reduceMotion: reduceMotion))
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
         switch store.detailMode {
         case .automations:
             SectionPageView(
@@ -294,9 +323,12 @@ struct DetailView: View {
         .overlay(alignment: .bottom) {
             if settings.composerEnabled {
                 GeometryReader { proxy in
+                    // The same 12pt on every side the drag clamp keeps it
+                    // from the surface's edges, so home is not a different
+                    // distance from the edge than anywhere it can be dragged.
                     ComposerBar(bounds: proxy.size)
                         .frame(maxWidth: settings.composerWidth)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
                 }
@@ -332,7 +364,7 @@ private struct DetailBottomStrip: View {
             RemotePortsButton()
         }
         .padding(.horizontal, 14)
-        .frame(height: 26)
+        .frame(height: WindowChrome.bottomStripHeight)
     }
 }
 
@@ -1489,8 +1521,12 @@ struct TerminalDockView: View {
                 .buttonStyle(.plain)
                 .help("Close terminal dock")
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            // The same 38pt header, inset and seam as a side panel's tab
+            // strip, so the dock and the panels read as one family.
+            .padding(.horizontal, 8)
+            .frame(height: 38)
+
+            FadedDivider()
 
             if let session = store.selectedDockSession {
                 // Identity must follow the session. Without it SwiftUI sees

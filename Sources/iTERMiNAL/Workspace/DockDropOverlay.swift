@@ -58,15 +58,8 @@ struct DockDropOverlay: View {
         .foregroundStyle(theme.textPrimary)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.floatingSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(theme.surfaceBorder)
-        )
-        .shadow(color: theme.elevatedShadow, radius: 8, y: 3)
+        // Picked up, so lit like everything else that floats.
+        .elevated(cornerRadius: 8, radius: 10, y: 4, fill: theme.floatingSurface)
         .fixedSize()
         .offset(x: drag.pointer.x + 14, y: drag.pointer.y + 14)
     }

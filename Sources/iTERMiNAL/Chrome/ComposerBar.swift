@@ -53,8 +53,10 @@ struct ComposerBar: View {
         Group {
             if settings.composerCollapsed {
                 collapsedPill
+                    .transition(Motion.morphTransition(reduceMotion: reduceMotion))
             } else {
                 expandedCard
+                    .transition(Motion.morphTransition(reduceMotion: reduceMotion))
             }
         }
         .background(
@@ -71,7 +73,7 @@ struct ComposerBar: View {
             x: settings.composerOffsetX + dragDelta.width,
             y: settings.composerOffsetY + dragDelta.height
         )
-        .animation(Motion.panel, value: settings.composerCollapsed)
+        .animation(Motion.morph, value: settings.composerCollapsed)
         .onChange(of: bounds) { _, _ in clampToBounds() }
         .onAppear {
             // Asked when it is needed rather than kept: a session's directory
@@ -347,7 +349,12 @@ struct ComposerBar: View {
                     .disabled(trimmedText.isEmpty)
                 }
             }
-            .padding(14)
+            // Less above than at the sides and below: the grip row is taller
+            // than its 4pt capsule, and this is what leaves the capsule with
+            // the same 20pt of air above it as between it and the field.
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
             // A distinctly lighter surface and a deeper shadow, so this reads
             // as floating above the terminal rather than painted onto it.
             .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme))
@@ -373,7 +380,9 @@ struct ComposerBar: View {
         // Taller than it looks: the capsule is 4pt, but the grabbable strip
         // around it needs to be big enough to hit without aiming.
         .frame(height: 24)
-        .overlay(alignment: .trailing) { headerControls(theme: theme) }
+        // Inset so the minimise button sits on the same vertical line as the
+        // send button's centre at the card's other end.
+        .overlay(alignment: .trailing) { headerControls(theme: theme).padding(.trailing, 4) }
         .contentShape(Rectangle())
         .onHover { NSCursor.openHand.set(); if !$0 { NSCursor.arrow.set() } }
         .gesture(
