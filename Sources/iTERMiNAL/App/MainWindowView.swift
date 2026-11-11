@@ -332,6 +332,9 @@ struct DetailView: View {
                         .padding(.bottom, 12)
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
                 }
+                // Folds away the way it folds to its pill, rather than blinking
+                // out when the corner button turns it off.
+                .transition(Motion.morphTransition(reduceMotion: reduceMotion))
             }
         }
     }
@@ -360,11 +363,44 @@ private struct DetailBottomStrip: View {
             if showMetrics {
                 SystemMetricsReadout()
             }
+            // Beside the globe, in the bottom-right corner: it hides the
+            // composer, and its pill with it, from the terminal.
+            ComposerToggleButton()
             // Last, past the network figure, in the bottom-right corner.
             RemotePortsButton()
         }
         .padding(.horizontal, 14)
         .frame(height: WindowChrome.bottomStripHeight)
+    }
+}
+
+/// Shows and hides the composer — the card, and the pill it folds to — from the
+/// window's bottom-right corner, so the terminal can have its whole surface
+/// back without a trip to Settings. The same switch as Settings → Composer →
+/// "Show composer"; ⇧⌘R (Focus Composer) brings it back.
+private struct ComposerToggleButton: View {
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        let shown = settings.composerEnabled
+        Button {
+            withAnimation(Motion.morph) { settings.composerEnabled.toggle() }
+        } label: {
+            Image(systemName: "text.cursor")
+                .font(.system(size: 11, weight: .medium))
+                // Lit while the composer is on screen, like the rail's own
+                // toggles; dim while it is put away.
+                .foregroundStyle(shown ? theme.textPrimary : theme.textSecondary)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(shown ? "Hide the composer" : "Show the composer (⇧⌘R)")
+        .accessibilityLabel(shown ? "Hide composer" : "Show composer")
+        .accessibilityAddTraits(shown ? .isSelected : [])
     }
 }
 
