@@ -55,13 +55,13 @@ struct ConnectionTestRow: View {
                     .textSelection(.enabled)
             case nil:
                 Text("Signs in the way the Files panel does: with a key, or through a terminal tab you have signed in to, since a file browser has nowhere to type a password.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             if let signInNote {
                 Label(signInNote, systemImage: "info.circle")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }

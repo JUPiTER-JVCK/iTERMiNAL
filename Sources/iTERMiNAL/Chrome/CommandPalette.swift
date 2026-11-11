@@ -52,6 +52,9 @@ struct CommandPaletteView: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        // Read once: the rows and the headings between them have to agree on
+        // one list.
+        let rows = matches
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -75,8 +78,16 @@ struct CommandPaletteView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(Array(matches.enumerated()), id: \.element.id) { index, action in
-                            PaletteRow(action: action, isSelected: index == selectedIndex, theme: theme)
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
+                            if let heading = sectionHeading(at: index, in: rows) {
+                                PaletteSectionHeading(title: heading, theme: theme)
+                            }
+                            PaletteRow(
+                                action: action,
+                                isSelected: index == selectedIndex,
+                                theme: theme,
+                                accent: settings.accentColor
+                            )
                                 .id(action.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { run(action) }
@@ -95,7 +106,17 @@ struct CommandPaletteView: View {
             .frame(height: 320)
         }
         .frame(width: 560)
-        .background(theme.background)
+        // What is behind the sheet, blurred, under a wash of the theme's
+        // floating colour: mostly the theme, so text keeps its ground, with
+        // enough of the window showing through to say this is over it. With
+        // Reduce Transparency on, the system draws the material solid.
+        .background {
+            ZStack {
+                VisualEffectView(material: .menu, blendingMode: .behindWindow)
+                theme.floatingSurface.opacity(0.82)
+            }
+            .ignoresSafeArea()
+        }
         .onMoveCommand { direction in
             switch direction {
             case .down: selectedIndex = min(selectedIndex + 1, max(matches.count - 1, 0))
@@ -114,13 +135,25 @@ struct CommandPaletteView: View {
     private var matches: [PaletteAction] {
         let actions = allActions()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return actions }
+        // Nothing typed: the whole list, gathered under headings.
+        guard !trimmed.isEmpty else { return PaletteGroup.grouped(actions) }
         // A leading "/" asks for files alone; otherwise the files follow the
         // actions, which have the first say.
         let found = FileSearch.parse(trimmed).filesOnly
             ? []
             : actions.filter { Self.matches(query: trimmed, in: $0.title + " " + $0.subtitle) }
         return found + fileActions()
+    }
+
+    /// The heading above a row: the name of its group, on the first row of
+    /// each, while the whole list is showing. Results for something typed are
+    /// one ranked list and have none.
+    private func sectionHeading(at index: Int, in rows: [PaletteAction]) -> String? {
+        guard query.trimmingCharacters(in: .whitespaces).isEmpty,
+              rows.indices.contains(index) else { return nil }
+        let group = PaletteGroup(actionID: rows[index].id)
+        if index > 0, PaletteGroup(actionID: rows[index - 1].id) == group { return nil }
+        return group.title
     }
 
     // MARK: Files
@@ -506,17 +539,103 @@ struct CommandPaletteView: View {
     }
 }
 
+/// What an action is about, read from the first part of its id. Only for
+/// laying the unfiltered list out under headings: nothing else depends on it,
+/// and an id this does not recognise falls under the last group.
+enum PaletteGroup: Int {
+    case terminal, panels, goTo, appearance, app
+
+    var title: String {
+        switch self {
+        case .terminal: return "Terminal"
+        case .panels: return "Panels and tools"
+        case .goTo: return "Go to"
+        case .appearance: return "Appearance"
+        case .app: return "App"
+        }
+    }
+
+    /// Longer prefixes first where one begins with another.
+    private static let prefixes: [(String, PaletteGroup)] = [
+        ("workspace.goto.", .goTo), ("goto.", .goTo), ("connect.", .goTo),
+        ("tab.", .terminal), ("workspace.", .terminal), ("split.", .terminal), ("pane.", .terminal),
+        ("profile.", .terminal), ("font.", .terminal), ("gpu.", .terminal), ("log.", .terminal),
+        ("panel.", .panels), ("panels.", .panels), ("tool.", .panels), ("dock.", .panels),
+        ("sidebar.", .panels), ("composer.", .panels), ("tasks.", .panels), ("skills.", .panels),
+        ("skill.", .panels), ("cheatsheet.", .panels),
+        ("apptheme.", .appearance), ("theme.", .appearance),
+    ]
+
+    init(actionID id: String) {
+        self = Self.prefixes.first { id.hasPrefix($0.0) }?.1 ?? .app
+    }
+
+    /// The actions with each group's together, groups in the order above.
+    /// Within a group they keep the order they were listed in.
+    static func grouped(_ actions: [PaletteAction]) -> [PaletteAction] {
+        let keyed = actions.enumerated().map { (offset: $0.offset, group: PaletteGroup(actionID: $0.element.id).rawValue, action: $0.element) }
+        return keyed
+            .sorted { $0.group != $1.group ? $0.group < $1.group : $0.offset < $1.offset }
+            .map { $0.action }
+    }
+}
+
+private struct PaletteSectionHeading: View {
+    let title: String
+    let theme: Theme
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(theme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A shortcut as keys: one cap for each, the way a keyboard shows them.
+private struct PaletteKeyCaps: View {
+    let keys: String
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                Text(String(key))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(theme.surface.opacity(0.9))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(theme.surfaceBorder)
+                    )
+            }
+        }
+        // Read out as the menus print it, not key by key.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(keys)
+    }
+}
+
 private struct PaletteRow: View {
     let action: PaletteAction
     let isSelected: Bool
     let theme: Theme
+    let accent: Color
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: action.systemImage)
                 .font(.system(size: 13))
                 .frame(width: 20)
-                .foregroundStyle(theme.textSecondary)
+                .foregroundStyle(isSelected ? accent : theme.textSecondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(action.title)
                     .font(.system(size: 13))
@@ -531,10 +650,7 @@ private struct PaletteRow: View {
             if let shortcut = action.shortcut {
                 // The system face, as menus draw them: the monospaced one
                 // shrank ⇧ ⌥ ⌘ to specks beside the letter they modify.
-                Text(shortcut)
-                    .font(.system(size: 11.5))
-                    .tracking(1)
-                    .foregroundStyle(theme.textSecondary)
+                PaletteKeyCaps(keys: shortcut, theme: theme)
             }
         }
         .padding(.horizontal, 10)

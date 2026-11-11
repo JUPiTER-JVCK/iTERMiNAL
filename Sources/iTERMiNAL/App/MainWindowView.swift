@@ -586,7 +586,7 @@ private struct LandingView: View {
                 .padding(.top, 28)
                 // The composer floats over the bottom of this page; its pill is
                 // short, the open card is not.
-                .padding(.bottom, settings.composerEnabled && !settings.composerCollapsed ? 210 : 84)
+                .padding(.bottom, settings.composerEnabled && !settings.composerCollapsed ? 130 : 84)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
             .scrollIndicators(.automatic)

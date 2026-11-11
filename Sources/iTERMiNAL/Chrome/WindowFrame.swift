@@ -58,10 +58,7 @@ struct TopBar: View {
                 .frame(width: 1, height: 16)
 
             // Hit-testing off so the drag area behind it takes the click.
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.textPrimary)
-                .lineLimit(1)
+            breadcrumb(theme)
                 .allowsHitTesting(false)
 
             Spacer(minLength: 12)
@@ -87,6 +84,45 @@ struct TopBar: View {
         .background(WindowDragArea())
     }
 
+    /// Where you are, from the outside in: the space, the tab, and — for a
+    /// terminal — the folder and branch its shell is in. On any other page,
+    /// just the page's name.
+    @ViewBuilder
+    private func breadcrumb(_ theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            if store.detailMode == .terminal, store.selectedTab != nil,
+               let space = store.currentWorkspace?.name, !space.isEmpty {
+                Text(space)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                crumbSeparator(theme)
+            }
+
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                // The tab's name is the last thing to give way when the bar
+                // is narrow.
+                .layoutPriority(1)
+
+            if store.detailMode == .terminal, store.selectedTab != nil,
+               let session = store.focusedSession, !session.kind.isTool {
+                TopBarSessionCrumbs(session: session, theme: theme)
+                    .id(session.id)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func crumbSeparator(_ theme: Theme) -> some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(theme.textSecondary.opacity(0.6))
+            .accessibilityHidden(true)
+    }
+
     private var title: String {
         switch store.detailMode {
         case .terminal: return store.selectedTab?.displayName ?? "iTERMiNAL"
@@ -94,6 +130,43 @@ struct TopBar: View {
         case .automations: return RailItem.automations.title
         case .skills: return RailItem.skills.title
         case .cheatsheet: return RailItem.cheatsheet.title
+        }
+    }
+}
+
+/// The focused terminal's folder and branch, after the tab's name. Its own
+/// view because the session is its own observable object: read from the bar,
+/// these would not follow a `cd`.
+private struct TopBarSessionCrumbs: View {
+    @ObservedObject var session: TerminalSession
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(theme.textSecondary.opacity(0.6))
+                .accessibilityHidden(true)
+
+            Text(session.abbreviatedDirectory)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            if let branch = session.gitBranch, !session.isRemote {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 9))
+                    Text(branch)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(theme.textSecondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(theme.surface.opacity(0.7)))
+            }
         }
     }
 }
@@ -182,7 +255,7 @@ struct SidebarRail: View {
             Spacer(minLength: 0)
 
             // Just above the dock, at the bottom of the rail.
-            RailButton(icon: "ellipsis", title: "More", isActive: moreOpen) {
+            RailButton(icon: "ellipsis", title: "More", isActive: moreOpen, isToggle: true) {
                 moreOpen.toggle()
             }
             .popover(isPresented: $moreOpen, arrowEdge: .trailing) {
@@ -197,7 +270,8 @@ struct SidebarRail: View {
             RailButton(
                 icon: "rectangle.bottomthird.inset.filled",
                 title: "Terminal dock (⌘J)",
-                isActive: store.bottomDockOpen
+                isActive: store.bottomDockOpen,
+                isToggle: true
             ) {
                 store.toggleBottomDock()
             }
@@ -216,6 +290,8 @@ struct SidebarRail: View {
             icon: item.icon,
             title: item.title,
             isActive: isActive(item),
+            // Workspaces shows and hides a panel; it is not somewhere you are.
+            isToggle: item == .workspaces,
             badge: item == .tasks ? runningTaskCount : nil
         ) {
             RailNavigation.open(item, store: store, settings: settings)
@@ -238,22 +314,29 @@ struct SidebarRail: View {
 struct RailIconLabel: View {
     let icon: String
     var isActive = false
+    /// A button that shows and hides something — the workspaces panel, the
+    /// dock, the "···" menu — rather than a page. It brightens while its
+    /// thing is open but never takes the raised tile, which is left to mean
+    /// one thing: the page you are on.
+    var isToggle = false
     var isHovering = false
     var badge: Int? = nil
 
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        let raised = isActive && !isToggle
         Image(systemName: icon)
             .font(.system(size: 16))
             .foregroundStyle(isActive ? theme.textPrimary : theme.textSecondary)
             .frame(width: 40, height: 40)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isActive ? theme.surface : theme.surface.opacity(isHovering ? 0.6 : 0))
+                    .fill(raised ? theme.surface : theme.surface.opacity(isHovering ? 0.6 : 0))
             )
             .overlay(
                 // The selected icon is lit like a raised surface — a hairline
@@ -267,13 +350,17 @@ struct RailIconLabel: View {
                         ),
                         lineWidth: 1
                     )
-                    .opacity(isActive ? 1 : 0)
+                    .opacity(raised ? 1 : 0)
             )
             .overlay(alignment: .topTrailing) {
                 if let badge, badge > 0 {
                     Text(badge > 99 ? "99+" : "\(badge)")
                         .font(.system(size: 9, weight: .semibold))
+                        .monospacedDigit()
                         .foregroundStyle(.white)
+                        // The count rolls to its new value.
+                        .contentTransition(reduceMotion ? .identity : .numericText())
+                        .animation(reduceMotion ? nil : Motion.hover, value: badge)
                         .padding(.horizontal, 4)
                         .frame(minWidth: 14, minHeight: 14)
                         // The app's accent, not the system's: the badge is
@@ -294,6 +381,7 @@ struct RailButton: View {
     let icon: String
     let title: String
     var isActive = false
+    var isToggle = false
     var badge: Int? = nil
     let action: () -> Void
 
@@ -301,7 +389,7 @@ struct RailButton: View {
 
     var body: some View {
         Button(action: action) {
-            RailIconLabel(icon: icon, isActive: isActive, isHovering: hovering, badge: badge)
+            RailIconLabel(icon: icon, isActive: isActive, isToggle: isToggle, isHovering: hovering, badge: badge)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

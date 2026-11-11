@@ -14,7 +14,7 @@ struct SecuritySettingsView: View {
             Section("Local scripting API") {
                 Toggle("Enable local API", isOn: $settings.localAPIEnabled)
                 Text("Lets scripts, the iterminalctl command, and AI agents drive this app over a Unix socket. It can type into live shells, so it stays off until you turn it on.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 if settings.localAPIEnabled {
@@ -50,7 +50,7 @@ struct SecuritySettingsView: View {
 
                     if let tokenMessage {
                         Text(tokenMessage)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -61,11 +61,11 @@ struct SecuritySettingsView: View {
                     Button("Install iterminalctl…") { installCLI() }
                     if let installMessage {
                         Text(installMessage)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         Text("Copies the bundled iterminalctl into ~/.local/bin.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -74,11 +74,11 @@ struct SecuritySettingsView: View {
             if settings.localAPIEnabled || !scriptedLog.entries.isEmpty {
                 Section("Scripted commands on hosts") {
                     Text("A script with the API token can run a command on a host — with no terminal — only if you ticked “Allow scripted commands” for that host in Settings → Connections. Every one, and every refusal, is listed here until you quit. Commands are masked and cut short.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     if scriptedLog.entries.isEmpty {
                         Text("None since iTERMiNAL started.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(scriptedLog.entries) { entry in
@@ -87,7 +87,7 @@ struct SecuritySettingsView: View {
                                     Text(entry.host).font(.system(size: 12, weight: .medium))
                                     Spacer()
                                     Text(entry.time.formatted(date: .omitted, time: .standard))
-                                        .font(.caption)
+                                        .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
                                 if !entry.command.isEmpty {
@@ -97,7 +97,7 @@ struct SecuritySettingsView: View {
                                         .textSelection(.enabled)
                                 }
                                 Text(entry.result)
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
@@ -110,7 +110,7 @@ struct SecuritySettingsView: View {
             Section("Keyboard") {
                 Toggle("Secure Keyboard Entry", isOn: $settings.secureKeyboardEntry)
                 Text("While iTERMiNAL is the active app, macOS keeps other apps from reading what you type in it — the protection a password field gets. It is released when you switch to another app and when you quit. While it is on, tools that watch the keyboard, such as text expanders and some window-management and accessibility utilities, cannot see keystrokes made here.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -122,7 +122,7 @@ struct SecuritySettingsView: View {
                 • App Transport Security stays enabled; only the embedded web view may load plain HTTP, so you can preview a local dev server.
                 • A terminal can't run inside the macOS sandbox — it exists to launch your programs — so capabilities are narrowed individually instead.
                 """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
         }

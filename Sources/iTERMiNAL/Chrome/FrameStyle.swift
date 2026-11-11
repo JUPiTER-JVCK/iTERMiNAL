@@ -67,8 +67,8 @@ enum VisualRange {
 
 /// How the pane the keyboard drives is marked once a tab is split.
 enum SplitFocusStyle: String, CaseIterable, Identifiable {
-    /// A bar along the pane's top edge: the default, and the only mark that
-    /// does not surround content.
+    /// A bar along the pane's top edge, with the other panes dimmed a
+    /// little: the default, and the only mark that does not surround content.
     case standard
     /// A line all the way round, inside the pane's edge.
     case outline

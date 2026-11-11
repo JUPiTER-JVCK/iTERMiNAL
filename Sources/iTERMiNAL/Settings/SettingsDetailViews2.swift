@@ -35,7 +35,7 @@ struct AdvancedSettingsView: View {
                 BundledFontRow()
                 BundledCheatsheetRow()
                 Text("Shipped inside the app at the versions pinned in scripts/tools.env. superfile and ripgrep are upstream's release binaries, checked against their published hashes; bat's is checked against the hash of the file when it was pinned, because upstream publishes none; btop publishes no macOS build, so it is compiled from pinned source. None runs with elevated privileges. rg, bat and imgcat are on the PATH of every local terminal tab, after anything you have installed yourself. The symbols font is used only for icons the terminal font has no glyph for, and only inside this app — nothing is installed on your Mac. The Cheatsheet's extra examples are data from tldr-pages, under CC BY 4.0 and reformatted for the page.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -55,7 +55,7 @@ private struct BundledToolRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(tool.title)
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -95,7 +95,7 @@ private struct BundledCommandRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(command.title)
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -134,7 +134,7 @@ private struct BundledFontRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Nerd Font symbols")
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -170,7 +170,7 @@ private struct BundledCheatsheetRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Cheatsheet examples")
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -229,7 +229,7 @@ struct ComposerSettingsView: View {
                         .frame(width: 56, alignment: .trailing)
                 }
                 Text("The transcript is the composer's own shell, shown once it has run something. Both can also be dragged directly on the card. A tall transcript is capped to whatever the window can fit, so the input stays reachable.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Button("Reset position") {
@@ -249,25 +249,25 @@ struct ComposerSettingsView: View {
                 }
                 Toggle("Background vibrancy", isOn: $settings.composerVibrancy)
                 Text("Vibrancy lets the terminal underneath show through the card — not the desktop, since the composer floats over the app's own content. Off by default, because the card is meant to read as sitting above the terminal rather than as a window onto it.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             Section("Suggestions") {
                 Toggle("Suggest from shell history", isOn: $settings.composerSuggestFromShellHistory)
                 Text("As you type, the rest of a command you have run before appears in grey after the caret — → or ⇥ takes it, esc waves it away. ⌃R searches your history, and ⇥ completes file names for terminals on this Mac. What the composer has run in this session is always used. With this on, the tail of your shell's history file (~/.zsh_history or ~/.bash_history) is read too. It is kept in memory only: never saved, exported, or sent anywhere.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             Section("Typing") {
                 Toggle("Close brackets and quotes as you type", isOn: $settings.composerAutoClose)
                 Text("Typing ( [ { \" ' or ` also types the closing one, with the caret between. Typing the closing character steps over it, and ⌫ straight after the opener removes both. A quote is not closed inside another kind of quote, in a comment, after a backslash, or after a letter, so an apostrophe in a word stays one. Off by default.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle("Note risky or unfinished commands", isOn: $settings.composerShowNotes)
                 Text("A moment after you stop typing, a line above the input names well-known dangers in what you typed — deleting folders, administrator rights, piping a download into a shell, overwriting a file — and says when a quote is still open, a bracket is, or the line ends in a backslash. It is advice, not a check: it never stops a command, and no note does not mean a command is safe.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -278,10 +278,10 @@ struct ComposerSettingsView: View {
                     }
                 }
                 Text(settings.composerTarget.detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text("The chip above the composer's input always names the destination, and doubles as a menu for changing it.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -293,11 +293,11 @@ struct ComposerSettingsView: View {
                     }
                 }
                 Text("Applies only to the composer's own session, so trying something in another shell doesn't change what new tabs open as. Changing it restarts that session.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if settings.composerTarget == .activeTerminal {
                     Text("Only used while \"Run commands in\" is set to the composer's own shell.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }

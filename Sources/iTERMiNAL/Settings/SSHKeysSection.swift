@@ -128,12 +128,12 @@ struct SSHKeysSection: View {
     var body: some View {
         Section("SSH keys") {
             Text(agentLine)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             if model.rows.isEmpty {
                 Text(model.loaded ? "There are no public keys (.pub files) in ~/.ssh." : "Looking in ~/.ssh…")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(model.rows) { row in
@@ -141,14 +141,14 @@ struct SSHKeysSection: View {
                 }
                 if model.omitted > 0 {
                     Text("\(model.omitted) more are not listed.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
 
             if let notice {
                 Text(notice)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -159,7 +159,7 @@ struct SSHKeysSection: View {
             }
 
             Text("Lists the public keys in ~/.ssh and asks the ssh-agent this app was started with what it holds. Private keys are never opened, and nothing here asks for a passphrase: Add to Agent and Generate type the ssh-add or ssh-keygen command into a new tab and leave Return to you, so ssh itself asks.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .onAppear { model.refresh() }
@@ -210,7 +210,7 @@ private struct SSHKeyRow: View {
                     .font(.system(.body, design: .monospaced))
                 if let fingerprint = row.fingerprint {
                     Text("\(fingerprint.type) · \(fingerprint.bits)")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
@@ -224,7 +224,7 @@ private struct SSHKeyRow: View {
                     .textSelection(.enabled)
                 if !fingerprint.comment.isEmpty {
                     Text(fingerprint.comment)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -242,11 +242,11 @@ private struct SSHKeyRow: View {
         switch row.inAgent {
         case true?:
             Label("In agent", systemImage: "checkmark.circle.fill")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         case false?:
             Text("Not in agent")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         case nil:
             EmptyView()
@@ -260,7 +260,7 @@ private struct SSHKeyRow: View {
             EmptyView()
         case .missing:
             Text("There is no private key file named \(row.entry.name) beside it. That is fine for a key that lives in a hardware token or another agent.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         case .tooOpen(let mode):
             Label("The private key's permissions (\(String(mode, radix: 8))) are too open, so ssh refuses to use it.", systemImage: "exclamationmark.triangle.fill")
@@ -348,7 +348,7 @@ private struct GenerateSSHKeySheet: View {
             }
 
             Text("This opens a terminal tab with the command typed in and waits for you to press Return. ssh-keygen then asks for a passphrase there: iTERMiNAL never sees it, and a name that is taken is not offered.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             HStack {

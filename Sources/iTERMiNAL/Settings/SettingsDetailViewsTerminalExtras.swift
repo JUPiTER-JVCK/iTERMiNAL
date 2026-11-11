@@ -29,7 +29,7 @@ struct TerminalTypeSettingsSection: View {
                 .foregroundStyle(.orange)
             } else {
                 Text(settings.localTerminalType.detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -39,17 +39,17 @@ struct TerminalTypeSettingsSection: View {
                 }
             }
             Text(settings.remoteTerminalType.detail)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let hint = settings.remoteTerminalType.installHint {
                 Text("A host that doesn't know this name can be taught it with: \(hint)")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
 
             Text("Sets TERM for new sessions; a host can use its own under Connections. It is what programs are told, not what the terminal can do — naming a type the host has no entry for makes less, vim and tput fall back or complain, and iTERMiNAL can only check this Mac. COLORTERM=truecolor goes along only with types that claim 256 colours or more.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -73,11 +73,11 @@ struct GhosttyThemeImportSection: View {
             }
             if let message {
                 Text(message)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Text("Reads Ghostty theme files — the ones in Ghostty's themes folder, or any file of palette = N=#rrggbb, background and foreground lines — and adds each to the theme list above. Only the colours are read; nothing else in a file is used.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -157,11 +157,11 @@ struct TerminalPaddingSection: View {
                     settings.terminalPaddingVertical = TerminalPadding.defaultVertical
                 }
                 Text("Custom padding active. Turn it off to return to the built-in padding, which is a little wider on the left.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
                 Text("Space between a terminal's edge and its text. The built-in padding is used until you set your own.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -186,7 +186,7 @@ struct SplitFocusSettingsSection: View {
             }
             .disabled(settings.splitFocusStyle == .none || settings.splitFocusStyle == .dimOthers)
             Text("How the pane you are typing in stands out once a tab is split. A single pane is never marked.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -254,7 +254,7 @@ struct TerminalColorOverridesSection: View {
             OverrideColorRow(title: "Custom selection color", hex: $settings.selectionColorHex, defaultHex: 0x3B82F6)
             Toggle("Draw bold text in bright colors", isOn: $settings.boldAsBright)
             Text("Off, the theme's cursor and selection colors are used. Bold in bright colors is how most terminals draw bold in the eight dark ANSI colors; turn it off for a font whose bold weight is enough on its own. Open terminals pick the change up as they come into view. Bundled tools such as btop keep their own cursor.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -276,7 +276,7 @@ struct TerminalLineSpacingSection: View {
             Button("Reset") { settings.terminalLineSpacing = 1 }
                 .disabled(settings.terminalLineSpacing == 1)
             Text("Multiplies the height of each row of text; 1.00× is the font's own. Rows get taller or shorter, the letters do not change. Character width is fixed by the font and has no setting here.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -313,11 +313,11 @@ struct ThemeEditorSection: View {
                     }
                 }
                 Text("The sixteen colors programs draw with, dark above, bright below. Changes apply as you make them.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
                 Text("The built-in themes can't be changed. Duplicate one to get a copy you can: it is added to the theme list and chosen, and imported Ghostty themes can be edited the same way.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -397,7 +397,7 @@ struct EffectsSection: View {
             Button("Reset") { settings.animationSpeed = 1 }
                 .disabled(settings.animationSpeed == 1)
             Text("How fast panels, banners and highlights move: 2× is twice as quick, 0.5× half as quick. It does not replace Reduce Motion, which still removes the sliding.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }

@@ -53,17 +53,17 @@ struct AISettingsView: View {
                     }
                     if let localModelsNote {
                         Text(localModelsNote)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
                 Text("OpenAI-compatible chat completions at `{base}/chat/completions`. Point the base URL at Ollama or any compatible proxy for local models.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 if providerPreset == .claude {
                     Text("Claude is reached through Anthropic's OpenAI-compatible endpoint, with an API key from the Claude Console — a Claude.ai account login is not used. Anthropic describes that endpoint as meant for testing and comparison rather than long-term use.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     if let keysPage = providerPreset.keysPage {
                         Link("Get an API key in the Claude Console", destination: keysPage)
@@ -90,11 +90,11 @@ struct AISettingsView: View {
                 }
                 if let keyMessage {
                     Text(keyMessage)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(keyHelp)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -105,7 +105,7 @@ struct AISettingsView: View {
                 Toggle("Include space name", isOn: $settings.assistantIncludeWorkspace)
                 Toggle("Include recent terminal output", isOn: $settings.assistantIncludeRecentOutput)
                 Text("Only the fields switched on above are sent with a prompt, and full scrollback never is — only what is on screen, trimmed to the last 6,000 characters. Explain and Fix it ask first when this is off.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if settings.assistantIncludeRecentOutput {
                     Text("Control sequences are stripped and values that look like API keys, tokens, passwords, private keys and URL credentials are masked before output is sent. That is best effort: a secret in a form it doesn't recognise — an env dump with an unusual name, say — still goes.")
@@ -117,17 +117,17 @@ struct AISettingsView: View {
             Section("Error help") {
                 Toggle("Offer Explain / Fix it after a command prints an error", isOn: $settings.assistantOfferErrorHelp)
                 Text("When a command you run from the composer prints something that reads like an error, a row offers Explain and Fix it. Spotting it happens on this Mac, from the terminal's text; nothing is sent until you press one. From the offer, the command and only the new text that appeared after it are sent; from the Terminal menu, what is on screen and the command last sent from the composer if it is still there. If \"Include recent terminal output\" is off, you're asked each time and shown what would go. A suggested command is only ever put in the input for you to review.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             Section("Asking about a web page") {
                 Text("In the HTTP client's Extract tab, Ask… sends the text of the page you have in hand, its address and title, and what you asked for, to the same endpoint — after a sheet that says where it goes and can show every character. Keys and passwords are masked first (best effort, and nothing else is, so don't send a private page), the text is cut at 12,000 characters, and the answer comes back as a table of text that is only ever shown: nothing in it is run, opened or fetched.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Text("In the Cheatsheet, Ask AI sends what you typed in its search field and the 40 commands the cheatsheet found closest, one line each, to the same endpoint — after a sheet that says where it goes and can show every character. Keys and passwords in what you typed are masked first, nothing from your terminal is included, and the assistant is asked to choose among those commands, not to write one: its answer is only ever shown, and nothing in it is run.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -135,7 +135,7 @@ struct AISettingsView: View {
                 Text("""
                 Prompts and the context toggles above go to the configured endpoint when you submit `@ai …` in the composer, and the command and output Explain / Fix it show go when you send them, and a web page's text goes when you press Ask on the sheet in Extract, and the Cheatsheet's question and closest commands go when you press Ask on its sheet. Nothing is sent until an API key is saved (or the base URL is a localhost OpenAI-compatible server). Suggested commands are shown only — they can be put in the input to review and are never auto-executed.
                 """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
         }

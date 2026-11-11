@@ -3,15 +3,29 @@ import SwiftUI
 /// Renders a tab's layout tree: splits become HSplitView/VSplitView, leaves
 /// host a terminal, browser, file, or HTTP client pane.
 ///
-/// A tab with a single pane draws no card and no focus ring — there is
+/// A tab with a single pane draws no card and no focus mark — there is
 /// nothing to disambiguate, and the reference app keeps its content flush to
-/// the window. Card and ring treatment appears only once the tab is split.
+/// the window. Once the tab is split, each pane is a rounded card of its own
+/// with a gap between it and its neighbours (see `PaneCard`).
 struct PaneTreeView: View {
     @ObservedObject var node: PaneNode
     /// False once this node sits inside a split.
     var isSolo = true
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
+        if isSolo, case .split = node.content {
+            // The outermost split paints what shows in the gaps between the
+            // cards: the chrome colour, so the panes read as set into it.
+            tree.background(Theme.current(for: colorScheme, themeID: appThemeID).sidebar)
+        } else {
+            tree
+        }
+    }
+
+    @ViewBuilder
+    private var tree: some View {
         switch node.content {
         case .terminal(let session):
             TerminalPaneView(session: session, isSolo: isSolo)
@@ -26,6 +40,7 @@ struct PaneTreeView: View {
                 HSplitView {
                     ForEach(children) { child in
                         PaneTreeView(node: child, isSolo: false)
+                            .modifier(PaneCard(node: child))
                             .frame(minWidth: 160, maxWidth: .infinity, minHeight: 100, maxHeight: .infinity)
                     }
                 }
@@ -33,6 +48,7 @@ struct PaneTreeView: View {
                 VSplitView {
                     ForEach(children) { child in
                         PaneTreeView(node: child, isSolo: false)
+                            .modifier(PaneCard(node: child))
                             .frame(minWidth: 160, maxWidth: .infinity, minHeight: 100, maxHeight: .infinity)
                     }
                 }
@@ -41,8 +57,39 @@ struct PaneTreeView: View {
     }
 }
 
-/// Terminal leaf. Every pane renders flush; inside a split, the one the
-/// keyboard drives is marked by a bar along its top edge.
+/// What makes a pane inside a split its own card: rounded corners, a hairline
+/// edge, and half of the gap to its neighbour on every side.
+///
+/// Applied to leaves only. A nested split is not a card — its children are —
+/// so every pane ends up with the same gap around it however deep it sits.
+struct PaneCard: ViewModifier {
+    @ObservedObject var node: PaneNode
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+
+    static let cornerRadius: CGFloat = 8
+    /// Each pane's share of the gap: two neighbours make it twice this, plus
+    /// the split view's own divider.
+    static let inset: CGFloat = 3
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if case .split = node.content {
+            content
+        } else {
+            let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+            let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+            content
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(theme.surfaceBorder).allowsHitTesting(false))
+                .padding(Self.inset)
+        }
+    }
+}
+
+/// Terminal leaf. A lone pane renders flush; inside a split, the one the
+/// keyboard drives is marked by a bar along its top edge and the others sit
+/// back a little.
 struct TerminalPaneView: View {
     @ObservedObject var session: TerminalSession
     var isSolo = true
@@ -75,28 +122,38 @@ struct TerminalPaneView: View {
         if isSolo {
             host
         } else {
-            // A ring around an opaque terminal reads as a halo, and the inset
-            // it needs divides the gap between panes unevenly. A bar along
-            // the focused pane's top edge says the same thing without
-            // surrounding the content.
+            // A bar along the focused pane's top edge, clipped to the card's
+            // corners by `PaneCard`, with the other panes dimmed slightly: the
+            // mark says which pane has the keyboard, the dimming says it
+            // before you have looked for the mark.
             //
             // The look is the person's to choose (Settings → Terminal → Split
-            // panes); the bar stays the default for the reasons above.
+            // panes); the bar stays the default.
             let style = settings.splitFocusStyle
             let markColor = settings.splitFocusColor.hex.map { Color(nsColor: NSColor(hex: $0)) }
                 ?? settings.accentColor
             host
+                .overlay {
+                    if style == .standard {
+                        Color.black
+                            .opacity(isFocused ? 0 : 0.1)
+                            .allowsHitTesting(false)
+                            .animation(Motion.disclosure, value: isFocused)
+                    }
+                }
                 .overlay(alignment: .top) {
                     if style == .standard {
                         Rectangle()
                             .fill(isFocused ? markColor : Color.clear)
                             .frame(height: 2)
+                            .allowsHitTesting(false)
                             .animation(Motion.disclosure, value: isFocused)
                     }
                 }
                 .overlay {
                     if style == .outline {
-                        Rectangle()
+                        // The card's own shape, so the line follows its corners.
+                        RoundedRectangle(cornerRadius: PaneCard.cornerRadius, style: .continuous)
                             .strokeBorder(isFocused ? markColor : Color.clear, lineWidth: 2)
                             .allowsHitTesting(false)
                             .animation(Motion.disclosure, value: isFocused)

@@ -131,7 +131,7 @@ struct TerminalSettingsView: View {
                 }
                 if let importMessage {
                     Text(importMessage)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -143,7 +143,7 @@ struct TerminalSettingsView: View {
                     }
                 })
                 Text("Import copies a .ttf, .otf, .ttc or .otc file into this app's own folder and uses it here only — nothing is installed on the Mac. macOS reads the file, so import fonts you trust.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Cursor") {
@@ -158,7 +158,7 @@ struct TerminalSettingsView: View {
                     }
                 }
                 Text("An animation takes the place of the blink, while the terminal is the one you are typing in. It is drawn by the default renderer, so it does nothing with GPU rendering on, and it is off while Reduce Motion is. Applies to open terminals as they come into view.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             TerminalColorOverridesSection()
@@ -174,13 +174,13 @@ struct TerminalSettingsView: View {
                         .monospacedDigit()
                 }
                 Text("Applies to new terminals.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Keyboard") {
                 Toggle("Option key acts as Meta", isOn: $settings.optionAsMeta)
                 Text("On, Option sends Escape followed by the key, which is what shells and editors read as Meta: Option-B and Option-F move by word in zsh and bash. Off, Option types the character your keyboard layout gives it — @, € or ø on layouts that put them there. Open terminals pick the change up as they come into view; a bundled tool such as btop keeps the default.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Notifications") {
@@ -190,13 +190,13 @@ struct TerminalSettingsView: View {
                     }
                 }
                 Text("Bell and OSC 9/777 from background panes show an in-app mark. System banners are optional and only fire when the app is inactive or the pane is unfocused.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Shell integration") {
                 Toggle("Report each command's result from zsh", isOn: $settings.shellIntegration)
                 Text("A new zsh tab on this Mac is started with two small hooks that tell iTERMiNAL when a command starts and what status it ends with. It works through zsh's ZDOTDIR: iTERMiNAL's own .zshenv adds the hooks, puts ZDOTDIR back and loads yours, so zsh reads everything else from where it really is — nothing in your home folder is changed. A tab whose last command failed shows its exit status in the sidebar. bash, fish and ssh sessions are left alone, and a tab that is already open keeps the way it was started.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle("Notify when a long command finishes", isOn: $settings.notifyLongCommands)
                     .disabled(!settings.shellIntegration)
@@ -205,13 +205,13 @@ struct TerminalSettingsView: View {
                 }
                 .disabled(!settings.shellIntegration || !settings.notifyLongCommands)
                 Text("Follows Pane attention above: nothing if it is off, an in-app mark, or a system banner as well. It is shown only for a tab you are not looking at.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Performance") {
                 Toggle("GPU rendering (experimental)", isOn: $settings.useGPURendering)
                 Text("Draws the terminal with Metal for smoother scrolling. The renderer is still experimental upstream; if it can't start, terminals silently keep using the CPU renderer.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -305,7 +305,7 @@ private struct ImportedFontsList: View {
                     let families = Array(Set(entry.faces.map(\.family))).sorted()
                     Text(families.joined(separator: ", "))
                     Text("\(entry.fileName) · \(entry.faces.count) style\(entry.faces.count == 1 ? "" : "s")")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -338,7 +338,7 @@ struct RecommendedFontsNotice: View {
             .padding(.top, 4)
         } label: {
             Text("\(missing.count) recommended fonts aren't installed")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }

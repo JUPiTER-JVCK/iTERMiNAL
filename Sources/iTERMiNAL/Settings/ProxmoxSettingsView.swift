@@ -113,7 +113,7 @@ struct ProxmoxSettingsSection: View {
         Section("Proxmox") {
             if settings.proxmoxHosts.isEmpty {
                 Text("No Proxmox hosts yet. Add one to list its VMs and open their consoles in the browser panel.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
                 Picker("Host", selection: $selectedID) {
@@ -152,7 +152,7 @@ struct ProxmoxSettingsSection: View {
                 Create the token in Proxmox under Datacenter → Permissions → API Tokens. \
                 Only the secret is kept in the Keychain; the token ID is stored with the host.
                 """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
 
@@ -168,7 +168,7 @@ struct ProxmoxSettingsSection: View {
                     }
                 } else {
                     Text("Nothing pinned yet. A default Proxmox install serves a self-signed certificate, which this app will not accept until you have confirmed it.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
@@ -190,7 +190,7 @@ struct ProxmoxSettingsSection: View {
                     Task { await model.probe(host: host) }
                 }
                 Text("Pinning applies to this host and port alone, and covers both the API and the console in the browser panel.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -208,7 +208,7 @@ struct ProxmoxSettingsSection: View {
 
                 if !model.status.isEmpty {
                     Text(model.status)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 

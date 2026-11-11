@@ -27,7 +27,7 @@ struct RemoteServicesSettingsSection: View {
                 Text(discovery.isBrowsing
                      ? "Listening for machines advertising screen sharing, SSH or file sharing…"
                      : "Not listening.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -40,13 +40,13 @@ struct RemoteServicesSettingsSection: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(service.name)
                         Text(service.subtitle)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if resolving.contains(service.id) {
                         Text("Connecting…")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         Button("Connect") { connect(service) }
@@ -66,7 +66,7 @@ struct RemoteServicesSettingsSection: View {
             }
 
             Text("Browsing only — this advertises nothing about this Mac, and opens no connection until you pick something. A Bonjour listing names a service, not an address, so the address is looked up at the moment you connect.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .onAppear { discovery.start() }
@@ -94,7 +94,7 @@ struct RemoteServicesSettingsSection: View {
                         }
                         if service.viewer == .builtIn {
                             Text("Opens a window in this app. It does no sign-in or a VNC password, asked each time and never saved; macOS Screen Sharing's own sign-in is not supported unless “VNC viewers may control screen with password” is on. The picture is sent uncompressed, so it suits a local network or a tunnel better than a slow link. The connection is not encrypted unless it goes through an SSH host.")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -108,7 +108,7 @@ struct RemoteServicesSettingsSection: View {
                         }
                         if service.tunnelThrough != nil {
                             Text("The host above is read as the SSH host sees it. An ssh forward carries the connection to a port on this Mac, and the client is pointed there. It signs in with a key or an open terminal tab, never a typed password.")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -134,7 +134,7 @@ struct RemoteServicesSettingsSection: View {
 
             if let message {
                 Text(message)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -145,7 +145,7 @@ struct RemoteServicesSettingsSection: View {
 
             Share This Mac's Screen opens System Settings → General → Sharing, where Screen Sharing is switched on or off. iTERMiNAL does not change it.
             """)
-            .font(.caption)
+            .font(.subheadline)
             .foregroundStyle(.secondary)
         }
     }

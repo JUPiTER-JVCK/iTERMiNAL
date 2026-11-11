@@ -35,13 +35,13 @@ struct OutputColorsSettingsSection: View {
             Applies to new terminals. The colors are your theme's own — bold blue is whatever blue the theme calls blue — so they follow a theme change. \
             Your shell's startup files run afterwards, so anything you set there wins, and the NO_COLOR convention switches this off.
             """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             DisclosureGroup("grep, GNU ls and other commands") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Some commands print color only when asked. For grep, add these to your .zshrc — iTERMiNAL doesn't edit your shell's files:")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack(alignment: .top) {
                         Text(Self.grepAliases)
@@ -51,7 +51,7 @@ struct OutputColorsSettingsSection: View {
                         Button(copied ? "Copied" : "Copy") { copy() }
                     }
                     Text("macOS's own ls colors folders, links and programs, and nothing else. GNU ls (with --color) and eza also read LS_COLORS, which is set too, and color archives, pictures and audio.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
