@@ -536,7 +536,7 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Local scripting API + CLI** — a Unix-socket JSON API and the `iterminalctl`
   command for creating workspaces, splitting panes, sending input, and driving
   the browser, plus an event stream plugins and agents can subscribe to.
-- **Command palette** — ⌘K (or ⌘P), fuzzy search over every command in the
+- **Command palette** — ⌘K, fuzzy search over every command in the
   menus, your saved hosts, the themes, the workspaces and the tabs that are open.
   It also finds files: type two or more characters of a name and the files under
   the focused terminal's folder follow the commands (start with `/` to search
@@ -1545,7 +1545,7 @@ bind:
 
 | Action | Keys |
 | --- | --- |
-| Command palette | ⌘K or ⌘P |
+| Command palette | ⌘K |
 | Keyboard shortcuts | ⌘/ |
 | New terminal tab | ⌘T |
 | New workspace | ⇧⌘N |

@@ -249,7 +249,7 @@ enum ShortcutCatalog {
 
     static let all: [ShortcutEntry] = [
         // MARK: General
-        ShortcutEntry("palette.open", "Command palette", [ShortcutChord("k", cmd), ShortcutChord("p", cmd)], in: .general,
+        ShortcutEntry("palette.open", "Command palette", [ShortcutChord("k", cmd)], in: .general,
                       detail: "Search every action, including the ones with no shortcut"),
         ShortcutEntry("shortcuts.open", "Keyboard shortcuts", [ShortcutChord("/", cmd)], in: .general,
                       detail: "This list. Type to search; esc closes it"),

@@ -137,13 +137,6 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("k", modifiers: .command)
 
-            // The reference design uses ⌘P for the palette; keep both, since
-            // the app has nothing to print.
-            Button("Command Palette (⌘P)") {
-                WorkspaceStore.shared.showCommandPalette = true
-            }
-            .keyboardShortcut("p", modifiers: .command)
-
             // Replaces `SidebarCommands()`, which drove the split view this
             // window no longer has. Same shortcut, so it stays where it was.
             Button(settings.railPanelOpen ? "Hide Sidebar" : "Show Sidebar") {
