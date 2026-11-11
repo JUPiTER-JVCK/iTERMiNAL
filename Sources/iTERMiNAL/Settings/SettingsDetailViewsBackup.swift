@@ -19,7 +19,7 @@ struct BackupSettingsView: View {
             Section("Where your setup lives") {
                 LabeledContent("Stored on", value: LocalStateStore.displayName)
                 Text(LocalStateStore.statusDescription)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 LabeledContent("State file") {
                     Text(store.stateFileURL.path)
@@ -42,7 +42,7 @@ struct BackupSettingsView: View {
                 }
                 if let savedMessage {
                     Text(savedMessage)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -57,7 +57,7 @@ struct BackupSettingsView: View {
                     }
                 }
                 Text("A snapshot carries your spaces, tabs, split layout, and preferences — but no secrets. Importing replaces the current layout and closes the shells running under it.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -67,7 +67,7 @@ struct BackupSettingsView: View {
 
                 Terminal scrollback is excluded too. Transcripts stay in their own files on this Mac at 0600, and a snapshot you hand to someone else should not contain what your shells printed.
                 """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
         }
@@ -88,7 +88,7 @@ struct ShortcutsSettingsView: View {
                                 Text(entry.title)
                                 if let detail = entry.detail {
                                     Text(detail)
-                                        .font(.caption)
+                                        .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -102,7 +102,7 @@ struct ShortcutsSettingsView: View {
 
             Section {
                 Text("The Help menu shows this list in a window you can search. Custom key bindings are on the roadmap.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }

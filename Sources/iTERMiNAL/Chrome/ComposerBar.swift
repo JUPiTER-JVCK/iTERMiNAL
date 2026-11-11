@@ -127,7 +127,7 @@ struct ComposerBar: View {
     /// controls off the bottom — leaving the composer visible but unusable.
     /// Everything above and below the transcript needs roughly this much.
     private var maxTranscriptHeight: Double {
-        let chrome: Double = 210
+        let chrome: Double = 170
         return max(100, bounds.height - chrome)
     }
 
@@ -228,7 +228,7 @@ struct ComposerBar: View {
                 .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 gripBar(theme: theme)
 
                 if isChatting {
@@ -286,75 +286,13 @@ struct ComposerBar: View {
                 }
 
                 inputField(theme: theme)
-
-                HStack(spacing: 8) {
-                    // A popover rather than a Menu: the reference app groups
-                    // these under headings and gives each row a line of
-                    // explanation, neither of which a Menu can render.
-                    Button {
-                        showActions = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(theme.textSecondary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add a terminal, split, or panel")
-                    .popover(isPresented: $showActions, arrowEdge: .top) {
-                        ComposerActionsPopover(isPresented: $showActions, typedCommand: text) {
-                            withAnimation(Motion.banner) {
-                                ai.requestHelp(.explainCommand, offer: nil, typed: text, store: store, settings: settings)
-                            }
-                        }
-                            .environmentObject(store)
-                            .environmentObject(settings)
-                    }
-
-                    // Shows and hides the tray under the card, which holds the
-                    // workspace and run-in chips.
-                    Button {
-                        trayShown.toggle()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .rotationEffect(.degrees(trayShown ? 180 : 0))
-                            .foregroundStyle(theme.textSecondary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(trayShown ? "Hide space and destination" : "Show space and destination")
-                    .accessibilityLabel(trayShown ? "Hide status tray" : "Show status tray")
-
-                    Spacer()
-
-                    SessionChip()
-
-                    Button(action: send) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                Circle().fill(
-                                    trimmedText.isEmpty
-                                        ? Color.secondary.opacity(0.35)
-                                        : (colorScheme == .dark ? Color.white : Color.black)
-                                )
-                            )
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-                    .disabled(trimmedText.isEmpty)
-                }
             }
             // Less above than at the sides and below: the grip row is taller
-            // than its 4pt capsule, and this is what leaves the capsule with
-            // the same 20pt of air above it as between it and the field.
-            .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
+            // than its 4pt capsule, which leaves the capsule with about the
+            // same air above it as between it and the field.
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
             // A distinctly lighter surface and a deeper shadow, so this reads
             // as floating above the terminal rather than painted onto it.
             .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme))
@@ -379,10 +317,10 @@ struct ComposerBar: View {
         }
         // Taller than it looks: the capsule is 4pt, but the grabbable strip
         // around it needs to be big enough to hit without aiming.
-        .frame(height: 24)
+        .frame(height: 20)
         // Inset so the minimise button sits on the same vertical line as the
         // send button's centre at the card's other end.
-        .overlay(alignment: .trailing) { headerControls(theme: theme).padding(.trailing, 4) }
+        .overlay(alignment: .trailing) { headerControls(theme: theme).padding(.trailing, 8) }
         .contentShape(Rectangle())
         .onHover { NSCursor.openHand.set(); if !$0 { NSCursor.arrow.set() } }
         .gesture(
@@ -595,28 +533,35 @@ struct ComposerBar: View {
 
     // MARK: Input
 
-    /// The command line, in a soft field that warms to the accent on focus.
-    ///
-    /// The field's whole area is the editor — its padding is the text view's own
-    /// inset — so a click anywhere in it lands the caret.
+    /// The command line, in a soft field that warms to the accent on focus,
+    /// with the card's controls at its two ends.
     private func inputField(theme: Theme) -> some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        return CommandInputView(
-            text: $text,
-            placeholder: isChatting ? "Message the AI" : "Run anything",
-            style: inputStyle(theme),
-            workingDirectory: destinationDirectory,
-            ghost: suggestions.ghost(for: text),
-            ghostBase: text,
-            suggestions: suggestions,
-            focusPending: store.composerFocusPending,
-            isFocused: $inputFocused,
-            onFocusTaken: { store.composerFocusHandled = store.composerFocusRequest },
-            onSubmit: send,
-            onRecallEarlier: recallEarlier,
-            onRecallLater: recallLater,
-            autoClose: settings.composerAutoClose
-        )
+        // The controls sit inside the field, at its two ends, and stay on its
+        // last line as the text grows: a row of their own under the field made
+        // the card half as tall again for four small buttons.
+        return HStack(alignment: .bottom, spacing: 2) {
+            leadingControls(theme: theme)
+
+            CommandInputView(
+                text: $text,
+                placeholder: isChatting ? "Message the AI" : "Run anything",
+                style: inputStyle(theme),
+                workingDirectory: destinationDirectory,
+                ghost: suggestions.ghost(for: text),
+                ghostBase: text,
+                suggestions: suggestions,
+                focusPending: store.composerFocusPending,
+                isFocused: $inputFocused,
+                onFocusTaken: { store.composerFocusHandled = store.composerFocusRequest },
+                onSubmit: send,
+                onRecallEarlier: recallEarlier,
+                onRecallLater: recallLater,
+                autoClose: settings.composerAutoClose
+            )
+
+            trailingControls(theme: theme)
+        }
         // Opaque and sRGB, so the colours chosen for it are checked against
         // exactly what is drawn. The focus change is the accent hairline.
         .background(shape.fill(Color(hex: Theme.inputFieldHex(for: colorScheme, themeID: appThemeID))))
@@ -637,6 +582,85 @@ struct ComposerBar: View {
         // Above what follows it in the card, or the row of controls below
         // would draw over the list's shadow.
         .zIndex(1)
+    }
+
+    /// "+" and the tray's arrow, at the field's leading end.
+    private func leadingControls(theme: Theme) -> some View {
+        HStack(spacing: 0) {
+            // A popover rather than a Menu: the reference app groups
+            // these under headings and gives each row a line of
+            // explanation, neither of which a Menu can render.
+            Button {
+                showActions = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 26, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Add a terminal, split, or panel")
+            .popover(isPresented: $showActions, arrowEdge: .top) {
+                ComposerActionsPopover(isPresented: $showActions, typedCommand: text) {
+                    withAnimation(Motion.banner) {
+                        ai.requestHelp(.explainCommand, offer: nil, typed: text, store: store, settings: settings)
+                    }
+                }
+                    .environmentObject(store)
+                    .environmentObject(settings)
+            }
+
+            // Shows and hides the tray under the card, which holds the
+            // workspace and run-in chips.
+            Button {
+                trayShown.toggle()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .rotationEffect(.degrees(trayShown ? 180 : 0))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 20, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(trayShown ? "Hide space and destination" : "Show space and destination")
+            .accessibilityLabel(trayShown ? "Hide status tray" : "Show status tray")
+        }
+        // 28pt tall and 3 up from the field's bottom edge: centred on a
+        // single line of text, and on the last line of several.
+        .padding(.leading, 5)
+        .padding(.bottom, 3)
+    }
+
+    /// Where input goes, and the send button, at the field's trailing end.
+    private func trailingControls(theme: Theme) -> some View {
+        HStack(spacing: 8) {
+            SessionChip()
+
+            Button(action: send) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(trimmedText.isEmpty ? theme.textSecondary : Color.white)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        // The accent once there is something to send: the one
+                        // control on the card that acts, in the app's colour.
+                        Circle().fill(
+                            trimmedText.isEmpty
+                                ? theme.textSecondary.opacity(0.18)
+                                : settings.accentColor
+                        )
+                    )
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .disabled(trimmedText.isEmpty)
+            .animation(reduceMotion ? nil : Motion.field, value: trimmedText.isEmpty)
+            .help(isChatting ? "Send (Return)" : "Run (Return)")
+            .accessibilityLabel(isChatting ? "Send" : "Run")
+        }
+        .padding(.trailing, 5)
+        .padding(.bottom, 4)
     }
 
     /// The command colours for the field this is typed in, from the terminal

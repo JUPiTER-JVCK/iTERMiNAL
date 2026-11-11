@@ -39,7 +39,7 @@ struct ProfilesSection: View {
             }
 
             Text("A profile applies to new terminals. Its startup command is typed only when you open a tab yourself — ⌘T, New Tab, the palette or Open a Tab here — never when a space is restored, and not in a split. Profiles stay on this Mac and are not part of an exported archive.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -154,7 +154,7 @@ private struct ProfileEditor: View {
                 }
             }
             Text("Colors and font apply to a shell opened with this profile, and to the tabs of any saved host set to use it. Bigger Text and Smaller Text change the size in Terminal settings, so a profile with its own size does not follow them.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             HStack {
@@ -174,7 +174,7 @@ private struct ProfileEditor: View {
                 }
                 Spacer()
                 Text(profile.summary)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }

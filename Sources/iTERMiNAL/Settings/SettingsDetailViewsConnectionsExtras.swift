@@ -28,7 +28,7 @@ struct HostOptionsSection: View {
             }
             .disabled(connection.transport == .custom || connection.host.trimmingCharacters(in: .whitespaces).isEmpty)
             Text("Opens a terminal tab with the command typed in: it creates an ed25519 key if you have none (asking whether to give it a passphrase), then installs it on this host with ssh-copy-id, which asks for the host's password once. Press Return to run it. After that the file browser and everything else sign in without a password. Nothing runs until you press Return.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         Section("Terminal and transport") {
@@ -40,11 +40,11 @@ struct HostOptionsSection: View {
             }
             if let type = TerminalType(rawValue: connection.terminalTypeTag) {
                 Text(type.detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if let hint = type.installHint {
                     Text("If this host doesn't know the name: \(hint)")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -57,7 +57,7 @@ struct HostOptionsSection: View {
                 }
             }
             Text("Draws this host's terminal tabs with the colors and font of a profile (Settings → General → Profiles). Only those two apply to a host; a profile's shell, variables and startup command are for shells on this Mac.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             if connection.transport == .ssh {
@@ -76,13 +76,13 @@ struct HostOptionsSection: View {
                     }
                 }
                 Text("Each is added to the ssh command only when set here, so leaving them alone leaves ~/.ssh/config in charge. They apply to the terminal, the file browser and port scans.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 forwardsEditor
             } else {
                 Text("Address family, compression, keep-alive and port forwards are ssh options; this host connects another way.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -131,7 +131,7 @@ struct HostOptionsSection: View {
             connection.forwards.append(PortForward())
         }
         Text("Opened with every ssh terminal tab on this host. Local: a port on this Mac that leads to a host and port as the server sees them. Remote: a port on the server that leads back to one on this Mac. SOCKS5: a proxy on this Mac that goes out through the server. Each listens on the loopback address only, and a rule that isn't valid is left out. A second tab on the same host finds the port taken and carries on without that forward.")
-            .font(.caption)
+            .font(.subheadline)
             .foregroundStyle(.secondary)
     }
 }
@@ -165,7 +165,7 @@ struct QuickConnectSection: View {
                 Text(targets.count == 1
                      ? targets[0].display
                      : "\(targets.count) hosts: \(targets.prefix(3).map(\.display).joined(separator: ", "))\(targets.count > 3 ? ", …" : "")")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             case .invalid(let problem)?:
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -176,11 +176,11 @@ struct QuickConnectSection: View {
             }
             if let message {
                 Text(message)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Text("user@host:port, or ssh -p 2222 user@host. A pattern names several hosts: [1-3] counts (and [01-10] pads), {a,b} chooses. Hosts are saved under SSH hosts so the next connect is one click, and a host already saved is reused.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -256,7 +256,7 @@ struct HostLookupSection: View {
                     .textSelection(.enabled)
             }
             Text("Uses this Mac's own resolver, so what it shows is what ssh would connect to. Nothing is sent to a lookup service.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }

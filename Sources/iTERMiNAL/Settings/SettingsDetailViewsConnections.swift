@@ -10,7 +10,7 @@ struct ConnectionsSettingsView: View {
             Section("Saved hosts") {
                 if settings.sshConnections.isEmpty {
                     Text("No hosts yet. Add one to browse it in the Files panel over SFTP.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("Host", selection: $selectedID) {
@@ -63,7 +63,7 @@ struct ConnectionsSettingsView: View {
                                 .foregroundStyle(.orange)
                         } else {
                             Text("Hosts to go through on the way, in order, as user@host:port and separated by commas. The terminal and the file browser both use them. Nothing connects directly while this has something wrong with it.")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
 
@@ -73,12 +73,12 @@ struct ConnectionsSettingsView: View {
                             }
                         }
                         Text(Self.agentCaption(binding.wrappedValue.agentForwarding))
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
 
                         Toggle("Allow scripted commands", isOn: binding.allowScriptedCommands)
                         Text("Lets a script that has the API token run a command on this host with no terminal (iterminalctl exec). Off unless you turn it on, host by host. It never asks for a password, never forwards your agent, and each one is listed in Settings → Security.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
 
@@ -86,7 +86,7 @@ struct ConnectionsSettingsView: View {
                         TextField("Command", text: binding.customCommand,
                                   prompt: Text("tailscale ssh %u@%h"))
                         Text("Runs in the terminal as written. %h, %p, %u, and %d expand to host, port, username, and user@host.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         TextField("Extra arguments (optional)", text: binding.extraArguments,
@@ -114,15 +114,15 @@ struct ConnectionsSettingsView: View {
             Section("Authentication") {
                 Toggle("Share each ssh tab's sign-in with the file browser", isOn: $settings.shareSignInWithFiles)
                 Text("On, a new ssh tab keeps its connection open, and the file browser, the port scan and forwards use it. A host that wants a password then needs signing in to once, in a tab, and the file browser fills in by itself; closing the tab ends the sharing. The connection is reachable only by this account, through a private folder. Applies to tabs opened from now on.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle("Notice a dead connection, and give up on a host that doesn't answer", isOn: $settings.fillInConnectionDefaults)
                 Text(Self.connectionDefaultsCaption)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle("Reconnect a dropped ssh session by itself", isOn: $settings.autoReconnect)
                 Text(Self.autoReconnectCaption)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text("""
                 iTERMiNAL never stores SSH passwords. Both remote features run the system's own clients, reusing your ssh-agent, keys, and known_hosts.
@@ -131,7 +131,7 @@ struct ConnectionsSettingsView: View {
 
                 A host that only wants a password: Test File Access, above, says so in plain words. Press Sign In in a Terminal, enter the password in the tab that opens, and keep the tab open — the file browser uses that connection, and the password goes to ssh in the tab, never to iTERMiNAL. Or install a key: it offers to type the ssh-copy-id command, and you press Return and enter the password once.
                 """)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
         }

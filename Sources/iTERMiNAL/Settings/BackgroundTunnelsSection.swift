@@ -9,7 +9,7 @@ struct BackgroundTunnelsSection: View {
         Section("Background tunnels") {
             if settings.savedTunnels.isEmpty {
                 Text("No tunnels yet. A tunnel keeps a port forward open through a saved host without a terminal tab.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             // Not `ForEach($settings.savedTunnels)`: its per-row bindings read
@@ -26,7 +26,7 @@ struct BackgroundTunnelsSection: View {
                 settings.savedTunnels.append(SavedTunnel(connectionID: settings.sshConnections.first?.id))
             }
             Text("Each tunnel is an ssh -N of its own through the host you pick. It signs in with a key or your agent — a background process has no keyboard, so a host that only takes a password fails with that reason; Set Up Key Login on the host fixes it. Tunnels listen on this Mac's loopback only, run until you stop them or quit iTERMiNAL, and are not restarted if the connection drops.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -56,7 +56,7 @@ struct BackgroundTunnelsSection: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(tunnel.name.isEmpty ? "Untitled" : tunnel.name)
                 Text(tunnel.summary)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()

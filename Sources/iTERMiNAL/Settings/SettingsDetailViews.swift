@@ -23,7 +23,7 @@ struct GeneralSettingsView: View {
                     Button("Choose…") { chooseDirectory() }
                 }
                 Text("Shell changes apply to new terminals.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             ProfilesSection()
@@ -37,7 +37,7 @@ struct GeneralSettingsView: View {
                     TextField("Command", text: $settings.editorCustomCommand, prompt: Text("code -w"))
                 }
                 Text(editorNote)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
@@ -94,15 +94,15 @@ struct AppearanceSettingsView: View {
     var body: some View {
         Form {
             Section("Theme") {
-                Picker("Appearance", selection: $settings.theme) {
-                    ForEach(AppSettings.ThemeChoice.allCases) { choice in
-                        Text(choice.label).tag(choice)
-                    }
-                }
-                .pickerStyle(.segmented)
+                PillSegmentedPicker(
+                    title: "Appearance",
+                    selection: $settings.theme,
+                    values: AppSettings.ThemeChoice.allCases,
+                    label: { $0.label }
+                )
                 AppThemePicker()
                 Text("A theme sets the colours of the window, its panels and its menus, in light and in dark; Appearance still decides which of the two you see. A terminal set to Match app theme takes the theme's own colour scheme.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Section("Accent") {
@@ -138,7 +138,7 @@ struct AppearanceSettingsView: View {
                         .frame(width: 42, alignment: .trailing)
                 }
                 Text("Lets the desktop show through a terminal's background, softly blurred. Text and the cursor stay solid. btop and superfile keep a solid background.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -147,7 +147,7 @@ struct AppearanceSettingsView: View {
 
                 Toggle("Translucent frame", isOn: $settings.sidebarTranslucent)
                 Text("Off by default, matching the flat chrome of the app this one is modelled on. On, the top bar, the icon rail and the spaces panel pick up the desktop behind them the way most macOS apps do.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Picker("Tint", selection: $settings.frameTintSource) {
@@ -168,7 +168,7 @@ struct AppearanceSettingsView: View {
                     }
                 }
                 Text("Mixes the color into the theme's own, rather than replacing it, so the icons and text on the bars stay readable in light and dark.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 HStack {
@@ -191,14 +191,14 @@ struct AppearanceSettingsView: View {
             }
 
             Section("Interface font") {
-                Picker("Typeface", selection: $settings.uiFontDesign) {
-                    ForEach(FrameFontDesign.allCases) { design in
-                        Text(design.label).tag(design)
-                    }
-                }
-                .pickerStyle(.segmented)
+                PillSegmentedPicker(
+                    title: "Typeface",
+                    selection: $settings.uiFontDesign,
+                    values: FrameFontDesign.allCases,
+                    label: { $0.label }
+                )
                 Text("The bars, panels, menus and settings. The terminal has its own font under Terminal.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
@@ -206,17 +206,17 @@ struct AppearanceSettingsView: View {
             Section("Status") {
                 Toggle("Status bar", isOn: $settings.showStatusBar)
                 Text("A line at the bottom left of the window about the focused terminal: who and where you are, the current directory, the git branch, and whether the last command failed.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Toggle("System monitor", isOn: $settings.showSystemMetrics)
                 Text("Live CPU, memory, GPU and network for this Mac, in a strip along the bottom right of the window. Hover the numbers for detail. Off stops the sampling as well as hiding the strip.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Toggle("Show listening ports", isOn: $settings.showRemotePorts)
                 Text("Adds a Listening ports tab to the globe menu at the bottom right of the window (which always has the Connect tab). It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — and choosing one forwards it to this Mac and opens it in the browser panel. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. A host that wants a password works once you have signed in to it in a tab (Connections → Authentication shares that sign-in; turning this on shares it too).")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }

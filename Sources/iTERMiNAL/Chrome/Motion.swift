@@ -121,6 +121,20 @@ enum Motion {
     }
 }
 
+extension View {
+    /// A symbol giving a small bounce when `value` changes — a pin taking, a
+    /// toggle flipping. Left out altogether under Reduce Motion: pass the
+    /// view's `accessibilityReduceMotion`, as for the transitions above.
+    @ViewBuilder
+    func symbolBounce<Value: Equatable>(on value: Value, reduceMotion: Bool) -> some View {
+        if reduceMotion {
+            self
+        } else {
+            self.symbolEffect(.bounce, value: value)
+        }
+    }
+}
+
 /// Compact relative time for sidebar rows: "now", "5m", "2h", "3d", "2w".
 enum RelativeTime {
     static func short(since date: Date, now: Date = Date()) -> String {

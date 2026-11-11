@@ -117,6 +117,7 @@ struct SidebarView: View {
                 Image(systemName: settings.railPanelPinned ? "pin.fill" : "pin")
                     .font(.system(size: 12))
                     .foregroundStyle(settings.railPanelPinned ? theme.textPrimary : theme.textSecondary)
+                    .symbolBounce(on: settings.railPanelPinned, reduceMotion: reduceMotion)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
@@ -342,7 +343,11 @@ struct SidebarView: View {
         SidebarTabRow(
             tab: tab,
             indented: indented,
-            isSelected: store.selectedTabID == tab.id,
+            // A pinned tab is listed twice, under Pinned and in its space.
+            // While the Pinned row is on screen it carries the selection, so
+            // one tab is not lit in two places.
+            isSelected: store.selectedTabID == tab.id
+                && !(indented && tab.isPinned && settings.pinnedExpanded),
             onSelect: {
                 store.selectedTabID = tab.id
                 store.detailMode = .terminal
@@ -721,8 +726,13 @@ private struct SidebarTabRow: View {
                 .padding(.trailing, 9)
                 .frame(height: 30)
                 .background(
+                    // The open tab is washed in the accent rather than a grey:
+                    // it is the one row that says where you are, and the one
+                    // place the chosen accent shows in the list.
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isSelected ? theme.surfaceHover : theme.surface.opacity(hovering ? 0.5 : 0))
+                        .fill(isSelected
+                              ? settings.accentColor.opacity(colorScheme == .dark ? 0.2 : 0.14)
+                              : theme.surface.opacity(hovering ? 0.5 : 0))
                 )
                 .contentShape(Rectangle())
             }
@@ -800,9 +810,10 @@ private struct SessionRowContent: View {
             }
             .frame(width: 8)
 
-            Image(systemName: session.isRemote ? "network" : "terminal")
+            Image(systemName: glyph)
                 .font(.system(size: 10))
-                .foregroundStyle(theme.textSecondary)
+                .foregroundStyle(glyphColor(theme))
+                .frame(width: 14)
 
             Text(tab.displayName)
                 .font(.system(size: 13))
@@ -829,8 +840,8 @@ private struct SessionRowContent: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Color.red.opacity(0.85))
                         .monospacedDigit()
-                } else {
-                    Text(RelativeTime.short(since: session.lastActivityAt))
+                } else if let idle = idleTime {
+                    Text(idle)
                         .font(.system(size: 10))
                         .foregroundStyle(theme.textSecondary)
                         .monospacedDigit()
@@ -838,6 +849,28 @@ private struct SessionRowContent: View {
             }
         }
         .help(tooltip)
+    }
+
+    /// What the row's icon shows: the session's state when there is one worth
+    /// showing, and otherwise where it runs.
+    private var glyph: String {
+        if session.statusNote != nil { return "moon.zzz" }
+        if session.failedCommandNote != nil { return "exclamationmark.triangle" }
+        return session.isRemote ? "network" : "terminal"
+    }
+
+    private func glyphColor(_ theme: Theme) -> Color {
+        if session.statusNote == nil, session.failedCommandNote != nil {
+            return Color.red.opacity(0.85)
+        }
+        return isSelected ? theme.textPrimary : theme.textSecondary
+    }
+
+    /// How long since anything happened here, once it is a minute or more. A
+    /// column of "now" down every row says nothing.
+    private var idleTime: String? {
+        let text = RelativeTime.short(since: session.lastActivityAt)
+        return text == "now" ? nil : text
     }
 
     /// Amber dot = this pane asked for you (bell / OSC). Blue dot = a live
@@ -1005,6 +1038,7 @@ struct MetricReadout: View {
     let label: String
     let value: String
     let theme: Theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 4) {
@@ -1015,6 +1049,9 @@ struct MetricReadout: View {
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(theme.textPrimary)
+                // The digits roll to the new figure instead of being swapped.
+                .contentTransition(reduceMotion ? .identity : .numericText())
+                .animation(reduceMotion ? nil : Motion.hover, value: value)
         }
     }
 }

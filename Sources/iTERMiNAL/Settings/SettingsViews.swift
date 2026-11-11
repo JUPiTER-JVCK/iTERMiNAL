@@ -166,6 +166,7 @@ private struct SettingsNavRow: View {
     let action: () -> Void
 
     @State private var hovering = false
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
@@ -185,11 +186,17 @@ private struct SettingsNavRow: View {
             .frame(height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? theme.surface : (hovering ? theme.surface.opacity(0.55) : Color.clear))
+                    // The section you are in, washed in the accent like the
+                    // open tab in the main window's list.
+                    .fill(isSelected
+                          ? settings.accentColor.opacity(colorScheme == .dark ? 0.2 : 0.14)
+                          : theme.surface.opacity(hovering ? 0.55 : 0))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isSelected)
         .onHover { hovering = $0 }
         .padding(.horizontal, 12)
     }
