@@ -1,9 +1,9 @@
 import Foundation
 
 enum SplitDirection: String, Codable {
-    /// Side-by-side panes (rendered with HSplitView).
+    /// Side-by-side panes (rendered by PaneSplitView).
     case horizontal
-    /// Stacked panes (rendered with VSplitView).
+    /// Stacked panes (rendered by PaneSplitView).
     case vertical
 }
 
