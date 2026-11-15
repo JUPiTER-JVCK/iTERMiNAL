@@ -3,7 +3,7 @@
 // Mac. Among it: the composer (tokenizer, palette, completion, suggestions), the
 // Cheatsheet, the assistant's helpers, the HTTP client's parsers and extractors, SSH
 // and remote-session rules, terminal and workspace logic, the API's request lines, and the
-// Bytes panel's reading, layout and editing.
+// Bytes panel's reading, layout, editing and file-format parsers.
 //
 // The files it compiles are listed once, in the "Check input logic" step of
 // .github/workflows/build.yml. Compile them and this file with swiftc, then run it:
@@ -9435,6 +9435,698 @@ do {
     } else {
         check(false, "the file to edit opens")
     }
+}
+
+// MARK: The Bytes panel's structure view
+
+// A file taken apart into fields, each tied to its bytes. The parsers are Foundation only,
+// and every one is checked against files made, and read back, by other software: the
+// PNGs by Pillow and by hand with zlib's CRC, the captures by dpkt.
+
+/// Bytes from the hex digits of a string, spaces ignored.
+func structureBytes(_ hex: String) -> [UInt8] {
+    var out: [UInt8] = []
+    var high: UInt8?
+    for character in hex.utf8 {
+        let value: UInt8
+        switch character {
+        case 0x30...0x39: value = character - 0x30
+        case 0x41...0x46: value = character - 0x41 + 10
+        case 0x61...0x66: value = character - 0x61 + 10
+        default: continue
+        }
+        if let h = high { out.append(h << 4 | value); high = nil } else { high = value }
+    }
+    return out
+}
+
+/// Bytes from joined parts. Written as a call, not as `+` between array literals, which
+/// Swift's type checker takes seconds over.
+func structureJoin(_ parts: [UInt8]...) -> [UInt8] {
+    parts.flatMap { $0 }
+}
+
+func structureASCII(_ text: String) -> [UInt8] {
+    Array(text.utf8)
+}
+
+/// The node at `path` of names from the top, with deferred children made on the way.
+func structureNode(_ roots: [FieldNode], _ path: String...) -> FieldNode? {
+    var level = roots
+    var found: FieldNode?
+    for name in path {
+        guard let hit = level.first(where: { $0.name == name }) else { return nil }
+        found = hit
+        level = hit.resolvedChildren()
+    }
+    return found
+}
+
+/// Every node, and a way to say what is wrong with the tree: a node outside the file or its
+/// parent, siblings out of order. Empty when the tree is sound.
+func structureProblems(_ roots: [FieldNode], fileLength: Int64, limit: Int = 200_000) -> [String] {
+    var problems: [String] = []
+    var visited = 0
+    func walk(_ nodes: [FieldNode], inside parent: FieldNode?, depth: Int) {
+        var previous: Int64 = -1
+        for node in nodes {
+            visited += 1
+            if visited > limit || depth > 40 || problems.count > 5 { return }
+            if node.offset < 0 || node.length < 0 || node.end > fileLength {
+                problems.append("\(node.id) is outside the file: \(node.offset)+\(node.length) of \(fileLength)")
+            }
+            if let parent = parent, node.offset < parent.offset || node.end > parent.end {
+                problems.append("\(node.id) is outside its parent \(parent.id): \(node.offset)+\(node.length) in \(parent.offset)+\(parent.length)")
+            }
+            if node.offset < previous { problems.append("\(node.id) is out of order") }
+            previous = node.offset
+            walk(node.resolvedChildren(), inside: node, depth: depth + 1)
+        }
+    }
+    walk(roots, inside: nil, depth: 0)
+    return problems
+}
+
+do {
+    // CRC-32: the check value every implementation is held to, and PNG's own end chunk.
+    check(CRC32.checksum(Array("123456789".utf8)) == 0xCBF4_3926, "the CRC-32 of 123456789 is 0xCBF43926")
+    check(CRC32.checksum(Array("IEND".utf8)) == 0xAE42_6082, "and of IEND the value every PNG ends with")
+    check(CRC32.checksum([]) == 0, "of nothing it is 0")
+    var running = CRC32()
+    running.update(Array("1234".utf8))
+    running.update(Array("56789".utf8))
+    check(running.value == 0xCBF4_3926, "and the same in two steps")
+
+    // A window reads what it holds and nothing else.
+    let window = ByteWindow(base: 100, bytes: [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    check(window.end == 109 && window.has(100, 9) && !window.has(100, 10) && !window.has(99, 1) && !window.has(109, 1), "a window holds the bytes from its base")
+    check(window.u8(100) == 1 && window.u8(108) == 9 && window.u8(109) == nil && window.u8(99) == nil, "and a byte outside it is nil")
+    check(window.u16(100, .big) == 0x0102 && window.u16(100, .little) == 0x0201, "numbers in either order")
+    check(window.u32(101, .big) == 0x0203_0405 && window.u64(100, .big) == 0x0102_0304_0506_0708 && window.u64(102, .big) == nil, "of four and eight bytes, as far as they fit")
+    check(window.uint(100, size: 3, .big) == 0x010203 && window.uint(100, size: 0, .big) == nil && window.uint(100, size: 9, .big) == nil, "or three, but not none or nine")
+    check(window.slice(101, 3) == [2, 3, 4] && window.slice(107, 3) == nil && window.slice(100, -1) == nil, "a slice that does not fit is nil")
+    check(window.has(Int64.max - 2, 4) == false && window.has(Int64.min, 1) == false && window.u8(Int64.max) == nil, "and no offset, however large, gets it to read outside")
+    let beyond = ByteWindow(source: DataByteSource([1, 2, 3]), at: 2, count: 100)
+    check(beyond.bytes == [3] && beyond.base == 2, "a window over a source holds what the source has")
+    check(ByteWindow(source: DataByteSource([1, 2, 3]), at: -5, count: 2).bytes == [1, 2], "and starts no earlier than the start of it")
+    check(ByteWindow(source: DataByteSource([1, 2, 3]), at: Int64.max, count: 8).bytes.isEmpty, "or after the end")
+
+    // A list of fields: what it records, and what it does when the bytes run out.
+    var list = FieldList(idPrefix: "t", window: ByteWindow(base: 0, bytes: [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC]), endianness: .big)
+    check(list.uint("Port", at: 0, size: 2) == 0x1234, "a field comes back as its number")
+    check(list.bits("High nibble", at: 2, size: 1, shift: 4, width: 4) == 5 && list.bits("Low nibble", at: 2, size: 1, shift: 0, width: 4) == 6, "and bits of a byte as theirs")
+    check(list.uint("Port", at: 3, size: 1) == 0x78, "a second field of the same name")
+    check(list.nodes.map(\.id) == ["t/port", "t/high-nibble", "t/low-nibble", "t/port#2"], "gets an id of its own: \(list.nodes.map(\.id))")
+    check(list.nodes[0].value == "4660 (0x1234)" && list.nodes[1].value == "5" && list.nodes[1].length == 1, "values say the number, and a nibble covers its byte")
+    check(list.uint("Big", at: 4, size: 4) == nil && list.truncated, "a number that does not fit is nil, and the list knows")
+    check(list.nodes.last?.kind == .problem && list.nodes.last?.offset == 4 && list.nodes.last?.length == 2, "and says so, over the bytes that were there")
+    let count = list.nodes.count
+    check(list.uint("After", at: 0, size: 1) == nil && list.nodes.count == count, "after which nothing more is tried")
+
+    var quiet = FieldList(idPrefix: "q", window: ByteWindow(base: 0, bytes: [1, 2]), endianness: .big, recording: false)
+    check(quiet.uint("A", at: 0, size: 2) == 0x0102 && quiet.nodes.isEmpty, "with recording off the numbers still come back and no nodes are made")
+
+    var grouped = FieldList(idPrefix: "g", window: ByteWindow(base: 10, bytes: [1, 2, 3, 4]), endianness: .little)
+    grouped.group("Header", at: 10, length: 4, value: "four") { inner in
+        inner.uint("First", at: 10, size: 2)
+        inner.uint("Second", at: 12, size: 2)
+    }
+    check(grouped.nodes.count == 1 && grouped.nodes[0].id == "g/header" && grouped.nodes[0].resolvedChildren().map(\.id) == ["g/header/first", "g/header/second"], "a group holds its fields, with ids under its own")
+    check(grouped.nodes[0].resolvedChildren()[0].value == "513 (0x0201)", "little-endian is read as such")
+    grouped.group("Cut", at: 12, length: 100) { inner in inner.uint("Big", at: 12, size: 8) }
+    check(grouped.truncated && grouped.nodes[1].length == 2 && grouped.nodes[1].offset == 12, "a group is cut to the window, and a cut field inside marks the list")
+    var made = 0
+    var lazy = FieldList(idPrefix: "d", window: ByteWindow(base: 0, bytes: [1, 2, 3]), endianness: .big)
+    lazy.deferredGroup("Packet", at: 0, length: 3) { id in
+        made += 1
+        return [FieldNode(id: id + "/inside", name: "Inside", offset: 0, length: 1, kind: .integer)]
+    }
+    check(made == 0 && lazy.nodes[0].isExpandable, "a deferred group is not made until it is opened")
+    check(lazy.nodes[0].resolvedChildren().count == 1 && lazy.nodes[0].resolvedChildren().count == 1 && made == 1, "and is made once, however often it is asked for")
+    check(lazy.nodes[0].resolvedChildren()[0].id == "d/packet/inside", "with ids under its own")
+
+    // Finding the field that holds a byte.
+    let tree = [
+        FieldNode(id: "a", name: "A", offset: 0, length: 10, children: .list([
+            FieldNode(id: "a/1", name: "A1", offset: 0, length: 4, kind: .integer),
+            FieldNode(id: "a/2", name: "A2", offset: 4, length: 6, children: .list([
+                FieldNode(id: "a/2/x", name: "X", offset: 4, length: 2, kind: .integer),
+                FieldNode(id: "a/2/y", name: "Y", offset: 6, length: 4, kind: .integer),
+            ])),
+        ])),
+        FieldNode(id: "b", name: "B", offset: 10, length: 0, kind: .bytes),
+        FieldNode(id: "c", name: "C", offset: 10, length: 5, kind: .bytes),
+    ]
+    check(FieldNode.chain(containing: 0, in: tree).map(\.name) == ["A", "A1"], "the byte at 0 is in A, in A1")
+    check(FieldNode.chain(containing: 7, in: tree).map(\.name) == ["A", "A2", "Y"], "the byte at 7 is three deep")
+    check(FieldNode.chain(containing: 4, in: tree).map(\.name) == ["A", "A2", "X"] && FieldNode.chain(containing: 3, in: tree).map(\.name) == ["A", "A1"], "on either side of a boundary")
+    check(FieldNode.chain(containing: 10, in: tree).map(\.name) == ["C"], "a field of no bytes holds none, so the next one does")
+    check(FieldNode.chain(containing: 15, in: tree).isEmpty && FieldNode.chain(containing: -1, in: tree).isEmpty, "a byte past the last field is in none")
+    check(FieldNode(id: "z", name: "Z", offset: 5, length: 0).lastByte == 5 && FieldNode(id: "z", name: "Z", offset: 5, length: 3).lastByte == 7, "the last byte of a field")
+    var wide: [FieldNode] = []
+    for i in 0..<5000 { wide.append(FieldNode(id: "w\(i)", name: "W\(i)", offset: Int64(i) * 10, length: 10, kind: .bytes)) }
+    check(FieldNode.chain(containing: 49_999, in: wide).map(\.name) == ["W4999"] && FieldNode.chain(containing: 25_000, in: wide).map(\.name) == ["W2500"], "five thousand siblings are searched, not walked")
+}
+
+// MARK: What a file is
+
+do {
+    func identity(_ bytes: [UInt8], length: Int64? = nil) -> String? {
+        FormatDetector.identify(head: bytes, length: length ?? Int64(bytes.count))?.id
+    }
+    let padding = [UInt8](repeating: 0, count: 64)
+    func riff(_ form: String) -> [UInt8] {
+        structureJoin(structureASCII("RIFF"), [0, 0, 0, 0], structureASCII(form))
+    }
+    check(identity(structureBytes("89504E470D0A1A0A0000")) == "png" && identity(Array("GIF89a\u{1}\0".utf8)) == "gif" && identity([0xFF, 0xD8, 0xFF, 0xE0]) == "jpeg", "images by their signatures")
+    check(identity(Array("%PDF-1.7\n".utf8)) == "pdf" && identity([0x50, 0x4B, 0x03, 0x04, 0, 0]) == "zip" && identity([0x1F, 0x8B, 0x08, 0]) == "gzip", "a PDF, a zip, a gzip")
+    check(identity([0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0]) == "elf" && identity([0xCF, 0xFA, 0xED, 0xFE, 7, 0, 0, 1]) == "macho", "programs")
+    check(identity([0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2]) == "macho" && identity([0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 52]) == "class", "CAFEBABE is a universal binary with a few architectures and a Java class with a version")
+    check(identity(riff("WAVE")) == "wav" && identity(riff("AVI ")) == "avi" && identity(riff("WEBP")) == "webp" && identity(riff("zzzz")) == "riff", "RIFF is told by its form type")
+    check(identity(structureJoin([0, 0, 0, 0x18], structureASCII("ftypmp42"))) == "mp4" && identity(structureJoin([0, 0, 0, 8], structureASCII("moov"))) == "mp4", "an MP4 by the box at its start")
+    check(identity(structureJoin(structureASCII("BM"), [UInt8](repeating: 0, count: 12), padding)) == "bmp" && identity(Array("BM and then some prose".utf8)) == "text", "BM is a bitmap only if its reserved bytes are zero")
+    check(identity([0xD4, 0xC3, 0xB2, 0xA1, 2, 0, 4, 0]) == "pcap" && identity([0x0A, 0x0D, 0x0D, 0x0A, 0, 0]) == "pcapng", "captures")
+    check(identity(Array("SQLite format 3\0".utf8)) == "sqlite" && identity(Array("#!/bin/sh\necho hi\n".utf8)) == "script" && identity(Array("<!DOCTYPE html><html>".utf8)) == "html", "a database, a script, a page")
+    check(identity(structureJoin(structureASCII("MZ"), [UInt8](repeating: 0, count: 58), [0x40, 0, 0, 0], structureASCII("PE"), [0, 0])) == "pe", "a Windows program by its PE header")
+    check(identity(Array("just some words\nand a second line\n".utf8)) == "text" && FormatDetector.identify(head: Array("naïve café\n".utf8), length: 12)?.detail == "valid UTF-8", "text is text, and says if it is UTF-8")
+    check(identity([0x00, 0x01, 0x02, 0xFE, 0xFF, 0x10, 0x00, 0x80]) == nil && identity([]) == nil, "bytes that are nothing known are nothing")
+    check(FormatDetector.identify(head: structureBytes("89504E470D0A1A0A"), length: 100)?.hasParser == true && FormatDetector.identify(head: [0xFF, 0xD8, 0xFF], length: 100)?.hasParser == false,
+          "and it says which it can take apart")
+    let unknown = FormatRegistry.analyze(DataByteSource([0x01, 0x02, 0x00, 0xFF, 0x10]))
+    check(unknown.identity == nil && unknown.outcome.roots.isEmpty && unknown.message.contains("Hex and Bits"), "a file nothing knows is told so, and pointed to the dump")
+    let jpeg = FormatRegistry.analyze(DataByteSource([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]))
+    check(jpeg.identity?.id == "jpeg" && jpeg.message.contains("JPEG") && jpeg.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
+    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng"], "three parsers so far")
+}
+
+// MARK: PNG
+
+do {
+    func png(_ name: String, _ hex: String) -> (bytes: [UInt8], result: StructureResult) {
+        let bytes = structureBytes(hex)
+        return (bytes, FormatRegistry.analyze(DataByteSource(bytes)))
+    }
+    func spans(_ nodes: [FieldNode]) -> [String] { nodes.map { "\($0.name)@\($0.offset)+\($0.length)" } }
+
+    // Written by Pillow: IHDR, tEXt, pHYs, IDAT, IEND. Layout from an independent walk of the file.
+    let pillow = png("pillow", "89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082")
+    check(pillow.result.identity?.id == "png" && pillow.bytes.count == 120, "Pillow's PNG is taken for one")
+    check(spans(pillow.result.outcome.roots) == ["Signature@0+8", "IHDR@8+25", "tEXt@33+25", "pHYs@58+21", "IDAT@79+29", "IEND@108+12"], "its chunks are where an independent walk puts them: \(spans(pillow.result.outcome.roots))")
+    check(pillow.result.outcome.problems.isEmpty && pillow.result.outcome.summary == "PNG image, 2 × 1 pixels, 8-bit RGBA, 5 chunks", "with nothing wrong: \(pillow.result.outcome.problems) \(pillow.result.outcome.summary ?? "")")
+    let pillowTree = pillow.result.outcome.roots
+    check(structureNode(pillowTree, "IHDR", "Length")?.offset == 8 && structureNode(pillowTree, "IHDR", "Type")?.offset == 12 && structureNode(pillowTree, "IHDR", "Data")?.offset == 16
+          && structureNode(pillowTree, "IHDR", "Data")?.length == 13 && structureNode(pillowTree, "IHDR", "CRC")?.offset == 29, "a chunk is its length, type, data and CRC, in that order")
+    check(structureNode(pillowTree, "IHDR", "Data", "Width")?.offset == 16 && structureNode(pillowTree, "IHDR", "Data", "Width")?.length == 4 && structureNode(pillowTree, "IHDR", "Data", "Width")?.value == "2 pixels", "the width is the four bytes at 16")
+    check(structureNode(pillowTree, "IHDR", "Data", "Height")?.value == "1 pixels" && structureNode(pillowTree, "IHDR", "Data", "Bit depth")?.value == "8 bits per sample", "the height and the depth")
+    check(structureNode(pillowTree, "IHDR", "Data", "Colour type")?.value == "6 · truecolour with alpha" && structureNode(pillowTree, "IHDR", "Data", "Interlace method")?.value == "0 · none", "the colour type and interlace")
+    check(structureNode(pillowTree, "IHDR", "CRC")?.value?.contains("matches") == true && structureNode(pillowTree, "IHDR")?.value?.contains("CRC ok") == true, "and its CRC is checked and ok")
+    check(structureNode(pillowTree, "tEXt", "Data", "Keyword")?.value == "\"Comment\"" && structureNode(pillowTree, "tEXt", "Data", "Keyword")?.offset == 41
+          && structureNode(pillowTree, "tEXt", "Data", "Separator")?.offset == 48 && structureNode(pillowTree, "tEXt", "Data", "Text")?.value == "\"hello\"" && structureNode(pillowTree, "tEXt", "Data", "Text")?.offset == 49, "text is a keyword, a zero, and the text")
+    check(structureNode(pillowTree, "pHYs", "Data", "Pixels per unit, x")?.value == "5669 per metre · 144.0 dpi" && structureNode(pillowTree, "pHYs", "Data", "Unit")?.value == "1 · metre", "pixel size reads as dots per inch too")
+    check(structureNode(pillowTree, "IDAT", "Data", "zlib method and window")?.value?.contains("deflate") == true && structureNode(pillowTree, "IDAT", "Data", "Compressed pixels")?.offset == 89
+          && structureNode(pillowTree, "IDAT", "Data", "Compressed pixels")?.length == 15, "the first IDAT begins with a zlib header, then the deflate stream")
+    check(structureNode(pillowTree, "IEND", "Data")?.length == 0 && structureNode(pillowTree, "IEND", "Data")?.value == "no data" && structureNode(pillowTree, "IEND", "CRC")?.offset == 116, "IEND has no data")
+    check(structureProblems(pillowTree, fileLength: 120).isEmpty, "and every field is inside the file and its parent: \(structureProblems(pillowTree, fileLength: 120))")
+    check(FieldNode.chain(containing: 18, in: pillowTree).map(\.name) == ["IHDR", "Data", "Width"] && FieldNode.chain(containing: 20, in: pillowTree).map(\.name) == ["IHDR", "Data", "Height"] && FieldNode.chain(containing: 3, in: pillowTree).map(\.name) == ["Signature"]
+          && FieldNode.chain(containing: 119, in: pillowTree).map(\.name) == ["IEND", "CRC"], "the field that holds a byte is found through the chunks")
+
+    // By hand: the common ancillary chunks.
+    let hand = png("ancillary", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c636080032e1139080200035c00b52cac443b0000000049454e44ae426082")
+    check(spans(hand.result.outcome.roots) == ["Signature@0+8", "IHDR@8+25", "gAMA@33+16", "sRGB@49+13", "pHYs@62+21", "tIME@83+19", "tEXt@102+23", "IDAT@125+28", "IEND@153+12"], "a hand-built PNG's chunks: \(spans(hand.result.outcome.roots))")
+    let handTree = hand.result.outcome.roots
+    check(structureNode(handTree, "IHDR", "Data", "Width")?.value == "3 pixels" && structureNode(handTree, "IHDR", "Data", "Height")?.value == "2 pixels" && structureNode(handTree, "IHDR", "Data", "Colour type")?.value == "2 · truecolour (red, green, blue)", "its header")
+    check(structureNode(handTree, "gAMA", "Data", "Gamma")?.value == "0.45455" && structureNode(handTree, "sRGB", "Data", "Rendering intent")?.value == "0 · perceptual", "gamma is stored times 100,000, and sRGB has an intent")
+    check(structureNode(handTree, "tIME", "Data", "Year")?.value == "2020" && structureNode(handTree, "tIME", "Data", "Month")?.value == "2" && structureNode(handTree, "tIME", "Data", "Day")?.value == "29"
+          && structureNode(handTree, "tIME", "Data", "Hour")?.value == "12" && structureNode(handTree, "tIME", "Data", "Minute")?.value == "34" && structureNode(handTree, "tIME", "Data", "Second")?.value == "56", "a time is six fields")
+    check(structureNode(handTree, "tEXt", "Data", "Keyword")?.value == "\"Title\"" && structureNode(handTree, "tEXt", "Data", "Text")?.value == "\"Hello\"", "text")
+    check(hand.result.outcome.summary == "PNG image, 3 × 2 pixels, 8-bit RGB, 8 chunks", "the summary says 8 chunks: \(hand.result.outcome.summary ?? "")")
+    check(structureNode(handTree, "gAMA")?.note?.contains("Ancillary") == true && structureNode(handTree, "IHDR")?.note?.contains("Critical") == true, "a chunk's name says whether a reader may skip it")
+    check(PNGParser.classification(Array("IHDR".utf8)).contains("Critical") && PNGParser.classification(Array("IHDR".utf8)).contains("Public") && PNGParser.classification(Array("IHDR".utf8)).contains("should drop"), "IHDR is critical, public and not safe to copy")
+    check(PNGParser.classification(Array("tEXt".utf8)).contains("Ancillary") && PNGParser.classification(Array("tEXt".utf8)).contains("may keep"), "tEXt is ancillary and safe to copy")
+    check(PNGParser.classification(Array("prVt".utf8)).contains("Private") && !PNGParser.classification(Array("prVt".utf8)).contains("reserved bit"), "a lower-case second letter is private")
+    check(PNGParser.classification(Array("IHdR".utf8)).contains("reserved bit"), "and a lower-case third is not allowed")
+
+    let indexed = png("indexed", "89504e470d0a1a0a0000000d49484452000000020000000208030000004568fd1600000009504c5445ff000000ff000000ff2d4acd8a0000000274524e53ff80080fb36a0000000e49444154789c6360606460620000000e0004c6887cf80000000049454e44ae426082")
+    check(spans(indexed.result.outcome.roots) == ["Signature@0+8", "IHDR@8+25", "PLTE@33+21", "tRNS@54+14", "IDAT@68+26", "IEND@94+12"], "an indexed PNG's chunks")
+    let indexedTree = indexed.result.outcome.roots
+    check(structureNode(indexedTree, "PLTE", "Data", "Entry 0")?.value == "#FF0000" && structureNode(indexedTree, "PLTE", "Data", "Entry 1")?.value == "#00FF00" && structureNode(indexedTree, "PLTE", "Data", "Entry 2")?.value == "#0000FF"
+          && structureNode(indexedTree, "PLTE", "Data", "Entry 2")?.offset == 47, "a palette is its colours")
+    check(structureNode(indexedTree, "tRNS", "Data", "Alpha values")?.length == 2 && indexed.result.outcome.summary == "PNG image, 2 × 2 pixels, 8-bit palette, 5 chunks", "and tRNS follows the colour type: \(indexed.result.outcome.summary ?? "")")
+
+    // Damaged: one byte of IDAT changed, and eight bytes after IEND.
+    let bad = png("bad", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c639f80032e1139080200035c00b52cac443b0000000049454e44ae426082545241494c455221")
+    let badTree = bad.result.outcome.roots
+    check(structureNode(badTree, "IDAT")?.kind == .problem && structureNode(badTree, "IDAT")?.value?.contains("CRC wrong") == true && structureNode(badTree, "IDAT", "CRC")?.value?.contains("wrong") == true, "a chunk with a changed byte is marked, and its CRC says wrong")
+    check(bad.result.outcome.problems.count == 1 && bad.result.outcome.problems[0].contains("IDAT") && bad.result.outcome.problems[0].contains("damaged or edited"), "and the file's problems say which: \(bad.result.outcome.problems)")
+    check(structureNode(badTree, "IHDR")?.kind == .container && structureNode(badTree, "IEND")?.value?.contains("CRC ok") == true, "the others are fine")
+    check(structureNode(badTree, "Data after IEND")?.offset == 165 && structureNode(badTree, "Data after IEND")?.length == 8 && structureNode(badTree, "Data after IEND")?.value == "54 52 41 49 4C 45 52 21", "what follows IEND is shown")
+    check(structureProblems(badTree, fileLength: 173).isEmpty, "all of it inside the file")
+
+    // Cut short, at every length: never past the end of what there is.
+    var cutProblems: [String] = []
+    for length in 0...pillow.bytes.count {
+        let cut = Array(pillow.bytes[0..<length])
+        let result = FormatRegistry.analyze(DataByteSource(cut))
+        let issues = structureProblems(result.outcome.roots, fileLength: Int64(length))
+        if !issues.isEmpty { cutProblems.append("cut at \(length): \(issues[0])") }
+    }
+    check(cutProblems.isEmpty, "a PNG cut at every length has a sound tree: \(cutProblems.prefix(3))")
+    let halfIDAT = FormatRegistry.analyze(DataByteSource(Array(pillow.bytes[0..<90])))
+    check(structureNode(halfIDAT.outcome.roots, "IDAT")?.kind == .problem && structureNode(halfIDAT.outcome.roots, "IDAT")?.offset == 79 && structureNode(halfIDAT.outcome.roots, "IDAT")?.length == 11
+          && halfIDAT.outcome.problems.contains { $0.contains("IDAT") && $0.contains("cut off") }, "cut inside IDAT, the chunk is marked and says how much it promised")
+    let noEnd = FormatRegistry.analyze(DataByteSource(Array(pillow.bytes[0..<108])))
+    check(noEnd.outcome.problems == ["There is no IEND chunk, so the file may be cut short."], "a PNG that ends between chunks says it has no IEND: \(noEnd.outcome.problems)")
+    let signatureOnly = FormatRegistry.analyze(DataByteSource(Array(pillow.bytes[0..<8])))
+    check(signatureOnly.outcome.roots.map(\.name) == ["Signature"] && signatureOnly.outcome.summary == "PNG image, 0 chunks", "just the signature is a PNG with no chunks: \(signatureOnly.outcome.summary ?? "")")
+
+    // A chunk that claims more than the file has.
+    var lying = Array(pillow.bytes)
+    lying[79] = 0x7F   // IDAT's length now 0x7F000011
+    let liar = FormatRegistry.analyze(DataByteSource(lying))
+    check(structureNode(liar.outcome.roots, "IDAT")?.kind == .problem && structureNode(liar.outcome.roots, "IDAT")?.length == 41 && liar.outcome.roots.last?.name == "IDAT", "a chunk that claims 2 GB in a file of 120 bytes is cut where the file ends")
+    check(structureProblems(liar.outcome.roots, fileLength: 120).isEmpty, "and no field is outside the file")
+
+    // Limits.
+    var many = Array(pillow.bytes[0..<33])
+    for _ in 0..<10 { many += structureJoin(structureBytes("0000000074455874"), structureASCII("abcd")) }
+    var tight = ParseContext()
+    tight.maxRecords = 4
+    let limited = FormatRegistry.analyze(DataByteSource(many), context: tight)
+    check(limited.outcome.listingLimit != nil && limited.outcome.roots.last?.name == "More chunks" && limited.outcome.roots.count == 6, "past the most chunks listed, the rest is one node: \(limited.outcome.roots.map(\.name))")
+    check(structureProblems(limited.outcome.roots, fileLength: Int64(many.count)).isEmpty, "inside the file")
+    var stopped = ParseContext()
+    stopped.isCancelled = { true }
+    check(FormatRegistry.analyze(DataByteSource(pillow.bytes), context: stopped).outcome.problems.contains("Stopped before the end of the file."), "a parse that is cancelled says it stopped")
+}
+
+// MARK: Packet captures
+
+/// The value, or the offset and length ("54+20"), of the field at a path like "Packet 1/IPv4/Source".
+func structureValue(_ roots: [FieldNode], _ path: String) -> String? {
+    structurePath(roots, path)?.value
+}
+
+func structureSpan(_ roots: [FieldNode], _ path: String) -> String? {
+    structurePath(roots, path).map { "\($0.offset)+\($0.length)" }
+}
+
+/// The children of the node at `path`, or none if there is no such node.
+func structureChildren(_ roots: [FieldNode], _ path: String) -> [FieldNode] {
+    structurePath(roots, path)?.resolvedChildren() ?? []
+}
+
+func structurePath(_ roots: [FieldNode], _ path: String) -> FieldNode? {
+    var level = roots
+    var found: FieldNode?
+    for name in path.split(separator: "/", omittingEmptySubsequences: true) {
+        guard let hit = level.first(where: { $0.name == name }) else { return nil }
+        found = hit
+        level = hit.resolvedChildren()
+    }
+    return found
+}
+
+do {
+    func analyze(_ hex: String) -> (bytes: [UInt8], result: StructureResult, tree: [FieldNode]) {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        return (bytes, result, result.outcome.roots)
+    }
+    func names(_ nodes: [FieldNode]) -> [String] { nodes.map(\.name) }
+    func spans(_ nodes: [FieldNode]) -> [String] { nodes.map { "\($0.name)@\($0.offset)+\($0.length)" } }
+
+    // Six packets: a TCP SYN with options, a DNS query, an ARP request, an 802.1Q-tagged ping,
+    // an IPv6 ping, and a data segment cut to 60 of its 1471 bytes. Built and read back by dpkt.
+    let capture = analyze("d4c3b2a1020004000000000000000000ffff000001000000d202964940e201004a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307d302964920a10700470000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001d4029649000000002a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002d50296493f420f00360000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768d602964901000000460000004600000033330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121d702964990d003003c000000bf05000000112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31")
+    let tree = capture.tree
+    check(capture.result.identity?.id == "pcap" && capture.bytes.count == 491, "a pcap file is taken for one")
+    check(spans(tree) == ["Global header@0+24", "Packet 1@24+90", "Packet 2@114+87", "Packet 3@201+58", "Packet 4@259+70", "Packet 5@329+86", "Packet 6@415+76"],
+          "its records are where an independent walk puts them: \(spans(tree))")
+    check(capture.result.outcome.problems.isEmpty && capture.result.outcome.summary == "pcap capture, Ethernet, 6 packets", "nothing is wrong with it: \(capture.result.outcome.problems) \(capture.result.outcome.summary ?? "")")
+    check(structureProblems(tree, fileLength: 491).isEmpty, "every field of every packet is inside the file and its parent: \(structureProblems(tree, fileLength: 491))")
+
+    // The global header.
+    check(structureSpan(tree, "Global header/Magic") == "0+4" && structureValue(tree, "Global header/Magic") == "0xA1B2C3D4 · little-endian, microsecond timestamps", "the magic says the byte order and the unit: \(structureValue(tree, "Global header/Magic") ?? "")")
+    check(structureValue(tree, "Global header/Version major") == "2" && structureValue(tree, "Global header/Version minor") == "4" && structureSpan(tree, "Global header/Version minor") == "6+2", "version 2.4")
+    check(structureValue(tree, "Global header/Time zone offset") == "0 seconds" && structureValue(tree, "Global header/Snap length") == "65535 bytes" && structureValue(tree, "Global header/Link type") == "Ethernet (1)", "snap length and link type")
+
+    // Packet 1: Ethernet, IPv4, TCP with five options.
+    check(structureValue(tree, "Packet 1") == "23:31:30.123456 · 74 B · TCP 10.0.0.1:51514 → 93.184.216.34:80 [SYN]", "packet 1's summary: \(structureValue(tree, "Packet 1") ?? "")")
+    check(spans(structureChildren(tree, "Packet 1")) == ["Record header@24+16", "Packet data@40+74"], "a record is its header and its packet")
+    check(structureValue(tree, "Packet 1/Record header/Timestamp seconds") == "1234567890 · 2009-02-13 23:31:30 UTC" && structureValue(tree, "Packet 1/Record header/Timestamp fraction") == "123456 microseconds", "its time")
+    check(structureValue(tree, "Packet 1/Record header/Captured length") == "74 bytes" && structureSpan(tree, "Packet 1/Record header/Original length") == "36+4", "its lengths")
+    check(spans(structureChildren(tree, "Packet 1/Packet data")) == ["Ethernet II@40+14", "IPv4@54+20", "TCP@74+40"], "the layers: \(spans(structureChildren(tree, "Packet 1/Packet data")))")
+    check(structureValue(tree, "Packet 1/Packet data/Ethernet II/Destination") == "66:77:88:99:aa:bb" && structureSpan(tree, "Packet 1/Packet data/Ethernet II/Destination") == "40+6", "the destination MAC")
+    check(structureValue(tree, "Packet 1/Packet data/Ethernet II/Source") == "00:11:22:33:44:55" && structureSpan(tree, "Packet 1/Packet data/Ethernet II/Source") == "46+6", "the source MAC")
+    check(structureValue(tree, "Packet 1/Packet data/Ethernet II/Type") == "IPv4 (0x0800)" && structureSpan(tree, "Packet 1/Packet data/Ethernet II/Type") == "52+2", "the type")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Version") == "4" && structureValue(tree, "Packet 1/Packet data/IPv4/Header length") == "5 words (20 bytes)", "IPv4's first byte holds two things")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Total length") == "60 bytes, header included" && structureSpan(tree, "Packet 1/Packet data/IPv4/Total length") == "56+2", "its length, which dpkt says is 60")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Identification") == "0x1234 (4660)" && structureValue(tree, "Packet 1/Packet data/IPv4/Flags") == "don't fragment", "identification and flags")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Fragment offset") == "0 bytes" && structureValue(tree, "Packet 1/Packet data/IPv4/Time to live") == "64 (0x40)", "fragment offset and TTL")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Protocol") == "TCP (6)" && structureSpan(tree, "Packet 1/Packet data/IPv4/Protocol") == "63+1", "the protocol")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Header checksum") == "0xE8AC" && structureSpan(tree, "Packet 1/Packet data/IPv4/Header checksum") == "64+2", "the checksum dpkt says is 59564")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4/Source") == "10.0.0.1" && structureSpan(tree, "Packet 1/Packet data/IPv4/Source") == "66+4" && structureValue(tree, "Packet 1/Packet data/IPv4/Destination") == "93.184.216.34", "the addresses")
+    check(structureValue(tree, "Packet 1/Packet data/IPv4") == "10.0.0.1 → 93.184.216.34", "which the group says")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Source port") == "51514" && structureSpan(tree, "Packet 1/Packet data/TCP/Source port") == "74+2", "the TCP source port")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Destination port") == "80 · HTTP" && structureSpan(tree, "Packet 1/Packet data/TCP/Destination port") == "76+2", "the destination port, named")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Sequence number") == "1000 (0x000003E8)" && structureValue(tree, "Packet 1/Packet data/TCP/Acknowledgment number") == "0", "sequence and acknowledgment")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Header length") == "10 words (40 bytes)" && structureValue(tree, "Packet 1/Packet data/TCP/Flags") == "SYN", "the header length and flags")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Flags/SYN") == "set" && structureValue(tree, "Packet 1/Packet data/TCP/Flags/ACK") == "not set", "each flag")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Window") == "64240 bytes" && structureValue(tree, "Packet 1/Packet data/TCP/Checksum") == "0x3FC0" && structureValue(tree, "Packet 1/Packet data/TCP/Urgent pointer") == "0", "window, checksum, urgent pointer")
+    check(structureValue(tree, "Packet 1/Packet data/TCP") == "51514 → 80 [SYN]", "and the group's own value")
+    check(spans(structureChildren(tree, "Packet 1/Packet data/TCP/Options"))
+          == ["Maximum segment size@94+4", "SACK permitted@98+2", "Timestamps@100+10", "No-operation@110+1", "Window scale@111+3"], "TCP's options, each its bytes")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Options/Maximum segment size") == "1460" && structureValue(tree, "Packet 1/Packet data/TCP/Options/Window scale") == "shift 7, × 128", "decoded")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Options/Timestamps") == "value 1, echo 0" && structureValue(tree, "Packet 1/Packet data/TCP/Options/SACK permitted") == "yes", "timestamps and SACK")
+
+    // Packet 2: UDP and its payload.
+    check(structureValue(tree, "Packet 2") == "23:31:31.500000 · 71 B · UDP 10.0.0.1:53124 → 8.8.8.8:53", "packet 2's summary: \(structureValue(tree, "Packet 2") ?? "")")
+    check(spans(structureChildren(tree, "Packet 2/Packet data")) == ["Ethernet II@130+14", "IPv4@144+20", "UDP@164+8", "Payload@172+29"], "the layers of the DNS query")
+    check(structureValue(tree, "Packet 2/Packet data/UDP/Source port") == "53124" && structureValue(tree, "Packet 2/Packet data/UDP/Destination port") == "53 · DNS", "UDP ports")
+    check(structureValue(tree, "Packet 2/Packet data/UDP/Length") == "37 bytes, header included" && structureValue(tree, "Packet 2/Packet data/UDP/Checksum") == "0x3438", "UDP length and checksum, as dpkt has them")
+    check(structurePath(tree, "Packet 2/Packet data/Payload")?.note?.contains("Port 53 is usually DNS.") == true, "and the payload says what port 53 is")
+
+    // Packet 3: ARP.
+    check(structureValue(tree, "Packet 3") == "23:31:32.000000 · 42 B · ARP who-has 10.0.0.2 tell 10.0.0.1", "packet 3's summary: \(structureValue(tree, "Packet 3") ?? "")")
+    check(spans(structureChildren(tree, "Packet 3/Packet data")) == ["Ethernet II@217+14", "ARP@231+28"], "the layers of the ARP request")
+    check(structureValue(tree, "Packet 3/Packet data/Ethernet II/Destination") == "ff:ff:ff:ff:ff:ff" && structureValue(tree, "Packet 3/Packet data/ARP/Opcode") == "1 · request", "broadcast, request")
+    check(structureSpan(tree, "Packet 3/Packet data/ARP/Sender hardware address") == "239+6" && structureValue(tree, "Packet 3/Packet data/ARP/Sender hardware address") == "00:11:22:33:44:55", "the sender's MAC")
+    check(structureValue(tree, "Packet 3/Packet data/ARP/Sender protocol address") == "10.0.0.1" && structureSpan(tree, "Packet 3/Packet data/ARP/Sender protocol address") == "245+4", "and IP")
+    check(structureValue(tree, "Packet 3/Packet data/ARP/Target hardware address") == "00:00:00:00:00:00" && structureValue(tree, "Packet 3/Packet data/ARP/Target protocol address") == "10.0.0.2" && structureSpan(tree, "Packet 3/Packet data/ARP/Target protocol address") == "255+4", "the target's")
+
+    // Packet 4: a VLAN tag in front of IPv4 and ICMP.
+    check(structureValue(tree, "Packet 4") == "23:31:33.999999 · 54 B · VLAN 100 · ICMP 192.168.1.10 → 192.168.1.1 echo request", "packet 4's summary: \(structureValue(tree, "Packet 4") ?? "")")
+    check(spans(structureChildren(tree, "Packet 4/Packet data")) == ["Ethernet II@275+14", "802.1Q VLAN tag@289+4", "IPv4@293+20", "ICMP@313+8", "Data@321+8"], "the layers: \(spans(structureChildren(tree, "Packet 4/Packet data")))")
+    check(structureValue(tree, "Packet 4/Packet data/Ethernet II/Type") == "802.1Q VLAN (0x8100)" && structureValue(tree, "Packet 4/Packet data/802.1Q VLAN tag") == "VLAN 100", "the Ethernet type says a tag follows")
+    check(structureValue(tree, "Packet 4/Packet data/802.1Q VLAN tag/VLAN ID") == "100" && structureValue(tree, "Packet 4/Packet data/802.1Q VLAN tag/Priority") == "3" && structureValue(tree, "Packet 4/Packet data/802.1Q VLAN tag/Drop eligible") == "no", "its priority and ID share two bytes")
+    check(structureValue(tree, "Packet 4/Packet data/802.1Q VLAN tag/Type") == "IPv4 (0x0800)" && structureSpan(tree, "Packet 4/Packet data/802.1Q VLAN tag/Type") == "291+2", "and the type that follows it")
+    check(structureValue(tree, "Packet 4/Packet data/IPv4/Time to live") == "128 (0x80)" && structureValue(tree, "Packet 4/Packet data/ICMP/Type") == "8 · echo request", "TTL and the ICMP type")
+    check(structureValue(tree, "Packet 4/Packet data/ICMP/Checksum") == "0x5435" && structureValue(tree, "Packet 4/Packet data/ICMP/Identifier") == "4660 (0x1234)" && structureValue(tree, "Packet 4/Packet data/ICMP/Sequence number") == "1", "echo's checksum, identifier and sequence")
+    check(structureValue(tree, "Packet 4/Packet data/Data") == "\"abcdefgh\"", "and its data, read as text")
+
+    // Packet 5: IPv6 and ICMPv6.
+    check(structureValue(tree, "Packet 5") == "23:31:34.000001 · 70 B · ICMPv6 fe80::1 → ff02::1 echo request", "packet 5's summary: \(structureValue(tree, "Packet 5") ?? "")")
+    check(spans(structureChildren(tree, "Packet 5/Packet data")) == ["Ethernet II@345+14", "IPv6@359+40", "ICMPv6@399+8", "Data@407+8"], "the layers of the IPv6 ping")
+    check(structureValue(tree, "Packet 5/Packet data/IPv6/Version") == "6" && structureValue(tree, "Packet 5/Packet data/IPv6/Traffic class") == "DSCP 10, ECN 2", "version and traffic class")
+    check(structureValue(tree, "Packet 5/Packet data/IPv6/Flow label") == "0x012345" && structureValue(tree, "Packet 5/Packet data/IPv6/Payload length") == "16 bytes after this header", "flow label and length")
+    check(structureValue(tree, "Packet 5/Packet data/IPv6/Next header") == "ICMPv6 (58)" && structureValue(tree, "Packet 5/Packet data/IPv6/Hop limit") == "64 (0x40)", "next header and hop limit")
+    check(structureValue(tree, "Packet 5/Packet data/IPv6/Source") == "fe80::1" && structureSpan(tree, "Packet 5/Packet data/IPv6/Source") == "367+16", "the source, written as RFC 5952 does")
+    check(structureValue(tree, "Packet 5/Packet data/IPv6/Destination") == "ff02::1" && structureSpan(tree, "Packet 5/Packet data/IPv6/Destination") == "383+16", "and the destination")
+    check(structureValue(tree, "Packet 5/Packet data/ICMPv6/Type") == "128 · echo request" && structureValue(tree, "Packet 5/Packet data/ICMPv6/Checksum") == "0xBEEF", "ICMPv6")
+    check(structureValue(tree, "Packet 5/Packet data/ICMPv6/Identifier") == "66 (0x0042)" && structureValue(tree, "Packet 5/Packet data/Data") == "\"ping6!!!\"", "identifier and data")
+
+    // Packet 6: cut to the snap length.
+    check(structureValue(tree, "Packet 6") == "23:31:35.250000 · 60 B · TCP 93.184.216.34:80 → 10.0.0.1:51514 [PSH, ACK]", "packet 6's summary: \(structureValue(tree, "Packet 6") ?? "")")
+    check(structurePath(tree, "Packet 6")?.note == "60 bytes captured of 1471: cut to the snap length when it was captured", "it says it was cut: \(structurePath(tree, "Packet 6")?.note ?? "")")
+    check(structurePath(tree, "Packet 6/Record header/Original length")?.value == "1471 bytes" && structurePath(tree, "Packet 6/Record header/Original length")?.note?.contains("cut to 60 bytes") == true, "the record header says by how much")
+    check(spans(structureChildren(tree, "Packet 6/Packet data")) == ["Ethernet II@431+14", "IPv4@445+20", "TCP@465+20", "Payload@485+6"], "only what was kept is there: \(spans(structureChildren(tree, "Packet 6/Packet data")))")
+    check(structurePath(tree, "Packet 6/Packet data/Payload")?.note?.contains("Cut short by the capture") == true && structureValue(tree, "Packet 6/Packet data/Payload") == "\"HTTP/1\"", "the payload says the capture kept 6 of its bytes")
+    check(structureValue(tree, "Packet 6/Packet data/TCP/Flags") == "PSH, ACK" && structureValue(tree, "Packet 6/Packet data/TCP/Source port") == "80 · HTTP" && structureValue(tree, "Packet 6/Packet data/TCP/Window") == "502 bytes", "flags in the order Wireshark gives them")
+    check(structureValue(tree, "Packet 6/Packet data/IPv4/Total length") == "1457 bytes, header included" && structureValue(tree, "Packet 6/Packet data/TCP/Sequence number") == "5000 (0x00001388)", "IPv4 says 1457, as dpkt does")
+
+    // Finding the field that holds a byte, through the packets.
+    check(FieldNode.chain(containing: 76, in: tree).map(\.name) == ["Packet 1", "Packet data", "TCP", "Destination port"], "byte 76 is TCP's destination port")
+    check(FieldNode.chain(containing: 100, in: tree).map(\.name) == ["Packet 1", "Packet data", "TCP", "Options", "Timestamps"], "byte 100 is in a TCP option")
+    check(FieldNode.chain(containing: 3, in: tree).map(\.name) == ["Global header", "Magic"] && FieldNode.chain(containing: 30, in: tree).map(\.name) == ["Packet 1", "Record header", "Timestamp fraction"], "and the headers")
+    check(FieldNode.chain(containing: 490, in: tree).map(\.name) == ["Packet 6", "Packet data", "Payload"], "the last byte of the file is in the last packet's payload")
+
+    // The same capture the other way round, in nanoseconds.
+    let nano = analyze("a1b23c4d0002000400000000000000000000ffff00000001499602d2075bca000000004a0000004a66778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307499602d31dcd6500000000470000004766778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001499602d4000000000000002a0000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002499602d53b9ac618000000360000003666778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768499602d6000003e8000000460000004633330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121499602d70ee6b2800000003c000005bf00112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31")
+    check(spans(nano.tree) == spans(tree) && nano.result.outcome.problems.isEmpty, "big-endian, nanosecond: the same records")
+    check(structureValue(nano.tree, "Global header/Magic") == "0xA1B23C4D · big-endian, nanosecond timestamps", "the magic reads the other way: \(structureValue(nano.tree, "Global header/Magic") ?? "")")
+    check(structureValue(nano.tree, "Packet 1") == "23:31:30.123456000 · 74 B · TCP 10.0.0.1:51514 → 93.184.216.34:80 [SYN]" && structureValue(nano.tree, "Packet 1/Record header/Timestamp fraction") == "123456000 nanoseconds", "with nine digits of fraction: \(structureValue(nano.tree, "Packet 1") ?? "")")
+    check(structureValue(nano.tree, "Packet 1/Packet data/TCP/Destination port") == "80 · HTTP" && structureValue(nano.tree, "Packet 1/Packet data/IPv4/Source") == "10.0.0.1", "the packet bytes are read the same")
+    check(structureProblems(nano.tree, fileLength: 491).isEmpty, "all of it inside the file")
+
+    // A capture of bare IP packets, no link header.
+    let raw = analyze("d4c3b2a1020004000000000000000000ffff000065000000d2029649050000003c0000003c0000004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307")
+    check(structureValue(raw.tree, "Global header/Link type") == "raw IP (101)" && spans(structureChildren(raw.tree, "Packet 1/Packet data")) == ["IPv4@40+20", "TCP@60+40"], "link type 101 starts at IP: \(spans(structureChildren(raw.tree, "Packet 1/Packet data")))")
+    check(structureValue(raw.tree, "Packet 1")?.hasSuffix("TCP 10.0.0.1:51514 → 93.184.216.34:80 [SYN]") == true && raw.result.outcome.summary == "pcap capture, raw IP, 1 packet", "its summary: \(raw.result.outcome.summary ?? "")")
+
+    // Cut short: in a header, in a record header, in a packet.
+    let inHeader = FormatRegistry.analyze(DataByteSource(Array(capture.bytes[0..<20])))
+    check(inHeader.outcome.problems == ["The file ends inside the 24-byte global header."] && structureNode(inHeader.outcome.roots, "Global header", "Link type")?.kind == .problem, "cut in the global header: \(inHeader.outcome.problems)")
+    let inRecord = FormatRegistry.analyze(DataByteSource(Array(capture.bytes[0..<30])))
+    check(inRecord.outcome.roots.map(\.name) == ["Global header", "Cut off"] && inRecord.outcome.problems.count == 1, "cut in a record header: \(inRecord.outcome.roots.map(\.name))")
+    let inPacket = FormatRegistry.analyze(DataByteSource(Array(capture.bytes[0..<60])))
+    check(structurePath(inPacket.outcome.roots, "Packet 1")?.kind == .problem && structurePath(inPacket.outcome.roots, "Packet 1")?.length == 36
+          && inPacket.outcome.problems.first?.contains("Packet 1 is cut off") == true, "cut in a packet: \(inPacket.outcome.problems)")
+    check(spans(structureChildren(inPacket.outcome.roots, "Packet 1/Packet data")) == ["Ethernet II@40+14", "IPv4@54+6"], "what is there is taken apart as far as it goes: \(spans(structureChildren(inPacket.outcome.roots, "Packet 1/Packet data")))")
+    check(structurePath(inPacket.outcome.roots, "Packet 1/Packet data/IPv4/Version")?.value == "4" && structureProblems(inPacket.outcome.roots, fileLength: 60).isEmpty, "with a cut-off field, never a read past the end")
+
+    // Limits: a capture of many packets lists the first and says so.
+    var tight = ParseContext()
+    tight.maxRecords = 3
+    let limited = FormatRegistry.analyze(DataByteSource(capture.bytes), context: tight)
+    check(names(limited.outcome.roots) == ["Global header", "Packet 1", "Packet 2", "Packet 3", "More packets"] && limited.outcome.listingLimit != nil, "past the limit the rest is one node: \(names(limited.outcome.roots))")
+    check(structureSpan(limited.outcome.roots, "More packets") == "259+232" && structureProblems(limited.outcome.roots, fileLength: 491).isEmpty, "covering the rest of the file")
+
+    // A capture with a hundred thousand records opens without dissecting them.
+    var big = Array(capture.bytes[0..<24])
+    let oneRecord = Array(capture.bytes[201..<259])   // the ARP request
+    for _ in 0..<20_000 { big.append(contentsOf: oneRecord) }
+    let started = Date()
+    let large = FormatRegistry.analyze(DataByteSource(big))
+    check(large.outcome.roots.count == 20_001 && large.outcome.summary == "pcap capture, Ethernet, 20000 packets", "twenty thousand packets are listed: \(large.outcome.summary ?? "")")
+    check(FieldNode.chain(containing: Int64(24 + 58 * 12_345 + 20), in: large.outcome.roots).map(\.name) == ["Packet 12346", "Packet data", "Ethernet II", "Destination"], "and a byte in the middle of them is found without opening the rest")
+    check(Date().timeIntervalSince(started) < 20, "in a few seconds")
+}
+
+// MARK: pcapng
+
+do {
+    func analyze(_ hex: String) -> (bytes: [UInt8], result: StructureResult, tree: [FieldNode]) {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        return (bytes, result, result.outcome.roots)
+    }
+    func spans(_ nodes: [FieldNode]) -> [String] { nodes.map { "\($0.name)@\($0.offset)+\($0.length)" } }
+
+    // Blocks as an independent walk found them: SHB, IDB, two EPBs, an SPB, an ISB, and one of a type nothing knows.
+    let ng = analyze("0a0d0d0a340000004d3c2b1a01000000ffffffffffffffff04000e00695445524d694e414c207465737400000000000034000000010000002800000001000000ffff0000020004006574683009000100060000000000000028000000060000008000000000000000d5620400c0ba8a3c4a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307000001000c006669727374207061636b65740000000080000000060000004c00000000000000d5620400005da73c2a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000200004c00000003000000580000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d00000100010058000000050000001c000000000000000000000000000000000000001c00000099000000140000006d7973746572792114000000060000004c00000000000000d56204000166e43c290000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000000004c000000060000005400000000000000d562040042a8f33c340000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a80101080054351234000161626364656654000000")
+    let tree = ng.tree
+    check(ng.result.identity?.id == "pcapng" && ng.bytes.count == 592, "a pcapng file is taken for one")
+    check(spans(tree) == ["Section header@0+52", "Interface 0@52+40", "Packet 1@92+128", "Packet 2@220+76", "Packet 3 (simple)@296+88", "Interface statistics@384+28", "Block 0x00000099@412+20", "Packet 4@432+76", "Packet 5@508+84"],
+          "its blocks are where the walk puts them: \(spans(tree))")
+    check(ng.result.outcome.problems.isEmpty && ng.result.outcome.summary == "pcapng capture, 5 packets, 1 interface", "nothing is wrong with it: \(ng.result.outcome.problems) \(ng.result.outcome.summary ?? "")")
+    check(structureProblems(tree, fileLength: 592).isEmpty, "every field is inside the file and its parent: \(structureProblems(tree, fileLength: 592))")
+
+    check(structureValue(tree, "Section header") == "pcapng 1.0 · little-endian · iTERMiNAL test", "the section header's value: \(structureValue(tree, "Section header") ?? "")")
+    check(structureValue(tree, "Section header/Block type")?.hasPrefix("0x0A0D0D0A") == true && structureValue(tree, "Section header/Block total length") == "52 bytes", "block type and length")
+    check(structureValue(tree, "Section header/Byte-order magic") == "0x1A2B3C4D" && structureSpan(tree, "Section header/Byte-order magic") == "8+4", "the byte-order magic")
+    check(structureValue(tree, "Section header/Major version") == "1" && structureValue(tree, "Section header/Minor version") == "0" && structureValue(tree, "Section header/Section length") == "-1 · not stated", "version and section length")
+    check(structureSpan(tree, "Section header/Options") == "24+24" && structureValue(tree, "Section header/Options/Application") == "\"iTERMiNAL test\"" && structureSpan(tree, "Section header/Options/Application") == "24+20", "an option is its code, length, value and padding")
+    check(structureSpan(tree, "Section header/Block total length (again)") == "48+4" && structureValue(tree, "Section header/Block total length (again)") == "52 bytes · matches", "and the length again at the end")
+
+    check(structureValue(tree, "Interface 0") == "Ethernet · eth0 · snap 65535", "the interface's value: \(structureValue(tree, "Interface 0") ?? "")")
+    check(structureValue(tree, "Interface 0/Link type") == "Ethernet (1)" && structureSpan(tree, "Interface 0/Link type") == "60+2" && structureValue(tree, "Interface 0/Snap length") == "65535 bytes", "its link type and snap length")
+    check(structureValue(tree, "Interface 0/Options/Interface name") == "\"eth0\"" && structureValue(tree, "Interface 0/Options/Timestamp resolution") == "10^-6 s per tick", "its options")
+
+    check(structureValue(tree, "Packet 1") == "23:31:30.123456 · 74 B · TCP 10.0.0.1:51514 → 93.184.216.34:80 [SYN]", "packet 1: \(structureValue(tree, "Packet 1") ?? "")")
+    check(spans(structureChildren(tree, "Packet 1")) == ["Block type@92+4", "Block total length@96+4", "Interface ID@100+4", "Timestamp@104+8", "Captured length@112+4", "Original length@116+4", "Packet data@120+74", "Padding@194+2", "Options@196+20", "Block total length (again)@216+4"],
+          "an enhanced packet block's fields: \(spans(structureChildren(tree, "Packet 1")))")
+    check(structureValue(tree, "Packet 1/Timestamp") == "2009-02-13 23:31:30.123456 UTC" && structureSpan(tree, "Packet 1/Timestamp/Low 32 bits") == "108+4" && structureValue(tree, "Packet 1/Captured length") == "74 bytes", "its time and length")
+    check(structureValue(tree, "Packet 1/Options/Comment") == "\"first packet\"" && structureSpan(tree, "Packet 1/Options/Comment") == "196+16", "and the comment option")
+    check(spans(structureChildren(tree, "Packet 1/Packet data")) == ["Ethernet II@120+14", "IPv4@134+20", "TCP@154+40"], "the packet inside it is taken apart as in pcap")
+    check(structureValue(tree, "Packet 1/Packet data/TCP/Destination port") == "80 · HTTP" && structureValue(tree, "Packet 1/Packet data/TCP/Options/Window scale") == "shift 7, × 128", "its TCP")
+
+    check(structureValue(tree, "Packet 2") == "23:31:32.000000 · 42 B · ARP who-has 10.0.0.2 tell 10.0.0.1", "packet 2: \(structureValue(tree, "Packet 2") ?? "")")
+    check(structureSpan(tree, "Packet 2/Padding") == "290+2" && structureValue(tree, "Packet 2/Packet data/ARP/Opcode") == "1 · request", "an ARP request of 42 bytes is padded to 44")
+    check(structureValue(tree, "Packet 3 (simple)") == "71 B · UDP 10.0.0.1:53124 → 8.8.8.8:53" && structureSpan(tree, "Packet 3 (simple)/Packet data") == "308+71", "a simple packet block has no time")
+    check(structureValue(tree, "Packet 3 (simple)/Original length") == "71 bytes" && structureSpan(tree, "Packet 3 (simple)/Padding") == "379+1", "just the length, the bytes and padding")
+    check(structureSpan(tree, "Interface statistics/Interface ID") == "392+4" && structureValue(tree, "Block 0x00000099") == "20 bytes" && structureValue(tree, "Block 0x00000099/Body")?.hasPrefix("6D 79 73 74") == true, "the statistics block and a block of a type nothing knows")
+
+    // Packet data is padded to a multiple of four: three bytes after 41, none after 52.
+    check(structureValue(tree, "Packet 4") == "23:31:36.000001 · 41 B · ARP" && structureSpan(tree, "Packet 4/Packet data") == "460+41" && structureSpan(tree, "Packet 4/Padding") == "501+3", "41 bytes are followed by 3 of padding: \(structureValue(tree, "Packet 4") ?? "") \(structureSpan(tree, "Packet 4/Padding") ?? "")")
+    check(structurePath(tree, "Packet 4/Packet data/ARP/Target protocol address")?.kind == .problem && structureSpan(tree, "Packet 4/Packet data/ARP/Target protocol address") == "498+3", "and the ARP message that is a byte short says where it ends, over the three bytes there are")
+    check(structureSpan(tree, "Packet 5/Packet data") == "536+52" && structurePath(tree, "Packet 5/Padding") == nil && structureSpan(tree, "Packet 5/Block total length (again)") == "588+4", "52 bytes need none")
+    check(structureValue(tree, "Packet 5") == "23:31:37.000002 · 52 B · VLAN 100 · ICMP 192.168.1.10 → 192.168.1.1 echo request" && structurePath(tree, "Packet 5/Packet data/Data")?.note?.contains("Cut short by the capture") == true, "a packet cut inside its data says so: \(structureValue(tree, "Packet 5") ?? "")")
+    check(structureProblems(tree, fileLength: 592).isEmpty, "all of it inside the file")
+
+    // Written the other way round.
+    let big = analyze("0a0d0d0a000000341a2b3c4d00010000ffffffffffffffff0004000e695445524d694e414c2074657374000000000000000000340000000100000028000100000000ffff000200046574683000090001060000000000000000000028000000060000008000000000000462d53c8abac00000004a0000004a66778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a00000001000000000103030700000001000c6669727374207061636b65740000000000000080000000060000004c00000000000462d53ca75d000000002a0000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000200000000004c00000003000000580000004766778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d00000100010000000058000000050000001c000000000000000000000000000000000000001c00000099000000146d7973746572792100000014000000060000004c00000000000462d53ce46601000000290000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000000000000004c000000060000005400000000000462d53cf3a842000000340000003666778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a80101080054351234000161626364656600000054")
+    check(spans(big.tree) == spans(tree) && big.result.outcome.problems.isEmpty, "big-endian: the same blocks")
+    check(structureValue(big.tree, "Section header") == "pcapng 1.0 · big-endian · iTERMiNAL test" && structureValue(big.tree, "Packet 1") == structureValue(tree, "Packet 1"), "the section header says which way: \(structureValue(big.tree, "Section header") ?? "")")
+    check(structureValue(big.tree, "Packet 1/Packet data/IPv4/Source") == "10.0.0.1" && structureValue(big.tree, "Packet 1/Timestamp") == "2009-02-13 23:31:30.123456 UTC", "and the numbers are read that way")
+    check(structureProblems(big.tree, fileLength: 592).isEmpty, "inside the file")
+
+    // Where a byte is.
+    check(FieldNode.chain(containing: 121, in: tree).map(\.name) == ["Packet 1", "Packet data", "Ethernet II", "Destination"], "byte 121 is a MAC address in packet 1")
+    check(FieldNode.chain(containing: 9, in: tree).map(\.name) == ["Section header", "Byte-order magic"], "and byte 9 the byte-order magic")
+
+    // Cut short, and lying.
+    let cutHeader = FormatRegistry.analyze(DataByteSource(Array(ng.bytes[0..<100])))
+    check(cutHeader.outcome.roots.last?.name == "Cut off" && cutHeader.outcome.problems.first == "The file ends inside a block, at 0x5C.", "a file that ends inside a block's first twelve bytes says so: \(cutHeader.outcome.problems)")
+    let cutInBlock = FormatRegistry.analyze(DataByteSource(Array(ng.bytes[0..<150])))
+    check(structureNode(cutInBlock.outcome.roots, "Enhanced packet")?.kind == .problem && structureNode(cutInBlock.outcome.roots, "Enhanced packet")?.length == 58, "a block that says it is longer than the file is marked, over what there is: \(cutInBlock.outcome.roots.map(\.name))")
+    check(cutInBlock.outcome.problems.first?.contains("Block 3") == true && cutInBlock.outcome.problems.first?.contains("128 bytes") == true && structureProblems(cutInBlock.outcome.roots, fileLength: 150).isEmpty, "and the file's problems say which block: \(cutInBlock.outcome.problems)")
+    var lying = ng.bytes
+    lying[96] = 0x03   // the first packet block's length: 3, not a multiple of 4 and below 12
+    let liar = FormatRegistry.analyze(DataByteSource(lying))
+    check(liar.outcome.roots.last?.kind == .problem && liar.outcome.problems.first?.contains("multiple of 4") == true, "a block with an impossible length stops the walk: \(liar.outcome.problems)")
+    var wrongOrder = ng.bytes
+    wrongOrder[8] = 0x11
+    check(FormatRegistry.analyze(DataByteSource(wrongOrder)).outcome.problems.first?.contains("byte-order magic") == true, "a section header with a bad byte-order magic says so")
+}
+
+// MARK: Parsers and hostile files
+
+// The files a parser is given are the ones that lie. So each fixture is cut at every length,
+// has every byte set to 0x00 and to 0xFF in turn, and is followed by random files that begin
+// with its magic. Whatever comes back must be a sound tree: every field inside the file and
+// its parent, in order. A parser that trapped, or looped, or read outside what it was given,
+// would not finish this.
+do {
+    let fixtures: [(String, String)] = [
+        ("PNG by Pillow", "89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082"), ("PNG, many chunks", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c636080032e1139080200035c00b52cac443b0000000049454e44ae426082"), ("PNG, indexed", "89504e470d0a1a0a0000000d49484452000000020000000208030000004568fd1600000009504c5445ff000000ff000000ff2d4acd8a0000000274524e53ff80080fb36a0000000e49444154789c6360606460620000000e0004c6887cf80000000049454e44ae426082"),
+        ("PNG, bad CRC", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c639f80032e1139080200035c00b52cac443b0000000049454e44ae426082545241494c455221"), ("pcap", "d4c3b2a1020004000000000000000000ffff000001000000d202964940e201004a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307d302964920a10700470000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001d4029649000000002a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002d50296493f420f00360000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768d602964901000000460000004600000033330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121d702964990d003003c000000bf05000000112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31"), ("pcap, big-endian, nanoseconds", "a1b23c4d0002000400000000000000000000ffff00000001499602d2075bca000000004a0000004a66778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307499602d31dcd6500000000470000004766778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001499602d4000000000000002a0000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002499602d53b9ac618000000360000003666778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768499602d6000003e8000000460000004633330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121499602d70ee6b2800000003c000005bf00112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31"),
+        ("pcap, raw IP", "d4c3b2a1020004000000000000000000ffff000065000000d2029649050000003c0000003c0000004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307"), ("pcapng", "0a0d0d0a340000004d3c2b1a01000000ffffffffffffffff04000e00695445524d694e414c207465737400000000000034000000010000002800000001000000ffff0000020004006574683009000100060000000000000028000000060000008000000000000000d5620400c0ba8a3c4a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307000001000c006669727374207061636b65740000000080000000060000004c00000000000000d5620400005da73c2a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000200004c00000003000000580000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d00000100010058000000050000001c000000000000000000000000000000000000001c00000099000000140000006d7973746572792114000000060000004c00000000000000d56204000166e43c290000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000000004c000000060000005400000000000000d562040042a8f33c340000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a80101080054351234000161626364656654000000"), ("pcapng, big-endian", "0a0d0d0a000000341a2b3c4d00010000ffffffffffffffff0004000e695445524d694e414c2074657374000000000000000000340000000100000028000100000000ffff000200046574683000090001060000000000000000000028000000060000008000000000000462d53c8abac00000004a0000004a66778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a00000001000000000103030700000001000c6669727374207061636b65740000000000000080000000060000004c00000000000462d53ca75d000000002a0000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000200000000004c00000003000000580000004766778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d00000100010000000058000000050000001c000000000000000000000000000000000000001c00000099000000146d7973746572792100000014000000060000004c00000000000462d53ce46601000000290000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a00000000000000004c000000060000005400000000000462d53cf3a842000000340000003666778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a80101080054351234000161626364656600000054"),
+    ]
+    func sound(_ bytes: [UInt8]) -> String? {
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        let issues = structureProblems(result.outcome.roots, fileLength: Int64(bytes.count))
+        return issues.first
+    }
+
+    var unsound: [String] = []
+    var runs = 0
+    for (name, hex) in fixtures {
+        let original = structureBytes(hex)
+        // Cut at every length.
+        for length in 0...original.count {
+            runs += 1
+            if let issue = sound(Array(original[0..<length])) { unsound.append("\(name) cut at \(length): \(issue)") }
+        }
+        // Every byte set to 0 and to 0xFF.
+        for index in 0..<original.count {
+            for value in [UInt8(0x00), UInt8(0xFF)] where original[index] != value {
+                var changed = original
+                changed[index] = value
+                runs += 1
+                if let issue = sound(changed) { unsound.append("\(name) byte \(index) = \(value): \(issue)") }
+            }
+        }
+        if unsound.count > 5 { break }
+    }
+    check(unsound.isEmpty, "every cut and every changed byte of every fixture gives a sound tree, in \(runs) runs: \(unsound.prefix(5))")
+
+    // Random files that begin like each format.
+    var random = BytesCheckRandom(seed: 31)
+    let magics: [[UInt8]] = [
+        [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], [0xD4, 0xC3, 0xB2, 0xA1, 2, 0, 4, 0], [0xA1, 0xB2, 0xC3, 0xD4, 0, 2, 0, 4],
+        [0x4D, 0x3C, 0xB2, 0xA1, 2, 0, 4, 0], [0x0A, 0x0D, 0x0D, 0x0A], [0x0A, 0x0D, 0x0D, 0x0A, 0x1C, 0, 0, 0, 0x4D, 0x3C, 0x2B, 0x1A],
+    ]
+    var randomUnsound: [String] = []
+    var randomRuns = 0
+    for magic in magics {
+        for _ in 0..<150 {
+            let tail = (0..<random.below(700)).map { _ in random.byte() }
+            // Some tails are mostly zero or mostly 0xFF, where lengths and counts go wrong in other ways.
+            let shaped = tail.map { byte -> UInt8 in
+                switch random.below(4) {
+                case 0: return 0
+                case 1: return 0xFF
+                default: return byte
+                }
+            }
+            randomRuns += 1
+            if let issue = sound(magic + (random.below(2) == 0 ? tail : shaped)) { randomUnsound.append("magic \(magic.prefix(4)): \(issue)") }
+        }
+    }
+    check(randomUnsound.isEmpty, "random files that begin like each format give sound trees, in \(randomRuns) runs: \(randomUnsound.prefix(3))")
+
+    // A packet whose lengths are wrong in the ways that matter: an IPv4 header longer than the
+    // packet, an IPv6 extension header that points past the end, a TCP option that claims too much.
+    let capture = structureBytes("d4c3b2a1020004000000000000000000ffff000001000000d202964940e201004a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307d302964920a10700470000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001d4029649000000002a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002d50296493f420f00360000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768d602964901000000460000004600000033330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121d702964990d003003c000000bf05000000112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31")
+    var evil = capture
+    evil[54] = 0x4F   // packet 1's IPv4 header length: 15 words = 60 bytes, in a 74-byte packet
+    check(sound(evil) == nil, "an IPv4 header longer than it should be is cut at the packet, not read past it")
+    var evilTCP = capture
+    evilTCP[95] = 0x00   // the first TCP option's length: 0
+    let evilResult = FormatRegistry.analyze(DataByteSource(evilTCP))
+    check(structureProblems(evilResult.outcome.roots, fileLength: 491).isEmpty && structurePath(evilResult.outcome.roots, "Packet 1/Packet data/TCP/Options/Bad option") != nil, "a TCP option whose length is 0 is a bad option, not a loop")
+    var evilV6 = capture
+    evilV6[365] = 0x00   // packet 5's IPv6 next header: hop-by-hop options, whose bytes are really the ICMPv6 header
+    evilV6[400] = 0xFF   // and its header length: far past the packet
+    check(sound(evilV6) == nil, "an IPv6 extension header that points past the end is cut at the packet")
+
+    // Whole files of nothing, and of everything.
+    check(sound([UInt8](repeating: 0, count: 5000)) == nil && sound([UInt8](repeating: 0xFF, count: 5000)) == nil, "files of zeros and of 0xFF have nothing to show, and no trouble showing it")
+}
+
+// MARK: The structure tree as lines
+
+do {
+    let png = FormatRegistry.analyze(DataByteSource(structureBytes("89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082")))
+    let roots = png.outcome.roots
+
+    var rows = StructureOutline.rows(roots: roots, expanded: [], limits: [:])
+    check(rows.map(\.id) == roots.map(\.id) && rows.allSatisfy { $0.depth == 0 && !$0.isExpanded }, "with nothing open there is a line for each field at the top")
+    check(roots.map(\.id) == FormatRegistry.analyze(DataByteSource(structureBytes("89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082"))).outcome.roots.map(\.id), "and a second parse of the same file gives the same ids, so what was open stays open")
+
+    rows = StructureOutline.rows(roots: roots, expanded: ["png/chunk1-IHDR"], limits: [:])
+    check(rows.count == roots.count + 4 && rows[2].depth == 1 && rows[1].isExpanded, "opening a chunk adds its four fields under it")
+    rows = StructureOutline.rows(roots: roots, expanded: ["png/chunk1-IHDR", "png/chunk1-IHDR/data"], limits: [:])
+    check(rows.count == roots.count + 4 + 7 && rows.contains { $0.id == "png/chunk1-IHDR/data/width" && $0.depth == 2 }, "and opening its data adds the seven fields in it")
+    rows = StructureOutline.rows(roots: roots, expanded: ["png/chunk1-IHDR/data/width", "png/signature"], limits: [:])
+    check(rows.count == roots.count && rows.allSatisfy { !$0.isExpanded }, "a field with nothing in it is never shown open")
+    rows = StructureOutline.rows(roots: roots, expanded: ["png/chunk1-IHDR/data"], limits: [:])
+    check(rows.count == roots.count, "and one inside a field that is closed is not shown")
+
+    // A level of twelve hundred fields lists a page of them, and a line for the rest.
+    var wide: [FieldNode] = []
+    for i in 0..<1200 { wide.append(FieldNode(id: "w\(i)", name: "W\(i)", offset: Int64(i) * 10, length: 10, kind: .bytes)) }
+    rows = StructureOutline.rows(roots: wide, expanded: [], limits: [:])
+    var more: String?
+    if case .more(let parent, let remaining) = rows.last?.content { more = "\(parent):\(remaining)" }
+    check(rows.count == 501 && more == ":700" && rows.last?.id == "more:", "twelve hundred fields list five hundred and a line for the other 700: \(rows.count) \(more ?? "")")
+    var limits = StructureOutline.showingMore(under: "", limits: [:])
+    rows = StructureOutline.rows(roots: wide, expanded: [], limits: limits)
+    check(rows.count == 1001, "asking for more adds a page")
+    limits = StructureOutline.showingMore(under: "", limits: limits)
+    rows = StructureOutline.rows(roots: wide, expanded: [], limits: limits)
+    check(rows.count == 1200 && rows.allSatisfy { if case .node = $0.content { return true } else { return false } }, "and again lists them all, with no line for more")
+
+    // A byte far down is brought into the list.
+    let far = StructureOutline.reveal(offset: 9_005, in: wide, limits: [:])
+    check(far.focus?.id == "w900" && far.open.isEmpty && (far.limits[""] ?? 0) >= 950, "a byte in the 901st field raises the limit to show it: \(far.limits)")
+    rows = StructureOutline.rows(roots: wide, expanded: Set(far.open), limits: far.limits)
+    check(rows.contains { $0.id == "w900" }, "and then it is in the list")
+    let near = StructureOutline.reveal(offset: 15, in: wide, limits: [:])
+    check(near.focus?.id == "w1" && near.limits.isEmpty, "a byte near the top changes no limit")
+    let nowhere = StructureOutline.reveal(offset: 99_999, in: wide, limits: [:])
+    check(nowhere.focus == nil && nowhere.open.isEmpty, "a byte in no field has no field")
+
+    // Into the PNG: the fields to open to see the one that holds a byte.
+    let height = StructureOutline.reveal(offset: 20, in: roots, limits: [:])
+    check(height.focus?.name == "Height" && height.open == ["png/chunk1-IHDR", "png/chunk1-IHDR/data"], "the Height field is shown by opening IHDR and its data: \(height.open)")
+    rows = StructureOutline.rows(roots: roots, expanded: Set(height.open), limits: height.limits)
+    check(rows.contains { $0.id == height.focus?.id } && rows.first(where: { $0.id == height.focus?.id })?.depth == 2, "and it is then a line, two levels in")
+    let magic = StructureOutline.reveal(offset: 2, in: roots, limits: [:])
+    check(magic.focus?.name == "Signature" && magic.open.isEmpty, "a byte of the signature opens nothing")
+    let chunk = StructureOutline.reveal(offset: 112, in: roots, limits: [:])
+    check(chunk.focus?.name == "Type" && chunk.open == ["png/chunk5-IEND"], "and one of IEND's type opens IEND")
+
+    // Packets: the field a byte is in, down through the packet, from a capture of many.
+    let capture = FormatRegistry.analyze(DataByteSource(structureBytes("d4c3b2a1020004000000000000000000ffff000001000000d202964940e201004a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307d302964920a10700470000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001d4029649000000002a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002d50296493f420f00360000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768d602964901000000460000004600000033330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121d702964990d003003c000000bf05000000112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31")))
+    let timestamp = StructureOutline.reveal(offset: 100, in: capture.outcome.roots, limits: [:])
+    check(timestamp.focus?.name == "Timestamps" && timestamp.open == ["pcap/pkt1", "pcap/pkt1/packet", "pcap/pkt1/packet/tcp", "pcap/pkt1/packet/tcp/options"], "a byte of a TCP option opens the packet, its data, TCP and its options: \(timestamp.open)")
+
+    // Many open levels never make more than the most lines.
+    var deep = FieldNode(id: "leaf", name: "Leaf", offset: 0, length: 1, kind: .bytes)
+    var open: Set<String> = []
+    for level in 0..<30 {
+        var siblings: [FieldNode] = []
+        for i in 0..<30 { siblings.append(FieldNode(id: "L\(level)-\(i)", name: "N", offset: 0, length: 1, kind: .bytes)) }
+        deep = FieldNode(id: "L\(level)", name: "Level", offset: 0, length: 1, kind: .container, children: .list(siblings + [deep]))
+        open.insert("L\(level)")
+    }
+    check(StructureOutline.rows(roots: [deep], expanded: open, limits: [:]).count <= StructureOutline.maxRows, "however much is open, the lines stop at a limit")
+
+    let flag = ParseCancellation()
+    check(!flag.isCancelled, "a parse nobody has stopped is not cancelled")
+    flag.cancel()
+    check(flag.isCancelled, "and one that was is")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

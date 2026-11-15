@@ -1,9 +1,23 @@
 import SwiftUI
 import AppKit
 
-/// How the bytes are written: in a base, or as the bits in them.
+/// How the bytes are shown: written in a base, as the bits in them, or beside the fields
+/// the file's format says they make up.
 enum BytesMode: String, CaseIterable, Hashable {
-    case hex, bits
+    case hex, bits, structure
+}
+
+/// Where the Structure outlook has got to with the open file.
+enum StructureState {
+    case idle
+    case parsing
+    case ready(StructureResult)
+}
+
+/// A request to scroll the Structure tree to a field.
+struct StructureScrollRequest: Equatable {
+    let id = UUID()
+    let nodeID: String
 }
 
 /// A file the panel was asked to open and would not, and why.
@@ -49,8 +63,25 @@ final class BytesViewerModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var goToText = ""
 
+    // MARK: Structure
+
+    /// The file taken apart by the parser that knows its format, made in the background.
+    @Published private(set) var structure: StructureState = .idle
+    /// The tree as lines: what is open, and no more of a long level than has been asked for.
+    @Published private(set) var structureRows: [StructureRow] = []
+    /// The field that holds the cursor, shown selected in the tree.
+    @Published private(set) var focusedNode: FieldNode?
+    /// Set when the selection moved in the dump, so the tree follows it.
+    @Published private(set) var structureScroll: StructureScrollRequest?
+    private var expandedNodes: Set<String> = []
+    private var rowLimits: [String: Int] = [:]
+    private var parseCancellation: ParseCancellation?
+
     @Published var mode: BytesMode = BytesViewerModel.storedMode() {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "bytes.mode") }
+        didSet {
+            UserDefaults.standard.set(mode.rawValue, forKey: "bytes.mode")
+            if mode == .structure { followSelection(scroll: true) }
+        }
     }
     /// The base of the cells in the Hex outlook; Bits is always binary.
     @Published var cellRadix: ByteRadix = BytesViewerModel.storedRadix() {
@@ -101,12 +132,15 @@ final class BytesViewerModel: ObservableObject {
             goToText = ""
             selection = ByteSelection(at: 0)
             reveal = BytesRevealRequest(offset: 0, centered: false)
+            startStructure(source)
         case .failure(let why):
             refusal = BytesRefusal(name: url.lastPathComponent, why: why)
         }
     }
 
     func close() {
+        parseCancellation?.cancel()
+        parseCancellation = nil
         buffer = nil
         fileURL = nil
         selection = nil
@@ -114,6 +148,11 @@ final class BytesViewerModel: ObservableObject {
         notice = nil
         refusal = nil
         goToText = ""
+        structure = .idle
+        structureRows = []
+        focusedNode = nil
+        expandedNodes = []
+        rowLimits = [:]
     }
 
     func dismissNotice() {
@@ -126,9 +165,93 @@ final class BytesViewerModel: ObservableObject {
 
     // MARK: Selecting
 
-    /// Selects `new`, kept inside the file.
+    /// Selects `new`, kept inside the file. This is what the dump calls, so the tree follows.
     func select(_ new: ByteSelection?) {
         selection = new?.limited(toLength: length)
+        if mode == .structure { followSelection(scroll: true) }
+    }
+
+    // MARK: Structure
+
+    private func startStructure(_ source: ByteSource) {
+        parseCancellation?.cancel()
+        let token = ParseCancellation()
+        parseCancellation = token
+        structure = .parsing
+        structureRows = []
+        focusedNode = nil
+        expandedNodes = []
+        rowLimits = [:]
+        var context = ParseContext()
+        context.isCancelled = { token.isCancelled }
+        let work = context
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = FormatRegistry.analyze(source, context: work)
+            DispatchQueue.main.async {
+                guard let self, !token.isCancelled else { return }
+                self.structure = .ready(result)
+                self.rebuildRows()
+                if self.mode == .structure { self.followSelection(scroll: true) }
+            }
+        }
+    }
+
+    private func rebuildRows() {
+        guard case .ready(let result) = structure else {
+            structureRows = []
+            return
+        }
+        structureRows = StructureOutline.rows(roots: result.outcome.roots, expanded: expandedNodes, limits: rowLimits)
+    }
+
+    /// Shows, in the tree, the field that holds the byte the cursor is on: opening what has to
+    /// be opened, and listing a level far enough to reach it.
+    private func followSelection(scroll: Bool) {
+        guard case .ready(let result) = structure, let head = selection?.head else {
+            focusedNode = nil
+            return
+        }
+        let found = StructureOutline.reveal(offset: head, in: result.outcome.roots, limits: rowLimits)
+        guard let focus = found.focus else {
+            focusedNode = nil
+            return
+        }
+        var changed = found.limits != rowLimits
+        rowLimits = found.limits
+        for id in found.open where !expandedNodes.contains(id) {
+            expandedNodes.insert(id)
+            changed = true
+        }
+        if changed { rebuildRows() }
+        focusedNode = focus
+        if scroll { structureScroll = StructureScrollRequest(nodeID: focus.id) }
+    }
+
+    func toggleExpansion(of node: FieldNode) {
+        if expandedNodes.contains(node.id) {
+            expandedNodes.remove(node.id)
+        } else {
+            expandedNodes.insert(node.id)
+        }
+        rebuildRows()
+    }
+
+    /// Lists a page more of the level under `parentID`.
+    func showMore(under parentID: String) {
+        rowLimits = StructureOutline.showingMore(under: parentID, limits: rowLimits)
+        rebuildRows()
+    }
+
+    /// Selects the bytes of a field, from a click on it in the tree. The dump scrolls to it; the
+    /// tree does not, since it is where the click was.
+    func selectNode(_ node: FieldNode) {
+        guard let buffer, buffer.length > 0 else { return }
+        let last = buffer.length - 1
+        let first = min(max(node.offset, 0), last)
+        let end = min(max(node.lastByte, first), last)
+        selection = ByteSelection(anchor: first, head: end)
+        focusedNode = node
+        reveal = BytesRevealRequest(offset: first, centered: true)
     }
 
     /// Goes to what is typed in the "Go to offset" field.
@@ -139,6 +262,7 @@ final class BytesViewerModel: ObservableObject {
             notice = nil
             selection = ByteSelection(at: offset)
             reveal = BytesRevealRequest(offset: offset, centered: true)
+            if mode == .structure { followSelection(scroll: true) }
         case .failure(let failure):
             notice = OffsetExpression.message(failure)
         }

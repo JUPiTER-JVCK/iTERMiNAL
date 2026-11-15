@@ -522,6 +522,20 @@ A tour of the app in thirty-four pictures, in five groups.
   hex, a C array, Python bytes or Base64. It only looks: the file is opened
   read-only and never changed. Folders, pipes and devices are refused, as they
   are not a fixed set of bytes.
+  The **Structure** outlook takes a PNG, a pcap or a pcapng capture apart into
+  its fields, each tied to its bytes: click a field and its bytes are selected
+  in the dump below, select bytes and the field that holds them is shown. A PNG
+  is its chunks, with their CRCs checked (the first 512 MB of chunk data; past
+  that a CRC is shown, not checked). A capture is its packets, and a packet is
+  opened down through its link layer (Ethernet with VLAN tags, Linux cooked,
+  loopback or raw IP), ARP, IPv4, IPv6 and its extension headers, TCP with its
+  options, UDP, ICMP and ICMPv6; checksums in a capture are shown, not checked,
+  as a capture taken on the sending machine often holds ones the network card
+  had not filled in yet. A packet cut short by the capture, or a file cut off
+  or lying about its lengths, ends in a field that says so. Any other file is
+  named by its first bytes where they say what it is, and the dump still shows it
+  all. At most the first 100,000 packets or chunks are listed; the rest of the
+  file is in the dump.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -1616,7 +1630,8 @@ Sources/
 │   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
 │   │                file, rows and columns, what a selection reads as, go-to
 │   │                and the copy formats, and an edit buffer the panel does not
-│   │                use yet — Foundation-only
+│   │                use yet; Structure/ holds the parsers (PNG, pcap, pcapng,
+│   │                the packet dissector) and what they make — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
 │   │                robots rules, crawl frontier — Foundation-only

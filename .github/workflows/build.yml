@@ -269,6 +269,17 @@ jobs:
             Sources/iTERMiNAL/Bytes/OffsetExpression.swift \
             Sources/iTERMiNAL/Bytes/ByteInterpreter.swift \
             Sources/iTERMiNAL/Bytes/ByteExport.swift \
+            Sources/iTERMiNAL/Bytes/Structure/FieldNode.swift \
+            Sources/iTERMiNAL/Bytes/Structure/CRC32.swift \
+            Sources/iTERMiNAL/Bytes/Structure/FieldList.swift \
+            Sources/iTERMiNAL/Bytes/Structure/FormatParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/FormatDetector.swift \
+            Sources/iTERMiNAL/Bytes/Structure/PacketNames.swift \
+            Sources/iTERMiNAL/Bytes/Structure/PacketDissector.swift \
+            Sources/iTERMiNAL/Bytes/Structure/PNGParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/PcapParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/PcapNGParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/StructureOutline.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
