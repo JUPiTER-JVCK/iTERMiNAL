@@ -238,6 +238,8 @@ private struct DockLeaf: View {
             ToolPanelView(tool: .btop)
         case .http:
             HTTPClientPaneView(model: store.panelHTTPClient)
+        case .bytes:
+            BytesViewerPaneView(model: store.panelBytes)
         }
     }
 

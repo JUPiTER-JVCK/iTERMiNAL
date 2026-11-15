@@ -416,6 +416,7 @@ enum ShortcutCatalog {
         ShortcutEntry("panel.files", "Files panel", [ShortcutChord("f", [option, cmd])], in: .panels),
         ShortcutEntry("panel.notes", "Notes panel", [ShortcutChord("n", [option, cmd])], in: .panels),
         ShortcutEntry("panel.http", "HTTP client panel", [ShortcutChord("r", [option, cmd])], in: .panels),
+        ShortcutEntry("panel.bytes", "Bytes panel", [ShortcutChord("y", [option, cmd])], in: .panels),
 
         // MARK: Terminal
         ShortcutEntry("font.bigger", "Bigger text", [ShortcutChord("+", cmd)], in: .terminal),

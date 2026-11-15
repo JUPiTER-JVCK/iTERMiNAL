@@ -260,6 +260,15 @@ jobs:
             Sources/iTERMiNAL/Workspace/DockGeometry.swift \
             Sources/iTERMiNAL/App/OpenFolders.swift \
             Sources/iTERMiNAL/API/RequestLineBuffer.swift \
+            Sources/iTERMiNAL/Bytes/ByteSource.swift \
+            Sources/iTERMiNAL/Bytes/BytesFilePolicy.swift \
+            Sources/iTERMiNAL/Bytes/FileByteSource.swift \
+            Sources/iTERMiNAL/Bytes/ByteEditBuffer.swift \
+            Sources/iTERMiNAL/Bytes/HexLayout.swift \
+            Sources/iTERMiNAL/Bytes/ByteSelection.swift \
+            Sources/iTERMiNAL/Bytes/OffsetExpression.swift \
+            Sources/iTERMiNAL/Bytes/ByteInterpreter.swift \
+            Sources/iTERMiNAL/Bytes/ByteExport.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
