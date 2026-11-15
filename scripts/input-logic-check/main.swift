@@ -2,7 +2,8 @@
 // mistake in it fails in seconds rather than after the build, and can be shown off a
 // Mac. Among it: the composer (tokenizer, palette, completion, suggestions), the
 // Cheatsheet, the assistant's helpers, the HTTP client's parsers and extractors, SSH
-// and remote-session rules, terminal and workspace logic, and the API's request lines.
+// and remote-session rules, terminal and workspace logic, the API's request lines, and the
+// Bytes panel's reading, layout and editing.
 //
 // The files it compiles are listed once, in the "Check input logic" step of
 // .github/workflows/build.yml. Compile them and this file with swiftc, then run it:
@@ -8745,6 +8746,695 @@ do {
     }
     check(refusedAfter == 12_288 && most <= 10_000 + 4096,
           "a line with no end is refused once it passes the limit (after \(refusedAfter ?? -1) bytes, holding at most \(most))")
+}
+
+// MARK: The Bytes panel
+
+// What the panel reads through, how it lays a row out, what a key does to the selection,
+// and what editing does to the content: all of it Foundation only, so it is checked here
+// rather than by looking. The AppKit that draws it is not, and CI's build is its only check.
+
+/// A fixed-seed generator, so a failure is the same failure next time.
+struct BytesCheckRandom {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state >> 33
+    }
+    mutating func byte() -> UInt8 { UInt8(truncatingIfNeeded: next()) }
+    mutating func below(_ n: Int) -> Int { Int(next() % UInt64(n)) }
+}
+
+/// A source that claims more bytes than it can give, like a file that shrank under the panel.
+final class BytesCheckShortSource: ByteSource {
+    let count: Int64
+    let available: [UInt8]
+    init(claiming count: Int64, available: [UInt8]) {
+        self.count = count
+        self.available = available
+    }
+    func read(_ range: Range<Int64>) -> [UInt8] {
+        let limited = clamped(range)
+        let from = Int(limited.lowerBound)
+        guard from < available.count else { return [] }
+        return Array(available[from..<min(Int(limited.upperBound), available.count)])
+    }
+}
+
+// MARK: Bytes: sources
+
+do {
+    let source = DataByteSource([10, 11, 12, 13, 14])
+    check(source.count == 5, "a data source knows its length")
+    check(source.read(1..<3) == [11, 12], "it reads a range")
+    check(source.read(3..<99) == [13, 14], "a range past the end gives what there is")
+    check(source.read(9..<12).isEmpty && source.read(2..<2).isEmpty, "a range outside, or empty, gives nothing")
+    check(source.read(-4..<2) == [10, 11], "a range that starts before the beginning starts at it")
+    check(DataByteSource([]).read(0..<10).isEmpty, "an empty source gives nothing")
+}
+
+do {
+    let fileManager = FileManager.default
+    let folder = NSTemporaryDirectory() + "bytes-check-\(UUID().uuidString)/"
+    try? fileManager.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(atPath: folder) }
+
+    func write(_ name: String, _ bytes: [UInt8]) -> String {
+        let path = folder + name
+        _ = fileManager.createFile(atPath: path, contents: Data(bytes))
+        return path
+    }
+    func refusal(_ path: String) -> BytesFilePolicy.Refusal? {
+        if case .failure(let refusal) = FileByteSource.opening(path: path) { return refusal }
+        return nil
+    }
+
+    // A file of three full pages and a short one, read against the array it was made from.
+    var random = BytesCheckRandom(seed: 7)
+    let content: [UInt8] = (0..<200_000).map { _ in random.byte() }
+    let path = write("content.bin", content)
+    if case .success(let source) = FileByteSource.opening(path: path) {
+        check(source.count == 200_000 && source.identity.size == 200_000, "a file's length is its size")
+        check(source.read(0..<200_000) == content, "the whole file reads back")
+        check(source.read(65_530..<65_545) == Array(content[65_530..<65_545]), "a read across a page boundary joins the two pages")
+        check(source.read(196_600..<250_000) == Array(content[196_600...]), "the last, short page reads to the end")
+        check(source.read(199_999..<200_001) == [content[199_999]], "a read one past the end gives the last byte")
+        check(source.read(200_000..<200_010).isEmpty, "and one that starts at the end gives nothing")
+        var wrong = 0
+        for _ in 0..<300 {
+            let from = random.below(200_000)
+            let to = min(200_000, from + random.below(150_000))
+            if source.read(Int64(from)..<Int64(to)) != Array(content[from..<to]) { wrong += 1 }
+        }
+        check(wrong == 0, "\(wrong) of 300 random ranges read back differently from the file")
+    } else {
+        check(false, "a regular file opens")
+    }
+
+    // More pages than the cache holds, each a different byte, read in two orders: a page
+    // the cache has let go of is read again from the file, and is still right.
+    let pageSize = FileByteSource.pageSize
+    let pageCount = FileByteSource.maxCachedPages + 14
+    var paged = Data()
+    for page in 0..<pageCount { paged.append(Data(repeating: UInt8(page % 251), count: pageSize)) }
+    let pagedPath = folder + "paged.bin"
+    _ = fileManager.createFile(atPath: pagedPath, contents: paged)
+    if case .success(let source) = FileByteSource.opening(path: pagedPath) {
+        var wrong = 0
+        for page in 0..<pageCount where source.read(Int64(page * pageSize)..<Int64(page * pageSize + 3)) != [UInt8](repeating: UInt8(page % 251), count: 3) {
+            wrong += 1
+        }
+        for page in stride(from: pageCount - 1, through: 0, by: -7) where source.read(Int64(page * pageSize + pageSize - 2)..<Int64(page * pageSize + pageSize)) != [UInt8](repeating: UInt8(page % 251), count: 2) {
+            wrong += 1
+        }
+        check(wrong == 0, "\(wrong) pages came back wrong after the cache filled")
+    } else {
+        check(false, "the paged file opens")
+    }
+
+    // A file bigger than 4 GB, made sparse so it costs nothing: offsets past 32 bits work.
+    let hugePath = folder + "sparse.bin"
+    let descriptor = open(hugePath, O_CREAT | O_RDWR, 0o600)
+    if descriptor >= 0, ftruncate(descriptor, off_t(5) << 30) == 0,
+       pwrite(descriptor, [0xDE, 0xAD] as [UInt8], 2, (off_t(5) << 30) - 2) == 2 {
+        close(descriptor)
+        if case .success(let source) = FileByteSource.opening(path: hugePath) {
+            check(source.count == Int64(5) << 30, "a 5 GB file has 5 GB")
+            check(source.read((source.count - 4)..<source.count) == [0, 0, 0xDE, 0xAD], "its last bytes read back")
+            check(source.read((Int64(1) << 32)..<((Int64(1) << 32) + 3)) == [0, 0, 0], "and so does a place past 32 bits")
+            check(HexGeometry.offsetDigits(forLength: source.count) == 12, "its offsets take twelve digits")
+            check(HexGeometry(bytesPerRow: 16).rowCount(forLength: source.count) == 335_544_320, "and it has the rows 5 GB has")
+        } else {
+            check(false, "a sparse 5 GB file opens")
+        }
+    } else {
+        if descriptor >= 0 { close(descriptor) }
+        print("note: no sparse 5 GB file here, so the offsets past 32 bits were not read")
+    }
+
+    // What is refused, and why.
+    check(refusal(folder) == .directory, "a folder is refused as a folder")
+    check(refusal(folder + "missing") == .unreadable(ENOENT), "a file that is not there is unreadable, with the reason")
+    check(refusal(write("empty.bin", [])) == .empty, "an empty file is empty, not a failure")
+    check(refusal("/dev/null") == .special("a character device"), "a device is refused as one")
+    let pipe = folder + "pipe"
+    if mkfifo(pipe, 0o600) == 0 {
+        // Opening a pipe with no writer waits; if it were waited on, this would hang the run.
+        _ = alarm(30)
+        check(refusal(pipe) == .special("a named pipe"), "a named pipe is refused, not waited on")
+        _ = alarm(0)
+    }
+    let target = write("target.bin", [1, 2, 3])
+    try? fileManager.createSymbolicLink(atPath: folder + "link.bin", withDestinationPath: target)
+    if case .success(let linked) = FileByteSource.opening(path: folder + "link.bin") {
+        check(linked.read(0..<3) == [1, 2, 3], "a link to a file reads the file")
+    } else {
+        check(false, "a link to a regular file opens")
+    }
+    try? fileManager.createSymbolicLink(atPath: folder + "dirlink", withDestinationPath: folder)
+    check(refusal(folder + "dirlink") == .directory, "a link to a folder is a folder")
+    let locked = write("locked.bin", [1])
+    chmod(locked, 0)
+    if geteuid() != 0 {
+        check(refusal(locked) == .unreadable(EACCES), "a file this user cannot read says so")
+    }
+    chmod(locked, 0o600)
+
+    // A file that changes under an open source: short reads, never a hole, and a way to tell.
+    let watched = write("watched.bin", [UInt8](repeating: 7, count: 1000))
+    if case .success(let source) = FileByteSource.opening(path: watched) {
+        check(source.staleness() == .unchanged, "a file nobody touched is unchanged")
+        var times = [timeval(tv_sec: Int(Date().timeIntervalSince1970) - 3600, tv_usec: 0),
+                     timeval(tv_sec: Int(Date().timeIntervalSince1970) - 3600, tv_usec: 0)]
+        utimes(watched, &times)
+        check(source.staleness() == .modified, "the same size, written at another time, is modified")
+        if let handle = FileHandle(forWritingAtPath: watched) {
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data([1, 2, 3]))
+            try? handle.close()
+        }
+        check(source.staleness() == .grew, "a file that got longer grew")
+        truncate(watched, 10)
+        check(source.staleness() == .shrank, "and one that got shorter shrank")
+        check(source.read(0..<1000) == [UInt8](repeating: 7, count: 10), "reading past the new end gives the bytes that are left")
+        check(source.read(500..<510).isEmpty, "and nothing from a place that is gone")
+        let other = write("other.bin", [9])
+        rename(other, watched)
+        check(source.staleness() == .replaced, "a different file with the name is a replacement")
+        unlink(watched)
+        check(source.staleness() == .missing, "and no file at all is missing")
+    } else {
+        check(false, "the watched file opens")
+    }
+
+    for problem in [BytesFilePolicy.Refusal.directory, .special("a socket"), .unreadable(EACCES), .unreadable(ENOENT), .empty] {
+        let message = BytesFilePolicy.message(problem, name: "x.bin")
+        check(message.contains("x.bin") && message.count > 12, "the message for \(problem) names the file and says something: \(message)")
+    }
+    check(BytesFilePolicy.isProblem(.directory) && BytesFilePolicy.isProblem(.unreadable(EIO)), "a folder or an unreadable file is a problem")
+    check(!BytesFilePolicy.isProblem(.empty), "an empty file is not")
+    check(BytesFilePolicy.refusal(forMode: S_IFREG | 0o644) == nil, "a regular file is not refused")
+    check(BytesFilePolicy.refusal(forMode: S_IFDIR | 0o755) == .directory, "a folder is")
+    check(BytesFilePolicy.refusal(forMode: S_IFIFO | 0o600) == .special("a named pipe"), "so is a pipe")
+    check(BytesFilePolicy.refusal(forMode: S_IFSOCK | 0o600) == .special("a socket"), "and a socket")
+    check(BytesFilePolicy.refusal(forMode: S_IFBLK | 0o600) == .special("a block device"), "and a disk")
+}
+
+// MARK: Bytes: where the characters go
+
+do {
+    let hex16 = HexGeometry(bytesPerRow: 16)
+    check(hex16.cellsStart == 10 && hex16.cellColumn(0) == 10 && hex16.cellColumn(7) == 31, "the cells start after the offset and a gutter")
+    check(hex16.cellColumn(8) == 35 && hex16.cellColumn(15) == 56, "and a group of eight is followed by a wider gap")
+    check(hex16.cellsEnd == 58 && hex16.textStart == 60 && hex16.totalColumns == 76, "a row of sixteen is 76 columns")
+    check(HexGeometry(bytesPerRow: 8).totalColumns == 43 && HexGeometry(bytesPerRow: 4).totalColumns == 27, "rows of eight and four are 43 and 27")
+    check(HexGeometry(bytesPerRow: 32).totalColumns == 142 && HexGeometry(bytesPerRow: 24).totalColumns == 109, "and of thirty-two and twenty-four 142 and 109")
+    check(HexGeometry(bytesPerRow: 8, groupSize: 4).cellColumn(4) == 23, "a group of four puts its gap after four")
+    check(HexGeometry(bytesPerRow: 16, groupSize: 0).cellColumn(8) == 34, "with no groups there is no gap")
+    check(HexGeometry(bytesPerRow: 16, showsText: false).totalColumns == 58, "without the text column a row ends with its cells")
+    check(HexGeometry(bytesPerRow: 0, groupSize: -3).bytesPerRow == 1 && HexGeometry(bytesPerRow: 0, groupSize: -3).groupSize == 0,
+          "a width of nothing is one byte, and a negative group is none")
+
+    let hello: [UInt8] = Array("Hello, World!".utf8) + [0x0A, 0x00, 0x7F]
+    check(hex16.rowText(offset: 0, bytes: hello, expected: 16)
+          == "00000000  48 65 6C 6C 6F 2C 20 57  6F 72 6C 64 21 0A 00 7F  Hello, World!...",
+          "a full row is the offset, the cells and the text, with a dot for what is not printable")
+    check(hex16.rowText(offset: 0x1F40, bytes: hello, expected: 16).hasPrefix("00001F40  48"), "the offset is hex, zero-padded")
+
+    let partial = hex16.rowText(offset: 32, bytes: [0x41, 0x42, 0x43, 0x44, 0x45], expected: 5)
+    check(partial.count == 76 && partial.hasPrefix("00000020  41 42 43 44 45 "), "a short last row keeps its width")
+    check(partial.dropFirst(24).prefix(36).allSatisfy { $0 == " " }, "its missing cells are blank")
+    check(String(partial.dropFirst(60)) == "ABCDE" + String(repeating: " ", count: 11), "and its text keeps its place")
+
+    let holes = Array(hex16.rowText(offset: 0, bytes: [0x41], expected: 3))
+    check(holes[10] == "4" && holes[13] == "?" && holes[14] == "?" && holes[16] == "?", "bytes that were expected but not read print as ?")
+    check(holes[60] == "A" && holes[61] == "?" && holes[62] == "?" && holes[63] == " ", "in the text too, and no further than were expected")
+
+    check(HexGeometry(bytesPerRow: 4, radix: .binary).rowText(offset: 0, bytes: Array("Hell".utf8), expected: 4)
+          == "00000000  01001000 01100101 01101100 01101100  Hell", "a row in binary")
+    check(HexGeometry(bytesPerRow: 4, radix: .decimal).rowText(offset: 0, bytes: Array("Hell".utf8), expected: 4)
+          == "00000000  072 101 108 108  Hell", "a row in decimal")
+    check(HexGeometry(bytesPerRow: 4, radix: .octal).rowText(offset: 0, bytes: [0, 10, 255, 64], expected: 4)
+          == "00000000  000 012 377 100  ...@", "a row in octal")
+    check([ByteRadix.hex, .decimal, .octal, .binary].map { $0.cell(0x0A) } == ["0A", "010", "012", "00001010"], "ten in each base")
+    check([ByteRadix.hex, .decimal, .octal, .binary].map { $0.cell(0xFF) } == ["FF", "255", "377", "11111111"], "and 255")
+    check([ByteRadix.hex, .decimal, .octal, .binary].map { $0.cell(0) } == ["00", "000", "000", "00000000"], "and nothing")
+    check(ByteRadix.allCases.allSatisfy { radix in (0...255).allSatisfy { radix.cell(UInt8($0)).count == radix.cellWidth } }, "every byte fills its cell exactly")
+    check(Set((0...255).map { ByteRadix.decimal.cell(UInt8($0)) }).count == 256 && Set((0...255).map { ByteRadix.octal.cell(UInt8($0)) }).count == 256,
+          "no two bytes print alike in decimal or octal")
+    check(Set((0...255).map { ByteRadix.binary.cell(UInt8($0)) }).count == 256 && UInt8(ByteRadix.binary.cell(0xA5), radix: 2) == 0xA5,
+          "binary prints each byte's own bits")
+
+    // Every column of every cell and every text byte is found again, for each way of laying a row out.
+    var hitsWrong: [String] = []
+    for (width, group, radix) in [(16, 8, ByteRadix.hex), (8, 4, .hex), (4, 0, .decimal), (8, 8, .binary), (24, 8, .octal), (1, 0, .hex), (5, 2, .hex)] {
+        let geometry = HexGeometry(bytesPerRow: width, groupSize: group, radix: radix)
+        for index in 0..<width {
+            for column in geometry.cellColumn(index)..<(geometry.cellColumn(index) + radix.cellWidth)
+            where geometry.hit(column: column) != .cell(index) {
+                hitsWrong.append("\(radix) \(width)/\(group) cell \(index) col \(column)")
+            }
+            if geometry.hit(column: geometry.textColumn(index)) != .text(index) { hitsWrong.append("\(radix) \(width)/\(group) text \(index)") }
+            if index < width - 1, geometry.hit(column: geometry.cellColumn(index) + radix.cellWidth) != .cell(index) {
+                hitsWrong.append("\(radix) \(width)/\(group) the space after \(index)")
+            }
+            // The wider gap between groups belongs to the byte before it, not the one after.
+            if group > 0, (index + 1) % group == 0, index < width - 1,
+               geometry.hit(column: geometry.cellColumn(index) + radix.cellWidth + 1) != .cell(index) {
+                hitsWrong.append("\(radix) \(width)/\(group) the gap after \(index)")
+            }
+        }
+        if geometry.hit(column: 0) != .offset || geometry.hit(column: geometry.cellsStart - 1) != .offset { hitsWrong.append("\(width) offset") }
+        if geometry.hit(column: geometry.cellsEnd) != .none || geometry.hit(column: geometry.totalColumns) != .none { hitsWrong.append("\(width) gap") }
+        if geometry.hit(column: -5) != .offset { hitsWrong.append("\(width) before the start") }
+    }
+    check(hitsWrong.isEmpty, "a column is found as the byte drawn there: \(hitsWrong.prefix(5))")
+
+    // Rows.
+    check(hex16.rowCount(forLength: 0) == 0 && hex16.rowCount(forLength: 1) == 1 && hex16.rowCount(forLength: 16) == 1, "a file of up to sixteen bytes is one row")
+    check(hex16.rowCount(forLength: 17) == 2 && hex16.rowCount(forLength: 32) == 2 && hex16.rowCount(forLength: 33) == 3, "and the rows after it")
+    check(hex16.rowCount(forLength: (Int64(5) << 30) + 1) == 335_544_321, "rows are counted in 64 bits")
+    check(hex16.rowStart(3) == 48 && hex16.location(of: 37) == (2, 5) && hex16.location(of: 0) == (0, 0) && hex16.location(of: 15) == (0, 15),
+          "a byte is in the row and place it should be")
+    check(hex16.bytesInRow(0, length: 40) == 16 && hex16.bytesInRow(2, length: 40) == 8 && hex16.bytesInRow(3, length: 40) == 0, "the last row is short")
+    check(HexGeometry.offsetDigits(forLength: 0) == 8 && HexGeometry.offsetDigits(forLength: 1) == 8, "offsets take eight digits to begin with")
+    check(HexGeometry.offsetDigits(forLength: Int64(1) << 32) == 8 && HexGeometry.offsetDigits(forLength: (Int64(1) << 32) + 1) == 12,
+          "eight up to a file's last offset of 0xFFFFFFFF, twelve after")
+    check(HexGeometry.offsetDigits(forLength: (Int64(1) << 48) + 1) == 16, "and sixteen after that")
+    check(String(decoding: HexGeometry.offsetText(0x1F40, digits: 8), as: UTF8.self) == "00001F40", "an offset is zero-padded hex")
+    check(String(decoding: HexGeometry.offsetText(0x1_0000_0000, digits: 12), as: UTF8.self) == "000100000000", "and as wide as it is told")
+
+    // Auto: the widest row that fits.
+    func fit(_ columns: Int, radix: ByteRadix = .hex) -> Int {
+        HexGeometry.fitting(columns: columns, groupSize: 8, radix: radix, offsetDigits: 8, showsText: true)
+    }
+    check(fit(26) == 4 && fit(27) == 4 && fit(42) == 4 && fit(43) == 8 && fit(75) == 8 && fit(76) == 16, "the widest row that fits, and the narrowest if none does")
+    check(fit(108) == 16 && fit(109) == 24 && fit(141) == 24 && fit(142) == 32 && fit(273) == 48 && fit(5000) == 64, "up to sixty-four")
+    check(fit(90, radix: .binary) == 4 && fit(91, radix: .binary) == 8, "binary is wider and fits fewer")
+}
+
+// MARK: Bytes: the selection
+
+do {
+    let one = ByteSelection(at: 5)
+    check(one.range == 5..<6 && one.count == 1 && one.lowerBound == 5 && one.upperBound == 5, "one byte is a selection of one")
+    let backwards = ByteSelection(anchor: 10, head: 4)
+    check(backwards.lowerBound == 4 && backwards.upperBound == 10 && backwards.count == 7 && backwards.range == 4..<11, "a selection made backwards covers the same bytes")
+    check(backwards.contains(10) && backwards.contains(4) && !backwards.contains(11) && !backwards.contains(3), "and contains both its ends and nothing beyond")
+
+    func move(_ selection: ByteSelection, _ move: ByteSelection.Move, extending: Bool = false, length: Int64 = 100) -> ByteSelection {
+        selection.moved(move, extending: extending, bytesPerRow: 16, rowsPerPage: 4, length: length)
+    }
+    check(move(ByteSelection(at: 0), .left).head == 0 && move(ByteSelection(at: 99), .right).head == 99, "the arrows stop at the ends of the file")
+    check(move(ByteSelection(at: 5), .right).head == 6 && move(ByteSelection(at: 5), .left).head == 4, "and move a byte")
+    check(move(ByteSelection(at: 20), .up).head == 4 && move(ByteSelection(at: 3), .up).head == 0, "up is a row, and stops at the top")
+    check(move(ByteSelection(at: 20), .down).head == 36 && move(ByteSelection(at: 90), .down).head == 99, "down is a row, and stops at the last byte")
+    check(move(ByteSelection(at: 10), .pageDown).head == 74 && move(ByteSelection(at: 74), .pageUp).head == 10, "a page is four rows here")
+    check(move(ByteSelection(at: 70), .pageDown).head == 99 && move(ByteSelection(at: 30), .pageUp).head == 0, "and stops at the ends")
+    check(move(ByteSelection(at: 37), .rowStart).head == 32 && move(ByteSelection(at: 37), .rowEnd).head == 47, "home and end go to the ends of the row")
+    check(move(ByteSelection(at: 37), .rowEnd, length: 40).head == 39, "but not past the end of the file")
+    check(move(ByteSelection(at: 37), .fileStart).head == 0 && move(ByteSelection(at: 37), .fileEnd).head == 99, "and of the file")
+    check(move(ByteSelection(at: 3), .left, length: 0) == ByteSelection(at: 3), "an empty file has nowhere to go")
+
+    let grown = move(ByteSelection(at: 10), .right, extending: true)
+    check(grown.anchor == 10 && grown.head == 11 && grown.count == 2, "shift extends from where it started")
+    let shrunk = move(move(grown, .left, extending: true), .left, extending: true)
+    check(shrunk.anchor == 10 && shrunk.head == 9 && shrunk.range == 9..<11, "and back over it and on the other side")
+    check(move(ByteSelection(anchor: 10, head: 20), .left) == ByteSelection(at: 19), "without shift a selection becomes the byte the arrow lands on")
+
+    check(ByteSelection(anchor: 50, head: 90).limited(toLength: 60) == ByteSelection(anchor: 50, head: 59), "a selection is brought back inside a file that shrank")
+    check(ByteSelection(anchor: 50, head: 90).limited(toLength: 0) == nil, "and there is none in an empty file")
+
+    let spanning = ByteSelection(anchor: 14, head: 35)
+    check(spanning.indices(inRow: 0, bytesPerRow: 16) == 14..<16 && spanning.indices(inRow: 1, bytesPerRow: 16) == 0..<16, "a selection across rows covers the end of one and all of the next")
+    check(spanning.indices(inRow: 2, bytesPerRow: 16) == 0..<4 && spanning.indices(inRow: 3, bytesPerRow: 16) == nil, "and the start of the last, and none after")
+    check(ByteSelection(at: 20).indices(inRow: 1, bytesPerRow: 16) == 4..<5 && ByteSelection(at: 20).indices(inRow: 0, bytesPerRow: 16) == nil, "a byte is in one row only")
+}
+
+// MARK: Bytes: what the bytes might be
+
+do {
+    func reading(_ bytes: [UInt8], _ label: String, _ order: Endianness = .little) -> String? {
+        ByteInterpreter.interpret(bytes, endianness: order).first { $0.label == label }?.value
+    }
+    check(ByteInterpreter.interpret([], endianness: .little).isEmpty, "nothing selected, nothing to read")
+
+    check(reading([0x41], "uint8") == "65 (0x41)" && reading([0x41], "int8") == "65" && reading([0x41], "binary") == "01000001", "one byte")
+    check(reading([0x41], "char") == "'A'" && reading([0x41], "UTF-8") == "A", "as a character and as text")
+    check(reading([0xFF], "int8") == "-1" && reading([0xFF], "uint8") == "255 (0xFF)", "a byte is signed and unsigned")
+    check(reading([0x00], "char") == "NUL" && reading([0x0A], "char") == "LF" && reading([0x20], "char") == "space" && reading([0x80], "char") == "not printable",
+          "and control characters are named")
+
+    check(reading([1, 2, 3, 4], "uint32") == "67305985 (0x04030201)" && reading([1, 2, 3, 4], "uint32", .big) == "16909060 (0x01020304)", "four bytes, either way round")
+    check(reading([1, 2, 3, 4], "uint16") == "513 (0x0201)" && reading([1, 2, 3, 4], "uint16", .big) == "258 (0x0102)", "the first two of them")
+    check(reading([0xFF, 0xFF], "int16") == "-1" && reading([0xFF, 0xFF], "uint16") == "65535 (0xFFFF)", "sixteen bits")
+    check(reading([0xFF, 0xFF, 0xFF, 0xFF], "int32") == "-1", "and thirty-two")
+    check(reading([0, 0, 0x80, 0x3F], "float32") == "1.0" && reading([0x3F, 0x80, 0, 0], "float32", .big) == "1.0", "a float is 1.0 in the order it was written")
+    check(reading([0, 0, 0, 0, 0, 0, 0xF0, 0x3F], "float64") == "1.0", "and a double")
+    check(reading([1, 0, 0, 0, 0, 0, 0, 0], "uint64") == "1 (0x0000000000000001)" && reading([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], "int64") == "-1", "sixty-four bits")
+    check(reading([1, 2, 3], "uint32") == nil && reading([1, 2, 3], "uint16") != nil && reading([1], "uint16") == nil,
+          "a reading appears only when there are enough bytes for it")
+    check(reading([1, 2, 3, 4, 5, 6, 7], "uint64") == nil && reading([1, 2, 3, 4, 5, 6, 7, 8], "uint64") != nil, "seven bytes are not a 64-bit number")
+
+    check(reading([0xD2, 0x02, 0x96, 0x49], "Unix time") == "2009-02-13 23:31:30 UTC", "1234567890 is a famous second")
+    check(reading([0x49, 0x96, 0x02, 0xD2], "Unix time", .big) == "2009-02-13 23:31:30 UTC", "in either order")
+    check(ByteInterpreter.utcString(unixSeconds: 0) == "1970-01-01 00:00:00 UTC" && ByteInterpreter.utcString(unixSeconds: 86_399) == "1970-01-01 23:59:59 UTC", "the epoch")
+    check(ByteInterpreter.utcString(unixSeconds: -1) == "1969-12-31 23:59:59 UTC", "and the second before it")
+    check(ByteInterpreter.utcString(unixSeconds: 951_782_400) == "2000-02-29 00:00:00 UTC", "a leap day")
+    check(ByteInterpreter.utcString(unixSeconds: 4_102_444_800) == "2100-01-01 00:00:00 UTC" && ByteInterpreter.utcString(unixSeconds: 4_294_967_295) == "2106-02-07 06:28:15 UTC",
+          "and the year 2100, which is not a leap year, and the end of 32 bits")
+    check(reading([0, 0xF5, 0x96, 0x32, 0x33, 0x8E, 0xC9, 0x01], "Windows time") == "2009-02-13 23:31:30 UTC", "a Windows FILETIME")
+    check(reading([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], "Windows time") == nil && reading([0, 0, 0, 0, 0, 0, 0, 0], "Windows time") == nil,
+          "but only one that is a date")
+
+    check(reading([192, 168, 1, 10], "IPv4") == "192.168.1.10" && reading([192, 168, 1], "IPv4") == nil && reading([1, 2, 3, 4, 5], "IPv4") == nil, "an address is read when exactly four bytes are selected")
+    check(reading([0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E], "MAC") == "00:1A:2B:3C:4D:5E" && reading([1, 2, 3, 4, 5], "MAC") == nil, "and a hardware address, six")
+
+    check(reading([0xE5, 0x8E, 0x26], "varint") == "624485 (3 bytes)" && reading([0x96, 0x01], "varint") == "150 (2 bytes)", "a varint from protobuf")
+    check(reading([0x05], "varint") == nil && reading([0x80, 0x80], "varint") == nil, "but not one byte, or one that does not end")
+    check(ByteInterpreter.varint([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01])?.0 == UInt64.max
+          && ByteInterpreter.varint([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02]) == nil
+          && ByteInterpreter.varint([UInt8](repeating: 0x80, count: 11)) == nil, "ten bytes at most, and the tenth carries one bit")
+
+    check(reading([0xE2, 0x82, 0xAC], "UTF-8") == "€", "UTF-8")
+    check(reading([0xFF, 0xFE, 0x41], "UTF-8") == nil, "which must be valid to be shown")
+    check(reading([0x41, 0x0A, 0x09, 0x00], "UTF-8") == "A\\n\\t\\x00", "with control characters spelled out")
+    check(reading([0x41, 0x00, 0x42, 0x00], "UTF-16") == "AB" && reading([0x00, 0x41, 0x00, 0x42], "UTF-16", .big) == "AB", "UTF-16")
+    check(reading([0x00, 0xD8, 0x41, 0x00], "UTF-16") == nil && reading([0x41], "UTF-16") == nil, "which must be valid, and whole")
+    check(reading([UInt8](repeating: 0x41, count: 300), "UTF-8") == String(repeating: "A", count: ByteInterpreter.maxTextBytes), "text is read from the first part of a long selection")
+    check(Set(ByteInterpreter.interpret([1, 2, 3, 4, 5, 6, 7, 8], endianness: .little).map(\.label)).count
+          == ByteInterpreter.interpret([1, 2, 3, 4, 5, 6, 7, 8], endianness: .little).count, "each reading has its own name")
+}
+
+// MARK: Bytes: go to
+
+do {
+    func go(_ text: String, cursor: Int64 = 100, length: Int64 = 1000) -> Int64? {
+        if case .success(let offset) = OffsetExpression.resolve(text, cursor: cursor, length: length) { return offset }
+        return nil
+    }
+    func why(_ text: String, cursor: Int64 = 100, length: Int64 = 1000) -> OffsetExpression.Failure? {
+        if case .failure(let failure) = OffsetExpression.resolve(text, cursor: cursor, length: length) { return failure }
+        return nil
+    }
+    check(go("0x1F") == 31 && go("$1f") == 31 && go("1Fh") == 31 && go("31") == 31 && go("  31 ") == 31, "hex three ways, and decimal")
+    check(go("0") == 0 && go("999") == 999, "the first byte and the last")
+    check(go("+0x10") == 116 && go("-16") == 84 && go("+5") == 105 && go("+ 5") == 105, "from the cursor")
+    check(go("end") == 999 && go("end-0x20") == 967 && go("end - 1") == 998 && go("END") == 999, "from the end")
+    check(go("50%") == 500 && go("100%") == 999 && go("0%") == 0 && go("33%", length: 10) == 3, "part of the way through")
+    check(go("00000100") == 100, "a number with no prefix is decimal, whatever its zeros say")
+
+    check(why("") == .empty && why("   ") == .empty, "nothing typed")
+    check(why("abc") == .notANumber && why("0x") == .notANumber && why("12x") == .notANumber && why("--5") == .notANumber && why("1.5") == .notANumber, "what is not a number")
+    check(why("101%") == .notANumber && why("end+5") == .notANumber && why("end-") == .notANumber && why("%") == .notANumber, "or not one of the forms")
+    check(why("1000") == .outOfRange(length: 1000) && why("0x3E8") == .outOfRange(length: 1000), "a byte past the end")
+    check(why("-101") == .outOfRange(length: 1000) && why("+900") == .outOfRange(length: 1000) && why("end-1000") == .outOfRange(length: 1000), "and a move that leaves the file")
+    check(why("0xFFFFFFFFFFFFFFFFFFFF") == .outOfRange(length: 1000) && why("99999999999999999999") == .outOfRange(length: 1000), "a number too big for 64 bits is out of range, not nonsense")
+    check(why("+9223372036854775807", cursor: 5) == .outOfRange(length: 1000) && why("-9223372036854775807", cursor: -5) == .outOfRange(length: 1000), "and arithmetic that would overflow does not trap")
+    check(why("0", length: 0) == .outOfRange(length: 0) && why("end", length: 0) == .outOfRange(length: 0), "an empty file has no byte to go to")
+    check([OffsetExpression.Failure.empty, .notANumber, .outOfRange(length: 7)].allSatisfy { OffsetExpression.message($0).count > 10 }, "each failure has a sentence")
+    check(OffsetExpression.message(.outOfRange(length: 7)).contains("7 bytes"), "which names the length")
+}
+
+// MARK: Bytes: copying out
+
+do {
+    let hello: [UInt8] = [0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A]
+    check(ByteExport.string(hello, as: .spacedHex) == "48 65 6C 6C 6F 0A", "hex, spaced")
+    check(ByteExport.string(hello, as: .hex) == "48656C6C6F0A", "hex")
+    check(ByteExport.string(hello, as: .pythonBytes) == "b\"\\x48\\x65\\x6c\\x6c\\x6f\\x0a\"", "a Python bytes literal")
+    check(ByteExport.string(hello, as: .base64) == "SGVsbG8K", "Base64")
+    check(ByteExport.string(hello, as: .text) == "Hello.", "text, with a dot for what is not printable")
+    check(ByteExport.string(hello, as: .cArray) == "unsigned char data[] = {\n    0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A\n};", "a C array")
+    let thirteen = ByteExport.string([UInt8](repeating: 0xAB, count: 13), as: .cArray)
+    check(thirteen.components(separatedBy: "\n").count == 4 && thirteen.contains("0xAB,\n    0xAB\n};"), "which wraps at twelve to a line")
+    check(ByteExport.string([], as: .hex).isEmpty && ByteExport.string([], as: .spacedHex).isEmpty && ByteExport.string([], as: .base64).isEmpty, "nothing copies as nothing")
+    check(ByteExport.string([], as: .cArray) == "unsigned char data[] = {};" && ByteExport.string([], as: .pythonBytes) == "b\"\"", "in a form that is still valid")
+    check(ByteExportFormat.allCases.allSatisfy { !$0.title.isEmpty }, "every format has a name")
+}
+
+// MARK: Bytes: editing
+
+do {
+    func makeBuffer(_ bytes: [UInt8]) -> ByteEditBuffer { ByteEditBuffer(source: DataByteSource(bytes)) }
+    func ok(_ body: () throws -> Void) -> Bool {
+        do { try body(); return true } catch { return false }
+    }
+    func failure(_ body: () throws -> Void) -> ByteEditError? {
+        do { try body() } catch let error as ByteEditError { return error } catch { return nil }
+        return nil
+    }
+    func contents(_ buffer: ByteEditBuffer) -> [UInt8] { buffer.read(0..<buffer.length) }
+    func streamed(_ buffer: ByteEditBuffer, chunk: Int) -> [UInt8] {
+        var out: [UInt8] = []
+        _ = try? buffer.stream(chunkSize: chunk) { out.append(contentsOf: $0) }
+        return out
+    }
+
+    let original: [UInt8] = Array(0..<10)
+    var buffer = makeBuffer(original)
+    check(buffer.length == 10 && contents(buffer) == original && !buffer.isDirty && !buffer.canUndo && !buffer.canRedo && buffer.revision == 0, "a buffer begins as its source")
+
+    var wrote = 0
+    check(ok { wrote = try buffer.overwrite(at: 2, with: [0xAA, 0xBB]) } && wrote == 2, "overwriting says how much it wrote")
+    check(contents(buffer) == [0, 1, 0xAA, 0xBB, 4, 5, 6, 7, 8, 9] && buffer.length == 10, "and replaces those bytes and no others")
+    check(buffer.isDirty && buffer.canUndo && !buffer.canRedo && buffer.revision == 1, "which makes it dirty")
+    check(buffer.undo() && contents(buffer) == original && !buffer.isDirty && buffer.canRedo && !buffer.canUndo, "undo puts them back, and a buffer undone to its start is clean")
+    check(buffer.redo() && contents(buffer) == [0, 1, 0xAA, 0xBB, 4, 5, 6, 7, 8, 9] && buffer.isDirty, "and redo does it again")
+    check(!buffer.redo() && buffer.undo() && !buffer.undo(), "there is only so far to go either way")
+
+    check(ok { try buffer.insert(at: 3, bytes: [0xC0, 0xC1, 0xC2]) } && contents(buffer) == [0, 1, 2, 0xC0, 0xC1, 0xC2, 3, 4, 5, 6, 7, 8, 9] && buffer.length == 13,
+          "inserting moves what follows")
+    check(buffer.undo() && contents(buffer) == original && buffer.length == 10, "and undo takes it out")
+    check(ok { try buffer.delete(2..<5) } && contents(buffer) == [0, 1, 5, 6, 7, 8, 9] && buffer.length == 7, "deleting closes the gap")
+    check(buffer.undo() && contents(buffer) == original, "and undo opens it")
+    check(ok { try buffer.fill(3..<7, with: 0xEE) } && contents(buffer) == [0, 1, 2, 0xEE, 0xEE, 0xEE, 0xEE, 7, 8, 9] && buffer.length == 10, "filling sets a run")
+    check(buffer.undo() && contents(buffer) == original, "and undo restores it")
+
+    check(ok { try buffer.insert(at: 0, bytes: [0xF0]) } && ok { try buffer.insert(at: 99, bytes: [0xF1]) } && contents(buffer) == [0xF0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xF1],
+          "inserting at the start, and past the end, which is the end")
+    check(ok { try buffer.delete(-5..<2) } && contents(buffer) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 0xF1], "a range that starts before the start is cut to it")
+    check(ok { try buffer.delete(8..<500) } && contents(buffer) == [1, 2, 3, 4, 5, 6, 7, 8], "and one that runs past the end is cut to it")
+    while buffer.undo() {}
+    check(contents(buffer) == original && !buffer.isDirty, "undoing everything gets the original back")
+
+    // What does not change anything leaves no trace.
+    var quiet = makeBuffer(original)
+    check(((try? quiet.overwrite(at: 10, with: [1])) ?? -1) == 0 && ((try? quiet.overwrite(at: -1, with: [1])) ?? -1) == 0 && ((try? quiet.overwrite(at: 3, with: [])) ?? -1) == 0,
+          "an overwrite outside the file, or of nothing, writes nothing")
+    check(ok { try quiet.insert(at: 3, bytes: []) } && ok { try quiet.delete(4..<4) } && ok { try quiet.delete(20..<30) } && ok { try quiet.fill(5..<5, with: 1) },
+          "and neither does an insert of nothing or a delete of nothing")
+    check(!quiet.isDirty && !quiet.canUndo && quiet.revision == 0 && contents(quiet) == original, "none of them is a step, or a change")
+    check(((try? quiet.overwrite(at: 8, with: [1, 2, 3, 4])) ?? -1) == 2 && contents(quiet) == [0, 1, 2, 3, 4, 5, 6, 7, 1, 2], "an overwrite that runs past the end is cut to the file, which does not grow")
+
+    // The whole file, deleted, and typed into an empty one.
+    var emptied = makeBuffer(original)
+    check(ok { try emptied.delete(0..<10) } && emptied.length == 0 && emptied.read(0..<10).isEmpty && emptied.pieces.isEmpty, "everything can be deleted")
+    check(ok { try emptied.insert(at: 0, bytes: [1, 2]) } && contents(emptied) == [1, 2], "and typed into again")
+    check(emptied.undo() && emptied.undo() && contents(emptied) == original, "and brought back")
+    var fromNothing = makeBuffer([])
+    check(fromNothing.length == 0 && fromNothing.pieces.isEmpty && ok { try fromNothing.insert(at: 0, bytes: [7, 8, 9]) } && contents(fromNothing) == [7, 8, 9] && fromNothing.undo() && fromNothing.length == 0,
+          "a buffer over nothing can be typed into, and undone to nothing")
+
+    // Every range of a buffer with several edits in it reads the same as an array that had the same edits.
+    var layered = makeBuffer(Array(0..<24))
+    var model: [UInt8] = Array(0..<24)
+    _ = try? layered.overwrite(at: 5, with: [0xA1, 0xA2, 0xA3]); model.replaceSubrange(5..<8, with: [0xA1, 0xA2, 0xA3])
+    try? layered.insert(at: 10, bytes: [0xB1, 0xB2]); model.insert(contentsOf: [0xB1, 0xB2], at: 10)
+    try? layered.delete(14..<17); model.removeSubrange(14..<17)
+    try? layered.fill(0..<2, with: 0xFF); model.replaceSubrange(0..<2, with: [0xFF, 0xFF])
+    var differing = 0
+    for from in -2...(model.count + 2) {
+        for to in from...(model.count + 3) {
+            let wanted = Array(model[max(0, min(from, model.count))..<max(max(0, min(from, model.count)), min(to, model.count))])
+            if layered.read(Int64(from)..<Int64(to)) != wanted { differing += 1 }
+        }
+    }
+    check(differing == 0 && contents(layered) == model, "\(differing) ranges of an edited buffer read differently from the same edits to an array")
+
+    // A long run of random edits, against an array, with undo and redo mixed in, and a save now and then.
+    var random = BytesCheckRandom(seed: 2024)
+    let start: [UInt8] = (0..<40).map { _ in random.byte() }
+    var subject = makeBuffer(start)
+    var current: (bytes: [UInt8], id: Int) = (start, 0)
+    var undoStates: [(bytes: [UInt8], id: Int)] = []
+    var redoStates: [(bytes: [UInt8], id: Int)] = []
+    var savedID: Int? = 0
+    var nextID = 1
+    var trouble: [String] = []
+    func randomBytes(_ count: Int, _ random: inout BytesCheckRandom) -> [UInt8] { (0..<count).map { _ in random.byte() } }
+    for step in 0..<600 {
+        let before = subject.revision
+        var after = current.bytes
+        let kind = random.below(10)
+        let length = after.count
+        // Offsets reach a little outside the file on purpose, to be clamped.
+        let offset = random.below(length + 6) - 3
+        let size = random.below(9)
+        var label = ""
+        switch kind {
+        case 0, 1, 2:
+            label = "overwrite"
+            let bytes = randomBytes(size, &random)
+            _ = try? subject.overwrite(at: Int64(offset), with: bytes)
+            if offset >= 0, offset < length, !bytes.isEmpty {
+                let count = min(bytes.count, length - offset)
+                after.replaceSubrange(offset..<(offset + count), with: bytes[0..<count])
+            }
+        case 3, 4:
+            label = "insert"
+            let bytes = randomBytes(size, &random)
+            try? subject.insert(at: Int64(offset), bytes: bytes)
+            after.insert(contentsOf: bytes, at: min(max(offset, 0), length))
+        case 5, 6:
+            label = "delete"
+            let upper = offset + size
+            try? subject.delete(Int64(offset)..<Int64(upper))
+            let lower = min(max(offset, 0), length)
+            let top = min(max(upper, lower), length)
+            after.removeSubrange(lower..<top)
+        case 7:
+            label = "fill"
+            let value = random.byte()
+            let upper = offset + size
+            try? subject.fill(Int64(offset)..<Int64(upper), with: value)
+            let lower = min(max(offset, 0), length)
+            let top = min(max(upper, lower), length)
+            after.replaceSubrange(lower..<top, with: [UInt8](repeating: value, count: top - lower))
+        case 8:
+            label = "undo"
+            if subject.undo(), let previous = undoStates.popLast() {
+                redoStates.append(current)
+                current = previous
+            } else if !undoStates.isEmpty {
+                trouble.append("step \(step): the buffer could not undo and the model could")
+            }
+            after = current.bytes
+        default:
+            if random.below(3) == 0 {
+                label = "save"
+                subject.markSaved()
+                savedID = current.id
+            } else {
+                label = "redo"
+                if subject.redo(), let next = redoStates.popLast() {
+                    undoStates.append(current)
+                    current = next
+                } else if !redoStates.isEmpty {
+                    trouble.append("step \(step): the buffer could not redo and the model could")
+                }
+            }
+            after = current.bytes
+        }
+        if subject.revision != before, ["overwrite", "insert", "delete", "fill"].contains(label) {
+            undoStates.append(current)
+            redoStates.removeAll()
+            current = (after, nextID)
+            nextID += 1
+        }
+        if contents(subject) != current.bytes || subject.length != Int64(current.bytes.count) {
+            trouble.append("step \(step) (\(label)): the content differs from the array's")
+        }
+        if subject.isDirty != (current.id != savedID) { trouble.append("step \(step) (\(label)): dirty is \(subject.isDirty)") }
+        if subject.canUndo != !undoStates.isEmpty || subject.canRedo != !redoStates.isEmpty { trouble.append("step \(step) (\(label)): undo or redo is available when it should not be") }
+        if step % 50 == 0, streamed(subject, chunk: 1 + random.below(9)) != current.bytes { trouble.append("step \(step): the stream differs from the content") }
+        if trouble.count > 5 { break }
+    }
+    check(trouble.isEmpty, "600 random edits against an array: \(trouble.prefix(5))")
+    while subject.redo() {}
+    let furthest = contents(subject)
+    while subject.undo() {}
+    check(contents(subject) == start && subject.length == 40, "undoing every step of the random edits gets the original back")
+    while subject.redo() {}
+    check(contents(subject) == furthest, "and redoing every one gets back to where they ended")
+
+    // Typing a run of bytes is one step, one piece, and one undo.
+    var typed = makeBuffer([UInt8](repeating: 0, count: 100))
+    check(ok { try typed.overwrite(at: 3, with: [1], coalescing: true) } && ok { try typed.overwrite(at: 4, with: [2], coalescing: true) } && ok { try typed.overwrite(at: 5, with: [3], coalescing: true) },
+          "three bytes typed one after another")
+    check(typed.pieces.count == 3, "are one piece between the rest, not three: \(typed.pieces.count)")
+    check(typed.undo() && typed.read(0..<10) == [UInt8](repeating: 0, count: 10) && !typed.canUndo, "and one step of undo")
+    check(typed.redo() && typed.read(3..<6) == [1, 2, 3] && typed.undo(), "and one of redo")
+    check(ok { try typed.overwrite(at: 3, with: [1], coalescing: true) } && ok { try typed.overwrite(at: 9, with: [9], coalescing: true) } && ok { try typed.overwrite(at: 10, with: [8], coalescing: true) },
+          "a byte typed somewhere else")
+    check(typed.undo() && typed.read(9..<11) == [0, 0] && typed.read(3..<4) == [1], "is a step of its own, with the run that continues from it")
+    check(typed.undo() && typed.read(3..<4) == [0] && !typed.canUndo, "and the first is another")
+    check(ok { try typed.overwrite(at: 1, with: [5], coalescing: true) } && ok { try typed.overwrite(at: 2, with: [6], coalescing: false) } && ok { try typed.overwrite(at: 3, with: [7], coalescing: true) },
+          "only an edit made with coalescing joins the one before")
+    check(typed.undo() && typed.read(1..<4) == [5, 6, 0] && typed.undo() && typed.read(1..<4) == [5, 0, 0] && typed.undo() && typed.read(1..<4) == [0, 0, 0],
+          "so these are three steps")
+    check(ok { try typed.overwrite(at: 1, with: [5], coalescing: true) } && ok { try typed.overwrite(at: 3, with: [7], coalescing: true) } && typed.undo() && typed.read(1..<4) == [5, 0, 0],
+          "an edit that does not begin where the last ended does not join it either")
+    var saved = makeBuffer([UInt8](repeating: 0, count: 20))
+    check(ok { try saved.overwrite(at: 3, with: [1], coalescing: true) }, "typing")
+    saved.markSaved()
+    check(!saved.isDirty && ok { try saved.overwrite(at: 4, with: [2], coalescing: true) } && saved.isDirty, "a save, and more typing")
+    check(saved.undo() && !saved.isDirty && saved.read(3..<5) == [1, 0], "which undoes without taking back what was saved")
+
+    // Dirty means different from what was saved.
+    var tracked = makeBuffer(original)
+    check(ok { try tracked.overwrite(at: 0, with: [9]) } && tracked.isDirty, "an edit")
+    tracked.markSaved()
+    check(!tracked.isDirty && tracked.canUndo, "saving makes it clean and keeps the history")
+    check(ok { try tracked.overwrite(at: 1, with: [9]) } && tracked.isDirty && tracked.undo() && !tracked.isDirty, "undoing back to what was saved is clean")
+    check(tracked.undo() && tracked.isDirty && tracked.redo() && !tracked.isDirty, "undoing past it is not, and coming back is")
+    check(tracked.undo() && ok { try tracked.overwrite(at: 2, with: [9]) } && tracked.isDirty && !tracked.redo(), "an edit after undoing past it...")
+    check(tracked.undo() && tracked.isDirty, "...buries it: the state that was saved can no longer be reached")
+
+    // When the edit is refused, nothing has happened.
+    var capped = makeBuffer([UInt8](repeating: 1, count: 50))
+    capped.pieceLimit = 4
+    check(ok { try capped.overwrite(at: 10, with: [9]) } && capped.pieces.count == 3, "one edit in the middle makes three pieces")
+    let beforeRefusal = (contents(capped), capped.revision, capped.pieces)
+    check(failure { try capped.overwrite(at: 30, with: [9]) } == ByteEditError.tooManyPieces, "a second would make five, over the limit of four")
+    check(contents(capped) == beforeRefusal.0 && capped.revision == beforeRefusal.1 && capped.pieces == beforeRefusal.2, "and is refused with nothing changed")
+    check(ok { try capped.delete(10..<11) } && capped.pieces.count == 2, "an edit that makes fewer pieces is still allowed")
+    check(capped.undo() && capped.undo() && contents(capped) == [UInt8](repeating: 1, count: 50), "and undo works at the limit")
+    var small = makeBuffer(original)
+    small.addedByteLimit = 3
+    check(failure { try small.insert(at: 0, bytes: [1, 2, 3, 4]) } == ByteEditError.tooMuchAddedData && contents(small) == original, "too many new bytes are refused, with nothing changed")
+    check(ok { try small.insert(at: 0, bytes: [1, 2, 3]) } && failure { try small.insert(at: 0, bytes: [1]) } == ByteEditError.tooMuchAddedData, "and the limit counts what is already there")
+
+    // A source that comes back short: a prefix to read, an error to stream.
+    let sunk = ByteEditBuffer(source: BytesCheckShortSource(claiming: 10, available: [1, 2, 3, 4]))
+    check(sunk.read(0..<10) == [1, 2, 3, 4], "a read that comes back short gives the prefix, never a hole")
+    var sunkOut: [UInt8] = []
+    check(failure { try sunk.stream { sunkOut.append(contentsOf: $0) } } == ByteEditError.unreadable(offset: 0), "and a save from it stops, saying where")
+    var edited = sunk
+    _ = try? edited.overwrite(at: 0, with: [9, 9])
+    var editedOut: [UInt8] = []
+    check(failure { try edited.stream { editedOut.append(contentsOf: $0) } } == ByteEditError.unreadable(offset: 2) && editedOut == [9, 9],
+          "even past an edit, at the right place")
+    check(edited.read(0..<10) == [9, 9, 3, 4], "which a read shows as far as it goes")
+
+    // A copy is a snapshot: the original goes on without it.
+    var live = makeBuffer(original)
+    _ = try? live.overwrite(at: 0, with: [7])
+    let snapshot = live
+    _ = try? live.overwrite(at: 1, with: [8])
+    check(contents(snapshot) == [7, 1, 2, 3, 4, 5, 6, 7, 8, 9] && contents(live) == [7, 8, 2, 3, 4, 5, 6, 7, 8, 9] && snapshot.revision == 1 && live.revision == 2,
+          "a copy of a buffer keeps the revision it was taken at")
+
+    // Over a real file, saved to another.
+    let fileManager = FileManager.default
+    let path = NSTemporaryDirectory() + "bytes-edit-\(UUID().uuidString).bin"
+    defer { try? fileManager.removeItem(atPath: path) }
+    var fileRandom = BytesCheckRandom(seed: 5)
+    let fileBytes: [UInt8] = (0..<150_000).map { _ in fileRandom.byte() }
+    _ = fileManager.createFile(atPath: path, contents: Data(fileBytes))
+    if case .success(let source) = FileByteSource.opening(path: path) {
+        var onFile = ByteEditBuffer(source: source)
+        var expected = fileBytes
+        _ = try? onFile.overwrite(at: 65_535, with: [1, 2, 3, 4]); expected.replaceSubrange(65_535..<65_539, with: [1, 2, 3, 4])
+        try? onFile.insert(at: 100, bytes: [9, 9, 9]); expected.insert(contentsOf: [9, 9, 9], at: 100)
+        try? onFile.delete(140_000..<149_000); expected.removeSubrange(140_000..<149_000)
+        try? onFile.fill(70_000..<70_100, with: 0); expected.replaceSubrange(70_000..<70_100, with: [UInt8](repeating: 0, count: 100))
+        check(onFile.length == Int64(expected.count) && streamed(onFile, chunk: 64 * 1024) == expected, "a buffer over a file streams out the file with its edits")
+        check(streamed(onFile, chunk: 1000) == expected && onFile.read(65_530..<65_545) == Array(expected[65_530..<65_545]), "in any size of chunk, and reads across the edits")
+    } else {
+        check(false, "the file to edit opens")
+    }
 }
 
 print("\(checks - failures)/\(checks) checks passed")

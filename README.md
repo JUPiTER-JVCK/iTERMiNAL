@@ -513,6 +513,15 @@ A tour of the app in thirty-four pictures, in five groups.
   them on), a same-site crawl that obeys `robots.txt`, and **Ask…**, which has your
   AI assistant read the page into rows, are each one click, after a sheet that says
   what they will do. See [Extract](#extract).
+- **Bytes panel** — drop any file on it (⌥⌘Y), or choose one, and see every byte:
+  as hex, decimal or octal with the text beside it, or as the bits. It reads only
+  the part you are looking at, so a multi-gigabyte video opens as quickly as a
+  note. Click or drag to select; the inspector reads the selection as numbers of
+  each size (little- or big-endian), a character, text, a time and an address.
+  Go to an offset (`0x1F40`, `+16`, `end-0x20`, `50%`), and copy the selection as
+  hex, a C array, Python bytes or Base64. It only looks: the file is opened
+  read-only and never changed. Folders, pipes and devices are refused, as they
+  are not a fixed set of bytes.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -1556,6 +1565,7 @@ bind:
 | Show / hide sidebar | ⌃⌘S |
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
+| Bytes panel | ⌥⌘Y |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
 | superfile / btop in full view | ⌥⇧⌘S / ⌥⇧⌘P |
 | Bigger / smaller text, actual size | ⌘+ / ⌘- / ⌘0 |
@@ -1602,7 +1612,11 @@ Sources/
 │   │                only — and the views that draw it and take a drag)
 │   ├── Panels/      scriptable browser pane, file pane, notes, HTTP client pane
 │   │                with the site explorer and the Extract tab (previews, crawler,
-│   │                assistant)
+│   │                assistant), the Bytes panel and its hex grid
+│   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
+│   │                file, rows and columns, what a selection reads as, go-to
+│   │                and the copy formats, and an edit buffer the panel does not
+│   │                use yet — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
 │   │                robots rules, crawl frontier — Foundation-only

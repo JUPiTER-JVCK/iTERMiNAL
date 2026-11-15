@@ -360,6 +360,9 @@ struct CommandPaletteView: View {
             PaletteAction(id: "panel.http", title: "Toggle HTTP Client Panel", systemImage: "sidebar.right", shortcut: "⌥⌘R") {
                 store.togglePanel(.http)
             },
+            PaletteAction(id: "panel.bytes", title: "Toggle Bytes Panel", subtitle: "Every byte of any file, in hex or bits", systemImage: "sidebar.right", shortcut: "⌥⌘Y") {
+                store.togglePanel(.bytes)
+            },
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()
             },

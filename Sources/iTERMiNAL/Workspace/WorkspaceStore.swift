@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files, notes, superfile, btop, http
+    case browser, files, notes, superfile, btop, http, bytes
     var id: String { rawValue }
 
     /// The bundled program this panel runs, for the two that are one.
@@ -14,7 +14,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         switch self {
         case .superfile: return .superfile
         case .btop: return .btop
-        case .browser, .files, .notes, .http: return nil
+        case .browser, .files, .notes, .http, .bytes: return nil
         }
     }
 
@@ -28,6 +28,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .superfile: return TerminalTool.superfile.title
         case .btop: return TerminalTool.btop.title
         case .http: return "HTTP Client"
+        case .bytes: return "Bytes"
         }
     }
     var icon: String {
@@ -38,6 +39,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .superfile: return TerminalTool.superfile.icon
         case .btop: return TerminalTool.btop.icon
         case .http: return "arrow.up.arrow.down"
+        case .bytes: return "number.square"
         }
     }
 
@@ -52,6 +54,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .superfile: return "⌥⌘S"
         case .btop: return "⌥⌘P"
         case .http: return "⌥⌘R"
+        case .bytes: return "⌥⌘Y"
         }
     }
 
@@ -74,13 +77,16 @@ enum SidePanel: String, CaseIterable, Identifiable {
     ///
     /// The HTTP client has its own history list and builder side by side
     /// inside it, which is why it is asked for a little more width than the
-    /// rest.
+    /// rest. The Bytes panel is asked for room for a row of eight bytes beside
+    /// its scroller, and for enough height that the grid still has a few rows
+    /// with the inspector open.
     var dockMinimum: DockSize {
         switch self {
         case .browser: return DockSize(width: 280, height: 220)
         case .files: return DockSize(width: 280, height: 180)
         case .notes: return DockSize(width: 280, height: 160)
         case .http: return DockSize(width: 360, height: 340)
+        case .bytes: return DockSize(width: 380, height: 340)
         case .superfile, .btop: return DockSize(width: minimumWidth ?? 640, height: 360)
         }
     }
@@ -309,6 +315,9 @@ final class WorkspaceStore: ObservableObject {
     lazy var panelBrowserTabs = BrowserTabsModel()
     lazy var panelFiles = FileBrowserModel()
     lazy var panelHTTPClient = HTTPClientModel(id: HTTPClientModel.sidePanelHistoryID)
+    /// Kept for as long as the app runs, so closing the panel puts the file away
+    /// without letting go of it or what was selected in it.
+    lazy var panelBytes = BytesViewerModel()
 
     /// The notes, kept together and not tied to a space.
     let panelNotes = NotesModel()
@@ -1369,6 +1378,8 @@ final class WorkspaceStore: ObservableObject {
         // terminal's directory, there is no "current thing" to seed a
         // request from, and seeding anything would mean firing a network
         // request the instant the panel opens.
+        // Nor for .bytes: it shows a file the person gives it, and opening the
+        // panel is not a reason to look at one.
         scheduleSave()
     }
 
