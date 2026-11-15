@@ -211,6 +211,12 @@ struct ComposerBar: View {
                 // left a spinner with nothing to cancel it.
                 HStack(alignment: .top, spacing: 6) {
                     ComposerAIBannerView(banner: banner, theme: theme, actions: bannerActions)
+                        // As tall as the button beside it, with a one-line
+                        // banner in the middle of that height. The offer's
+                        // capsule buttons already make its row about 20pt, and
+                        // the dismiss button, a bare glyph pinned to the top of
+                        // the row, sat a few points above the text it belongs to.
+                        .frame(minHeight: 20, alignment: .leading)
                     Spacer(minLength: 0)
                     Button {
                         withAnimation(Motion.banner) {
@@ -221,6 +227,11 @@ struct ComposerBar: View {
                         Image(systemName: banner == .thinking ? "stop.circle" : "xmark")
                             .font(.system(size: 11))
                             .foregroundStyle(theme.textSecondary)
+                            // The card's own header buttons are 20pt boxes. This
+                            // was a bare 11pt glyph, which was all there was to
+                            // click.
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(banner == .thinking ? "Stop the request" : "Dismiss")
@@ -280,7 +291,10 @@ struct ComposerBar: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    .padding(.horizontal, 4)
+                    // The warning sign over the "+" below it. At 4 it sat 7pt
+                    // short of it and 5pt in from the field's edge: on neither.
+                    .padding(.leading, ComposerMetrics.glyphColumn)
+                    .padding(.trailing, 4)
                     .accessibilityElement(children: .combine)
                     .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
                 }
@@ -594,9 +608,9 @@ struct ComposerBar: View {
                 showActions = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: ComposerMetrics.plusGlyphSize, weight: .medium))
                     .foregroundStyle(theme.textSecondary)
-                    .frame(width: 26, height: 28)
+                    .frame(width: ComposerMetrics.plusFrameWidth, height: 28)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -629,7 +643,7 @@ struct ComposerBar: View {
         }
         // 28pt tall and 3 up from the field's bottom edge: centred on a
         // single line of text, and on the last line of several.
-        .padding(.leading, 5)
+        .padding(.leading, ComposerMetrics.controlInset)
         .padding(.bottom, 3)
     }
 
@@ -659,7 +673,13 @@ struct ComposerBar: View {
             .help(isChatting ? "Send (Return)" : "Run (Return)")
             .accessibilityLabel(isChatting ? "Send" : "Run")
         }
-        .padding(.trailing, 5)
+        // Room between the text and the label. Only the text view's own inset
+        // and the 2pt between the views stood there, about 5pt less than the
+        // "+" end leaves before the first character, and the README's picture
+        // shows a line just short of wrapping running to within 9pt of the
+        // label.
+        .padding(.leading, ComposerMetrics.trailingGap)
+        .padding(.trailing, ComposerMetrics.controlInset)
         .padding(.bottom, 4)
     }
 
@@ -737,6 +757,30 @@ struct ComposerBar: View {
         }
         return true
     }
+}
+
+/// The horizontal measurements inside the input field, in one place because
+/// more than the field has to agree with them: the notes above it start on the
+/// "+" glyph, and the label at its far end keeps a set distance from the text.
+/// Retuning one here moves what depends on it, rather than leaving a number
+/// somewhere else to drift out of line.
+private enum ComposerMetrics {
+    /// How far in from the field's edge the "+" sits at one end and the send
+    /// button at the other, so the two ends are the same.
+    static let controlInset: CGFloat = 5
+    /// The "+" button's frame, and the size of the glyph centred in it.
+    static let plusFrameWidth: CGFloat = 26
+    static let plusGlyphSize: CGFloat = 14
+    /// From the field's leading edge to the left of the "+" glyph: the inset,
+    /// and the margin the frame leaves round the glyph, which this takes to be
+    /// as wide as its point size. Close enough to put another icon over it.
+    static var glyphColumn: CGFloat {
+        controlInset + (plusFrameWidth - plusGlyphSize) / 2
+    }
+    /// Clear space between the text view and the label after it, over and above
+    /// the text view's own 12pt inset and the 2pt between the views. Together
+    /// they come to about what the "+" end leaves before the first character.
+    static let trailingGap: CGFloat = 6
 }
 
 /// Gives a little under the pointer, so a button feels pressed rather than

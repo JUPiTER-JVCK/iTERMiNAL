@@ -922,12 +922,19 @@ private struct FileRowView: View {
             Text(item.name)
                 .font(.system(size: 12))
                 .lineLimit(1)
+                // Cut in the middle, so a long name keeps its extension.
+                .truncationMode(.middle)
             Spacer(minLength: 8)
             if let modified = item.modified {
                 Text(dateFormatter.string(from: modified))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    // The name gives way first. With the two at the same
+                    // priority a narrow pane cut the date as well, down to
+                    // "6:05…", which loses the AM or PM and leaves the
+                    // column ragged.
+                    .layoutPriority(1)
             }
         }
         .padding(.vertical, 1)

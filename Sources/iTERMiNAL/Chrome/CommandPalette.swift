@@ -56,10 +56,15 @@ struct CommandPaletteView: View {
         // one list.
         let rows = matches
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            // The glass is set in the rows' own icon column, with the rows'
+            // own gap after it, so what is typed starts where the titles
+            // below it do and the glass and the icons share a centre line.
+            // The 16 either side is the list's 6 and a row's 10.
+            HStack(spacing: PaletteMetrics.iconGap) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
                     .foregroundStyle(theme.textSecondary)
+                    .frame(width: PaletteMetrics.iconColumn)
                 TextField("Run a command, or / to find a file…", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
@@ -627,6 +632,14 @@ private struct PaletteKeyCaps: View {
     }
 }
 
+/// What the search field and the rows under it share, so that they cannot drift
+/// apart: the field's glass and each row's icon sit in one column, and the same
+/// gap follows both.
+private enum PaletteMetrics {
+    static let iconColumn: CGFloat = 20
+    static let iconGap: CGFloat = 10
+}
+
 private struct PaletteRow: View {
     let action: PaletteAction
     let isSelected: Bool
@@ -634,10 +647,10 @@ private struct PaletteRow: View {
     let accent: Color
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: PaletteMetrics.iconGap) {
             Image(systemName: action.systemImage)
                 .font(.system(size: 13))
-                .frame(width: 20)
+                .frame(width: PaletteMetrics.iconColumn)
                 .foregroundStyle(isSelected ? accent : theme.textSecondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(action.title)
