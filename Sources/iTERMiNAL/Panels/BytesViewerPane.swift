@@ -28,23 +28,12 @@ struct BytesViewerPaneView: View {
                 if let notice = model.notice {
                     noticeStrip(notice, isError: true, theme: theme, dismiss: model.dismissNotice)
                 }
-                HexGridView(
-                    buffer: buffer,
-                    radix: model.radix,
-                    bytesPerRow: model.bytesPerRow,
-                    showsText: model.showsText,
-                    selection: model.selection,
-                    reveal: model.reveal,
-                    style: gridStyle(theme: theme),
-                    onSelect: { model.select($0) },
-                    onCopy: { model.copySelection(as: .spacedHex) }
-                )
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Bytes of \(model.fileName)")
-                .accessibilityValue(selectionSummary)
+                outlook(buffer: buffer, theme: theme)
                 FadedDivider()
                 statusStrip(theme: theme)
-                if model.showsInspector {
+                // In the Structure outlook the tree's own detail line says what the selected field is,
+                // and the room is better kept for the tree and the dump.
+                if model.showsInspector, model.mode != .structure {
                     FadedDivider()
                     ByteInspectorView(
                         bytes: model.inspectedBytes(),
@@ -64,6 +53,43 @@ struct BytesViewerPaneView: View {
             openDropped(providers)
             return true
         }
+    }
+
+    // MARK: The dump, and the tree above it
+
+    /// The dump alone, or under the tree of fields in the Structure outlook.
+    ///
+    /// The dump is the last view of the stack in every outlook, so it stays the same view,
+    /// and keeps its place in the file, when the outlook changes: a view that moved to another
+    /// place in the stack would be made again, and start at the top.
+    private func outlook(buffer: ByteEditBuffer, theme: Theme) -> some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                if model.mode == .structure {
+                    StructureTreeView(model: model, theme: theme, accent: settings.accentColor)
+                        .frame(height: max(120, geometry.size.height * 0.5))
+                    FadedDivider()
+                }
+                dump(buffer: buffer, theme: theme)
+            }
+        }
+    }
+
+    private func dump(buffer: ByteEditBuffer, theme: Theme) -> some View {
+        HexGridView(
+            buffer: buffer,
+            radix: model.radix,
+            bytesPerRow: model.bytesPerRow,
+            showsText: model.showsText,
+            selection: model.selection,
+            reveal: model.reveal,
+            style: gridStyle(theme: theme),
+            onSelect: { model.select($0) },
+            onCopy: { model.copySelection(as: .spacedHex) }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Bytes of \(model.fileName)")
+        .accessibilityValue(selectionSummary)
     }
 
     // MARK: Empty
@@ -142,10 +168,11 @@ struct BytesViewerPaneView: View {
                 selection: $model.mode,
                 items: [
                     (BytesMode.hex, "Hex"),
-                    (BytesMode.bits, "Bits")
+                    (BytesMode.bits, "Bits"),
+                    (BytesMode.structure, "Structure")
                 ]
             )
-            .help("Hex: every byte as a number, with the text beside it · Bits: every byte as its eight bits")
+            .help("Hex: every byte as a number, with the text beside it · Bits: every byte as its eight bits · Structure: the fields the file's format says it is made of, beside their bytes")
             Spacer(minLength: 0)
             TextField("Go to offset", text: $model.goToText)
                 .textFieldStyle(.plain)
@@ -164,7 +191,7 @@ struct BytesViewerPaneView: View {
 
     private var displayMenu: some View {
         Menu {
-            if model.mode == .hex {
+            if model.mode != .bits {
                 Picker("Show bytes as", selection: $model.cellRadix) {
                     ForEach([ByteRadix.hex, ByteRadix.decimal, ByteRadix.octal], id: \.self) { radix in
                         Text(radix.title).tag(radix)
