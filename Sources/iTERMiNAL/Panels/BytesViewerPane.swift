@@ -31,9 +31,10 @@ struct BytesViewerPaneView: View {
                 outlook(buffer: buffer, theme: theme)
                 FadedDivider()
                 statusStrip(theme: theme)
-                // In the Structure outlook the tree's own detail line says what the selected field is,
-                // and the room is better kept for the tree and the dump.
-                if model.showsInspector, model.mode != .structure {
+                // In the Structure and Map outlooks the room is better kept for the tree, or the picture,
+                // and the dump; the tree's own detail line says what a field is, and the map's what a
+                // part of the file is.
+                if model.showsInspector, model.mode == .hex || model.mode == .bits {
                     FadedDivider()
                     ByteInspectorView(
                         bytes: model.inspectedBytes(),
@@ -55,9 +56,9 @@ struct BytesViewerPaneView: View {
         }
     }
 
-    // MARK: The dump, and the tree above it
+    // MARK: The dump, and what is above it
 
-    /// The dump alone, or under the tree of fields in the Structure outlook.
+    /// The dump alone, or under the tree of fields in the Structure outlook, or under the map.
     ///
     /// The dump is the last view of the stack in every outlook, so it stays the same view,
     /// and keeps its place in the file, when the outlook changes: a view that moved to another
@@ -70,9 +71,20 @@ struct BytesViewerPaneView: View {
                         .frame(height: max(120, geometry.size.height * 0.5))
                     FadedDivider()
                 }
+                if model.mode == .map {
+                    ByteMapView(model: model, theme: theme, accent: settings.accentColor)
+                        .frame(height: mapHeight(in: geometry.size.height))
+                        .clipped()
+                    FadedDivider()
+                }
                 dump(buffer: buffer, theme: theme)
             }
         }
+    }
+
+    /// The map wants most of the room, since it is a picture; the dump keeps at least a few rows.
+    private func mapHeight(in available: CGFloat) -> CGFloat {
+        min(max(300, available * 0.68), max(available - 110, 140))
     }
 
     private func dump(buffer: ByteEditBuffer, theme: Theme) -> some View {
@@ -169,10 +181,11 @@ struct BytesViewerPaneView: View {
                 items: [
                     (BytesMode.hex, "Hex"),
                     (BytesMode.bits, "Bits"),
-                    (BytesMode.structure, "Structure")
+                    (BytesMode.structure, "Structure"),
+                    (BytesMode.map, "Map")
                 ]
             )
-            .help("Hex: every byte as a number, with the text beside it · Bits: every byte as its eight bits · Structure: the fields the file's format says it is made of, beside their bytes")
+            .help("Hex: every byte as a number, with the text beside it · Bits: every byte as its eight bits · Structure: the fields the file's format says it is made of, beside their bytes · Map: how random each part is, and the whole file as a picture")
             Spacer(minLength: 0)
             TextField("Go to offset", text: $model.goToText)
                 .textFieldStyle(.plain)

@@ -536,6 +536,16 @@ A tour of the app in thirty-four pictures, in five groups.
   named by its first bytes where they say what it is, and the dump still shows it
   all. At most the first 100,000 packets or chunks are listed; the rest of the
   file is in the dump.
+  The **Map** outlook shows what is where in a file you know nothing about. A
+  graph along the top plots how random each part is, from 0 bits a byte for
+  zeros and padding, through about 4 for text, to nearly 8 for compressed or
+  encrypted data. Below it the whole file is laid out as a picture along a
+  Hilbert curve, so a run of bytes is one patch and not a thin line: zeros,
+  0xFF, text, control codes and everything else each in a colour, or coloured by
+  entropy. Point at either for the numbers and what they are typical of; click or
+  drag to put the cursor there, and the dump follows. A file up to 1 GiB is read
+  whole; a bigger one is sampled, 64 KiB from each of 16,384 places, and the
+  panel says so.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -1631,7 +1641,8 @@ Sources/
 │   │                file, rows and columns, what a selection reads as, go-to
 │   │                and the copy formats, and an edit buffer the panel does not
 │   │                use yet; Structure/ holds the parsers (PNG, pcap, pcapng,
-│   │                the packet dissector) and what they make — Foundation-only
+│   │                the packet dissector) and what they make; Map/ holds the
+│   │                entropy, the byte map and the Hilbert curve — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
 │   │                robots rules, crawl frontier — Foundation-only

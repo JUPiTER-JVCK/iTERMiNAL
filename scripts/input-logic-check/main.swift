@@ -3,7 +3,7 @@
 // Mac. Among it: the composer (tokenizer, palette, completion, suggestions), the
 // Cheatsheet, the assistant's helpers, the HTTP client's parsers and extractors, SSH
 // and remote-session rules, terminal and workspace logic, the API's request lines, and the
-// Bytes panel's reading, layout, editing and file-format parsers.
+// Bytes panel's reading, layout, editing, file-format parsers and entropy map.
 //
 // The files it compiles are listed once, in the "Check input logic" step of
 // .github/workflows/build.yml. Compile them and this file with swiftc, then run it:
@@ -10127,6 +10127,781 @@ do {
     check(!flag.isCancelled, "a parse nobody has stopped is not cancelled")
     flag.cancel()
     check(flag.isCancelled, "and one that was is")
+}
+
+// MARK: The Bytes panel's map and entropy graph
+
+// The map and the graph are arithmetic on a file's bytes, so they are checked against numbers worked
+// out a second way: Python's integers, `bisect`, `Counter` and `math.log2`, written from the rules and
+// not from the Swift. Where there is no second way to work a thing out (that a curve is a Hilbert curve),
+// it is checked by what is true of every such curve: it visits every cell once and never jumps.
+
+struct MapLayoutFixture {
+    let length: Int64
+    let order: Int
+    let cells: Int
+    let windows: Int
+    /// Pairs: a cell number, and where that cell starts.
+    let starts: [Int64]
+    /// Pairs: a byte offset, and the cell that holds it.
+    let containing: [Int64]
+}
+
+/// A file that is never held in memory: the byte at an offset is a function of the offset. It
+/// remembers what it was asked for.
+final class MapFormulaSource: ByteSource {
+    let count: Int64
+    private(set) var requests: [Range<Int64>] = []
+    private(set) var bytesRead: Int64 = 0
+
+    init(count: Int64) { self.count = count }
+
+    static func byte(at offset: Int64) -> UInt8 {
+        UInt8(truncatingIfNeeded: (UInt64(truncatingIfNeeded: offset) &* 2654435761) >> 7)
+    }
+
+    func read(_ range: Range<Int64>) -> [UInt8] {
+        let limited = clamped(range)
+        requests.append(limited)
+        bytesRead += limited.upperBound - limited.lowerBound
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(Int(limited.upperBound - limited.lowerBound))
+        var offset = limited.lowerBound
+        while offset < limited.upperBound {
+            bytes.append(MapFormulaSource.byte(at: offset))
+            offset += 1
+        }
+        return bytes
+    }
+}
+
+/// A source that counts what it is asked for, and from some offset on has nothing to give, as a
+/// file does that shrinks while it is being read.
+final class MapProbeSource: ByteSource {
+    let count: Int64
+    var readable: Int64
+    private(set) var reads = 0
+    private let inner: ByteSource
+
+    init(_ inner: ByteSource, readable: Int64? = nil) {
+        self.inner = inner
+        count = inner.count
+        self.readable = readable ?? inner.count
+    }
+
+    func read(_ range: Range<Int64>) -> [UInt8] {
+        reads += 1
+        let limited = clamped(range)
+        let end = min(limited.upperBound, readable)
+        guard end > limited.lowerBound else { return [] }
+        return inner.read(limited.lowerBound..<end)
+    }
+}
+
+/// 10,240 bytes in six stretches that look nothing alike: zeros, a ramp, text, random bytes, 0xFF, and
+/// bytes of every kind. The same file is built in the Python that works out the expected values.
+func mapMixedFile() -> [UInt8] {
+    var bytes: [UInt8] = []
+    bytes.append(contentsOf: [UInt8](repeating: 0x00, count: 2048))
+    for i in 0..<2048 { bytes.append(UInt8(truncatingIfNeeded: i * 3)) }
+    let phrase = Array("The quick brown fox jumps over the lazy dog. ".utf8)
+    for i in 0..<2048 { bytes.append(phrase[i % phrase.count]) }
+    var random = BytesCheckRandom(seed: 12345)
+    for _ in 0..<2048 { bytes.append(random.byte()) }
+    bytes.append(contentsOf: [UInt8](repeating: 0xFF, count: 1024))
+    for i in 0..<1024 { bytes.append(UInt8(truncatingIfNeeded: i * 37 + 11)) }
+    return bytes
+}
+
+func mapCell(_ zero: Int = 0, _ full: Int = 0, _ text: Int = 0, _ control: Int = 0, _ high: Int = 0) -> ByteMapCell {
+    ByteMapCell(classCounts: [zero, full, text, control, high])
+}
+
+func mapNear(_ a: Double, _ b: Double, _ tolerance: Double = 1e-9) -> Bool {
+    abs(a - b) <= tolerance
+}
+
+// MARK: The Hilbert curve
+
+do {
+    // Order 2 is the textbook curve; checking it fixes which way up the others are.
+    let textbook: [Int] = [0, 0, 1, 0, 1, 1, 0, 1, 0, 2, 0, 3, 1, 3, 1, 2, 2, 2, 2, 3, 3, 3, 3, 2, 3, 1, 2, 1, 2, 0, 3, 0]
+    var textbookMatches = true
+    for i in 0..<16 {
+        let point = HilbertCurve.point(order: 2, index: i)
+        if point.x != textbook[i * 2] || point.y != textbook[i * 2 + 1] { textbookMatches = false }
+    }
+    check(textbookMatches, "an order 2 curve is the textbook one: starts top left, ends top right")
+
+    for order in 0...7 {
+        let side = 1 << order
+        let cells = side * side
+        check(HilbertCurve.cellCount(order: order) == cells, "order \(order) has \(cells) cells")
+        var seen = [Bool](repeating: false, count: cells)
+        var inside = true
+        var roundTrips = true
+        var neverJumps = true
+        var previous = HilbertCurve.point(order: order, index: 0)
+        for i in 0..<cells {
+            let point = HilbertCurve.point(order: order, index: i)
+            guard point.x >= 0, point.x < side, point.y >= 0, point.y < side else { inside = false; continue }
+            seen[point.y * side + point.x] = true
+            if HilbertCurve.index(order: order, x: point.x, y: point.y) != i { roundTrips = false }
+            if i > 0, abs(point.x - previous.x) + abs(point.y - previous.y) != 1 { neverJumps = false }
+            previous = point
+        }
+        check(inside && !seen.contains(false), "order \(order): every cell of the grid is visited, once")
+        check(roundTrips, "order \(order): index undoes point for every cell")
+        check(neverJumps, "order \(order): each step is to the cell next door")
+        let first = HilbertCurve.point(order: order, index: 0)
+        let last = HilbertCurve.point(order: order, index: cells - 1)
+        check(first.x == 0 && first.y == 0 && last.x == side - 1 && last.y == 0, "order \(order): from the top left to the top right")
+    }
+
+    // An aligned run of 4^m cells fills a square of 2^m, which is why a patch of the file is a patch of the picture.
+    var squares = true
+    for m in 1...4 {
+        let run = 1 << (2 * m)
+        let edge = 1 << m
+        for start in stride(from: 0, to: 1 << 10, by: run) {
+            var low = (x: Int.max, y: Int.max)
+            var high = (x: -1, y: -1)
+            for i in start..<(start + run) {
+                let point = HilbertCurve.point(order: 5, index: i)
+                low = (min(low.x, point.x), min(low.y, point.y))
+                high = (max(high.x, point.x), max(high.y, point.y))
+            }
+            if high.x - low.x + 1 != edge || high.y - low.y + 1 != edge || low.x % edge != 0 || low.y % edge != 0 { squares = false }
+        }
+    }
+    check(squares, "every aligned run of 4^m cells fills one aligned square 2^m across")
+
+    let before = HilbertCurve.point(order: 3, index: -5)
+    let past = HilbertCurve.point(order: 3, index: 1000)
+    let end = HilbertCurve.point(order: 3, index: 63)
+    check(before.x == 0 && before.y == 0 && past.x == end.x && past.y == end.y, "an index off either end is moved to the nearest end")
+    check(HilbertCurve.index(order: 3, x: -1, y: 99) == HilbertCurve.index(order: 3, x: 0, y: 7)
+          && HilbertCurve.index(order: 3, x: 99, y: -4) == HilbertCurve.index(order: 3, x: 7, y: 0), "a column or row off the grid is moved to its edge")
+    check(HilbertCurve.cellCount(order: 99) == HilbertCurve.cellCount(order: HilbertCurve.maxOrder) && HilbertCurve.cellCount(order: -4) == 1, "an order is kept to what is allowed")
+}
+
+// MARK: Kinds of byte and entropy
+
+do {
+    let table = ByteClass.table.map { String($0.rawValue) }.joined()
+    check(table == "0333333332233233333333333333333322222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222344444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444441", "every byte value is in the class the rules give it")
+    check(ByteClass.of(0x00) == .zero && ByteClass.of(0xFF) == .full, "0x00 and 0xFF are kinds of their own")
+    check([0x41, 0x7E, 0x20, 0x09, 0x0A, 0x0D].allSatisfy { ByteClass.of(UInt8($0)) == .text }, "letters, symbols, space, tab and line breaks are text")
+    check([0x01, 0x08, 0x0B, 0x1F, 0x7F].allSatisfy { ByteClass.of(UInt8($0)) == .control }, "the other control codes, and DEL, are control codes")
+    check(ByteClass.of(0x80) == .high && ByteClass.of(0xFE) == .high, "0x80 to 0xFE are the rest")
+    check(ByteClass.counts(inHistogram: [Int](repeating: 1, count: 256)) == [1, 1, 98, 29, 127], "256 values, once each, split 1, 1, 98 text, 29 control, 127 other")
+    check(ByteClass.counts(inHistogram: [5, 7]) == [5, 0, 0, 7, 0], "a histogram shorter than 256 counts what it has")
+    check(ByteClass.counts(inHistogram: [Int](repeating: 1, count: 300)) == [1, 1, 98, 29, 127], "and one longer than 256 is read no further than 256")
+
+    check(Entropy.shannon([UInt8](repeating: 0, count: 1000)) == 0, "a run of one value has no entropy")
+    check(Entropy.shannon((0...255).map { UInt8($0) }) == 8, "all 256 values, once each, is 8 bits")
+    check(mapNear(Entropy.shannon((0..<1000).map { UInt8($0 % 2) }), 1.0), "two values, equally often, is 1 bit")
+    check(mapNear(Entropy.shannon([97, 97, 98]), 0.9182958340544896, 1e-12), "two of one and one of another is 0.918 bits")
+    check(mapNear(Entropy.shannon((0..<40).map { UInt8($0 % 4) }), 2.0), "four values, equally often, is 2 bits")
+    check(mapNear(Entropy.shannon(Array([UInt8](repeating: 0, count: 90) + [UInt8](repeating: 1, count: 10))), 0.4689955935892812, 1e-12), "nine to one is 0.469 bits")
+    check(mapNear(Entropy.shannon(Array("hello, world".utf8)), 3.0220552088742, 1e-12), "a line of text, as Python works it out")
+    check(Entropy.shannon([]) == 0 && Entropy.shannon(histogram: []) == 0 && Entropy.shannon(histogram: [Int](repeating: 0, count: 256)) == 0, "no bytes is 0 bits, not a crash")
+    check(mapNear(Entropy.shannon(histogram: [3, 1]), Entropy.shannon([0, 0, 0, 1]), 1e-12), "a histogram and the bytes it counts agree, even one shorter than 256")
+    check(mapNear(Entropy.shannon(histogram: [-5, 10, 10]), 1, 1e-12), "a count below 0 is ignored")
+    check(Entropy.shannon(histogram: [Int](repeating: 7, count: 256)) == 8, "every value equally often, however often, is 8 bits")
+
+    let corrections: [Double] = [7.17, 256, 162, 7.623659964029537, 4.1, 256, 50, 4.238070423835076, 0.0, 1000, 1, 0.0, 7.95, 4096, 256, 7.994908109793297, 2.5, 100, 20, 2.6370560288844516, 7.99, 1073741824, 256, 7.990000171310844, 7.99, 256, 256, 8.0, -1.0, 100, 5, 0.0]
+    var correctionsMatch = true
+    for i in stride(from: 0, to: corrections.count, by: 4) {
+        let got = Entropy.corrected(bits: corrections[i], bytes: Int64(corrections[i + 1]), distinct: Int(corrections[i + 2]))
+        if !mapNear(got, corrections[i + 3], 1e-12) { correctionsMatch = false }
+    }
+    check(correctionsMatch, "the small-sample correction adds (values seen - 1) / (2 * bytes * ln 2), up to 8")
+
+    func reading(_ bits: Double, _ bytes: Int64 = 1_000_000, _ distinct: Int = 256) -> String {
+        EntropyReading.describe(bits: bits, bytes: bytes, distinct: distinct)
+    }
+    let phrases = [
+        "almost all one value: zeros or padding",
+        "very repetitive: padding, long runs or sparse data",
+        "repetitive: tables, simple data or runs",
+        "text or structured data",
+        "program code or dense binary data",
+        "dense binary or lightly compressed data",
+        "random-looking: compressed, encrypted or noise"
+    ]
+    check(reading(0.2) == phrases[0] && reading(1.0) == phrases[1] && reading(3.0) == phrases[2] && reading(4.5) == phrases[3], "the low bands")
+    check(reading(6.0) == phrases[4] && reading(7.0) == phrases[5] && reading(7.9) == phrases[6], "the high bands")
+    // Each band starts exactly where it says, with no small-sample correction to blur it (one value seen).
+    let edges: [Double] = [0.5, 2.0, 3.5, 5.2, 6.8, 7.5]
+    check(edges.enumerated().allSatisfy { reading($1 - 0.01, 1_000_000, 1) == phrases[$0] && reading($1, 1_000_000, 1) == phrases[$0 + 1] }, "the bands begin at 0.5, 2, 3.5, 5.2, 6.8 and 7.5 bits")
+    check(reading(7.17, 256, 162) == phrases[6], "256 random bytes score about 7.2 and are still called random-looking")
+    check(reading(4.1, 256, 50) == phrases[3], "256 bytes of text are still called text")
+    check(reading(3, 63, 20) == "too few bytes to say" && reading(3, 0, 0) == "too few bytes to say", "a few bytes say nothing")
+    var lastBand = -1
+    var inOrder = true
+    var bits = 0.0
+    while bits <= 8.0 {
+        if let band = phrases.firstIndex(of: reading(bits)) {
+            if band < lastBand { inOrder = false }
+            lastBand = band
+        } else {
+            inOrder = false
+        }
+        bits += 0.05
+    }
+    check(inOrder && lastBand == 6, "up the scale from 0 to 8 bits the words only ever say more random, and end at random")
+}
+
+// MARK: Cutting a file into cells and windows
+
+do {
+    let fixtures: [MapLayoutFixture] = [
+        MapLayoutFixture(length: 0, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 0], containing: []),
+        MapLayoutFixture(length: 1, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 1], containing: [0, 0]),
+        MapLayoutFixture(length: 2, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 2], containing: [0, 0, 1, 0]),
+        MapLayoutFixture(length: 3, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 3], containing: [0, 0, 1, 0, 2, 0]),
+        MapLayoutFixture(length: 4, order: 1, cells: 4, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4], containing: [0, 0, 1, 1, 2, 2, 3, 3]),
+        MapLayoutFixture(length: 5, order: 1, cells: 4, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 4, 5], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 3]),
+        MapLayoutFixture(length: 15, order: 1, cells: 4, windows: 1, starts: [0, 0, 1, 3, 2, 7, 3, 11, 4, 15], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 5, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 13, 3, 14, 3]),
+        MapLayoutFixture(length: 16, order: 2, cells: 16, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 14, 14, 15, 15, 16, 16], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 13, 13, 14, 14, 15, 15]),
+        MapLayoutFixture(length: 17, order: 2, cells: 16, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 14, 14, 15, 15, 16, 17], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 13, 13, 14, 14, 15, 15, 16, 15]),
+        MapLayoutFixture(length: 63, order: 2, cells: 16, windows: 1, starts: [0, 0, 1, 3, 2, 7, 3, 11, 5, 19, 8, 31, 14, 55, 15, 59, 16, 63], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 18, 4, 19, 5, 20, 5, 21, 5, 30, 7, 31, 8, 32, 8, 54, 13, 55, 14, 56, 14, 58, 14, 59, 15, 60, 15, 61, 15, 62, 15]),
+        MapLayoutFixture(length: 64, order: 3, cells: 64, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 21, 21, 32, 32, 62, 62, 63, 63, 64, 64], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 20, 20, 21, 21, 22, 22, 31, 31, 32, 32, 33, 33, 61, 61, 62, 62, 63, 63]),
+        MapLayoutFixture(length: 65, order: 3, cells: 64, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 21, 21, 32, 32, 62, 62, 63, 63, 64, 65], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 20, 20, 21, 21, 22, 22, 31, 31, 32, 32, 33, 33, 61, 61, 62, 62, 63, 63, 64, 63]),
+        MapLayoutFixture(length: 255, order: 3, cells: 64, windows: 1, starts: [0, 0, 1, 3, 2, 7, 3, 11, 21, 83, 32, 127, 62, 247, 63, 251, 64, 255], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 82, 20, 83, 21, 84, 21, 85, 21, 126, 31, 127, 32, 128, 32, 246, 61, 247, 62, 248, 62, 250, 62, 251, 63, 252, 63, 253, 63, 254, 63]),
+        MapLayoutFixture(length: 256, order: 4, cells: 256, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 85, 85, 128, 128, 254, 254, 255, 255, 256, 256], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 84, 84, 85, 85, 86, 86, 127, 127, 128, 128, 129, 129, 253, 253, 254, 254, 255, 255]),
+        MapLayoutFixture(length: 257, order: 4, cells: 256, windows: 1, starts: [0, 0, 1, 1, 2, 2, 3, 3, 85, 85, 128, 128, 254, 254, 255, 255, 256, 257], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 84, 84, 85, 85, 86, 86, 127, 127, 128, 128, 129, 129, 253, 253, 254, 254, 255, 255, 256, 255]),
+        MapLayoutFixture(length: 511, order: 4, cells: 256, windows: 1, starts: [0, 0, 1, 1, 2, 3, 3, 5, 85, 169, 128, 255, 254, 507, 255, 509, 256, 511], containing: [0, 0, 1, 1, 2, 1, 3, 2, 4, 2, 5, 3, 6, 3, 168, 84, 169, 85, 170, 85, 254, 127, 255, 128, 256, 128, 506, 253, 507, 254, 508, 254, 509, 255, 510, 255]),
+        MapLayoutFixture(length: 512, order: 4, cells: 256, windows: 2, starts: [0, 0, 1, 2, 2, 4, 3, 6, 85, 170, 128, 256, 254, 508, 255, 510, 256, 512], containing: [0, 0, 1, 0, 2, 1, 3, 1, 4, 2, 5, 2, 6, 3, 7, 3, 169, 84, 170, 85, 171, 85, 255, 127, 256, 128, 257, 128, 507, 253, 508, 254, 509, 254, 510, 255, 511, 255]),
+        MapLayoutFixture(length: 513, order: 4, cells: 256, windows: 2, starts: [0, 0, 1, 2, 2, 4, 3, 6, 85, 170, 128, 256, 254, 508, 255, 510, 256, 513], containing: [0, 0, 1, 0, 2, 1, 3, 1, 4, 2, 5, 2, 6, 3, 7, 3, 169, 84, 170, 85, 171, 85, 255, 127, 256, 128, 257, 128, 507, 253, 508, 254, 509, 254, 510, 255, 511, 255, 512, 255]),
+        MapLayoutFixture(length: 1023, order: 4, cells: 256, windows: 2, starts: [0, 0, 1, 3, 2, 7, 3, 11, 85, 339, 128, 511, 254, 1015, 255, 1019, 256, 1023], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 338, 84, 339, 85, 340, 85, 341, 85, 510, 127, 511, 128, 512, 128, 1014, 253, 1015, 254, 1016, 254, 1018, 254, 1019, 255, 1020, 255, 1021, 255, 1022, 255]),
+        MapLayoutFixture(length: 1024, order: 5, cells: 1024, windows: 4, starts: [0, 0, 1, 1, 2, 2, 3, 3, 341, 341, 512, 512, 1022, 1022, 1023, 1023, 1024, 1024], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 340, 340, 341, 341, 342, 342, 511, 511, 512, 512, 513, 513, 1021, 1021, 1022, 1022, 1023, 1023]),
+        MapLayoutFixture(length: 1025, order: 5, cells: 1024, windows: 4, starts: [0, 0, 1, 1, 2, 2, 3, 3, 341, 341, 512, 512, 1022, 1022, 1023, 1023, 1024, 1025], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 340, 340, 341, 341, 342, 342, 511, 511, 512, 512, 513, 513, 1021, 1021, 1022, 1022, 1023, 1023, 1024, 1023]),
+        MapLayoutFixture(length: 4095, order: 5, cells: 1024, windows: 8, starts: [0, 0, 1, 3, 2, 7, 3, 11, 341, 1363, 512, 2047, 1022, 4087, 1023, 4091, 1024, 4095], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 1362, 340, 1363, 341, 1364, 341, 1365, 341, 2046, 511, 2047, 512, 2048, 512, 4086, 1021, 4087, 1022, 4088, 1022, 4090, 1022, 4091, 1023, 4092, 1023, 4093, 1023, 4094, 1023]),
+        MapLayoutFixture(length: 4096, order: 6, cells: 4096, windows: 16, starts: [0, 0, 1, 1, 2, 2, 3, 3, 1365, 1365, 2048, 2048, 4094, 4094, 4095, 4095, 4096, 4096], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 1364, 1364, 1365, 1365, 1366, 1366, 2047, 2047, 2048, 2048, 2049, 2049, 4093, 4093, 4094, 4094, 4095, 4095]),
+        MapLayoutFixture(length: 4097, order: 6, cells: 4096, windows: 16, starts: [0, 0, 1, 1, 2, 2, 3, 3, 1365, 1365, 2048, 2048, 4094, 4094, 4095, 4095, 4096, 4097], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 1364, 1364, 1365, 1365, 1366, 1366, 2047, 2047, 2048, 2048, 2049, 2049, 4093, 4093, 4094, 4094, 4095, 4095, 4096, 4095]),
+        MapLayoutFixture(length: 10240, order: 6, cells: 4096, windows: 32, starts: [0, 0, 1, 2, 2, 5, 3, 7, 1365, 3412, 2048, 5120, 4094, 10235, 4095, 10237, 4096, 10240], containing: [0, 0, 1, 0, 2, 1, 3, 1, 4, 1, 5, 2, 6, 2, 7, 3, 8, 3, 3411, 1364, 3412, 1365, 3413, 1365, 5119, 2047, 5120, 2048, 5121, 2048, 10234, 4093, 10235, 4094, 10236, 4094, 10237, 4095, 10238, 4095, 10239, 4095]),
+        MapLayoutFixture(length: 65535, order: 7, cells: 16384, windows: 128, starts: [0, 0, 1, 3, 2, 7, 3, 11, 5461, 21843, 8192, 32767, 16382, 65527, 16383, 65531, 16384, 65535], containing: [0, 0, 1, 0, 2, 0, 3, 1, 4, 1, 6, 1, 7, 2, 8, 2, 10, 2, 11, 3, 12, 3, 21842, 5460, 21843, 5461, 21844, 5461, 21845, 5461, 32766, 8191, 32767, 8192, 32768, 8192, 65526, 16381, 65527, 16382, 65528, 16382, 65530, 16382, 65531, 16383, 65532, 16383, 65533, 16383, 65534, 16383]),
+        MapLayoutFixture(length: 65536, order: 8, cells: 65536, windows: 256, starts: [0, 0, 1, 1, 2, 2, 3, 3, 21845, 21845, 32768, 32768, 65534, 65534, 65535, 65535, 65536, 65536], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 21844, 21844, 21845, 21845, 21846, 21846, 32767, 32767, 32768, 32768, 32769, 32769, 65533, 65533, 65534, 65534, 65535, 65535]),
+        MapLayoutFixture(length: 65537, order: 8, cells: 65536, windows: 256, starts: [0, 0, 1, 1, 2, 2, 3, 3, 21845, 21845, 32768, 32768, 65534, 65534, 65535, 65535, 65536, 65537], containing: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 21844, 21844, 21845, 21845, 21846, 21846, 32767, 32767, 32768, 32768, 32769, 32769, 65533, 65533, 65534, 65534, 65535, 65535, 65536, 65535]),
+        MapLayoutFixture(length: 100000, order: 8, cells: 65536, windows: 256, starts: [0, 0, 1, 1, 2, 3, 3, 4, 21845, 33332, 32768, 50000, 65534, 99996, 65535, 99998, 65536, 100000], containing: [0, 0, 1, 1, 2, 1, 3, 2, 4, 3, 5, 3, 33331, 21844, 33332, 21845, 33333, 21845, 49999, 32767, 50000, 32768, 50001, 32769, 99995, 65533, 99996, 65534, 99997, 65534, 99998, 65535, 99999, 65535]),
+        MapLayoutFixture(length: 1000000, order: 8, cells: 65536, windows: 512, starts: [0, 0, 1, 15, 2, 30, 3, 45, 21845, 333328, 32768, 500000, 65534, 999969, 65535, 999984, 65536, 1000000], containing: [0, 0, 1, 0, 14, 0, 15, 1, 16, 1, 29, 1, 30, 2, 31, 2, 44, 2, 45, 3, 46, 3, 333327, 21844, 333328, 21845, 333329, 21845, 333333, 21845, 499999, 32767, 500000, 32768, 500001, 32768, 999968, 65533, 999969, 65534, 999970, 65534, 999983, 65534, 999984, 65535, 999985, 65535, 999998, 65535, 999999, 65535]),
+        MapLayoutFixture(length: 1073741824, order: 8, cells: 65536, windows: 1024, starts: [0, 0, 1, 16384, 2, 32768, 3, 49152, 21845, 357908480, 32768, 536870912, 65534, 1073709056, 65535, 1073725440, 65536, 1073741824], containing: [0, 0, 1, 0, 16383, 0, 16384, 1, 16385, 1, 32767, 1, 32768, 2, 32769, 2, 49151, 2, 49152, 3, 49153, 3, 357908479, 21844, 357908480, 21845, 357908481, 21845, 357913941, 21845, 536870911, 32767, 536870912, 32768, 536870913, 32768, 1073709055, 65533, 1073709056, 65534, 1073709057, 65534, 1073725439, 65534, 1073725440, 65535, 1073725441, 65535, 1073741822, 65535, 1073741823, 65535]),
+        MapLayoutFixture(length: 1073741825, order: 8, cells: 65536, windows: 1024, starts: [0, 0, 1, 16384, 2, 32768, 3, 49152, 21845, 357908480, 32768, 536870912, 65534, 1073709056, 65535, 1073725440, 65536, 1073741825], containing: [0, 0, 1, 0, 16383, 0, 16384, 1, 16385, 1, 32767, 1, 32768, 2, 32769, 2, 49151, 2, 49152, 3, 49153, 3, 357908479, 21844, 357908480, 21845, 357908481, 21845, 357913941, 21845, 536870911, 32767, 536870912, 32768, 536870913, 32768, 1073709055, 65533, 1073709056, 65534, 1073709057, 65534, 1073725439, 65534, 1073725440, 65535, 1073725441, 65535, 1073741823, 65535, 1073741824, 65535]),
+        MapLayoutFixture(length: 5368721465, order: 8, cells: 65536, windows: 1024, starts: [0, 0, 1, 81920, 2, 163840, 3, 245760, 21845, 1789546514, 32768, 2684360732, 65534, 5368557624, 65535, 5368639544, 65536, 5368721465], containing: [0, 0, 1, 0, 81919, 0, 81920, 1, 81921, 1, 163839, 1, 163840, 2, 163841, 2, 245759, 2, 245760, 3, 245761, 3, 1789546513, 21844, 1789546514, 21845, 1789546515, 21845, 1789573821, 21845, 2684360731, 32767, 2684360732, 32768, 2684360733, 32768, 5368557623, 65533, 5368557624, 65534, 5368557625, 65534, 5368639543, 65534, 5368639544, 65535, 5368639545, 65535, 5368721463, 65535, 5368721464, 65535]),
+        MapLayoutFixture(length: 4611686018427388681, order: 8, cells: 65536, windows: 1024, starts: [0, 0, 1, 70368744177664, 2, 140737488355328, 3, 211106232532992, 21845, 1537205216561070338, 32768, 2305843009213694340, 65534, 4611545280939033352, 65535, 4611615649683211016, 65536, 4611686018427388681], containing: [0, 0, 1, 0, 70368744177663, 0, 70368744177664, 1, 70368744177665, 1, 140737488355327, 1, 140737488355328, 2, 140737488355329, 2, 211106232532991, 2, 211106232532992, 3, 211106232532993, 3, 1537205216561070337, 21844, 1537205216561070338, 21845, 1537205216561070339, 21845, 1537228672809129560, 21845, 2305843009213694339, 32767, 2305843009213694340, 32768, 2305843009213694341, 32768, 4611545280939033351, 65533, 4611545280939033352, 65534, 4611545280939033353, 65534, 4611615649683211015, 65534, 4611615649683211016, 65535, 4611615649683211017, 65535, 4611686018427388679, 65535, 4611686018427388680, 65535]),
+        MapLayoutFixture(length: 9223372036854775807, order: 8, cells: 65536, windows: 1024, starts: [0, 0, 1, 140737488355327, 2, 281474976710655, 3, 422212465065983, 21845, 3074410433122140159, 32768, 4611686018427387903, 65534, 9223090561878065151, 65535, 9223231299366420479, 65536, 9223372036854775807], containing: [0, 0, 1, 0, 140737488355326, 0, 140737488355327, 1, 140737488355328, 1, 281474976710654, 1, 281474976710655, 2, 281474976710656, 2, 422212465065982, 2, 422212465065983, 3, 422212465065984, 3, 3074410433122140158, 21844, 3074410433122140159, 21845, 3074410433122140160, 21845, 3074457345618258602, 21845, 4611686018427387902, 32767, 4611686018427387903, 32768, 4611686018427387904, 32768, 9223090561878065150, 65533, 9223090561878065151, 65534, 9223090561878065152, 65534, 9223231299366420478, 65534, 9223231299366420479, 65535, 9223231299366420480, 65535, 9223372036854775805, 65535, 9223372036854775806, 65535]),
+    ]
+    var wrong: [String] = []
+    for f in fixtures {
+        let layout = ByteMapLayout(length: f.length)
+        if layout.order != f.order || layout.cellCount != f.cells || layout.windowCount != f.windows {
+            wrong.append("length \(f.length): order \(layout.order), \(layout.cellCount) cells, \(layout.windowCount) windows, not \(f.order), \(f.cells), \(f.windows)")
+        }
+        for i in stride(from: 0, to: f.starts.count, by: 2) where layout.cellStart(Int(f.starts[i])) != f.starts[i + 1] {
+            wrong.append("length \(f.length): cell \(f.starts[i]) starts at \(layout.cellStart(Int(f.starts[i]))), not \(f.starts[i + 1])")
+        }
+        for i in stride(from: 0, to: f.containing.count, by: 2) where layout.cell(containing: f.containing[i]) != Int(f.containing[i + 1]) {
+            wrong.append("length \(f.length): byte \(f.containing[i]) is in cell \(layout.cell(containing: f.containing[i])), not \(f.containing[i + 1])")
+        }
+    }
+    check(wrong.isEmpty, "the layout of \(fixtures.count) file sizes, up to the biggest a file can be, matches Python's integers: \(wrong.prefix(3))")
+
+    // What is true of every layout, for every small size and a spread of big ones.
+    var lengths: [Int64] = (1...700).map { Int64($0) }
+    lengths += [1023, 1024, 1025, 4095, 4096, 4097, 16383, 16384, 16385, 65535, 65536, 65537, 131_071, 1_000_003]
+    var problems: [String] = []
+    for length in lengths {
+        let layout = ByteMapLayout(length: length)
+        var next: Int64 = 0
+        var smallest = Int64.max
+        var largest: Int64 = 0
+        for cell in 0..<layout.cellCount {
+            let span = layout.cellRange(cell)
+            if span.lowerBound != next { problems.append("length \(length): cell \(cell) does not start where the last one ended") }
+            let size = span.upperBound - span.lowerBound
+            smallest = min(smallest, size)
+            largest = max(largest, size)
+            next = span.upperBound
+            // Where a cell begins and ends, and the byte before and after, are in the right cells.
+            if layout.cell(containing: span.lowerBound) != cell || layout.cell(containing: span.upperBound - 1) != cell {
+                problems.append("length \(length): the ends of cell \(cell) are not in it")
+            }
+            if span.lowerBound > 0, layout.cell(containing: span.lowerBound - 1) != cell - 1 {
+                problems.append("length \(length): the byte before cell \(cell) is not in the one before")
+            }
+        }
+        if next != length { problems.append("length \(length): the cells end at \(next)") }
+        if smallest < 1 { problems.append("length \(length): a cell is empty") }
+        if largest - smallest > 1 { problems.append("length \(length): cells differ by more than a byte") }
+        if length <= 700 {
+            for offset in 0..<length where !layout.cellRange(layout.cell(containing: offset)).contains(offset) {
+                problems.append("length \(length): byte \(offset) is not in its own cell")
+            }
+        }
+        // Windows are whole cells, in order, each at least 256 bytes (or the file, when it is shorter).
+        let windows = layout.windowCount
+        if windows < 1 || windows > ByteMapLayout.maxWindows || windows & (windows - 1) != 0 || layout.cellCount % windows != 0 {
+            problems.append("length \(length): \(windows) windows is not a power of two that divides \(layout.cellCount)")
+        }
+        var windowStart: Int64 = 0
+        for window in 0..<windows {
+            let span = layout.windowRange(window)
+            if span.lowerBound != windowStart { problems.append("length \(length): window \(window) does not start where the last ended") }
+            windowStart = span.upperBound
+            let least = ByteMapLayout.minWindowBytes(forLength: length)
+            if length >= least, span.upperBound - span.lowerBound < least {
+                problems.append("length \(length): window \(window) is only \(span.upperBound - span.lowerBound) bytes")
+            }
+            if layout.window(containing: span.lowerBound) != window || layout.window(containing: span.upperBound - 1) != window {
+                problems.append("length \(length): the ends of window \(window) are not in it")
+            }
+        }
+        if windowStart != length { problems.append("length \(length): the windows end at \(windowStart)") }
+        if problems.count > 6 { break }
+    }
+    check(problems.isEmpty, "for \(lengths.count) file sizes the cells and windows tile the file with no gap or overlap: \(problems.prefix(3))")
+
+    check([0, 255, 256, 65_535, 65_536, 131_072, 200_000, 262_144, 1 << 40, Int64.max].map { ByteMapLayout.minWindowBytes(forLength: $0) } == [256, 256, 256, 256, 256, 512, 781, 1024, 1024, 1024], "a window is at least 256 bytes, and from 64 KiB up a 256th of the file, to a most of 1 KiB")
+    let layout = ByteMapLayout(length: 100_000)
+    let there = layout.point(ofCell: 12345)
+    check(layout.cell(atX: there.x, y: there.y) == 12345, "a cell's place in the picture leads back to the cell")
+    check(layout.cell(containing: -50) == 0 && layout.cell(containing: 99_999_999) == layout.cellCount - 1, "a byte off either end is in the nearest cell")
+    check(ByteMapLayout(length: 0).cellCount == 1 && ByteMapLayout(length: 0).windowCount == 1 && ByteMapLayout(length: 0).cell(containing: 5) == 0, "an empty file has a layout, and it does not trap")
+    check(ByteMapLayout(length: -9).length == 0, "a negative length is an empty file")
+    let widest = ByteMapLayout(length: Int64.max)
+    check(widest.cell(containing: Int64.max) == widest.cellCount - 1 && widest.cell(containing: Int64.max - 1) == widest.cellCount - 1, "the last byte of the biggest file is in its last cell, without overflowing")
+    check(layout.windowRange(layout.windowCount + 5) == layout.windowRange(layout.windowCount - 1) && layout.windowRange(-2) == layout.windowRange(0), "a window out of range is the nearest one")
+    check(layout.cellRange(layout.cellCount + 9) == layout.cellRange(layout.cellCount - 1) && layout.cellRange(-9) == layout.cellRange(0), "and so is a cell")
+    check(ByteMapLayout(length: 1_000_000, maxOrder: 3).cellCount == 64 && ByteMapLayout(length: 1_000_000, maxOrder: -1).cellCount == 1, "the order can be limited")
+}
+
+// MARK: Where a click lands
+
+do {
+    // The middle of every cell leads back to that cell, on maps of several sizes.
+    var centresLeadBack = true
+    for length: Int64 in [100_000, 5, 70, 5000, 1] {
+        let layout = ByteMapLayout(length: length)
+        for cell in 0..<layout.cellCount {
+            let middle = layout.center(ofCell: cell)
+            if layout.cell(atFractionX: middle.x, y: middle.y) != cell { centresLeadBack = false }
+        }
+    }
+    check(centresLeadBack, "pointing at the middle of any cell, of any size of map, finds that cell")
+
+    let layout = ByteMapLayout(length: 100_000)
+    check(layout.cell(atFractionX: 0, y: 0) == 0 && layout.cell(atFractionX: 1, y: 0) == layout.cellCount - 1, "the top left of the map is the start of the file and the top right the end")
+    check(layout.cell(atFractionX: 0, y: 1) == HilbertCurve.index(order: 8, x: 0, y: 255) && layout.cell(atFractionX: 1, y: 1) == HilbertCurve.index(order: 8, x: 255, y: 255), "and the lower corners are the lower corners")
+    check(layout.cell(atFractionX: -3, y: -3) == 0 && layout.cell(atFractionX: 9, y: -1) == layout.cellCount - 1 && layout.cell(atFractionX: .nan, y: .nan) == 0, "a point off the map, or not a number, is moved to the edge, or the start")
+    check(layout.cell(atFractionX: .infinity, y: -.infinity) == layout.cellCount - 1, "and one at infinity to the far edge")
+    let middle = layout.center(ofCell: 0)
+    check(mapNear(middle.x, 0.5 / 256, 1e-15) && mapNear(middle.y, 0.5 / 256, 1e-15), "the middle of the first cell is half a cell in from the corner")
+
+    // Along the graph.
+    let thousand = ByteMapLayout(length: 1000)
+    check(thousand.offset(atFraction: 0) == 0 && thousand.offset(atFraction: 1) == 999 && thousand.offset(atFraction: 0.5) == 500, "the ends and the middle of the graph")
+    check(thousand.offset(atFraction: -2) == 0 && thousand.offset(atFraction: 7) == 999 && thousand.offset(atFraction: .nan) == 0 && thousand.offset(atFraction: .infinity) == 999, "off the ends it stops at them")
+    check(ByteMapLayout(length: 0).offset(atFraction: 0.5) == 0 && ByteMapLayout(length: 1).offset(atFraction: 1) == 0, "an empty file, and a file of a byte, have only byte 0")
+    check(ByteMapLayout(length: Int64.max).offset(atFraction: 1) == Int64.max - 1 && ByteMapLayout(length: Int64.max).offset(atFraction: 0.5) == 1 << 62, "the biggest file does not overflow")
+    var roundTrips = true
+    for length: Int64 in [1, 2, 3, 7, 100, 999, 4096, 65_537, 1_000_003] {
+        let layout = ByteMapLayout(length: length)
+        let sample: [Int64] = length < 2000 ? Array(0..<length) : [0, 1, length / 3, length / 2, length - 2, length - 1]
+        for offset in sample where layout.offset(atFraction: layout.fraction(ofOffset: offset)) != offset { roundTrips = false }
+    }
+    check(roundTrips, "a byte's place on the graph points back at the byte")
+    check(thousand.fraction(ofOffset: 0) == 0.0005 && thousand.fraction(ofOffset: 999) == 0.9995 && thousand.fraction(ofOffset: -5) == 0.0005 && thousand.fraction(ofOffset: 5000) == 0.9995 && ByteMapLayout(length: 0).fraction(ofOffset: 3) == 0, "a byte is drawn at its middle, and a byte off the file at the nearest end")
+
+    var windowsLineUp = true
+    for length: Int64 in [3, 600, 5000, 100_000, 1_000_003] {
+        let layout = ByteMapLayout(length: length)
+        var last = 0.0
+        for window in 0..<layout.windowCount {
+            let span = layout.fractions(ofWindow: window)
+            if span.start != last || span.end <= span.start { windowsLineUp = false }
+            last = span.end
+            let inside = layout.window(containing: layout.offset(atFraction: (span.start + span.end) / 2))
+            if inside != window { windowsLineUp = false }
+        }
+        if last != 1 { windowsLineUp = false }
+    }
+    check(windowsLineUp, "the windows run along the graph from 0 to 1 with no gap, and a point in the middle of one is in it")
+}
+
+// MARK: The pass over a file
+
+do {
+    check(ByteMapAnalyzer.analyze(DataByteSource([])) == nil, "an empty file has no map")
+
+    // Four bytes of four kinds: a cell each, in the curve's order.
+    let four = ByteMapAnalyzer.analyze(DataByteSource([0x00, 0xFF, 0x41, 0x80]))!
+    check(four.layout.order == 1 && four.cells == [mapCell(1), mapCell(0, 1), mapCell(0, 0, 1), mapCell(0, 0, 0, 0, 1)], "four bytes, four cells, one kind in each")
+    check(four.windowEntropy.count == 1 && mapNear(four.windowEntropy[0], 2) && four.windowBytes == [4] && four.windowDistinct == [4], "and one window of 2 bits")
+    let one = ByteMapAnalyzer.analyze(DataByteSource([0x41]))!
+    check(one.layout.cellCount == 1 && one.cells == [mapCell(0, 0, 1)] && one.entropy == 0 && one.histogram[0x41] == 1, "one byte is one cell")
+    let three = ByteMapAnalyzer.analyze(DataByteSource([1, 2, 3]))!
+    check(three.layout.cellCount == 1 && three.cells == [mapCell(0, 0, 0, 3)], "three bytes are one cell of three")
+
+    // Nothing but zeros, at several sizes: one kind, no entropy, every byte counted.
+    var zerosAreZeros = true
+    for size in [1, 3, 4, 100, 1000, 70_000] {
+        let analysis = ByteMapAnalyzer.analyze(DataByteSource([UInt8](repeating: 0, count: size)))!
+        let allZero = analysis.cells.allSatisfy { $0.total == $0.zero && $0.total > 0 }
+        let sum = analysis.cells.reduce(0) { $0 + $1.total }
+        if !allZero || sum != size || analysis.entropy != 0 || analysis.windowEntropy.contains(where: { $0 != 0 })
+            || analysis.histogram[0] != size || analysis.readBytes != Int64(size) || analysis.isSampled || analysis.unreadBytes != 0 {
+            zerosAreZeros = false
+        }
+    }
+    check(zerosAreZeros, "files of nothing but zeros are zero in every cell, with entropy 0")
+
+    // A file in six stretches, against Python.
+    let mixedBytes = mapMixedFile()
+    let mixed = ByteMapAnalyzer.analyze(DataByteSource(mixedBytes))!
+    check(mixedBytes.count == 10240, "the mixed file is the length Python made it")
+    check(mixed.layout.order == 6 && mixed.layout.windowCount == 32, "its layout")
+    check(!mixed.isSampled && mixed.sampleSize == 0 && mixed.unreadBytes == 0 && mixed.readBytes == Int64(mixedBytes.count), "all of it is read")
+    let mixedEntropy: [Double] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.495527107544843, 7.921928094887335, 7.921928094887335, 7.921928094887335, 7.921928094887335, 7.921928094887335, 7.769066481492621, 4.443541877588072, 4.435743642582337, 4.435816288007466, 4.446516485337212, 4.440494624413805, 4.42908654481519, 7.133062235491338, 7.344717499519524, 7.391531405742478, 7.30206518548282, 7.315704335409697, 7.35014042918674, 5.0820778496579875, 0.0, 0.0, 1.9219280948873638, 7.921928094887335, 7.921928094887335, 7.921928094887335]
+    let mixedBytesIn: [Int] = [320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320, 320]
+    let mixedDistinct: [Int] = [1, 1, 1, 1, 1, 1, 192, 256, 256, 256, 256, 256, 256, 29, 29, 29, 29, 29, 29, 169, 183, 188, 181, 180, 185, 130, 1, 1, 65, 256, 256, 256]
+    let mixedClasses: [Int] = [320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 129, 1, 77, 28, 85, 1, 1, 119, 30, 169, 2, 1, 131, 38, 148, 1, 2, 130, 39, 148, 1, 1, 110, 38, 170, 1, 1, 119, 30, 169, 1, 1, 162, 29, 127, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 320, 0, 0, 3, 0, 167, 38, 112, 3, 2, 145, 28, 142, 0, 2, 105, 40, 173, 0, 1, 118, 48, 153, 1, 3, 128, 28, 160, 3, 0, 122, 41, 154, 2, 129, 79, 22, 88, 0, 320, 0, 0, 0, 0, 320, 0, 0, 0, 0, 256, 23, 8, 33, 1, 1, 124, 37, 157, 2, 1, 124, 35, 158, 1, 2, 121, 36, 160]
+    var windowsMatch = mixed.windowEntropy.count == mixedEntropy.count
+    for w in 0..<min(mixed.windowEntropy.count, mixedEntropy.count) {
+        if !mapNear(mixed.windowEntropy[w], mixedEntropy[w]) || mixed.windowBytes[w] != mixedBytesIn[w] || mixed.windowDistinct[w] != mixedDistinct[w] {
+            windowsMatch = false
+        }
+        // The kinds in a window are the kinds in its cells.
+        var kinds = [Int](repeating: 0, count: 5)
+        let from = w * mixed.layout.windowCells
+        for cell in from..<(from + mixed.layout.windowCells) {
+            for byteClass in ByteClass.allCases { kinds[byteClass.rawValue] += mixed.cells[cell][byteClass] }
+        }
+        if kinds != Array(mixedClasses[(w * 5)..<(w * 5 + 5)]) { windowsMatch = false }
+    }
+    check(windowsMatch, "each window's entropy, size, number of values and kinds of byte match Python's")
+    let mixedCells: [Int] = [0, 2, 0, 0, 0, 0, 1, 3, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 63, 3, 0, 0, 0, 0, 64, 2, 0, 0, 0, 0, 100, 2, 0, 0, 0, 0, 1000, 0, 0, 2, 0, 0, 2047, 0, 0, 3, 0, 0, 2048, 0, 0, 2, 0, 0, 3000, 0, 0, 1, 0, 1, 4095, 0, 0, 0, 0, 3]
+    var cellsMatch = true
+    for i in stride(from: 0, to: mixedCells.count, by: 6) {
+        if mixed.cells[mixedCells[i]] != mapCell(mixedCells[i + 1], mixedCells[i + 2], mixedCells[i + 3], mixedCells[i + 4], mixedCells[i + 5]) { cellsMatch = false }
+    }
+    check(cellsMatch, "and so do eleven of the cells")
+    let mixedHistogram: [Int] = [2072, 17, 22, 14, 18, 19, 21, 16, 18, 22, 19, 25, 23, 18, 21, 22, 24, 22, 20, 24, 25, 26, 21, 24, 18, 19, 16, 19, 17, 24, 19, 20, 432, 23, 19, 23, 19, 23, 23, 20, 20, 19, 18, 21, 21, 17, 66, 17, 18, 18, 16, 20, 20, 14, 19, 23, 24, 19, 16, 15, 24, 21, 16, 25, 22, 21, 28, 18, 17, 17, 17, 22, 21, 22, 21, 28, 22, 20, 18, 15, 21, 21, 17, 19, 63, 21, 17, 24, 24, 19, 16, 18, 19, 22, 18, 17, 23, 66, 63, 66, 66, 153, 67, 66, 108, 64, 66, 65, 64, 67, 69, 203, 66, 65, 114, 70, 73, 113, 70, 64, 66, 67, 67, 20, 19, 21, 20, 19, 18, 20, 18, 21, 24, 20, 19, 15, 20, 17, 17, 22, 21, 17, 19, 15, 19, 26, 18, 23, 16, 21, 19, 21, 22, 18, 20, 22, 21, 15, 19, 18, 19, 21, 22, 21, 22, 23, 18, 22, 18, 16, 22, 15, 17, 18, 21, 18, 18, 20, 16, 22, 19, 23, 19, 19, 21, 17, 21, 17, 17, 20, 22, 19, 16, 23, 20, 20, 24, 20, 23, 20, 20, 20, 22, 19, 22, 19, 22, 23, 18, 14, 18, 20, 23, 20, 23, 24, 17, 20, 22, 20, 22, 26, 18, 20, 24, 19, 21, 24, 15, 14, 21, 17, 18, 21, 18, 20, 16, 19, 16, 19, 23, 21, 23, 19, 25, 19, 16, 15, 21, 22, 20, 22, 18, 22, 16, 1045]
+    check(mapNear(mixed.entropy, 6.424212344623623) && mixed.distinctValues == 256, "and the whole file's entropy and number of values")
+    check(mixed.histogram == mixedHistogram, "and how often each byte value occurs")
+    // A window of zeros, of text, of random bytes: the graph's three levels.
+    check(mixed.windowEntropy.first == 0 && mixed.windowEntropy.contains { $0 > 7 } && mixed.windowEntropy.contains { $0 > 3 && $0 < 5 }, "zeros, text and random bytes read as the low, middle and high of the graph")
+
+    // A million bytes, so every cell of a full 256 by 256 map.
+    let million = ByteMapAnalyzer.analyze(DataByteSource((0..<1_000_000).map { MapFormulaSource.byte(at: Int64($0)) }))!
+    check(million.layout.order == 8 && million.layout.windowCount == 512 && million.cells.count == 65_536, "a million bytes make 65,536 cells and as many windows as Python makes")
+    check(mapNear(million.entropy, 7.999999974885559) && million.distinctValues == 256, "its entropy and the number of values in it")
+    var totals = [Int](repeating: 0, count: 5)
+    for cell in million.cells { for byteClass in ByteClass.allCases { totals[byteClass.rawValue] += cell[byteClass] } }
+    check(totals == [3907, 3906, 382813, 113279, 496095] && totals.reduce(0, +) == 1_000_000, "the kinds of byte add up to the file, as Python counts them")
+    check(mapNear(million.windowEntropy.reduce(0, +), 4091.3723656155494, 1e-6), "the window entropies add up as Python's do")
+    let someWindows: [Double] = [7.990721725821404, 7.9908276173193675, 7.991118669562217, 7.991118669562217, 7.990827617319367, 7.990845630319572]
+    let windowPicks = [0, 1, 2, 3, 100, million.layout.windowCount - 1]
+    check(zip(windowPicks, someWindows).allSatisfy { mapNear(million.windowEntropy[$0], $1) }, "and six of them one by one, the first four, the hundred-and-first and the last")
+    let millionCells: [Int] = [0, 1, 0, 4, 0, 10, 1, 0, 0, 3, 3, 9, 255, 0, 0, 4, 2, 10, 256, 0, 1, 8, 2, 4, 4097, 0, 0, 6, 1, 8, 30000, 0, 0, 8, 2, 5, 65535, 0, 0, 7, 0, 9]
+    var millionCellsMatch = true
+    for i in stride(from: 0, to: millionCells.count, by: 6) {
+        if million.cells[millionCells[i]] != mapCell(millionCells[i + 1], millionCells[i + 2], millionCells[i + 3], millionCells[i + 4], millionCells[i + 5]) { millionCellsMatch = false }
+    }
+    check(millionCellsMatch, "and seven of the cells")
+    let histogramValues = [0, 1, 7, 64, 127, 128, 200, 255]
+    let histogramCounts: [Int] = [3907, 3906, 3907, 3906, 3906, 3907, 3908, 3906]
+    check(zip(histogramValues, histogramCounts).allSatisfy { million.histogram[$0] == $1 }, "and how often eight of the byte values occur")
+}
+
+// MARK: Files too big to read whole
+
+do {
+    check(ByteMapAnalyzer.sampleRange(in: 100..<300, size: 64) == 128..<192, "a sample starts at the first aligned place in the cell")
+    check(ByteMapAnalyzer.sampleRange(in: 128..<300, size: 64) == 128..<192, "or at the cell's start, when that is aligned")
+    check(ByteMapAnalyzer.sampleRange(in: 130..<200, size: 64) == 130..<194, "or where the cell starts, when there is not room to align")
+    check(ByteMapAnalyzer.sampleRange(in: 100..<192, size: 64) == 128..<192 && ByteMapAnalyzer.sampleRange(in: 100..<191, size: 64) == 100..<164, "an aligned sample that fits exactly is used, and one a byte too far is not")
+    check(ByteMapAnalyzer.sampleRange(in: 10..<40, size: 64) == 10..<40, "a cell smaller than a sample is read whole")
+    check(ByteMapAnalyzer.sampleRange(in: 0..<65, size: 64) == 0..<64, "and one a byte bigger than a sample gives a whole one")
+
+    // Over the budget: a sample from each of as many cells as the budget buys one for.
+    let small = MapFormulaSource(count: 100_000)
+    var smallLimits = ByteMapAnalyzer.Limits()
+    smallLimits.budget = 4096
+    smallLimits.sampleSize = 64
+    let sampled = ByteMapAnalyzer.analyze(small, limits: smallLimits)!
+    check(sampled.isSampled && sampled.sampleSize == 64 && sampled.layout.order == 3 && sampled.layout.windowCount == 64, "a file over the budget is sampled, in as many cells as it pays for")
+    check(sampled.readBytes == 4096 && small.bytesRead == 4096 && small.requests.count == 64, "64 samples of 64 bytes, and the budget is not passed")
+    let runs: [Int64] = [0, 64, 1600, 1664, 3136, 3200, 4736, 4800, 6272, 6336, 7872, 7936, 9408, 9472, 10944, 11008, 12544, 12608, 14080, 14144, 15680, 15744, 17216, 17280, 93760, 93824, 95360, 95424, 96896, 96960, 98496, 98560]
+    let seen = small.requests.prefix(12) + small.requests.suffix(4)
+    check(seen.enumerated().allSatisfy { $1.lowerBound == runs[$0 * 2] && $1.upperBound == runs[$0 * 2 + 1] }, "each is the aligned run Python picks, at the front and at the back of the file")
+    let sampledClasses: [Int] = [1, 0, 24, 6, 33, 0, 0, 24, 9, 31, 0, 0, 25, 8, 31, 0, 0, 25, 7, 32, 0, 0, 23, 8, 33, 1, 0, 24, 7, 32, 1, 0, 28, 5, 30, 1, 0, 25, 5, 33, 0, 1, 23, 7, 33, 0, 1, 23, 9, 31, 1, 0, 25, 8, 30, 1, 0, 26, 7, 30, 1, 0, 24, 6, 33, 0, 1, 22, 8, 33, 0, 1, 26, 7, 30, 0, 0, 27, 6, 31, 0, 0, 23, 7, 34, 1, 0, 25, 5, 33, 0, 0, 24, 10, 30, 0, 0, 26, 8, 30, 0, 0, 25, 8, 31, 0, 0, 23, 7, 34, 1, 0, 24, 6, 33, 1, 0, 27, 6, 30, 0, 0, 25, 7, 32, 0, 1, 23, 7, 33, 1, 0, 24, 7, 32, 0, 0, 24, 9, 31, 0, 1, 26, 7, 30, 0, 1, 23, 7, 33, 0, 0, 24, 6, 34, 1, 0, 25, 8, 30, 0, 0, 25, 8, 31, 0, 0, 22, 8, 34, 0, 0, 24, 7, 33, 0, 0, 23, 10, 31, 0, 0, 27, 6, 31, 1, 0, 27, 5, 31, 1, 0, 25, 5, 33, 0, 1, 23, 7, 33, 0, 0, 26, 8, 30, 0, 0, 25, 8, 31, 1, 0, 23, 7, 33, 1, 0, 24, 6, 33, 0, 1, 23, 10, 30, 0, 1, 26, 7, 30, 0, 0, 25, 6, 33, 0, 0, 23, 7, 34, 0, 0, 24, 9, 31, 0, 0, 26, 8, 30, 0, 0, 23, 8, 33, 0, 0, 23, 8, 33, 0, 0, 23, 8, 33, 0, 0, 25, 8, 31, 1, 0, 27, 6, 30, 0, 0, 24, 7, 33, 0, 1, 23, 7, 33, 1, 0, 26, 7, 30, 0, 0, 26, 7, 31, 0, 1, 23, 7, 33, 0, 1, 23, 7, 33, 0, 1, 24, 8, 31, 1, 0, 26, 7, 30, 0, 0, 24, 8, 32]
+    var classesMatch = sampled.cells.count == 64
+    for i in 0..<min(sampled.cells.count, 64) {
+        if sampled.cells[i] != mapCell(sampledClasses[i * 5], sampledClasses[i * 5 + 1], sampledClasses[i * 5 + 2], sampledClasses[i * 5 + 3], sampledClasses[i * 5 + 4]) { classesMatch = false }
+    }
+    check(classesMatch, "the kinds of byte in every sample")
+    let sampledWindows: [Double] = [6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0]
+    check(sampled.windowEntropy.count == 64 && zip(sampled.windowEntropy, sampledWindows).allSatisfy { mapNear($0, $1) } && mapNear(sampled.entropy, 7.991094195851428), "and the entropy of each window and of the whole")
+    check(sampled.coverageNote == "A file this big is sampled: 64 bytes from each of 64 places, 4.0 KiB of 98 KiB.", "the note says what was read: \(sampled.coverageNote ?? "nothing")")
+
+    // At the budget exactly it is read whole.
+    let exactSource = MapFormulaSource(count: 4096)
+    let exact = ByteMapAnalyzer.analyze(exactSource, limits: smallLimits)!
+    check(!exact.isSampled && exact.sampleSize == 0 && exactSource.bytesRead == 4096 && exact.readBytes == 4096 && exact.coverageNote == nil, "a file of exactly the budget is read whole")
+    let justOver = MapFormulaSource(count: 4097)
+    check(ByteMapAnalyzer.analyze(justOver, limits: smallLimits)!.isSampled && justOver.bytesRead == 4096, "and one byte over is sampled")
+
+    // 5 GiB and a bit, never in memory.
+    let hugeSource = MapFormulaSource(count: 5368721465)
+    var hugeLimits = ByteMapAnalyzer.Limits()
+    hugeLimits.budget = 1 << 20
+    hugeLimits.sampleSize = 1024
+    let huge = ByteMapAnalyzer.analyze(hugeSource, limits: hugeLimits)!
+    check(huge.isSampled && huge.layout.order == 5 && huge.layout.windowCount == 1024, "a file of 5 GiB is cut into 1,024 cells")
+    check(huge.readBytes == 1048576 && hugeSource.bytesRead == 1 << 20 && hugeSource.requests.count == 1024, "and costs the budget: a mebibyte, in 1,024 reads")
+    let hugeRuns: [Int64] = [0, 1024, 5243904, 5244928, 10486784, 10487808, 15729664, 15730688, 20972544, 20973568, 26215424, 26216448, 5352993792, 5352994816, 5358236672, 5358237696, 5363479552, 5363480576]
+    let hugeSeen = hugeSource.requests.prefix(6) + hugeSource.requests.suffix(3)
+    check(hugeSeen.enumerated().allSatisfy { $1.lowerBound == hugeRuns[$0 * 2] && $1.upperBound == hugeRuns[$0 * 2 + 1] }, "from the places Python picks, the last of them 5 GiB along")
+    var hugeTotals = [Int](repeating: 0, count: 5)
+    for cell in huge.cells { for byteClass in ByteClass.allCases { hugeTotals[byteClass.rawValue] += cell[byteClass] } }
+    check(hugeTotals == [4093, 4100, 401814, 118789, 519780] && mapNear(huge.entropy, 7.999810994480212), "its kinds of byte and its entropy")
+    let hugeCells: [Int] = [0, 5, 3, 387, 116, 513, 1, 3, 6, 396, 116, 503, 2, 3, 6, 396, 116, 503, 511, 4, 3, 394, 113, 510, 512, 4, 3, 394, 113, 510, 1023, 3, 5, 388, 117, 511]
+    var hugeCellsMatch = true
+    for i in stride(from: 0, to: hugeCells.count, by: 6) {
+        if huge.cells[hugeCells[i]] != mapCell(hugeCells[i + 1], hugeCells[i + 2], hugeCells[i + 3], hugeCells[i + 4], hugeCells[i + 5]) { hugeCellsMatch = false }
+    }
+    check(hugeCellsMatch, "and six of its cells")
+    let hugeStarts: [Int64] = [0, 0, 1, 5242892, 2, 10485784, 511, 2679117840, 512, 2684360732, 1023, 5363478572, 1024, 5368721465]
+    check(stride(from: 0, to: hugeStarts.count, by: 2).allSatisfy { huge.layout.cellStart(Int(hugeStarts[$0])) == hugeStarts[$0 + 1] }, "cells at 5 GiB start where Python says")
+    check(huge.coverageNote?.hasPrefix("A file this big is sampled: 1.0 KiB from each of 1024 places, 1.0 MiB of 5.0 GiB.") == true, "the note for it: \(huge.coverageNote ?? "nothing")")
+}
+
+// MARK: Stopping, progress and files that shrink
+
+do {
+    let source = MapProbeSource(MapFormulaSource(count: 50_000))
+    var asked = 0
+    let stopped = ByteMapAnalyzer.analyze(source, isCancelled: { asked += 1; return asked > 10 })
+    check(stopped == nil && source.reads == 10, "a pass that is stopped gives nothing back and reads no further: \(source.reads) reads")
+    let never = MapProbeSource(MapFormulaSource(count: 50_000))
+    check(ByteMapAnalyzer.analyze(never, isCancelled: { true }) == nil && never.reads == 0, "one stopped before it starts reads nothing")
+
+    var reports: [Double] = []
+    _ = ByteMapAnalyzer.analyze(MapProbeSource(MapFormulaSource(count: 300_000)), progress: { reports.append($0) })
+    check(reports.first == 0 && reports.last == 1 && reports.count > 3, "progress begins at 0 and ends at 1")
+    check(zip(reports, reports.dropFirst()).allSatisfy { $0 <= $1 } && reports.allSatisfy { $0 >= 0 && $0 <= 1 }, "and only ever goes up, within 0 to 1")
+
+    // A file that shrinks while it is read: what could not be read is said, and not counted.
+    let shrinking = MapProbeSource(DataByteSource((0..<1000).map { UInt8($0 % 251) }), readable: 400)
+    let shrunk = ByteMapAnalyzer.analyze(shrinking)!
+    check(shrunk.unreadBytes == 600 && shrunk.readBytes == 400 && shrunk.cells.reduce(0) { $0 + $1.total } == 400, "bytes that could not be read are counted as such, and are in no cell")
+    check(shrunk.coverageNote == "600 bytes could not be read; the file may have changed.", "and the note says so: \(shrunk.coverageNote ?? "nothing")")
+    check(shrunk.cells[0].total > 0 && shrunk.cells.contains { $0.total == 0 }, "the cells beyond the shrink are empty")
+    let shrunkPixels = ByteMapRaster.pixels(shrunk, coloring: .byteClass)
+    let unreadColor = ByteMapPalette.unread
+    var unreadShown = 0
+    for cell in 0..<shrunk.cells.count where shrunk.cells[cell].total == 0 {
+        let point = shrunk.layout.point(ofCell: cell)
+        let at = (point.y * shrunk.layout.side + point.x) * 4
+        if shrunkPixels[at] == unreadColor.red && shrunkPixels[at + 1] == unreadColor.green && shrunkPixels[at + 2] == unreadColor.blue { unreadShown += 1 }
+    }
+    check(unreadShown == shrunk.cells.filter { $0.total == 0 }.count && unreadShown > 0, "and are drawn as unread")
+    let shrunkEntropy = ByteMapRaster.pixels(shrunk, coloring: .entropy)
+    var unreadWindowCells = 0
+    var unreadWindowShown = 0
+    for cell in 0..<shrunk.cells.count where shrunk.windowBytes[shrunk.layout.window(ofCell: cell)] == 0 {
+        unreadWindowCells += 1
+        let point = shrunk.layout.point(ofCell: cell)
+        let at = (point.y * shrunk.layout.side + point.x) * 4
+        if shrunkEntropy[at] == unreadColor.red && shrunkEntropy[at + 1] == unreadColor.green && shrunkEntropy[at + 2] == unreadColor.blue { unreadWindowShown += 1 }
+    }
+    check(unreadWindowCells > 0 && unreadWindowShown == unreadWindowCells, "by entropy, a window that read nothing is drawn as unread and not as plain")
+    let oneShort = ByteMapAnalyzer.analyze(MapProbeSource(DataByteSource([UInt8](repeating: 7, count: 100)), readable: 99))!
+    check(oneShort.unreadBytes == 1 && oneShort.coverageNote == "1 byte could not be read; the file may have changed.", "even one byte that could not be read is said: \(oneShort.coverageNote ?? "nothing")")
+    let nothing = ByteMapAnalyzer.analyze(MapProbeSource(DataByteSource([1, 2, 3, 4, 5, 6, 7, 8]), readable: 0))!
+    check(nothing.readBytes == 0 && nothing.unreadBytes == 8 && nothing.entropy == 0, "a file that cannot be read at all is a map of nothing, not a crash")
+}
+
+// MARK: Colours
+
+do {
+    let colours = ByteClass.allCases.map { ByteMapPalette.color(of: $0) }
+    var distinctColours = true
+    for i in 0..<colours.count { for j in (i + 1)..<colours.count where colours[i] == colours[j] { distinctColours = false } }
+    check(distinctColours, "the five kinds of byte have five colours")
+    check(ByteMapPalette.color(of: .zero).luminance < 40 && ByteMapPalette.color(of: .full).luminance > 220, "zeros are dark and 0xFF is light")
+    check(mapNear(ByteMapColor(red: 255, green: 0, blue: 0).luminance, 0.2126 * 255) && mapNear(ByteMapColor(red: 0, green: 255, blue: 0).luminance, 0.7152 * 255) && mapNear(ByteMapColor(red: 0, green: 0, blue: 255).luminance, 0.0722 * 255), "light is weighted most to green and least to blue")
+    func pureCell(_ byteClass: ByteClass) -> ByteMapCell {
+        var counts = [Int](repeating: 0, count: 5)
+        counts[byteClass.rawValue] = 7
+        return ByteMapCell(classCounts: counts)
+    }
+    check(ByteClass.allCases.allSatisfy { ByteMapPalette.color(of: pureCell($0)) == ByteMapPalette.color(of: $0) }, "a cell of one kind is that kind's colour")
+    check(ByteMapPalette.color(of: mapCell(1, 1)) == ByteMapColor(red: 130, green: 131, blue: 134), "half zeros and half 0xFF is the mean of the two, rounded")
+    check(ByteMapPalette.color(of: mapCell(1, 0, 3)) == ByteMapColor(red: 48, green: 102, blue: 190), "three of text to one of zero is weighted three to one")
+    check(ByteMapPalette.color(of: mapCell()) == ByteMapPalette.unread, "a cell with nothing read is the unread colour")
+
+    check(ByteMapPalette.entropyColor(0) == ByteMapColor(red: 0, green: 0, blue: 4) && ByteMapPalette.entropyColor(8) == ByteMapColor(red: 252, green: 255, blue: 164), "the entropy scale runs from near black to pale yellow")
+    check(ByteMapPalette.entropyColor(-3) == ByteMapPalette.entropyColor(0) && ByteMapPalette.entropyColor(99) == ByteMapPalette.entropyColor(8), "and stops at either end")
+    let ramp: [Double] = [0.0, 0, 0, 4, 0.5, 22, 4, 31, 1.0, 44, 8, 57, 2.0, 87, 16, 110, 3.3, 153, 41, 93, 4.0, 188, 55, 84, 5.5, 234, 120, 28, 6.0, 249, 142, 9, 7.2, 251, 210, 102, 7.9, 252, 249, 156, 8.0, 252, 255, 164]
+    var rampMatches = true
+    for i in stride(from: 0, to: ramp.count, by: 4) {
+        let color = ByteMapPalette.entropyColor(ramp[i])
+        if Double(color.red) != ramp[i + 1] || Double(color.green) != ramp[i + 2] || Double(color.blue) != ramp[i + 3] { rampMatches = false }
+    }
+    check(rampMatches, "eleven points on the scale are the colours Python gives, rounded the same way")
+    var brighter = true
+    var previousLuminance = -1.0
+    var level = 0.0
+    while level <= 8.0 {
+        let luminance = ByteMapPalette.entropyColor(level).luminance
+        if luminance < previousLuminance { brighter = false }
+        previousLuminance = luminance
+        level += 0.05
+    }
+    check(brighter, "more entropy is never darker")
+
+    // The picture itself: pixels, from the top left, row by row.
+    let four = ByteMapAnalyzer.analyze(DataByteSource([0x00, 0xFF, 0x41, 0x80]))!
+    let pixels = ByteMapRaster.pixels(four, coloring: .byteClass)
+    func pixel(_ at: Int) -> ByteMapColor { ByteMapColor(red: pixels[at * 4], green: pixels[at * 4 + 1], blue: pixels[at * 4 + 2]) }
+    check(pixels.count == 16 && stride(from: 3, to: 16, by: 4).allSatisfy { pixels[$0] == 255 }, "a map of four cells is four pixels, all opaque")
+    // The curve goes top left, bottom left, bottom right, top right.
+    check(pixel(0) == ByteMapPalette.color(of: .zero) && pixel(2) == ByteMapPalette.color(of: .full) && pixel(3) == ByteMapPalette.color(of: .text) && pixel(1) == ByteMapPalette.color(of: .high),
+          "each byte's pixel is where the curve puts it")
+
+    // By entropy, a window is a patch: zeros the darkest end, random bytes brighter.
+    var halves = [UInt8](repeating: 0, count: 2048)
+    var random = BytesCheckRandom(seed: 99)
+    for _ in 0..<2048 { halves.append(random.byte()) }
+    let split = ByteMapAnalyzer.analyze(DataByteSource(halves))!
+    let entropyPixels = ByteMapRaster.pixels(split, coloring: .entropy)
+    check(entropyPixels.count == split.layout.side * split.layout.side * 4 && split.layout.windowCount == 16, "an entropy picture has a pixel for each cell")
+    var rightPatches = true
+    for cell in 0..<split.cells.count {
+        let point = split.layout.point(ofCell: cell)
+        let at = (point.y * split.layout.side + point.x) * 4
+        let expected = ByteMapPalette.entropyColor(split.windowEntropy[cell / split.layout.windowCells])
+        if entropyPixels[at] != expected.red || entropyPixels[at + 1] != expected.green || entropyPixels[at + 2] != expected.blue { rightPatches = false }
+        if cell < 2048, expected != ByteMapColor(red: 0, green: 0, blue: 4) { rightPatches = false }
+        if cell >= 2048, expected.luminance < 150 { rightPatches = false }
+    }
+    check(rightPatches, "by entropy each cell is the colour of its window: black for the zeros, bright for the random half")
+}
+
+// MARK: What it says
+
+do {
+    check(ByteMapText.hex(0) == "0x0" && ByteMapText.hex(8000) == "0x1F40" && ByteMapText.hex(Int64.max) == "0x7FFFFFFFFFFFFFFF", "offsets in hex")
+    check(ByteMapText.range(100..<101) == "0x64" && ByteMapText.range(0x1F40..<0x2000) == "0x1F40 to 0x1FFF" && ByteMapText.range(5..<5) == "0x5", "a run is first to last, one byte is one")
+    check(ByteMapText.size(0) == "0 bytes" && ByteMapText.size(1) == "1 byte" && ByteMapText.size(1023) == "1023 bytes", "small sizes in bytes")
+    check(ByteMapText.size(1024) == "1.0 KiB" && ByteMapText.size(1536) == "1.5 KiB" && ByteMapText.size(65_536) == "64 KiB" && ByteMapText.size(10_240) == "10 KiB", "and then in binary units, named as such")
+    check(ByteMapText.size(1 << 30) == "1.0 GiB" && ByteMapText.size(5 << 30) == "5.0 GiB" && ByteMapText.size(Int64.max) == "8.0 EiB", "up to the biggest a file can be")
+    check(ByteMapText.bits(7.98765) == "7.99" && ByteMapText.bits(0) == "0.00", "entropy to two places")
+    check(ByteMapText.percent(0, of: 10) == 0 && ByteMapText.percent(10, of: 10) == 100 && ByteMapText.percent(1, of: 1000) == 1 && ByteMapText.percent(999, of: 1000) == 99 && ByteMapText.percent(1, of: 3) == 33 && ByteMapText.percent(2, of: 3) == 67, "a share is never 0 for something there, nor 100 for what is not all of it")
+    check(ByteMapText.mix(mapCell(17, 0, 62, 21)) == "text 62%, control codes 21%, zeros 17%", "the kinds in a cell, biggest first")
+    check(ByteMapText.mix(mapCell(5, 0, 90, 0, 5)) == "text 90%", "a kind under a tenth is left out")
+    check(ByteMapText.mix(mapCell(10, 0, 90)) == "text 90%, zeros 10%", "and one of exactly a tenth is not")
+    check(ByteMapText.mix(mapCell(1, 1, 0, 0, 0)) == "zeros 50%, 0xFF 50%", "equal shares go in the order of the kinds")
+    check(ByteMapText.mix(mapCell()) == "nothing read", "an empty cell says so")
+
+    let analysis = ByteMapAnalyzer.analyze(DataByteSource(Array("Hello, world! ".utf8) + [UInt8](repeating: 0, count: 50)))!
+    check(analysis.cellLine(0) == "0x0 · 1 byte · text 100%", "a cell of the file: \(analysis.cellLine(0))")
+    check(analysis.windowLine(0) == "0x0 to 0x3F · entropy 1.45 bits per byte: very repetitive: padding, long runs or sparse data", "a window of the file: \(analysis.windowLine(0))")
+    check(analysis.summaryLine == "entropy 1.45 bits per byte over 64 bytes: very repetitive: padding, long runs or sparse data", "the whole file: \(analysis.summaryLine)")
+    check(analysis.coverageNote == nil, "nothing to note when all of it was read")
+    let sampledText = ByteMapAnalyzer.analyze(MapFormulaSource(count: 100_000), limits: { var l = ByteMapAnalyzer.Limits(); l.budget = 4096; l.sampleSize = 64; return l }())!
+    check(sampledText.cellLine(3).contains("sampled 64 bytes") && sampledText.summaryLine.hasPrefix("Sampled: "), "a sampled file says so in each line: \(sampledText.cellLine(3))")
+    check(analysis.cellLine(9999) == analysis.cellLine(analysis.cells.count - 1) && analysis.windowLine(-3) == analysis.windowLine(0), "a cell or window out of range is the nearest one")
+}
+
+// MARK: Any file at all
+
+// Random sizes, random contents, random limits and random places to stop: whatever happens, what comes
+// back is sound. Every cell and window is accounted for, every byte read is counted once, entropy is
+// between 0 and 8, the picture has a pixel for each cell, and a pass never reads more than it said it would.
+do {
+    var random = BytesCheckRandom(seed: 777)
+    var unsound: [String] = []
+    var runs = 0
+    for _ in 0..<1500 {
+        runs += 1
+        let length = 1 + random.below(random.below(4) == 0 ? 20_000 : 600)
+        var bytes = [UInt8](repeating: 0, count: length)
+        let style = random.below(4)
+        for i in 0..<length {
+            switch style {
+            case 0: bytes[i] = random.byte()
+            case 1: bytes[i] = UInt8(truncatingIfNeeded: i / 7)
+            case 2: bytes[i] = random.below(5) == 0 ? random.byte() : 0
+            default: bytes[i] = UInt8(truncatingIfNeeded: 0x20 + random.below(95))
+            }
+        }
+        var limits = ByteMapAnalyzer.Limits()
+        let sampling = random.below(3) == 0
+        if sampling {
+            limits.sampleSize = Int64(1 + random.below(64))
+            limits.budget = Int64(1 + random.below(length))
+        }
+        limits.maxOrder = random.below(10)
+        let source = MapProbeSource(DataByteSource(bytes), readable: random.below(6) == 0 ? Int64(random.below(length + 1)) : nil)
+        let expectedUnreadable = Int64(length) - source.readable
+        guard let analysis = ByteMapAnalyzer.analyze(source, limits: limits) else { unsound.append("length \(length): no analysis"); continue }
+        let layout = analysis.layout
+        let total = analysis.cells.reduce(0) { $0 + $1.total }
+        var problem: String?
+        if analysis.cells.count != layout.cellCount || analysis.windowEntropy.count != layout.windowCount
+            || analysis.windowBytes.count != layout.windowCount || analysis.windowDistinct.count != layout.windowCount {
+            problem = "counts of cells and windows"
+        } else if Int64(total) != analysis.readBytes || analysis.histogram.reduce(0, +) != total || analysis.windowBytes.reduce(0, +) != total {
+            problem = "bytes read: cells \(total), histogram \(analysis.histogram.reduce(0, +)), windows \(analysis.windowBytes.reduce(0, +)), said \(analysis.readBytes)"
+        } else if analysis.windowEntropy.contains(where: { $0 < 0 || $0 > 8 || $0.isNaN }) || analysis.entropy < 0 || analysis.entropy > 8 || analysis.entropy.isNaN {
+            problem = "entropy out of range"
+        } else if analysis.isSampled != (Int64(length) > limits.budget) && sampling {
+            problem = "sampled when it should not be, or not when it should"
+        } else if !analysis.isSampled && analysis.readBytes + analysis.unreadBytes != Int64(length) {
+            problem = "read \(analysis.readBytes) and missed \(analysis.unreadBytes) of \(length)"
+        } else if !analysis.isSampled && analysis.unreadBytes != max(expectedUnreadable, 0) {
+            problem = "missed \(analysis.unreadBytes), expected \(expectedUnreadable)"
+        } else if analysis.isSampled && analysis.readBytes + analysis.unreadBytes > limits.budget {
+            problem = "read more than the budget \(limits.budget)"
+        } else if ByteMapRaster.pixels(analysis, coloring: .byteClass).count != layout.side * layout.side * 4
+                    || ByteMapRaster.pixels(analysis, coloring: .entropy).count != layout.side * layout.side * 4 {
+            problem = "the picture is the wrong size"
+        } else if [0, analysis.cells.count / 2, analysis.cells.count - 1].contains(where: { analysis.cellLine($0).isEmpty })
+                    || [0, analysis.windowEntropy.count - 1].contains(where: { analysis.windowLine($0).isEmpty }) {
+            problem = "an empty line of words"
+        }
+        // In a file that is read whole, every byte is counted, in the histogram, as it is in the file.
+        if problem == nil, !analysis.isSampled, source.readable >= Int64(length) {
+            var counts = [Int](repeating: 0, count: 256)
+            for byte in bytes { counts[Int(byte)] += 1 }
+            if counts != analysis.histogram { problem = "the histogram is not the file's" }
+        }
+        if let problem { unsound.append("length \(length): \(problem)") }
+        if unsound.count > 4 { break }
+    }
+    check(unsound.isEmpty, "\(runs) random files with random limits give sound maps: \(unsound.prefix(4))")
+
+    // Stopped at a random place, a pass either finishes or says it was stopped, and never reads on.
+    var stops: [String] = []
+    for _ in 0..<300 {
+        let length = 1 + random.below(30_000)
+        let source = MapProbeSource(MapFormulaSource(count: Int64(length)))
+        let allowed = random.below(400)
+        var asked = 0
+        let result = ByteMapAnalyzer.analyze(source, isCancelled: { asked += 1; return asked > allowed })
+        let cells = ByteMapLayout(length: Int64(length)).cellCount
+        if allowed >= cells {
+            if result == nil { stops.append("length \(length) allowed \(allowed): stopped though it was done") }
+        } else if result != nil || source.reads != allowed {
+            stops.append("length \(length) allowed \(allowed): \(source.reads) reads, result \(result == nil ? "nil" : "kept")")
+        }
+        if stops.count > 3 { break }
+    }
+    check(stops.isEmpty, "a pass stopped at any cell stops there: \(stops.prefix(3))")
 }
 
 print("\(checks - failures)/\(checks) checks passed")

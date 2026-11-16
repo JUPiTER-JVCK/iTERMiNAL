@@ -1,10 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// How the bytes are shown: written in a base, as the bits in them, or beside the fields
-/// the file's format says they make up.
+/// How the bytes are shown: written in a base, as the bits in them, beside the fields
+/// the file's format says they make up, or as a map of what kind of bytes are where.
 enum BytesMode: String, CaseIterable, Hashable {
-    case hex, bits, structure
+    case hex, bits, structure, map
 }
 
 /// Where the Structure outlook has got to with the open file.
@@ -12,6 +12,29 @@ enum StructureState {
     case idle
     case parsing
     case ready(StructureResult)
+}
+
+/// Where the Map outlook has got to with the open file.
+enum MapState {
+    case idle
+    /// Reading the file, this far along: 0 to 1.
+    case analysing(Double)
+    case ready(ByteMapResult)
+}
+
+/// What the Map outlook shows: what the pass over the file found, and the picture made from it,
+/// in each of the ways it can be coloured.
+struct ByteMapResult {
+    let analysis: ByteMapAnalysis
+    let byteClassImage: CGImage?
+    let entropyImage: CGImage?
+
+    func image(for coloring: ByteMapColoring) -> CGImage? {
+        switch coloring {
+        case .byteClass: return byteClassImage
+        case .entropy: return entropyImage
+        }
+    }
 }
 
 /// A request to scroll the Structure tree to a field.
@@ -77,10 +100,24 @@ final class BytesViewerModel: ObservableObject {
     private var rowLimits: [String: Int] = [:]
     private var parseCancellation: ParseCancellation?
 
+    // MARK: Map
+
+    /// The pass over the file that the Map outlook is made from. It reads a lot of the file, so
+    /// it is not begun until the outlook is looked at.
+    @Published private(set) var map: MapState = .idle
+    /// How the cells of the map are coloured.
+    @Published var mapColoring: ByteMapColoring = BytesViewerModel.storedColoring() {
+        didSet { UserDefaults.standard.set(mapColoring.rawValue, forKey: "bytes.mapColoring") }
+    }
+    private var mapCancellation: ParseCancellation?
+    /// The file as it was opened, which the map's pass reads a copy of.
+    private var openedSource: FileByteSource?
+
     @Published var mode: BytesMode = BytesViewerModel.storedMode() {
         didSet {
             UserDefaults.standard.set(mode.rawValue, forKey: "bytes.mode")
             if mode == .structure { followSelection(scroll: true) }
+            if mode == .map { startMapIfNeeded() }
         }
     }
     /// The base of the cells in the Hex outlook; Bits is always binary.
@@ -133,6 +170,9 @@ final class BytesViewerModel: ObservableObject {
             selection = ByteSelection(at: 0)
             reveal = BytesRevealRequest(offset: 0, centered: false)
             startStructure(source)
+            openedSource = source
+            resetMap()
+            if mode == .map { startMapIfNeeded() }
         case .failure(let why):
             refusal = BytesRefusal(name: url.lastPathComponent, why: why)
         }
@@ -141,6 +181,8 @@ final class BytesViewerModel: ObservableObject {
     func close() {
         parseCancellation?.cancel()
         parseCancellation = nil
+        openedSource = nil
+        resetMap()
         buffer = nil
         fileURL = nil
         selection = nil
@@ -254,6 +296,68 @@ final class BytesViewerModel: ObservableObject {
         reveal = BytesRevealRequest(offset: first, centered: true)
     }
 
+    // MARK: Map
+
+    /// Stops any pass over the file, and forgets what it found.
+    private func resetMap() {
+        mapCancellation?.cancel()
+        mapCancellation = nil
+        map = .idle
+    }
+
+    /// Begins the pass over the file if the map has not been made, or is not being. It reads the
+    /// file as it is on disk, which is all the panel shows until it can edit; once it can, an edit
+    /// will have to call `resetMap()` so the map is made again.
+    private func startMapIfNeeded() {
+        guard case .idle = map, let shared = openedSource else { return }
+        let token = ParseCancellation()
+        mapCancellation = token
+        map = .analysing(0)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // The pass reads through a source of its own, so that its reads do not push out of the
+            // cache the pages the grid is showing. If the file is not the one that was opened (it
+            // was replaced, or is gone), the shared source, which still holds what the grid shows,
+            // is read instead.
+            var source: ByteSource = shared
+            if case .success(let own) = FileByteSource.opening(path: shared.path), own.identity == shared.identity {
+                source = own
+            }
+            var lastReport = DispatchTime.now().uptimeNanoseconds
+            let analysis = ByteMapAnalyzer.analyze(
+                source,
+                isCancelled: { token.isCancelled },
+                progress: { fraction in
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    guard now - lastReport > 80_000_000 else { return }
+                    lastReport = now
+                    DispatchQueue.main.async {
+                        guard let self, !token.isCancelled, case .analysing = self.map else { return }
+                        self.map = .analysing(fraction)
+                    }
+                }
+            )
+            guard let analysis, !token.isCancelled else { return }
+            let result = ByteMapResult(
+                analysis: analysis,
+                byteClassImage: ByteMapImage.make(analysis, coloring: .byteClass),
+                entropyImage: ByteMapImage.make(analysis, coloring: .entropy)
+            )
+            DispatchQueue.main.async {
+                guard let self, !token.isCancelled else { return }
+                self.map = .ready(result)
+            }
+        }
+    }
+
+    /// Puts the cursor on the byte at `offset`, from a click on the map or the graph, and brings
+    /// it to the middle of the dump.
+    func moveCursor(to offset: Int64) {
+        guard let buffer, buffer.length > 0 else { return }
+        let target = min(max(offset, 0), buffer.length - 1)
+        selection = ByteSelection(at: target)
+        reveal = BytesRevealRequest(offset: target, centered: true)
+    }
+
     /// Goes to what is typed in the "Go to offset" field.
     func goTo() {
         guard let buffer else { return }
@@ -300,6 +404,10 @@ final class BytesViewerModel: ObservableObject {
     private static func storedRadix() -> ByteRadix {
         let radix = ByteRadix(rawValue: UserDefaults.standard.string(forKey: "bytes.radix") ?? "") ?? .hex
         return radix == .binary ? .hex : radix
+    }
+
+    private static func storedColoring() -> ByteMapColoring {
+        ByteMapColoring(rawValue: UserDefaults.standard.string(forKey: "bytes.mapColoring") ?? "") ?? .byteClass
     }
 
     private static func storedEndianness() -> Endianness {
