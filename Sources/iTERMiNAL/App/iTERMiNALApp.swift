@@ -100,6 +100,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A quit with changes in the Bytes panel that are not saved asks first; with none, it does nothing at all.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let bytes = WorkspaceStore.shared.panelBytes
+        // A save cut off by a quit leaves the file as it was, but also leaves its half-written copy beside it.
+        if bytes.isSaving {
+            let waiting = NSAlert()
+            waiting.messageText = "\(bytes.fileName) is still being saved"
+            waiting.informativeText = "Quit again once the Bytes panel has finished saving it."
+            waiting.runModal()
+            return .terminateCancel
+        }
         guard bytes.isDirty else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Save the changes to \(bytes.fileName)?"

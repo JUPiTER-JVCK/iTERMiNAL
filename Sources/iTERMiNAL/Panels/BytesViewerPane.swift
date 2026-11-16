@@ -113,7 +113,8 @@ struct BytesViewerPaneView: View {
                 case .previous: model.findPrevious()
                 }
             },
-            isEditable: model.isWritable && model.radix == .hex,
+            isEditable: model.isWritable,
+            takesHexDigits: model.radix == .hex,
             onEdit: { edit in
                 switch edit {
                 case .hexDigit(let digit): model.typeHexDigit(digit)
@@ -192,7 +193,7 @@ struct BytesViewerPaneView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(RoundedRectangle(cornerRadius: 4).fill(theme.surface))
-                    .help("The file, or the folder it is in, cannot be written to, so it can be looked at but not changed")
+                    .help(model.readOnlyReason ?? "This file can be looked at but not changed")
             }
             Text(sizeText)
                 .font(.system(size: 11))
@@ -291,7 +292,7 @@ struct BytesViewerPaneView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Click the dump and type: hex digits in the cells, characters in the text column")
+            .help("Click the dump and type: hex digits in the cells (when they are shown as hex), characters in the text column. The heavier outline shows which takes the typing.")
             Spacer(minLength: 0)
             if let note = model.savedNote {
                 Text(note)

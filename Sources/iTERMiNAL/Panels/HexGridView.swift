@@ -31,8 +31,10 @@ struct HexGridView: NSViewRepresentable {
     let onCopy: () -> Void
     /// ⌘F, ⌘G and ⇧⌘G while the dump has the keys.
     let onFind: (HexGridFindCommand) -> Void
-    /// Whether keys change the bytes: the file can be written and the cells are hex.
+    /// Whether keys change the bytes: the file can be written.
     let isEditable: Bool
+    /// Whether the cells take typed digits: they are written in hex. The text column, Delete, undo and save do not need it.
+    let takesHexDigits: Bool
     let onEdit: (HexGridEdit) -> Void
 
     /// Which reveal request was acted on, so one that is still on the model after
@@ -58,6 +60,7 @@ struct HexGridView: NSViewRepresentable {
         view.onCopy = onCopy
         view.onFind = onFind
         view.isEditable = isEditable
+        view.takesHexDigits = takesHexDigits
         view.onEdit = onEdit
         view.update(buffer: buffer, radix: radix, requestedBytesPerRow: bytesPerRow, showsText: showsText,
                     selection: selection, style: style)
@@ -108,7 +111,10 @@ final class HexGridNSView: NSView {
     var onSelect: ((ByteSelection) -> Void)?
     var onCopy: (() -> Void)?
     var onFind: ((HexGridFindCommand) -> Void)?
-    var isEditable = false
+    var isEditable = false {
+        didSet { if isEditable != oldValue { needsDisplay = true } }
+    }
+    var takesHexDigits = true
     var onEdit: ((HexGridEdit) -> Void)?
     /// Whether the last click was on the text column, so that typing goes there and not to the hex cells.
     private var typesInText = false
@@ -347,13 +353,17 @@ final class HexGridNSView: NSView {
                 let index = Int(selection.head % perRow)
                 style.cursor.setStroke()
                 let cell = NSRect(x: x(g.cellColumn(index)) - 1, y: y, width: cellWidth + 2, height: lineHeight)
-                let outline = NSBezierPath(rect: cell.insetBy(dx: 0.5, dy: 0.5))
-                outline.lineWidth = 1
+                // When the file can be edited, the column that takes the typing has the heavier outline.
+                let inText = typesInText && g.showsText
+                let cellLine: CGFloat = isEditable && !inText ? 2 : 1
+                let outline = NSBezierPath(rect: cell.insetBy(dx: cellLine / 2, dy: cellLine / 2))
+                outline.lineWidth = cellLine
                 outline.stroke()
                 if g.showsText {
                     let glyph = NSRect(x: x(g.textColumn(index)), y: y, width: charWidth, height: lineHeight)
-                    let textOutline = NSBezierPath(rect: glyph.insetBy(dx: 0.5, dy: 0.5))
-                    textOutline.lineWidth = 1
+                    let textLine: CGFloat = isEditable && inText ? 2 : 1
+                    let textOutline = NSBezierPath(rect: glyph.insetBy(dx: textLine / 2, dy: textLine / 2))
+                    textOutline.lineWidth = textLine
                     textOutline.stroke()
                 }
             }
@@ -382,11 +392,13 @@ final class HexGridNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // Typing goes to the column that was clicked: the text, or the cells.
         if case .text = geometry.hit(column: Int(((convert(event.locationInWindow, from: nil).x - padding.width + panX) / charWidth).rounded(.down))) {
             typesInText = true
         } else {
             typesInText = false
         }
+        needsDisplay = true
         guard let target = byteOffset(at: convert(event.locationInWindow, from: nil)) else { return }
         let anchor = event.modifierFlags.contains(.shift) ? (selection?.anchor ?? target) : target
         dragAnchor = anchor
@@ -481,7 +493,7 @@ final class HexGridNSView: NSView {
     }
 
     /// A key that types: a hex digit in the cells, a character in the text column, or Delete.
-    private static func typedEdit(for event: NSEvent, inText: Bool) -> HexGridEdit? {
+    private static func typedEdit(for event: NSEvent, inText: Bool, hexDigits: Bool) -> HexGridEdit? {
         let flags = event.modifierFlags.intersection([.command, .control])
         guard flags.isEmpty else { return nil }
         switch event.keyCode {
@@ -490,9 +502,12 @@ final class HexGridNSView: NSView {
         default: break
         }
         guard event.specialKey == nil, let characters = event.characters, !characters.isEmpty else { return nil }
+        // Escape and the like are keys, not text.
+        guard !characters.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else { return nil }
         if inText { return .text(characters) }
-        if characters.count == 1, let digit = UInt8(characters, radix: 16) { return .hexDigit(digit) }
-        return nil
+        guard hexDigits, characters.count == 1, let first = characters.unicodeScalars.first, first.isASCII,
+              let digit = UInt8(characters, radix: 16) else { return nil }
+        return .hexDigit(digit)
     }
 
     private static func findCommand(for event: NSEvent) -> HexGridFindCommand? {
@@ -510,7 +525,8 @@ final class HexGridNSView: NSView {
             onFind?(command)
             return
         }
-        if isEditable, HexGridNSView.move(for: event) == nil, let edit = HexGridNSView.typedEdit(for: event, inText: typesInText && showsText) {
+        if isEditable, HexGridNSView.move(for: event) == nil,
+           let edit = HexGridNSView.typedEdit(for: event, inText: typesInText && showsText, hexDigits: takesHexDigits) {
             onEdit?(edit)
             return
         }

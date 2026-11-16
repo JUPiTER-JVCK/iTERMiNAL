@@ -25,6 +25,16 @@ enum ByteFileSaver {
         case lengthMismatch(written: Int64, expected: Int64)
         /// The original could not be read in full (it changed underneath).
         case unreadable(offset: Int64)
+        /// The file has this many names (hard links). A save puts a new file under one of them, and the others would
+        /// be left with the old bytes without anyone being told.
+        case hasOtherNames(Int)
+    }
+
+    /// How many names the file at `path` has, following a link to the file it names; nil if it cannot be looked at.
+    static func nameCount(ofFileAt path: String) -> Int? {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        return Int(info.st_nlink)
     }
 
     /// How a save was made, for the one line that says so.
@@ -47,6 +57,23 @@ enum ByteFileSaver {
     /// More than the content, for the folder's own bookkeeping.
     static let spaceMargin: Int64 = 1 << 20
 
+    /// Whether a copy of a file in `folder` shares the original's data until one of them is changed, as APFS does.
+    /// There, a copy of a file of any size needs no room of its own.
+    static func clonesFiles(inFolder folder: URL) -> Bool {
+        #if canImport(Darwin)
+        return (try? folder.resourceValues(forKeys: [.volumeSupportsFileCloningKey]))?.volumeSupportsFileCloning ?? false
+        #else
+        return false
+        #endif
+    }
+
+    /// The room a save of `buffer` needs in its folder: all of it, unless only bytes were overwritten and the
+    /// volume clones files, when it is the changed bytes alone.
+    static func spaceNeeded(for buffer: ByteEditBuffer, clones: Bool) -> Int64 {
+        guard clones, let changed = buffer.changedRanges() else { return buffer.length }
+        return changed.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
+    }
+
     /// Saves `buffer` over the file `source` was opened from, and says how. Throws without having changed the file.
     ///
     /// - Parameters:
@@ -64,15 +91,17 @@ enum ByteFileSaver {
         let folder = original.deletingLastPathComponent()
         let temporary = folder.appendingPathComponent(".\(original.lastPathComponent).iterminal-\(UUID().uuidString.prefix(8)).tmp")
 
-        // A copy needs room for the whole file too, on a file system that cannot clone.
-        let needed = buffer.length
+        var info = stat()
+        guard stat(original.path, &info) == 0 else { throw Failure.cannotWrite(String(cString: strerror(errno))) }
+        guard info.st_nlink <= 1 else { throw Failure.hasOtherNames(Int(info.st_nlink)) }
+        let permissions = info.st_mode & 0o7777
+
+        // A copy needs room for the whole file, except on a volume that clones: there, changing one byte of a
+        // file bigger than the room that is left is still a save that fits.
+        let needed = spaceNeeded(for: buffer, clones: clonesFiles(inFolder: folder))
         if let available = freeSpace(folder.path), available < needed + spaceMargin {
             throw Failure.notEnoughSpace(needed: needed, available: available)
         }
-
-        var info = stat()
-        guard stat(original.path, &info) == 0 else { throw Failure.cannotWrite(String(cString: strerror(errno))) }
-        let permissions = info.st_mode & 0o7777
 
         let method: Method
         do {
@@ -193,6 +222,8 @@ enum ByteFileSaver {
             return "\(name) was not saved: \(FieldText.bytes(written)) were written and \(FieldText.bytes(expected)) were meant to be."
         case .unreadable(let offset):
             return "\(name) was not saved: the original could not be read at \(offset). It changed while it was open."
+        case .hasOtherNames(let count):
+            return "\(name) has \(count - 1) other \(count == 2 ? "name" : "names") (hard links). Saving would leave \(count == 2 ? "it" : "them") with the old bytes, so it was not saved."
         }
     }
 }
