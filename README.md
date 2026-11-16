@@ -522,8 +522,8 @@ A tour of the app in thirty-four pictures, in five groups.
   hex, a C array, Python bytes or Base64. It only looks: the file is opened
   read-only and never changed. Folders, pipes and devices are refused, as they
   are not a fixed set of bytes.
-  The **Structure** outlook takes a PNG, a pcap or a pcapng capture apart into
-  its fields, each tied to its bytes: click a field and its bytes are selected
+  The **Structure** outlook takes a PNG, a JPEG, an MP4 or QuickTime movie, a PDF,
+  a pcap or a pcapng capture apart into its fields, each tied to its bytes: click a field and its bytes are selected
   in the dump below, select bytes and the field that holds them is shown. A PNG
   is its chunks, with their CRCs checked (the first 512 MB of chunk data; past
   that a CRC is shown, not checked). A capture is its packets, and a packet is
@@ -531,10 +531,18 @@ A tour of the app in thirty-four pictures, in five groups.
   loopback or raw IP), ARP, IPv4, IPv6 and its extension headers, TCP with its
   options, UDP, ICMP and ICMPv6; checksums in a capture are shown, not checked,
   as a capture taken on the sending machine often holds ones the network card
-  had not filled in yet. A packet cut short by the capture, or a file cut off
+  had not filled in yet. A JPEG is its segments (the tables, the frame header,
+  Exif and the other application data, each scan of the compressed image) and an
+  MP4 its tree of boxes, with the movie, track and sample headers, the codec
+  setup, the tables that index the samples and the tags decoded, and the
+  media data itself left unread. A PDF is read from the front, as it was
+  written: the header, every object with its dictionary and its stream (skipped by
+  its length, not decoded), the cross-reference tables checked against the objects
+  they point at, the trailers, `startxref` and each `%%EOF`, so a file saved again
+  by appending shows every revision. A packet cut short by the capture, or a file cut off
   or lying about its lengths, ends in a field that says so. Any other file is
   named by its first bytes where they say what it is, and the dump still shows it
-  all. At most the first 100,000 packets or chunks are listed; the rest of the
+  all. At most the first 100,000 packets, chunks, segments or boxes are listed; the rest of the
   file is in the dump.
   The **Map** outlook shows what is where in a file you know nothing about. A
   graph along the top plots how random each part is, from 0 bits a byte for
@@ -1640,8 +1648,8 @@ Sources/
 │   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
 │   │                file, rows and columns, what a selection reads as, go-to
 │   │                and the copy formats, and an edit buffer the panel does not
-│   │                use yet; Structure/ holds the parsers (PNG, pcap, pcapng,
-│   │                the packet dissector) and what they make; Map/ holds the
+│   │                use yet; Structure/ holds the parsers (PNG, JPEG, MP4, PDF,
+│   │                pcap, pcapng, the packet dissector) and what they make; Map/ holds the
 │   │                entropy, the byte map and the Hilbert curve — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),

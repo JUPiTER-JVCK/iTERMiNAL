@@ -315,7 +315,7 @@ struct FieldList {
         return count == 1 ? base : base + "#\(count)"
     }
 
-    private static func slug(_ name: String) -> String {
+    static func slug(_ name: String) -> String {
         var out = ""
         var lastWasDash = false
         for character in name.lowercased() {
