@@ -202,14 +202,19 @@ struct ByteEditBuffer {
     /// With `coalescing`, an edit that starts where the last one ended, and was
     /// also made with it, joins that one into a single step of undo — so typing a
     /// run of bytes is undone as a run.
+    ///
+    /// `continuingRun` joins the open run wherever this edit is, for the second digit of a byte
+    /// typed in two: it changes the byte that was just written, which is before where the run ends.
+    /// The run's end does not move in that case.
     @discardableResult
-    mutating func overwrite(at offset: Int64, with bytes: [UInt8], coalescing: Bool = false) throws -> Int {
+    mutating func overwrite(at offset: Int64, with bytes: [UInt8], coalescing: Bool = false, continuingRun: Bool = false) throws -> Int {
         guard offset >= 0, offset < length, !bytes.isEmpty else { return 0 }
         let count = Int(min(Int64(bytes.count), length - offset))
         let end = offset + Int64(count)
+        let continues = continuingRun && runOpen
         try replace(offset..<end, with: .bytes(Array(bytes[0..<count])),
-                    joiningRun: coalescing && runOpen && runEnd == offset,
-                    opensRun: coalescing, runEnd: end)
+                    joiningRun: coalescing && runOpen && (runEnd == offset || continues),
+                    opensRun: coalescing, runEnd: continues ? max(end, runEnd ?? end) : end)
         return count
     }
 
@@ -268,6 +273,32 @@ struct ByteEditBuffer {
         runOpen = false
         revision += 1
         return true
+    }
+
+    // MARK: What changed
+
+    /// The runs of bytes whose content differs from the original at the same place, or nil if the length is
+    /// different or anything has moved, so that the file cannot be had by changing those runs alone. A save
+    /// that finds a list writes only those runs into a copy of the file.
+    func changedRanges() -> [Range<Int64>]? {
+        guard length == source.count else { return nil }
+        var position: Int64 = 0
+        var runs: [Range<Int64>] = []
+        for piece in pieces {
+            let range = position..<(position + piece.length)
+            if case .original = piece.origin, piece.start == position {
+                // Unchanged.
+            } else if case .original = piece.origin {
+                // The original, but from somewhere else.
+                return nil
+            } else if let last = runs.last, last.upperBound == range.lowerBound {
+                runs[runs.count - 1] = last.lowerBound..<range.upperBound
+            } else {
+                runs.append(range)
+            }
+            position += piece.length
+        }
+        return runs
     }
 
     // MARK: The piece list

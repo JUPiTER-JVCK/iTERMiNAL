@@ -523,9 +523,23 @@ A tour of the app in thirty-four pictures, in five groups.
   or Latin-1, with A to Z in either case if you like; it wraps round the file, and a big file is
   searched in the background and can be stopped by searching again.
   Go to an offset (`0x1F40`, `+16`, `end-0x20`, `50%`), and copy the selection as
-  hex, a C array, Python bytes or Base64. It only looks: the file is opened
-  read-only and never changed. Folders, pipes and devices are refused, as they
+  hex, a C array, Python bytes or Base64. Folders, pipes and devices are refused, as they
   are not a fixed set of bytes.
+  A file you can write to can be **edited**: click the dump and type hex digits in the
+  cells (two to a byte) or characters in the text column. **Overwrite** changes the bytes
+  under the cursor, so nothing moves, which is what you want when studying a format;
+  **Insert** puts new bytes in before the cursor and lets Backspace and Delete take bytes
+  out, and moves everything after them (the Edit menu's "Add bytes at the end" is how to
+  add to the end). Undo and redo (⌘Z, ⇧⌘Z) step back through what you typed, a run of typing
+  being one step; the Edit menu also fills the selection with 00 or FF. ⌘S saves, and a save
+  is never in place: the new content is written to a file of its own beside the original,
+  checked (its length, and the room in the folder, before), and only then swapped in, so a
+  crash or a full disk leaves the original as it was. When only bytes were overwritten the file
+  is copied first (which APFS does without writing the data) and just the changed bytes are
+  written, so one byte changed in a multi-gigabyte video is not a multi-gigabyte write. The old
+  file is kept as `name.bak` unless you turn that off, and a save is refused if the file was
+  changed by something else since it was opened. Changes you have not saved are asked
+  about before another file replaces them, before the file is closed, and before the app quits.
   The **Structure** outlook takes a PNG, a JPEG, a GIF, a BMP, an icon, a WebP, a TIFF,
   a HEIC or AVIF, a JPEG 2000 or JPEG XL image, an MP4 or QuickTime movie, a PDF,
   a ZIP archive (or a .docx, .xlsx, .jar, .apk), an ELF or Mach-O program or library,
@@ -1670,8 +1684,7 @@ Sources/
 │   │                assistant), the Bytes panel and its hex grid
 │   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
 │   │                file, rows and columns, what a selection reads as, go-to,
-│   │                search and the copy formats, and an edit buffer the panel
-│   │                does not use yet; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
+│   │                search, the copy formats, editing and its safe save; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
 │   │                ICO, WebP, TIFF, MP4 and the images in its boxes, JPEG XL,
 │   │                PDF, ZIP, ELF, Mach-O, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
 │   │                entropy, the byte map and the Hilbert curve — Foundation-only

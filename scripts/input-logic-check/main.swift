@@ -14879,6 +14879,410 @@ do {
     check(sweepWrong.isEmpty, "400 random searches agree with a plain loop: \(sweepWrong.prefix(2))")
 }
 
+// MARK: Typing and saving
+
+// What typing does to the bytes (where a digit lands, what the second digit changes, where the cursor goes, what Delete is for)
+// is checked on scenarios whose answers are written out, and against a plain array on random keystrokes. Saving is checked on
+// real files in a folder made for it: what is written, what is left behind, and what is refused.
+
+do {
+    func buffer(_ bytes: [UInt8]) -> ByteEditBuffer { ByteEditBuffer(source: DataByteSource(bytes)) }
+    func content(_ buffer: ByteEditBuffer) -> [UInt8] { buffer.read(0..<buffer.length) }
+    func digits(_ text: String) -> [UInt8] { text.compactMap { UInt8(String($0), radix: 16) } }
+
+    // Overwriting: two digits make a byte, and the cursor moves on.
+    do {
+        var b = buffer([0x00, 0x11, 0x22, 0x33])
+        var typing = ByteTyping()
+        var cursor: ByteSelection? = ByteSelection(at: 1)
+        for digit in digits("ABCD") { cursor = try? typing.hexDigit(digit, in: &b, at: cursor) ?? nil }
+        check(content(b) == [0x00, 0xAB, 0xCD, 0x33] && cursor == ByteSelection(at: 3), "two digits make a byte, the next two the next: \(content(b)) \(String(describing: cursor))")
+        check(b.undo() && content(b) == [0x00, 0x11, 0x22, 0x33] && !b.canUndo, "and the whole run is one step of undo")
+        // The first digit shows at once, over the low half that is still there.
+        var c = buffer([0x00, 0x11])
+        var t2 = ByteTyping()
+        var wide = buffer([0x00, 0x00])
+        var t0 = ByteTyping()
+        _ = try? t0.hexDigit(0x1A, in: &wide, at: ByteSelection(at: 0))
+        _ = try? t0.hexDigit(0x1B, in: &wide, at: ByteSelection(at: 0))
+        check(content(wide) == [0xAB, 0x00], "only the low four bits of a digit are used")
+        let after = try? t2.hexDigit(0xF, in: &c, at: ByteSelection(at: 1))
+        check(content(c) == [0x00, 0xF1] && after == ByteSelection(at: 1) && t2.pendingDigit == 1, "the first digit sets the high half and the cursor waits")
+        _ = try? t2.hexDigit(0x2, in: &c, at: ByteSelection(at: 1))
+        check(content(c) == [0x00, 0xF2] && t2.pendingDigit == nil, "the second sets the low half, and at the last byte the cursor stays")
+        // A cursor that moved away drops the half-typed byte.
+        var d = buffer([0x00, 0x11, 0x22])
+        var t3 = ByteTyping()
+        _ = try? t3.hexDigit(0xA, in: &d, at: ByteSelection(at: 0))
+        t3.forget()
+        _ = try? t3.hexDigit(0xB, in: &d, at: ByteSelection(at: 1))
+        check(content(d) == [0xA0, 0xB1, 0x22] && t3.pendingDigit == 1, "a digit typed elsewhere starts a byte there")
+        // A selection of many bytes: typing starts at its first.
+        var e = buffer([1, 2, 3, 4, 5])
+        var t4 = ByteTyping()
+        let landed = try? t4.hexDigit(0x9, in: &e, at: ByteSelection(anchor: 3, head: 1))
+        check(content(e) == [1, 0x92, 3, 4, 5] && landed == ByteSelection(at: 1), "typing over a selection starts at its first byte")
+    }
+    // Inserting: new bytes are put in before the cursor, and the rest moves along.
+    do {
+        var b = buffer([0x00, 0x11])
+        var typing = ByteTyping()
+        typing.mode = .insert
+        var cursor: ByteSelection? = ByteSelection(at: 1)
+        for digit in digits("ABCD") { cursor = try? typing.hexDigit(digit, in: &b, at: cursor) ?? nil }
+        check(content(b) == [0x00, 0xAB, 0xCD, 0x11] && cursor == ByteSelection(at: 3), "in insert mode typed bytes go in before the byte under the cursor: \(content(b))")
+        check(b.undo() && content(b) == [0x00, 0x11] && !b.canUndo, "and are one step of undo")
+        // Adding at the end is asked for.
+        var c = buffer([0x00, 0x11])
+        var t2 = ByteTyping()
+        t2.mode = .insert
+        var at = t2.beginAppending(to: c)
+        check(at == ByteSelection(at: 1), "appending puts the cursor on the last byte")
+        for digit in digits("ABCD") { at = try? t2.hexDigit(digit, in: &c, at: at) ?? nil }
+        check(content(c) == [0x00, 0x11, 0xAB, 0xCD] && at == ByteSelection(at: 3), "and what is typed goes after it, byte after byte: \(content(c))")
+        // The first digit alone has put a byte in.
+        var d = buffer([0x00])
+        var t3 = ByteTyping()
+        t3.mode = .insert
+        _ = try? t3.hexDigit(0x7, in: &d, at: ByteSelection(at: 0))
+        check(content(d) == [0x70, 0x00] && t3.pendingDigit == 0, "the first digit of an inserted byte shows at once")
+    }
+    // Text.
+    do {
+        var b = buffer(Array("abcdef".utf8))
+        var typing = ByteTyping()
+        let after = try? typing.text("XY", in: &b, at: ByteSelection(at: 1))
+        check(String(decoding: content(b), as: UTF8.self) == "aXYdef" && after == ByteSelection(at: 3), "text overwrites what is under the cursor, and the cursor goes past it")
+        let atEnd = try? typing.text("ZZZZZZ", in: &b, at: ByteSelection(at: 4))
+        check(String(decoding: content(b), as: UTF8.self) == "aXYdZZ" && b.length == 6 && atEnd == ByteSelection(at: 5), "and stops at the end of the file, with the cursor on the last byte")
+        let del = try? typing.text("\u{7F}", in: &b, at: ByteSelection(at: 0))
+        check(del == ByteSelection(at: 0) && String(decoding: content(b), as: UTF8.self) == "aXYdZZ", "DEL is a control character too")
+        typing.mode = .insert
+        let inserted = try? typing.text("--", in: &b, at: ByteSelection(at: 2))
+        check(String(decoding: content(b), as: UTF8.self) == "aX--YdZZ" && inserted == ByteSelection(at: 4), "in insert mode it is put in")
+        _ = try? typing.text("é", in: &b, at: ByteSelection(at: 0))
+        check(content(b).prefix(3) == [0xC3, 0xA9, 0x61], "a character beyond ASCII is its UTF-8 bytes")
+        let same = try? typing.text("\r\u{1B}\t", in: &b, at: ByteSelection(at: 0))
+        check(same == ByteSelection(at: 0) && content(b).count == 10, "control characters are left out")
+    }
+    // Deleting.
+    do {
+        var b = buffer([1, 2, 3, 4, 5, 6])
+        var typing = ByteTyping()
+        var failure: ByteTyping.Failure?
+        do { _ = try typing.deleteBackward(in: &b, at: ByteSelection(at: 2)) } catch { failure = error as? ByteTyping.Failure }
+        check(failure == .needsInsertMode && content(b) == [1, 2, 3, 4, 5, 6], "Delete does nothing in overwrite mode, and says why")
+        typing.mode = .insert
+        let back = try? typing.deleteBackward(in: &b, at: ByteSelection(at: 2))
+        check(content(b) == [1, 3, 4, 5, 6] && back == ByteSelection(at: 1), "Backspace takes out the byte before the cursor")
+        let forward = try? typing.deleteForward(in: &b, at: ByteSelection(at: 1))
+        check(content(b) == [1, 4, 5, 6] && forward == ByteSelection(at: 1), "Delete takes out the byte under it")
+        let range = try? typing.deleteForward(in: &b, at: ByteSelection(anchor: 3, head: 1))
+        check(content(b) == [1] && range == ByteSelection(at: 0), "either takes out a selection, and the cursor stays inside the file")
+        let atStart = try? typing.deleteBackward(in: &b, at: ByteSelection(at: 0))
+        check(content(b) == [1] && atStart == ByteSelection(at: 0), "Backspace at the start takes out nothing")
+        let emptied = try? typing.deleteForward(in: &b, at: ByteSelection(at: 0))
+        check(b.length == 0 && emptied == nil, "taking out everything leaves no cursor")
+        var none: ByteTyping.Failure?
+        do { _ = try typing.deleteForward(in: &b, at: nil) } catch { none = error as? ByteTyping.Failure }
+        check(none == .nothing, "and nothing is left to take out")
+        // Typing into an empty buffer in insert mode.
+        let first = try? typing.hexDigit(0xA, in: &b, at: nil)
+        check(content(b) == [0xA0] && first == .some(ByteSelection(at: 0)), "insert mode can start from nothing")
+        var overwrite = ByteTyping()
+        var empty = buffer([])
+        var nothing: ByteTyping.Failure?
+        do { _ = try overwrite.hexDigit(1, in: &empty, at: nil) } catch { nothing = error as? ByteTyping.Failure }
+        check(nothing == .nothing, "and overwrite mode cannot")
+    }
+    // Filling.
+    do {
+        var b = buffer([1, 2, 3, 4, 5])
+        var typing = ByteTyping()
+        try? typing.fill(0xFF, in: &b, at: ByteSelection(anchor: 3, head: 1))
+        check(content(b) == [1, 0xFF, 0xFF, 0xFF, 5] && b.undo() && content(b) == [1, 2, 3, 4, 5], "a selection is filled in one step")
+    }
+    // Refusals.
+    do {
+        var b = buffer([1, 2, 3, 4])
+        b.pieceLimit = 3
+        var typing = ByteTyping()
+        typing.mode = .insert
+        var refused: ByteTyping.Failure?
+        var cursor: ByteSelection? = ByteSelection(at: 0)
+        for round in 0..<6 {
+            do { cursor = try typing.text("x", in: &b, at: ByteSelection(at: Int64((round * 2) % max(1, Int(b.length))))) ?? cursor } catch { refused = error as? ByteTyping.Failure; break }
+        }
+        check(refused == .edit(.tooManyPieces) || refused == nil, "a buffer that refuses an edit says so, and is left as it was")
+        _ = cursor
+    }
+
+    // Many random keystrokes against a plain array that follows the same rules.
+    var random = BytesCheckRandom(seed: 0xED17)
+    var sweepWrong: [String] = []
+    for round in 0..<300 {
+        let start = (0..<(1 + random.below(12))).map { _ in UInt8(random.below(256)) }
+        var b = buffer(start)
+        var model = start
+        var typing = ByteTyping()
+        var cursor: ByteSelection? = ByteSelection(at: Int64(random.below(start.count)))
+        var pending: Int?
+        var appending: Int?
+        var insert = false
+        var history: [[UInt8]] = [start]
+        for step in 0..<40 {
+            let at = Int(cursor?.lowerBound ?? 0)
+            switch random.below(8) {
+            case 0, 1, 2:
+                // a hex digit
+                let digit = UInt8(random.below(16))
+                guard let landed = try? typing.hexDigit(digit, in: &b, at: cursor) else { continue }
+                if let p = pending, p == at, at < model.count {
+                    model[at] = (model[at] & 0xF0) | digit
+                    pending = nil
+                    if at + 1 < model.count { appending = nil; cursor = ByteSelection(at: Int64(at + 1)) } else { appending = insert ? at : nil; cursor = ByteSelection(at: Int64(at)) }
+                } else if insert {
+                    let place = (appending == at && at == model.count - 1) ? model.count : at
+                    model.insert(digit << 4, at: place)
+                    pending = place
+                    appending = nil
+                    cursor = ByteSelection(at: Int64(place))
+                } else {
+                    model[at] = (digit << 4) | (model[at] & 0x0F)
+                    pending = at
+                    appending = nil
+                    cursor = ByteSelection(at: Int64(at))
+                }
+                if landed != cursor { sweepWrong.append("round \(round) step \(step): cursor \(String(describing: landed)) not \(String(describing: cursor))") }
+                history.append(model)
+            case 3:
+                // text
+                let letters = String((0..<(1 + random.below(3))).map { _ in Character(UnicodeScalar(UInt8(0x61 + random.below(26)))) })
+                guard (try? typing.text(letters, in: &b, at: cursor)) != nil else { continue }
+                let bytes = Array(letters.utf8)
+                pending = nil
+                if insert {
+                    let place = (appending == at && at == model.count - 1) ? model.count : at
+                    model.insert(contentsOf: bytes, at: place)
+                    let next = place + bytes.count
+                    if next >= model.count { appending = model.count - 1; cursor = ByteSelection(at: Int64(model.count - 1)) } else { appending = nil; cursor = ByteSelection(at: Int64(next)) }
+                } else {
+                    let written = min(bytes.count, model.count - at)
+                    model.replaceSubrange(at..<(at + written), with: bytes[0..<written])
+                    appending = nil
+                    cursor = ByteSelection(at: Int64(min(at + written, model.count - 1)))
+                }
+                history.append(model)
+            case 4:
+                // move the cursor
+                typing.forget()
+                pending = nil
+                appending = nil
+                cursor = ByteSelection(at: Int64(random.below(max(1, model.count))))
+            case 5:
+                typing.mode = typing.mode == .insert ? .overwrite : .insert
+                insert = typing.mode == .insert
+            case 6:
+                guard insert, !model.isEmpty, let current = cursor else { continue }
+                let forward = random.below(2) == 0
+                let result = forward ? try? typing.deleteForward(in: &b, at: current) : try? typing.deleteBackward(in: &b, at: current)
+                pending = nil
+                appending = nil
+                let lower = Int(current.lowerBound)
+                let upper = Int(current.upperBound)
+                var removed: Range<Int>?
+                if current.count > 1 { removed = lower..<(upper + 1) }
+                else if forward { removed = lower..<(lower + 1) }
+                else if lower > 0 { removed = (lower - 1)..<lower }
+                if let removed {
+                    model.removeSubrange(removed)
+                    let place = forward || current.count > 1 ? lower : lower - 1
+                    cursor = model.isEmpty ? nil : ByteSelection(at: Int64(min(max(place, 0), model.count - 1)))
+                } else {
+                    cursor = current
+                }
+                if result != cursor { sweepWrong.append("round \(round) step \(step): delete cursor \(String(describing: result)) not \(String(describing: cursor))") }
+                history.append(model)
+            default:
+                // undo, then redo
+                let before = content(b)
+                if b.undo() {
+                    pending = nil
+                    appending = nil
+                    typing.forget()
+                    if b.redo() == false || content(b) != before { sweepWrong.append("round \(round) step \(step): redo did not put it back") }
+                    cursor = ByteSelection(at: Int64(min(Int(cursor?.lowerBound ?? 0), max(0, Int(b.length) - 1))))
+                }
+            }
+            if content(b) != model {
+                sweepWrong.append("round \(round) step \(step): \(content(b).prefix(8)) is not \(model.prefix(8))")
+                break
+            }
+            if b.length == 0 { break }
+        }
+        // Everything done can be undone, back to the start.
+        while b.undo() {}
+        if content(b) != start { sweepWrong.append("round \(round): undoing everything gave \(content(b).prefix(8)) not \(start.prefix(8))") }
+        if sweepWrong.count > 3 { break }
+    }
+    check(sweepWrong.isEmpty, "300 rounds of random typing, deleting, mode changes and undo agree with a plain array: \(sweepWrong.prefix(2))")
+
+    // Which bytes changed.
+    do {
+        var b = buffer([1, 2, 3, 4, 5, 6, 7, 8])
+        check(b.changedRanges() == [], "an unchanged buffer has no changed bytes")
+        try? b.overwrite(at: 1, with: [9, 9])
+        try? b.overwrite(at: 6, with: [0])
+        try? b.fill(3..<4, with: 0xAA)
+        check(b.changedRanges() == [1..<4, 6..<7], "overwritten and filled runs are the changed ones, joined where they touch: \(String(describing: b.changedRanges()))")
+        try? b.insert(at: 2, bytes: [1])
+        check(b.changedRanges() == nil, "an insert means no list")
+        var longer = buffer([1, 2, 3])
+        try? longer.insert(at: 3, bytes: [4])
+        check(longer.changedRanges() == nil, "and so does one at the end")
+        var shorter = buffer([1, 2, 3])
+        try? shorter.delete(2..<3)
+        check(shorter.changedRanges() == nil, "or a delete")
+        try? b.delete(2..<3)
+        check(b.changedRanges() != nil, "an insert taken out again does not")
+        var c = buffer([1, 2, 3, 4, 5, 6])
+        try? c.insert(at: 1, bytes: [7])
+        try? c.delete(4..<5)
+        check(c.changedRanges() == nil, "an insert and a delete that leave the length alone still move what is between them")
+        var d = buffer([1, 2, 3, 4])
+        try? d.insert(at: 4, bytes: [9])
+        try? d.delete(0..<1)
+        check(d.changedRanges() == nil, "or at the ends")
+    }
+
+    // Saving, on real files.
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("iterminal-save-\(UUID().uuidString.prefix(8))")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    func make(_ name: String, _ bytes: [UInt8], mode: Int = 0o644) -> URL {
+        let url = folder.appendingPathComponent(name)
+        FileManager.default.createFile(atPath: url.path, contents: Data(bytes), attributes: [.posixPermissions: mode])
+        return url
+    }
+    func open(_ url: URL) -> FileByteSource? { if case .success(let source) = FileByteSource.opening(path: url.path) { return source } else { return nil } }
+    func read(_ url: URL) -> [UInt8] { [UInt8](FileManager.default.contents(atPath: url.path) ?? Data()) }
+    func names() -> [String] { ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted() }
+
+    var saveWrong: [String] = []
+    do {
+        // Only overwrites: a copy with the changed bytes written into it.
+        let original = (0..<5000).map { UInt8($0 % 251) }
+        let url = make("patch.bin", original)
+        guard let source = open(url) else { saveWrong.append("could not open patch.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.overwrite(at: 10, with: [0xDE, 0xAD])
+        try b.fill(4000..<4100, with: 0x55)
+        let method = try ByteFileSaver.save(b, over: source, keepsBackup: false, chunk: 64)
+        var expected = original
+        expected.replaceSubrange(10..<12, with: [0xDE, 0xAD])
+        for i in 4000..<4100 { expected[i] = 0x55 }
+        if read(url) != expected { saveWrong.append("patched file differs") }
+        if method != .patchedCopy(changedBytes: 102) { saveWrong.append("method \(method)") }
+        if names() != ["patch.bin"] { saveWrong.append("left behind: \(names())") }
+    } catch { saveWrong.append("patch: \(error)") }
+    do {
+        // An insert and a delete: the whole content written out, with the original's permissions.
+        let original = (0..<3000).map { UInt8(($0 * 7) % 256) }
+        let url = make("rewrite.bin", original, mode: 0o640)
+        guard let source = open(url) else { saveWrong.append("could not open rewrite.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.insert(at: 100, bytes: [1, 2, 3, 4, 5])
+        try b.delete(2000..<2010)
+        let method = try ByteFileSaver.save(b, over: source, keepsBackup: false, chunk: 100)
+        var expected = original
+        expected.insert(contentsOf: [1, 2, 3, 4, 5], at: 100)
+        expected.removeSubrange(2000..<2010)
+        if read(url) != expected { saveWrong.append("rewritten file differs") }
+        if method != .rewritten { saveWrong.append("method \(method)") }
+        var info = stat()
+        stat(url.path, &info)
+        if info.st_mode & 0o7777 != 0o640 { saveWrong.append("permissions \(String(info.st_mode & 0o7777, radix: 8))") }
+        if !names().allSatisfy({ !$0.hasSuffix(".tmp") }) { saveWrong.append("a temporary file was left: \(names())") }
+    } catch { saveWrong.append("rewrite: \(error)") }
+    do {
+        // A backup of what was there.
+        let url = make("backup.bin", [1, 2, 3, 4])
+        guard let source = open(url) else { saveWrong.append("could not open backup.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.overwrite(at: 0, with: [9])
+        try ByteFileSaver.save(b, over: source, keepsBackup: true)
+        if read(url) != [9, 2, 3, 4] { saveWrong.append("backup: saved file is \(read(url))") }
+        if read(folder.appendingPathComponent("backup.bin.bak")) != [1, 2, 3, 4] { saveWrong.append("backup: .bak is \(read(folder.appendingPathComponent("backup.bin.bak")))") }
+    } catch { saveWrong.append("backup: \(error)") }
+    do {
+        // A file changed by someone else is not written over.
+        let url = make("changed.bin", [1, 2, 3, 4])
+        guard let source = open(url) else { saveWrong.append("could not open changed.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.overwrite(at: 0, with: [9])
+        let handle = FileHandle(forWritingAtPath: url.path)
+        try handle?.seekToEnd()
+        try handle?.write(contentsOf: Data([0xEE]))
+        try handle?.close()
+        var failure: ByteFileSaver.Failure?
+        do { try ByteFileSaver.save(b, over: source, keepsBackup: false) } catch { failure = error as? ByteFileSaver.Failure }
+        if failure != .changedOnDisk(.grew) { saveWrong.append("changed: \(String(describing: failure))") }
+        if read(url) != [1, 2, 3, 4, 0xEE] { saveWrong.append("changed: the file was touched: \(read(url))") }
+        try FileManager.default.removeItem(at: url)
+        var gone: ByteFileSaver.Failure?
+        do { try ByteFileSaver.save(b, over: source, keepsBackup: false) } catch { gone = error as? ByteFileSaver.Failure }
+        if gone != .changedOnDisk(.missing) { saveWrong.append("missing: \(String(describing: gone))") }
+        if FileManager.default.fileExists(atPath: url.path) { saveWrong.append("missing: a file appeared") }
+    } catch { saveWrong.append("changed: \(error)") }
+    do {
+        // Room.
+        let url = make("room.bin", [1, 2, 3, 4])
+        guard let source = open(url) else { saveWrong.append("could not open room.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.overwrite(at: 0, with: [9])
+        var failure: ByteFileSaver.Failure?
+        do { try ByteFileSaver.save(b, over: source, keepsBackup: false, freeSpace: { _ in 100 }) } catch { failure = error as? ByteFileSaver.Failure }
+        if failure != .notEnoughSpace(needed: 4, available: 100) { saveWrong.append("room: \(String(describing: failure))") }
+        if read(url) != [1, 2, 3, 4] { saveWrong.append("room: the file was touched") }
+        // Nothing left.
+        try b.delete(0..<4)
+        var empty: ByteFileSaver.Failure?
+        do { try ByteFileSaver.save(b, over: source, keepsBackup: false) } catch { empty = error as? ByteFileSaver.Failure }
+        if empty != .wouldBeEmpty { saveWrong.append("empty: \(String(describing: empty))") }
+        if !names().allSatisfy({ !$0.hasSuffix(".tmp") }) { saveWrong.append("a temporary file was left after a refusal: \(names())") }
+    } catch { saveWrong.append("room: \(error)") }
+    do {
+        // Through a link: the file it names is saved, and the link stays a link.
+        let target = make("target.bin", [1, 2, 3, 4])
+        let link = folder.appendingPathComponent("link.bin")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        guard let source = open(link) else { saveWrong.append("could not open link.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.insert(at: 0, bytes: [0])
+        try ByteFileSaver.save(b, over: source, keepsBackup: false)
+        let kind = try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType
+        if read(target) != [0, 1, 2, 3, 4] || kind != .typeSymbolicLink { saveWrong.append("link: target \(read(target)), kind \(String(describing: kind))") }
+    } catch { saveWrong.append("link: \(error)") }
+    do {
+        // A save that is done can be followed by opening the file again and saving again.
+        let url = make("twice.bin", [1, 2, 3])
+        var source = open(url)
+        var b = ByteEditBuffer(source: source!)
+        try b.overwrite(at: 0, with: [7])
+        try ByteFileSaver.save(b, over: source!, keepsBackup: false)
+        source = open(url)
+        b = ByteEditBuffer(source: source!)
+        try b.overwrite(at: 2, with: [8])
+        try ByteFileSaver.save(b, over: source!, keepsBackup: false)
+        if read(url) != [7, 2, 8] { saveWrong.append("twice: \(read(url))") }
+    } catch { saveWrong.append("twice: \(error)") }
+    check(saveWrong.isEmpty, "saving writes what the buffer holds, keeps the permissions and the link, makes a backup if asked, and refuses over a changed file, a full disk or an empty result: \(saveWrong.prefix(3))")
+    check(ByteFileSaver.message(.changedOnDisk(.grew), name: "a").contains("changed") && ByteFileSaver.message(.changedOnDisk(.replaced), name: "a").contains("replaced") && ByteFileSaver.message(.changedOnDisk(.missing), name: "a").contains("gone")
+          && ByteFileSaver.message(.notEnoughSpace(needed: 5, available: 2), name: "a").contains("5 bytes") && ByteFileSaver.message(.wouldBeEmpty, name: "a").contains("no bytes")
+          && ByteFileSaver.message(.cannotWrite("denied"), name: "a").contains("denied") && ByteFileSaver.message(.lengthMismatch(written: 1, expected: 2), name: "a").contains("1 byte") && ByteFileSaver.message(.unreadable(offset: 9), name: "a").contains("9"), "every way a save fails has words")
+    check(ByteFileSaver.freeSpace(inFolder: folder.path).map { $0 > 0 } == true && ByteFileSaver.freeSpace(inFolder: "/no/such/folder") == nil, "free space is read from the folder")
+}
+
 // MARK: The structure tree as lines
 
 do {

@@ -79,12 +79,45 @@ final class BytesViewerModel: ObservableObject {
     /// What the last file offered to the panel was refused for. Shown in place of
     /// the empty state, or over a file that is open without closing it.
     @Published private(set) var refusal: BytesRefusal?
-    @Published private(set) var selection: ByteSelection?
+    @Published private(set) var selection: ByteSelection? {
+        didSet {
+            // A half-typed byte belongs to where the cursor was when its first digit went in.
+            if selection != typingCursor { typing.forget() }
+        }
+    }
     @Published private(set) var reveal: BytesRevealRequest?
     /// A line to say something to the person: a go-to that found nothing, a copy
     /// that was too big.
     @Published private(set) var notice: String?
     @Published var goToText = ""
+
+    // MARK: Editing
+
+    /// Whether the file can be changed and saved: it can be written, and so can the folder it is in, where a
+    /// save makes its new file before swapping it in.
+    @Published private(set) var isWritable = false
+    /// Overwrite changes bytes where they are; Insert puts bytes in and takes them out, and moves what follows.
+    @Published var editMode: ByteTyping.Mode = .overwrite {
+        didSet {
+            typing.mode = editMode
+            typing.forget()
+        }
+    }
+    /// Leave the file as it was beside the new one, as `name.bak`, when saving.
+    @Published var keepsBackup: Bool = BytesViewerModel.storedFlag("bytes.keepsBackup", default: true) {
+        didSet { UserDefaults.standard.set(keepsBackup, forKey: "bytes.keepsBackup") }
+    }
+    @Published private(set) var isSaving = false
+    /// What the last save did, until the next edit.
+    @Published private(set) var savedNote: String?
+    private var typing = ByteTyping()
+    /// Where typing left the cursor, so that moving it somewhere else can be told from typing.
+    private var typingCursor: ByteSelection?
+    private var reparseWork: DispatchWorkItem?
+
+    var isDirty: Bool { buffer?.isDirty ?? false }
+    var canUndo: Bool { buffer?.canUndo ?? false }
+    var canRedo: Bool { buffer?.canRedo ?? false }
 
     // MARK: Find
 
@@ -210,7 +243,13 @@ final class BytesViewerModel: ObservableObject {
             fileURL = url
             refusal = nil
             notice = nil
+            savedNote = nil
             goToText = ""
+            isWritable = BytesViewerModel.canWrite(url)
+            typing = ByteTyping()
+            typing.mode = editMode
+            typingCursor = nil
+            reparseWork?.cancel()
             cancelFind()
             findStatus = nil
             lastMatch = nil
@@ -236,6 +275,9 @@ final class BytesViewerModel: ObservableObject {
         reveal = nil
         notice = nil
         refusal = nil
+        savedNote = nil
+        isWritable = false
+        reparseWork?.cancel()
         goToText = ""
         cancelFind()
         findStatus = nil
@@ -265,15 +307,19 @@ final class BytesViewerModel: ObservableObject {
 
     // MARK: Structure
 
-    private func startStructure(_ source: ByteSource) {
+    /// Takes the file apart again after an edit or a save: what is open in the tree stays open, and the old
+    /// tree stays up until the new one is ready.
+    private func startStructure(_ source: ByteSource, keepingView: Bool = false) {
         parseCancellation?.cancel()
         let token = ParseCancellation()
         parseCancellation = token
-        structure = .parsing
-        structureRows = []
-        focusedNode = nil
-        expandedNodes = []
-        rowLimits = [:]
+        if !keepingView {
+            structure = .parsing
+            structureRows = []
+            focusedNode = nil
+            expandedNodes = []
+            rowLimits = [:]
+        }
         var context = ParseContext()
         context.isCancelled = { token.isCancelled }
         let work = context
@@ -363,13 +409,17 @@ final class BytesViewerModel: ObservableObject {
         let token = ParseCancellation()
         mapCancellation = token
         map = .analysing(0)
+        // With edits over the file, the map is of what the dump shows, not of what is on disk.
+        let edited: ByteSource? = buffer.flatMap { $0.isDirty ? EditedBytesSource($0) : nil }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // The pass reads through a source of its own, so that its reads do not push out of the
             // cache the pages the grid is showing. If the file is not the one that was opened (it
             // was replaced, or is gone), the shared source, which still holds what the grid shows,
             // is read instead.
             var source: ByteSource = shared
-            if case .success(let own) = FileByteSource.opening(path: shared.path), own.identity == shared.identity {
+            if let edited {
+                source = edited
+            } else if case .success(let own) = FileByteSource.opening(path: shared.path), own.identity == shared.identity {
                 source = own
             }
             var lastReport = DispatchTime.now().uptimeNanoseconds
@@ -420,6 +470,208 @@ final class BytesViewerModel: ObservableObject {
         case .failure(let failure):
             notice = OffsetExpression.message(failure)
         }
+    }
+
+    // MARK: Editing
+
+    /// Whether the person can change this file at all.
+    private static func canWrite(_ url: URL) -> Bool {
+        let manager = FileManager.default
+        return manager.isWritableFile(atPath: url.path)
+            && manager.isWritableFile(atPath: url.resolvingSymlinksInPath().deletingLastPathComponent().path)
+    }
+
+    /// Types one hex digit (0 to 15) at the cursor.
+    func typeHexDigit(_ digit: UInt8) {
+        perform { rules, buffer, selection in try rules.hexDigit(digit, in: &buffer, at: selection) }
+    }
+
+    /// Types characters in the text column.
+    func typeText(_ text: String) {
+        perform { rules, buffer, selection in try rules.text(text, in: &buffer, at: selection) }
+    }
+
+    func deleteBackward() {
+        perform { rules, buffer, selection in try rules.deleteBackward(in: &buffer, at: selection) }
+    }
+
+    func deleteForward() {
+        perform { rules, buffer, selection in try rules.deleteForward(in: &buffer, at: selection) }
+    }
+
+    /// Sets every selected byte to `value`.
+    func fillSelection(with value: UInt8) {
+        perform { rules, buffer, selection in
+            try rules.fill(value, in: &buffer, at: selection)
+            return selection
+        }
+    }
+
+    /// Puts the cursor on the last byte, so that typing adds to the end of the file.
+    func beginAppending() {
+        guard isWritable, let buffer else { return }
+        editMode = .insert
+        let target = typing.beginAppending(to: buffer)
+        typingCursor = target
+        selection = target
+        if let head = target?.head { reveal = BytesRevealRequest(offset: head, centered: false) }
+    }
+
+    /// Runs one edit on a copy of the buffer, and keeps the copy only if the edit worked.
+    private func perform(_ change: (inout ByteTyping, inout ByteEditBuffer, ByteSelection?) throws -> ByteSelection?) {
+        guard var working = buffer, !isSaving else { return }
+        guard isWritable else {
+            notice = "\(fileName) cannot be changed here: it, or the folder it is in, is read-only."
+            return
+        }
+        var rules = typing
+        let next: ByteSelection?
+        do {
+            next = try change(&rules, &working, selection)
+        } catch let failure as ByteTyping.Failure {
+            typing = rules
+            switch failure {
+            case .needsInsertMode:
+                notice = "Delete takes bytes out, which moves everything after them. Choose Insert first."
+            case .edit(let error):
+                notice = BytesViewerModel.message(for: error)
+            case .nothing:
+                break
+            }
+            return
+        } catch {
+            return
+        }
+        typing = rules
+        buffer = working
+        typingCursor = next?.limited(toLength: working.length)
+        selection = typingCursor
+        if let head = selection?.head { reveal = BytesRevealRequest(offset: head, centered: false) }
+        editsChanged()
+    }
+
+    private static func message(for error: ByteEditError) -> String {
+        switch error {
+        case .tooManyPieces:
+            return "That is more separate edits than can be kept track of. Save, and carry on."
+        case .tooMuchAddedData:
+            return "That is more new bytes than can be held at once. Save, and carry on."
+        case .unreadable(let offset):
+            return "The file could not be read at \(offset): it changed while it was open."
+        }
+    }
+
+    func undo() { stepHistory { $0.undo() } }
+    func redo() { stepHistory { $0.redo() } }
+
+    private func stepHistory(_ step: (inout ByteEditBuffer) -> Bool) {
+        guard var working = buffer, !isSaving, step(&working) else { return }
+        buffer = working
+        typing.forget()
+        typingCursor = nil
+        if working.length > 0 {
+            selection = selection?.limited(toLength: working.length) ?? ByteSelection(at: 0)
+        } else {
+            selection = nil
+        }
+        if let head = selection?.head { reveal = BytesRevealRequest(offset: head, centered: false) }
+        editsChanged()
+    }
+
+    /// What an edit puts out of date: the search's place, the map, and the tree of fields, which is made again
+    /// once the typing stops.
+    private func editsChanged() {
+        savedNote = nil
+        lastMatch = nil
+        findStatus = nil
+        resetMap()
+        if mode == .map { startMapIfNeeded() }
+        reparseWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let buffer = self.buffer else { return }
+            self.startStructure(EditedBytesSource(buffer), keepingView: true)
+        }
+        reparseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    // MARK: Saving
+
+    /// Writes the edits into the file, in the background, safely: see `ByteFileSaver`. `completion` is told, on the main
+    /// queue, whether the file is now as the dump shows it.
+    func save(then completion: ((Bool) -> Void)? = nil) {
+        guard let buffer, let source = openedSource, buffer.isDirty, !isSaving else {
+            completion?(!isDirty)
+            return
+        }
+        isSaving = true
+        notice = nil
+        let keeps = keepsBackup
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let outcome: Result<ByteFileSaver.Method, ByteFileSaver.Failure>
+            do {
+                outcome = .success(try ByteFileSaver.save(buffer, over: source, keepsBackup: keeps))
+            } catch let failure as ByteFileSaver.Failure {
+                outcome = .failure(failure)
+            } catch {
+                outcome = .failure(.cannotWrite(error.localizedDescription))
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isSaving = false
+                switch outcome {
+                case .success(let method):
+                    self.didSave(method: method)
+                    completion?(true)
+                case .failure(let failure):
+                    self.notice = ByteFileSaver.message(failure, name: self.fileName)
+                    completion?(false)
+                }
+            }
+        }
+    }
+
+    /// Saves now, on this thread, for a quit that is waiting on it. Nil when it worked, else why not.
+    func saveNow() -> String? {
+        guard let buffer, let source = openedSource, buffer.isDirty else { return nil }
+        do {
+            try ByteFileSaver.save(buffer, over: source, keepsBackup: keepsBackup)
+            return nil
+        } catch let failure as ByteFileSaver.Failure {
+            return ByteFileSaver.message(failure, name: fileName)
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// The file is changed on disk; the panel now shows it as it is, from a new source, and the steps of undo are let go.
+    private func didSave(method: ByteFileSaver.Method) {
+        guard let url = fileURL else { return }
+        switch FileByteSource.opening(path: url.path) {
+        case .success(let fresh):
+            buffer = ByteEditBuffer(source: fresh)
+            openedSource = fresh
+            typing = ByteTyping()
+            typing.mode = editMode
+            typingCursor = nil
+            selection = selection?.limited(toLength: fresh.count)
+            lastMatch = nil
+            switch method {
+            case .patchedCopy(let changed): savedNote = "Saved: \(FieldText.bytes(changed)) changed"
+            case .rewritten: savedNote = "Saved"
+            }
+            resetMap()
+            if mode == .map { startMapIfNeeded() }
+            startStructure(fresh, keepingView: true)
+        case .failure:
+            notice = "\(fileName) was saved, but could not be opened again."
+        }
+    }
+
+    /// Drops the edits, and shows the file as it is on disk.
+    func revert() {
+        guard let url = fileURL else { return }
+        open(url: url)
     }
 
     // MARK: Finding

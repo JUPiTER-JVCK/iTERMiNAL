@@ -22,6 +22,7 @@ struct BytesViewerPaneView: View {
             if let buffer = model.buffer {
                 header(theme: theme)
                 modeBar(theme: theme)
+                if model.isWritable { editBar(theme: theme) }
                 if model.showsFind { findBar(theme: theme) }
                 FadedDivider()
                 if let refusal = model.refusal {
@@ -111,6 +112,18 @@ struct BytesViewerPaneView: View {
                 case .next: model.findNext()
                 case .previous: model.findPrevious()
                 }
+            },
+            isEditable: model.isWritable && model.radix == .hex,
+            onEdit: { edit in
+                switch edit {
+                case .hexDigit(let digit): model.typeHexDigit(digit)
+                case .text(let text): model.typeText(text)
+                case .deleteBackward: model.deleteBackward()
+                case .deleteForward: model.deleteForward()
+                case .undo: model.undo()
+                case .redo: model.redo()
+                case .save: model.save()
+                }
             }
         )
         .accessibilityElement(children: .ignore)
@@ -166,6 +179,21 @@ struct BytesViewerPaneView: View {
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if model.isDirty {
+                Circle()
+                    .fill(settings.accentColor)
+                    .frame(width: 7, height: 7)
+                    .help("Changed, and not saved")
+                    .accessibilityLabel("Changed, and not saved")
+            }
+            if !model.isWritable {
+                Text("Read-only")
+                    .font(.system(size: 10))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(theme.surface))
+                    .help("The file, or the folder it is in, cannot be written to, so it can be looked at but not changed")
+            }
             Text(sizeText)
                 .font(.system(size: 11))
                 .lineLimit(1)
@@ -182,7 +210,7 @@ struct BytesViewerPaneView: View {
             .buttonStyle(.plain)
             .help("Open another file")
             .accessibilityLabel("Open another file")
-            Button(action: model.close) {
+            Button(action: { confirmThen { model.close() } }) {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.plain)
@@ -220,6 +248,68 @@ struct BytesViewerPaneView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
+    }
+
+    private func editBar(theme: Theme) -> some View {
+        HStack(spacing: 8) {
+            Picker("Typing", selection: $model.editMode) {
+                Text("Overwrite").tag(ByteTyping.Mode.overwrite)
+                Text("Insert").tag(ByteTyping.Mode.insert)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Overwrite changes the bytes you type over, so nothing moves. Insert puts new bytes in before the cursor, and lets Delete take bytes out; everything after them moves.")
+            Button(action: model.undo) {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canUndo)
+            .help("Undo (⌘Z)")
+            .accessibilityLabel("Undo")
+            Button(action: model.redo) {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canRedo)
+            .help("Redo (⇧⌘Z)")
+            .accessibilityLabel("Redo")
+            Menu {
+                Button("Fill the selection with 00") { model.fillSelection(with: 0x00) }
+                    .disabled(model.selection == nil)
+                Button("Fill the selection with FF") { model.fillSelection(with: 0xFF) }
+                    .disabled(model.selection == nil)
+                Button("Add bytes at the end") { model.beginAppending() }
+                Divider()
+                Toggle("Keep the old file as .bak when saving", isOn: $model.keepsBackup)
+                Divider()
+                Button("Revert to the saved file…") { confirmRevert() }
+                    .disabled(!model.isDirty)
+            } label: {
+                Text("Edit")
+                    .font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Click the dump and type: hex digits in the cells, characters in the text column")
+            Spacer(minLength: 0)
+            if let note = model.savedNote {
+                Text(note)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+            }
+            Button(action: { model.save() }) {
+                Text(model.isSaving ? "Saving…" : "Save")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!model.isDirty || model.isSaving)
+            .help("Write the changes into the file (⌘S): into a new file that replaces it, so a failure leaves the original as it was")
+        }
+        .foregroundStyle(theme.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
     }
 
     private func findBar(theme: Theme) -> some View {
@@ -414,8 +504,43 @@ struct BytesViewerPaneView: View {
         panel.allowsMultipleSelection = false
         panel.message = "Choose a file to look at, byte by byte"
         if panel.runModal() == .OK, let url = panel.url {
-            model.open(url: url)
+            confirmThen { model.open(url: url) }
         }
+    }
+
+    /// Asks what to do with changes that are not saved before something that would lose them, and does `action` if the
+    /// answer is to go on: after saving, or without.
+    private func confirmThen(_ action: @escaping () -> Void) {
+        guard model.isDirty else {
+            action()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Save the changes to \(model.fileName)?"
+        alert.informativeText = "The bytes you changed are not in the file yet. If you go on without saving them, they are lost."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            model.save { saved in
+                if saved { action() }
+            }
+        case .alertSecondButtonReturn:
+            action()
+        default:
+            break
+        }
+    }
+
+    /// Asks before dropping every change since the last save.
+    private func confirmRevert() {
+        let alert = NSAlert()
+        alert.messageText = "Go back to the saved \(model.fileName)?"
+        alert.informativeText = "Every change since it was last saved is lost."
+        alert.addButton(withTitle: "Revert")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { model.revert() }
     }
 
     /// The first thing dropped. loadObject calls back on an arbitrary queue, so
@@ -425,7 +550,7 @@ struct BytesViewerPaneView: View {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url else { return }
             DispatchQueue.main.async {
-                model.open(url: url)
+                confirmThen { model.open(url: url) }
             }
         }
     }
