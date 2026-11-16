@@ -9616,7 +9616,7 @@ do {
     check(unknown.identity == nil && unknown.outcome.roots.isEmpty && unknown.message.contains("Hex and Bits"), "a file nothing knows is told so, and pointed to the dump")
     let gzip = FormatRegistry.analyze(DataByteSource([0x1F, 0x8B, 0x08, 0, 0, 0]))
     check(gzip.identity?.id == "gzip" && gzip.message.contains("gzip") && gzip.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
-    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf", "gif", "bmp", "ico", "webp", "tiff", "jxl", "heic", "avif", "jp2"], "fifteen formats so far, four of them read by the MP4 parser: \(FormatRegistry.parserIDs.sorted())")
+    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf", "gif", "bmp", "ico", "webp", "tiff", "jxl", "heic", "avif", "jp2", "zip", "elf", "macho"], "eighteen formats so far, four of them read by the MP4 parser: \(FormatRegistry.parserIDs.sorted())")
 }
 
 // MARK: PNG
@@ -11446,6 +11446,2787 @@ do {
     if let issue = imgHostile("HEIC, AVIF, JPEG 2000 and JPEG XL", fixtures: fixtures, prefix: [0, 0, 0, 0x18] + Array("ftypheic".utf8), seed: 0xA11CE) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random files give sound trees") }
     if let issue = imgHostile("JPEG XL and 2000 signatures", fixtures: [], prefix: [0xFF, 0x0A], seed: 0xB0B) { check(false, issue) } else { check(true, "random JPEG XL codestreams give sound trees") }
     if let issue = imgHostile("JP2 signature", fixtures: [], prefix: [0, 0, 0, 12] + Array("jP  ".utf8) + [0x0D, 0x0A, 0x87, 0x0A], seed: 0xC0DE) { check(false, issue) } else { check(true, "random JPEG 2000 files give sound trees") }
+}
+
+// MARK: ZIP
+
+// Archives from Python's zipfile and by hand, read back by zipfile, with the layout found by a walker written separately;
+// then archives that lie about where things are, and cut, flipped and random files.
+
+func zipFields(_ node: FieldNode?) -> [String: String] {
+    var out: [String: String] = [:]
+    for child in node?.resolvedChildren() ?? [] where out[child.name] == nil { out[child.name] = child.value ?? "" }
+    return out
+}
+
+func zipLeading(_ text: String?) -> Int64? {
+    guard let text else { return nil }
+    return Int64(text.prefix { $0.isNumber })
+}
+
+do {
+    var wrong: [String] = []
+    var fixtures: [(String, [UInt8])] = []
+    let hostile: Set<String> = ["overlap", "bad_offset", "count_lies", "comment_cut", "tiny_cd", "long_entry", "overlap_sizes"]
+    do {
+        let name = "plain"
+        let bytes = structureBytes("504b0304140000000800c563a658bc2f197411000000680100000900000068656c6c6f2e747874cb48cdc9c957c840905c19a32234100100504b030414000000000083182256806108edc8000000c80000000a00000073746f7265642e62696e000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7504b0304140000000000c563a658000000000000000000000000040000006469722f504b03042e0000080c007dbf9f538f5d0e5e27000000640000000d0000006469722fc3bc6ec3af2e747874425a6839314159265359d184ad7b00000201804000004020002100820b177245385090d184ad7b504b03043f0002000e004208ef4eb6c5b971170000002c010000060000006c7a2e62696e090405005d00008000003ceffbb7c42dd6fffffdf09000504b01021403140000000800c563a658bc2f1974110000006801000009000000000000000000000080010000000068656c6c6f2e747874504b0102140314000000000083182256806108edc8000000c80000000a0000000000000000000000a4813800000073746f7265642e62696e504b01021403140000000000c563a658000000000000000000000000040000000000000000000000ed41280100006469722f504b01022e032e0000080c007dbf9f538f5d0e5e27000000640000000d000000000000000000000080014a0100006469722fc3bc6ec3af2e747874504b01023f033f0002000e004208ef4eb6c5b971170000002c01000006000000000000000000000080019c0100006c7a2e62696e504b0506000000000500050010010000d701000009006120636f6d6d656e74")
+        let expectedLayout = ["Entry 1@0+56", "Entry 2@56+240", "Entry 3@296+34", "Entry 4@330+82", "Entry 5@412+59", "Central directory@471+272", "End of central directory@743+31"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "hello.txt", "method": 8, "flags": 0, "crc": 1947807676, "cs": 17, "us": 360, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "stored.bin", "method": 0, "flags": 0, "crc": 3976749440, "cs": 200, "us": 200, "lo": 56, "comment": "", "mode": 33188, "create_system": 3, "date": [2023, 1, 2, 3, 4, 6], "create_version": 20, "extract_version": 20], ["name": "dir/", "method": 0, "flags": 0, "crc": 0, "cs": 0, "us": 0, "lo": 296, "comment": "", "mode": 16877, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "dir/ünï.txt", "method": 12, "flags": 2048, "crc": 1577999759, "cs": 39, "us": 100, "lo": 330, "comment": "", "mode": 384, "create_system": 3, "date": [2021, 12, 31, 23, 59, 58], "create_version": 46, "extract_version": 46], ["name": "lz.bin", "method": 14, "flags": 2, "crc": 1908000182, "cs": 23, "us": 300, "lo": 412, "comment": "", "mode": 384, "create_system": 3, "date": [2019, 7, 15, 1, 2, 4], "create_version": 63, "extract_version": 63]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 9 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "empty"
+        let bytes = structureBytes("504b0506000000000000000000000000000000000000")
+        let expectedLayout = ["End of central directory@0+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = []
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "one_stored"
+        let bytes = structureBytes("504b0304140000000800c563a6588b9ed9d303000000010000000100000061730400504b01021403140000000800c563a6588b9ed9d3030000000100000001000000000000000000000080010000000061504b050600000000010001002f000000220000000000")
+        let expectedLayout = ["Entry 1@0+34", "Central directory@34+47", "End of central directory@81+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "a", "method": 8, "flags": 0, "crc": 3554254475, "cs": 3, "us": 1, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "extras"
+        let bytes = structureBytes("504b0304140000000800c563a65863f3f3ad060000000400000005001800742e747874555405000100f1536575780b000104e803000004e80300004b492c490400504b0304140000000800c563a65863f3f3ad060000000400000005000000632e7478744b492c490400504b01021403140000000800c563a65863f3f3ad0600000004000000050018000000000000000000800100000000742e747874555405000100f1536575780b000104e803000004e8030000504b01021403140000000800c563a65863f3f3ad0600000004000000050000000d00000000000000800141000000632e747874656e74727920636f6d6d656e74504b050600000000020002008b0000006a0000000000")
+        let expectedLayout = ["Entry 1@0+65", "Entry 2@65+41", "Central directory@106+139", "End of central directory@245+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "t.txt", "method": 8, "flags": 0, "crc": 2918445923, "cs": 6, "us": 4, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "c.txt", "method": 8, "flags": 0, "crc": 2918445923, "cs": 6, "us": 4, "lo": 65, "comment": "entry comment", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "descriptor"
+        let bytes = structureBytes("504b0304140008000000000021000000000000000000000000000c00000073747265616d65642e74787473747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e6720646174612073747265616d696e67206461746120504b07089ba253dd9600000096000000504b0304140008000000000021000000000000000000000000000700000074776f2e7478747365636f6e64207365636f6e64207365636f6e64207365636f6e64207365636f6e6420504b070808f6012d2300000023000000504b01021403140008000000000021009ba253dd96000000960000000c000000000000000000000080010000000073747265616d65642e747874504b010214031400080000000000210008f6012d23000000230000000700000000000000000000008001d000000074776f2e747874504b050600000000020002006f000000280100000000")
+        let expectedLayout = ["Entry 1@0+208", "Entry 2@208+88", "Central directory@296+111", "End of central directory@407+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "streamed.txt", "method": 0, "flags": 8, "crc": 3713245851, "cs": 150, "us": 150, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [1980, 1, 1, 0, 0, 0], "create_version": 20, "extract_version": 20], ["name": "two.txt", "method": 0, "flags": 8, "crc": 755103240, "cs": 35, "us": 35, "lo": 208, "comment": "", "mode": 384, "create_system": 3, "date": [1980, 1, 1, 0, 0, 0], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "zip64_local"
+        let bytes = structureBytes("504b03042d00080000000000210000000000ffffffffffffffff070014006269672e62696e01001000000000000000000000000000000000007a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a504b0708001b69a7f401000000000000f401000000000000504b01022d032d000800000000002100001b69a7f4010000f40100000700000000000000000000008001000000006269672e62696e504b0506000000000100010035000000450200000000")
+        let expectedLayout = ["Entry 1@0+581", "Central directory@581+53", "End of central directory@634+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "big.bin", "method": 0, "flags": 8, "crc": 2808683264, "cs": 500, "us": 500, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [1980, 1, 1, 0, 0, 0], "create_version": 45, "extract_version": 45]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "zip64_full"
+        let bytes = structureBytes("504b030414000000000000002100e13f618b0300000003000000070000007072652e747874707265504b03042d000000080000002100361c1e2affffffffffffffff050014007a2e62696e010010006e000000000000001000000000000000abca2c30335148492c4954a8a23d1300504b0102140014000000000000002100e13f618b03000000030000000700000000000000000000000000000000007072652e747874504b01022d002d000000080000002100361c1e2affffffffffffffff05001c0000000000000000000000ffffffff7a2e62696e010018006e0000000000000010000000000000002800000000000000504b06062c000000000000002d002d0000000000000000000700000000000000020000000000000084000000000000006f00000000000000504b060700000000f30000000000000001000000504b0506ffffffffffffffffffffffffffffffff0000")
+        let expectedLayout = ["Entry 1@0+40", "Entry 2@40+71", "Central directory@111+132", "Zip64 end of central directory@243+56", "Zip64 end of central directory locator@299+20", "End of central directory@319+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "pre.txt", "method": 0, "flags": 0, "crc": 2338406369, "cs": 3, "us": 3, "lo": 0, "comment": "", "mode": 0, "create_system": 0, "date": [1980, 1, 1, 0, 0, 0], "create_version": 20, "extract_version": 20], ["name": "z.bin", "method": 8, "flags": 0, "crc": 706616374, "cs": 16, "us": 110, "lo": 40, "comment": "", "mode": 0, "create_system": 0, "date": [1980, 1, 1, 0, 0, 0], "create_version": 45, "extract_version": 45]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "prefixed"
+        let bytes = structureBytes("4d5a2073747562206f6620736f6d652070726f6772616d0a504b0304140000000800c563a658bc2f197411000000680100000900000068656c6c6f2e747874cb48cdc9c957c840905c19a32234100100504b030414000000000083182256806108edc8000000c80000000a00000073746f7265642e62696e000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7504b0304140000000000c563a658000000000000000000000000040000006469722f504b03042e0000080c007dbf9f538f5d0e5e27000000640000000d0000006469722fc3bc6ec3af2e747874425a6839314159265359d184ad7b00000201804000004020002100820b177245385090d184ad7b504b03043f0002000e004208ef4eb6c5b971170000002c010000060000006c7a2e62696e090405005d00008000003ceffbb7c42dd6fffffdf09000504b01021403140000000800c563a658bc2f1974110000006801000009000000000000000000000080010000000068656c6c6f2e747874504b0102140314000000000083182256806108edc8000000c80000000a0000000000000000000000a4813800000073746f7265642e62696e504b01021403140000000000c563a658000000000000000000000000040000000000000000000000ed41280100006469722f504b01022e032e0000080c007dbf9f538f5d0e5e27000000640000000d000000000000000000000080014a0100006469722fc3bc6ec3af2e747874504b01023f033f0002000e004208ef4eb6c5b971170000002c01000006000000000000000000000080019c0100006c7a2e62696e504b0506000000000500050010010000d701000009006120636f6d6d656e74")
+        let expectedLayout = ["Data before the first entry@0+24", "Entry 1@24+56", "Entry 2@80+240", "Entry 3@320+34", "Entry 4@354+82", "Entry 5@436+59", "Central directory@495+272", "End of central directory@767+31"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "hello.txt", "method": 8, "flags": 0, "crc": 1947807676, "cs": 17, "us": 360, "lo": 24, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "stored.bin", "method": 0, "flags": 0, "crc": 3976749440, "cs": 200, "us": 200, "lo": 80, "comment": "", "mode": 33188, "create_system": 3, "date": [2023, 1, 2, 3, 4, 6], "create_version": 20, "extract_version": 20], ["name": "dir/", "method": 0, "flags": 0, "crc": 0, "cs": 0, "us": 0, "lo": 320, "comment": "", "mode": 16877, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "dir/ünï.txt", "method": 12, "flags": 2048, "crc": 1577999759, "cs": 39, "us": 100, "lo": 354, "comment": "", "mode": 384, "create_system": 3, "date": [2021, 12, 31, 23, 59, 58], "create_version": 46, "extract_version": 46], ["name": "lz.bin", "method": 14, "flags": 2, "crc": 1908000182, "cs": 23, "us": 300, "lo": 436, "comment": "", "mode": 384, "create_system": 3, "date": [2019, 7, 15, 1, 2, 4], "create_version": 63, "extract_version": 63]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 9 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "trailing"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b0506000000000200020062000000920000000000747261696c696e6720627974657320746861742062656c6f6e6720746f206e6f7468696e67")
+        let expectedLayout = ["Entry 1@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22", "Data after the end@266+37"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "overlap"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080010000000074776f504b0506000000000200020062000000920000000000")
+        let expectedLayout = ["Entry 1@0+73", "Bytes no entry accounts for@73+73", "Central directory@146+98", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "bad_offset"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001f0ffff7f6f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b0506000000000200020062000000920000000000")
+        let expectedLayout = ["Data before the first entry@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 2147483632, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "count_lies"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b0506000000000200070062000000920000000000")
+        let expectedLayout = ["Entry 1@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "comment_cut"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b050600000000020002006200000092000000f401")
+        let expectedLayout = ["Entry 1@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "tiny_cd"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b050600000000020002001e000000920000000000")
+        let expectedLayout = ["Data before the first entry@0+146", "Central directory@146+30", "Bytes no entry accounts for@176+68", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+    }
+    do {
+        let name = "nosig_descriptor"
+        let bytes = structureBytes("504b0304140008000000210021000000000000000000000000000100000064756e7369676e65642064657363726970746f725d16cb711300000013000000504b01021400140008000000210021005d16cb71130000001300000001000000000000000000000000000000000064504b050600000000010001002f0000003e0000000000")
+        let expectedLayout = ["Entry 1@0+62", "Central directory@62+47", "End of central directory@109+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "d", "method": 0, "flags": 8, "crc": 1909134941, "cs": 19, "us": 19, "lo": 0, "comment": "", "mode": 0, "create_system": 0, "date": [1980, 1, 1, 0, 1, 2], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "trailing_one"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b050600000000020002006200000092000000000021")
+        let expectedLayout = ["Entry 1@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22", "Data after the end@266+1"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "long_entry"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a6581bca6ff328000000280000000300000074776f32323232323232323232323232323232323232323232323232323232323232323232323232323232504b01021403140000000000c563a65864002f49e8030000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a6581bca6ff3280000002800000003000000000000000000000080014900000074776f504b0506000000000200020062000000920000000000")
+        let expectedLayout = ["Entry 1@0+73", "Entry 2@73+73", "Central directory@146+98", "End of central directory@244+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 1000, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 4084189723, "cs": 40, "us": 40, "lo": 73, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "overlap_sizes"
+        let bytes = structureBytes("504b0304140000000000c563a65864002f492800000028000000030000006f6e6531313131313131313131313131313131313131313131313131313131313131313131313131313131504b0304140000000000c563a658397b66bd0a0000000a0000000300000074776f32323232323232323232504b01021403140000000000c563a65864002f4928000000280000000300000000000000000000008001000000006f6e65504b01021403140000000000c563a658397b66bd0a0000000a00000003000000000000000000000080010000000074776f504b0506000000000200020062000000740000000000")
+        let expectedLayout = ["Entry 1@0+73", "Bytes no entry accounts for@73+43", "Central directory@116+98", "End of central directory@214+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "one", "method": 0, "flags": 0, "crc": 1227817060, "cs": 40, "us": 40, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "two", "method": 0, "flags": 0, "crc": 3177610041, "cs": 10, "us": 10, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "stored_as_deflate"
+        let bytes = structureBytes("504b0304140000000800c563a658bc2f197411000000680100000900000068656c6c6f2e747874cb48cdc9c957c840905c19a32234100100504b030414000000080083182256806108edc8000000c80000000a00000073746f7265642e62696e000102030405060708090a0b0c0d0e0f101112134115161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7504b0304140000000000c563a658000000000000000000000000040000006469722f504b03042e0000080c007dbf9f538f5d0e5e27000000640000000d0000006469722fc3bc6ec3af2e747874425a6839314159265359d184ad7b00000201804000004020002100820b177245385090d184ad7b504b03043f0002000e004208ef4eb6c5b971170000002c010000060000006c7a2e62696e090405005d00008000003ceffbb7c42dd6fffffdf09000504b01021403140000000800c563a658bc2f1974110000006801000009000000000000000000000080010000000068656c6c6f2e747874504b0102140314000000080083182256806108edc8000000c80000000a0000000000000000000000a4813800000073746f7265642e62696e504b01021403140000000000c563a658000000000000000000000000040000000000000000000000ed41280100006469722f504b01022e032e0000080c007dbf9f538f5d0e5e27000000640000000d000000000000000000000080014a0100006469722fc3bc6ec3af2e747874504b01023f033f0002000e004208ef4eb6c5b971170000002c01000006000000000000000000000080019c0100006c7a2e62696e504b0506000000000500050010010000d701000009006120636f6d6d656e74")
+        let expectedLayout = ["Entry 1@0+56", "Entry 2@56+240", "Entry 3@296+34", "Entry 4@330+82", "Entry 5@412+59", "Central directory@471+272", "End of central directory@743+31"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "hello.txt", "method": 8, "flags": 0, "crc": 1947807676, "cs": 17, "us": 360, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "stored.bin", "method": 8, "flags": 0, "crc": 3976749440, "cs": 200, "us": 200, "lo": 56, "comment": "", "mode": 33188, "create_system": 3, "date": [2023, 1, 2, 3, 4, 6], "create_version": 20, "extract_version": 20], ["name": "dir/", "method": 0, "flags": 0, "crc": 0, "cs": 0, "us": 0, "lo": 296, "comment": "", "mode": 16877, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "dir/ünï.txt", "method": 12, "flags": 2048, "crc": 1577999759, "cs": 39, "us": 100, "lo": 330, "comment": "", "mode": 384, "create_system": 3, "date": [2021, 12, 31, 23, 59, 58], "create_version": 46, "extract_version": 46], ["name": "lz.bin", "method": 14, "flags": 2, "crc": 1908000182, "cs": 23, "us": 300, "lo": 412, "comment": "", "mode": 384, "create_system": 3, "date": [2019, 7, 15, 1, 2, 4], "create_version": 63, "extract_version": 63]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 9 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "encrypted_stored"
+        let bytes = structureBytes("504b0304140000000800c563a658bc2f197411000000680100000900000068656c6c6f2e747874cb48cdc9c957c840905c19a32234100100504b030414000100000083182256806108edc8000000c80000000a00000073746f7265642e62696e000102030405060708090a0b0c0d0e0f101112134115161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7504b0304140000000000c563a658000000000000000000000000040000006469722f504b03042e0000080c007dbf9f538f5d0e5e27000000640000000d0000006469722fc3bc6ec3af2e747874425a6839314159265359d184ad7b00000201804000004020002100820b177245385090d184ad7b504b03043f0002000e004208ef4eb6c5b971170000002c010000060000006c7a2e62696e090405005d00008000003ceffbb7c42dd6fffffdf09000504b01021403140000000800c563a658bc2f1974110000006801000009000000000000000000000080010000000068656c6c6f2e747874504b0102140314000100000083182256806108edc8000000c80000000a0000000000000000000000a4813800000073746f7265642e62696e504b01021403140000000000c563a658000000000000000000000000040000000000000000000000ed41280100006469722f504b01022e032e0000080c007dbf9f538f5d0e5e27000000640000000d000000000000000000000080014a0100006469722fc3bc6ec3af2e747874504b01023f033f0002000e004208ef4eb6c5b971170000002c01000006000000000000000000000080019c0100006c7a2e62696e504b0506000000000500050010010000d701000009006120636f6d6d656e74")
+        let expectedLayout = ["Entry 1@0+56", "Entry 2@56+240", "Entry 3@296+34", "Entry 4@330+82", "Entry 5@412+59", "Central directory@471+272", "End of central directory@743+31"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "hello.txt", "method": 8, "flags": 0, "crc": 1947807676, "cs": 17, "us": 360, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "stored.bin", "method": 0, "flags": 1, "crc": 3976749440, "cs": 200, "us": 200, "lo": 56, "comment": "", "mode": 33188, "create_system": 3, "date": [2023, 1, 2, 3, 4, 6], "create_version": 20, "extract_version": 20], ["name": "dir/", "method": 0, "flags": 0, "crc": 0, "cs": 0, "us": 0, "lo": 296, "comment": "", "mode": 16877, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "dir/ünï.txt", "method": 12, "flags": 2048, "crc": 1577999759, "cs": 39, "us": 100, "lo": 330, "comment": "", "mode": 384, "create_system": 3, "date": [2021, 12, 31, 23, 59, 58], "create_version": 46, "extract_version": 46], ["name": "lz.bin", "method": 14, "flags": 2, "crc": 1908000182, "cs": 23, "us": 300, "lo": 412, "comment": "", "mode": 384, "create_system": 3, "date": [2019, 7, 15, 1, 2, 4], "create_version": 63, "extract_version": 63]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 9 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "corrupt_stored"
+        let bytes = structureBytes("504b0304140000000800c563a658bc2f197411000000680100000900000068656c6c6f2e747874cb48cdc9c957c840905c19a32234100100504b030414000000000083182256806108edc8000000c80000000a00000073746f7265642e62696e000102030405060708090a0b0c0d0e0f101112134115161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7504b0304140000000000c563a658000000000000000000000000040000006469722f504b03042e0000080c007dbf9f538f5d0e5e27000000640000000d0000006469722fc3bc6ec3af2e747874425a6839314159265359d184ad7b00000201804000004020002100820b177245385090d184ad7b504b03043f0002000e004208ef4eb6c5b971170000002c010000060000006c7a2e62696e090405005d00008000003ceffbb7c42dd6fffffdf09000504b01021403140000000800c563a658bc2f1974110000006801000009000000000000000000000080010000000068656c6c6f2e747874504b0102140314000000000083182256806108edc8000000c80000000a0000000000000000000000a4813800000073746f7265642e62696e504b01021403140000000000c563a658000000000000000000000000040000000000000000000000ed41280100006469722f504b01022e032e0000080c007dbf9f538f5d0e5e27000000640000000d000000000000000000000080014a0100006469722fc3bc6ec3af2e747874504b01023f033f0002000e004208ef4eb6c5b971170000002c01000006000000000000000000000080019c0100006c7a2e62696e504b0506000000000500050010010000d701000009006120636f6d6d656e74")
+        let expectedLayout = ["Entry 1@0+56", "Entry 2@56+240", "Entry 3@296+34", "Entry 4@330+82", "Entry 5@412+59", "Central directory@471+272", "End of central directory@743+31"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "hello.txt", "method": 8, "flags": 0, "crc": 1947807676, "cs": 17, "us": 360, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "stored.bin", "method": 0, "flags": 0, "crc": 3976749440, "cs": 200, "us": 200, "lo": 56, "comment": "", "mode": 33188, "create_system": 3, "date": [2023, 1, 2, 3, 4, 6], "create_version": 20, "extract_version": 20], ["name": "dir/", "method": 0, "flags": 0, "crc": 0, "cs": 0, "us": 0, "lo": 296, "comment": "", "mode": 16877, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "dir/ünï.txt", "method": 12, "flags": 2048, "crc": 1577999759, "cs": 39, "us": 100, "lo": 330, "comment": "", "mode": 384, "create_system": 3, "date": [2021, 12, 31, 23, 59, 58], "create_version": 46, "extract_version": 46], ["name": "lz.bin", "method": 14, "flags": 2, "crc": 1908000182, "cs": 23, "us": 300, "lo": 412, "comment": "", "mode": 384, "create_system": 3, "date": [2019, 7, 15, 1, 2, 4], "create_version": 63, "extract_version": 63]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 9 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "times"
+        let bytes = structureBytes("504b0304140000000800c563a6588316dc8c0300000001000000010011007455540d000700f1536564f15365c8f15365ab0000504b01021403140000000800c563a6588316dc8c03000000010000000100110000000000000000008001000000007455540d000700f1536564f15365c8f15365504b0506000000000100010040000000330000000000")
+        let expectedLayout = ["Entry 1@0+51", "Central directory@51+64", "End of central directory@115+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "t", "method": 8, "flags": 0, "crc": 2363233923, "cs": 3, "us": 1, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "docx"
+        let bytes = structureBytes("504b0304140000000800c563a6582b8426120600000004000000130000005b436f6e74656e745f54797065735d2e786d6cb3a9d0b70300504b0304140000000800c563a65816c37a19060000000400000011000000776f72642f646f63756d656e742e786d6cb329d7b70300504b01021403140000000800c563a6582b84261206000000040000001300000000000000000000008001000000005b436f6e74656e745f54797065735d2e786d6c504b01021403140000000800c563a65816c37a190600000004000000110000000000000000000000800137000000776f72642f646f63756d656e742e786d6c504b05060000000002000200800000006c0000000000")
+        let expectedLayout = ["Entry 1@0+55", "Entry 2@55+53", "Central directory@108+128", "End of central directory@236+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "[Content_Types].xml", "method": 8, "flags": 0, "crc": 304514091, "cs": 6, "us": 4, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "word/document.xml", "method": 8, "flags": 0, "crc": 427475734, "cs": 6, "us": 4, "lo": 55, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "xlsx"
+        let bytes = structureBytes("504b0304140000000800c563a6582b8426120600000004000000130000005b436f6e74656e745f54797065735d2e786d6cb3a9d0b70300504b0304140000000800c563a65816c37a1906000000040000000f000000786c2f776f726b626f6f6b2e786d6cb329d7b70300504b01021403140000000800c563a6582b84261206000000040000001300000000000000000000008001000000005b436f6e74656e745f54797065735d2e786d6c504b01021403140000000800c563a65816c37a1906000000040000000f0000000000000000000000800137000000786c2f776f726b626f6f6b2e786d6c504b050600000000020002007e0000006a0000000000")
+        let expectedLayout = ["Entry 1@0+55", "Entry 2@55+51", "Central directory@106+126", "End of central directory@232+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "[Content_Types].xml", "method": 8, "flags": 0, "crc": 304514091, "cs": 6, "us": 4, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "xl/workbook.xml", "method": 8, "flags": 0, "crc": 427475734, "cs": 6, "us": 4, "lo": 55, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "pptx"
+        let bytes = structureBytes("504b0304140000000800c563a6582b8426120600000004000000130000005b436f6e74656e745f54797065735d2e786d6cb3a9d0b70300504b0304140000000800c563a65816c37a190600000004000000140000007070742f70726573656e746174696f6e2e786d6cb329d7b70300504b01021403140000000800c563a6582b84261206000000040000001300000000000000000000008001000000005b436f6e74656e745f54797065735d2e786d6c504b01021403140000000800c563a65816c37a1906000000040000001400000000000000000000008001370000007070742f70726573656e746174696f6e2e786d6c504b05060000000002000200830000006f0000000000")
+        let expectedLayout = ["Entry 1@0+55", "Entry 2@55+56", "Central directory@111+131", "End of central directory@242+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "[Content_Types].xml", "method": 8, "flags": 0, "crc": 304514091, "cs": 6, "us": 4, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "ppt/presentation.xml", "method": 8, "flags": 0, "crc": 427475734, "cs": 6, "us": 4, "lo": 55, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "jar"
+        let bytes = structureBytes("504b0304140000000800c563a6587adf5a201800000016000000140000004d4554412d494e462f4d414e49464553542e4d46f34dcccb4c4b2d2ed10d4b2d2acecccfb35230d433e00200504b01021403140000000800c563a6587adf5a2018000000160000001400000000000000000000008001000000004d4554412d494e462f4d414e49464553542e4d46504b05060000000001000100420000004a0000000000")
+        let expectedLayout = ["Entry 1@0+74", "Central directory@74+66", "End of central directory@140+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "META-INF/MANIFEST.MF", "method": 8, "flags": 0, "crc": 542826362, "cs": 24, "us": 22, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "apk"
+        let bytes = structureBytes("504b0304140000000800c563a658b0e5cb08060000000400000013000000416e64726f69644d616e69666573742e786d6cb3c9d5b70300504b0304140000000800c563a65802dccbf605000000030000000b000000636c61737365732e6465784b49ad0000504b01021403140000000800c563a658b0e5cb080600000004000000130000000000000000000000800100000000416e64726f69644d616e69666573742e786d6c504b01021403140000000800c563a65802dccbf605000000030000000b0000000000000000000000800137000000636c61737365732e646578504b050600000000020002007a000000650000000000")
+        let expectedLayout = ["Entry 1@0+55", "Entry 2@55+46", "Central directory@101+122", "End of central directory@223+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "AndroidManifest.xml", "method": 8, "flags": 0, "crc": 147580336, "cs": 6, "us": 4, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "classes.dex", "method": 8, "flags": 0, "crc": 4140555266, "cs": 5, "us": 3, "lo": 55, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    do {
+        let name = "odt"
+        let bytes = structureBytes("504b0304140000000000c563a6585ec6320c2700000027000000080000006d696d65747970656170706c69636174696f6e2f766e642e6f617369732e6f70656e646f63756d656e742e74657874504b0304140000000800c563a658bac8550206000000040000000b000000636f6e74656e742e786d6cb349d6b70300504b01021403140000000000c563a6585ec6320c27000000270000000800000000000000000000008001000000006d696d6574797065504b01021403140000000800c563a658bac8550206000000040000000b000000000000000000000080014d000000636f6e74656e742e786d6c504b050600000000020002006f0000007c0000000000")
+        let expectedLayout = ["Entry 1@0+77", "Entry 2@77+47", "Central directory@124+111", "End of central directory@235+22"]
+        fixtures.append((name, bytes))
+        let outcome = ZIPParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        let expected: [[String: Any]] = [["name": "mimetype", "method": 0, "flags": 0, "crc": 204654174, "cs": 39, "us": 39, "lo": 0, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20], ["name": "content.xml", "method": 8, "flags": 0, "crc": 39176378, "cs": 6, "us": 4, "lo": 77, "comment": "", "mode": 384, "create_system": 3, "date": [2024, 5, 6, 12, 30, 10], "create_version": 20, "extract_version": 20]]
+        let central = outcome.roots.first { $0.name == "Central directory" }?.resolvedChildren() ?? []
+        if hostile.contains(name) == false && central.count != expected.count { wrong.append("\(name) entries: \(central.count) not \(expected.count)") }
+        for (record, want) in zip(central, expected) {
+            let fields = zipFields(record.resolvedChildren().isEmpty ? nil : record)
+            let method = want["method"] as? Int ?? -1
+            if zipLeading(fields["Method"]) != Int64(method) { wrong.append("\(name) \(want["name"] ?? "") method \(fields["Method"] ?? "none") not \(method)") }
+            if zipLeading(fields["Flags"].map { $0.hasPrefix("0x") ? String(Int(String($0.dropFirst(2).prefix(4)), radix: 16) ?? -1) : $0 }) != Int64(want["flags"] as? Int ?? -2) { wrong.append("\(name) \(want["name"] ?? "") flags \(fields["Flags"] ?? "none") not \(want["flags"] ?? "")") }
+            if let date = want["date"] as? [Int], date.count == 6, fields["Modified"] != String(format: "%04d-%02d-%02d %02d:%02d:%02d", date[0], date[1], date[2], date[3], date[4], date[5]) { wrong.append("\(name) \(want["name"] ?? "") date \(fields["Modified"] ?? "none") not \(date)") }
+            if let made = want["create_version"] as? Int, let needed = want["extract_version"] as? Int, hostile.contains(name) == false, !(fields["Version made by"] ?? "").hasPrefix("\(made / 10).\(made % 10) on") || fields["Version needed"] != "\(needed / 10).\(needed % 10)" { wrong.append("\(name) versions \(fields["Version made by"] ?? "none") \(fields["Version needed"] ?? "none")") }
+            if let system = want["create_system"] as? Int, let mode = want["mode"] as? Int, system == 3, mode != 0, !(fields["External attributes"] ?? "").hasSuffix(String(mode & 0o7777, radix: 8)) { wrong.append("\(name) attributes \(fields["External attributes"] ?? "none")") }
+            let crc = String(format: "0x%08X", want["crc"] as? Int ?? -1)
+            if fields["CRC-32"] != crc { wrong.append("\(name) crc \(fields["CRC-32"] ?? "none") not \(crc)") }
+            if zipLeading(fields["Compressed size"]) != Int64(want["cs"] as? Int ?? -1) || zipLeading(fields["Uncompressed size"]) != Int64(want["us"] as? Int ?? -1) { wrong.append("\(name) sizes \(fields["Compressed size"] ?? "") \(fields["Uncompressed size"] ?? "")") }
+            if record.value != (want["name"] as? String) { wrong.append("\(name) entry name \(record.value ?? "none") not \(want["name"] ?? "")") }
+            if fields["Name"] != "\"\(want["name"] as? String ?? "")\"" { wrong.append("\(name) name field \(fields["Name"] ?? "none")") }
+            if let comment = want["comment"] as? String, !comment.isEmpty, fields["Comment"] != "\"\(comment)\"" { wrong.append("\(name) entry comment \(fields["Comment"] ?? "none")") }
+        }
+        if outcome.summary?.contains("comment 0 bytes") != true { wrong.append("\(name) summary: \(outcome.summary ?? "none")") }
+    }
+    check(wrong.isEmpty, "every layout, entry and summary is what zipfile and a separate walk say, for 28 archives: \(wrong.prefix(2))")
+    let plain = fixtures.first { $0.0 == "plain" }?.1 ?? []
+    let plainResult = FormatRegistry.analyze(DataByteSource(plain))
+    check(plainResult.identity?.id == "zip" && plainResult.identity?.hasParser == true && plainResult.message.isEmpty && plainResult.outcome.problems.isEmpty, "an archive is taken for a ZIP, with a structure view")
+    check(ZIPParser.matches(head: [0x50, 0x4B, 3, 4], length: 4) && ZIPParser.matches(head: [0x50, 0x4B, 5, 6], length: 4) && !ZIPParser.matches(head: [0x50, 0x4B, 7, 8], length: 4) && !ZIPParser.matches(head: [0x50, 0x4B], length: 2), "what a ZIP begins with")
+    let stored = plainResult.outcome.roots.first { $0.name == "Entry 2" }
+    check(stored?.resolvedChildren().first { $0.name == "Compressed data" }?.value?.hasSuffix("CRC matches") == true, "a stored entry's CRC is checked when it is opened")
+    if let at = plain.firstIndex(where: { _ in true }), plain.count > 100 {
+        var damaged = plain
+        damaged[110] ^= 0x55
+        let result = ZIPParser.parse(DataByteSource(damaged), context: ParseContext())
+        let data = result.roots.first { $0.name == "Entry 2" }?.resolvedChildren().first { $0.name == "Compressed data" }
+        check(data?.value?.hasSuffix("CRC DIFFERS") == true && at == 0, "and a stored byte that changed is said to differ: \(data?.value ?? "none")")
+    }
+    do {
+        var big = fixtures.first { $0.0 == "one_stored" }?.1 ?? []
+        big[big.count - 2] = 0xFF
+        big[big.count - 1] = 0xFF
+        big += [UInt8](repeating: 0x63, count: 65535)
+        let result = ZIPParser.parse(DataByteSource(big), context: ParseContext())
+        check(result.problems.isEmpty && result.summary?.contains("1 entry") == true && result.summary?.contains("comment 65535 bytes") == true, "an end record behind the longest comment is found: \(result.summary ?? "none") \(result.problems)")
+    }
+    func zipFixture(_ name: String) -> [UInt8] { fixtures.first { $0.0 == name }?.1 ?? [] }
+    func zipData(_ name: String, entry: String = "Entry 2") -> FieldNode? {
+        ZIPParser.parse(DataByteSource(zipFixture(name)), context: ParseContext()).roots.first { $0.name == entry }?.resolvedChildren().first { $0.name == "Compressed data" }
+    }
+    check(zipData("corrupt_stored")?.value?.hasSuffix("CRC DIFFERS") == true, "a stored entry with a changed byte differs from its CRC")
+    check(zipData("stored_as_deflate")?.value?.contains("CRC") == false, "an entry that is not stored has no CRC check: \(zipData("stored_as_deflate")?.value ?? "none")")
+    check(zipData("encrypted_stored")?.value?.contains("CRC") == false, "nor has an encrypted one: \(zipData("encrypted_stored")?.value ?? "none")")
+    check(ZIPParser.flagsText(0x0809).contains("encrypted") && ZIPParser.flagsText(0x0809).contains("sizes in a data descriptor") && ZIPParser.flagsText(0x0809).contains("UTF-8 names") && !ZIPParser.flagsText(0x0000).contains("·")
+          && ZIPParser.flagsText(0x0004) == "0x0004" && ZIPParser.flagsText(0x0400) == "0x0400" && ZIPParser.flagsText(0x0010).contains("enhanced") && ZIPParser.flagsText(0x0040).contains("strong"), "the flags are named")
+    check(ZIPParser.methodName(8) == "8 · deflated" && ZIPParser.methodName(93) == "93 · Zstandard" && ZIPParser.methodName(1234) == "1234", "the methods are named")
+    check(ZIPParser.dosTime(date: 0x5042, time: 0x1041) == "2020-02-02 02:02:02" && ZIPParser.dosTime(date: 0x58A6, time: 0x65D5).hasPrefix("2024-05-06") && ZIPParser.dosTime(date: 0, time: 0).contains("not a date") && ZIPParser.dosTime(date: 0x5042, time: 0xFFFF).contains("not a date"), "a DOS date and time are read, and an impossible one is said to be")
+    check(ZIPParser.attributesText(host: 3, raw: 0o100644 << 16).hasSuffix("file 644") && ZIPParser.attributesText(host: 19, raw: 0o040755 << 16).hasSuffix("directory 755") && ZIPParser.attributesText(host: 0, raw: 0x11).contains("read-only") && ZIPParser.attributesText(host: 0, raw: 0x11).contains("directory") && ZIPParser.attributesText(host: 3, raw: 0o120777 << 16).contains("symbolic link"), "attributes are read as Unix modes or DOS flags by the host")
+    check(ZIPParser.versionText(0x031E, host: true) == "3.0 on 3 · Unix" && ZIPParser.versionText(63, host: false) == "6.3", "a version is major.minor, and the host that made it")
+    let unsigned = ZIPParser.parse(DataByteSource(zipFixture("nosig_descriptor")), context: ParseContext())
+    let unsignedDescriptor = zipFields(unsigned.roots.first { $0.name == "Entry 1" }?.resolvedChildren().first { $0.name == "Data descriptor" })
+    check(unsignedDescriptor["Signature"] == nil && unsignedDescriptor["CRC-32"] != nil && unsigned.problems.isEmpty, "a data descriptor without its optional signature is 12 bytes: \(unsignedDescriptor.keys.sorted())")
+    let signedBytes = zipFixture("descriptor")
+    let noEnd = ZIPParser.parse(DataByteSource(Array(signedBytes[0..<208])), context: ParseContext())
+    check(noEnd.problems.contains { $0.contains("no telling") }, "without the central directory an entry whose size is in its descriptor cannot be walked past: \(noEnd.problems)")
+    check(ZIPParser.parse(DataByteSource(zipFixture("trailing_one")), context: ParseContext()).roots.last?.name == "Data after the end", "even one byte after the end is shown")
+    check(ZIPParser.parse(DataByteSource(zipFixture("long_entry")), context: ParseContext()).problems.contains { $0.contains("past where the next part") }, "an entry that claims more than there is before the next is cut and said so")
+    check(ZIPParser.parse(DataByteSource(zipFixture("overlap_sizes")), context: ParseContext()).problems.contains { $0.contains("overlaps") }, "two entries at one place: the second is not shown again")
+    let times = ZIPParser.parse(DataByteSource(zipFixture("times")), context: ParseContext())
+    let timeItem = times.roots.first { $0.name == "Entry 1" }?.resolvedChildren().first { $0.name == "Local file header" }?.resolvedChildren().first { $0.name == "Extra field" }?.resolvedChildren().first
+    check(zipFields(timeItem)["Modified"] == "2023-11-14 22:13:20 UTC" && zipFields(timeItem)["Accessed"] == "2023-11-14 22:15:00 UTC" && zipFields(timeItem)["Created"] == "2023-11-14 22:16:40 UTC" && zipFields(timeItem)["Which times"]?.contains("accessed, created") == true, "all three times of an extended timestamp")
+    for (name, words) in [("docx", "a Word document"), ("xlsx", "an Excel workbook"), ("pptx", "a PowerPoint presentation"), ("jar", "a Java archive"), ("apk", "an Android package"), ("odt", "an OpenDocument or EPUB file")] {
+        check(ZIPParser.parse(DataByteSource(zipFixture(name)), context: ParseContext()).summary?.contains(words) == true, "\(name) is said to be \(words)")
+    }
+    check(zipFields(ZIPParser.parse(DataByteSource(zipFixture("zip64_full")), context: ParseContext()).roots.first { $0.name == "Central directory" }?.resolvedChildren().last)["Offset of local header"]?.contains("from the Zip64 field") == true, "a number kept in the Zip64 field is shown with its real value")
+    let prefixed = fixtures.first { $0.0 == "prefixed" }?.1 ?? []
+    let shifted = ZIPParser.parse(DataByteSource(prefixed), context: ParseContext())
+    check(shifted.roots.first?.name == "Data before the first entry" && shifted.roots.first?.length == 24 && shifted.problems.isEmpty && shifted.summary?.contains("5 entries") == true, "a program in front of the archive shifts the offsets and is shown: \(shifted.summary ?? "none")")
+    check(FormatRegistry.analyze(DataByteSource(prefixed)).identity?.id != "zip", "(it is not taken for a ZIP by its first bytes, which are the program's)")
+    let descriptor = fixtures.first { $0.0 == "descriptor" }?.1 ?? []
+    let streamed = ZIPParser.parse(DataByteSource(descriptor), context: ParseContext())
+    let descriptorNode = streamed.roots.first { $0.name == "Entry 1" }?.resolvedChildren().first { $0.name == "Data descriptor" }
+    let descriptorFields = zipFields(descriptorNode)
+    let centralFields = zipFields(streamed.roots.first { $0.name == "Central directory" }?.resolvedChildren().first)
+    check(descriptorNode != nil && descriptorFields["CRC-32"] == centralFields["CRC-32"] && descriptorFields["Compressed size"] == centralFields["Compressed size"], "a data descriptor holds what the central directory repeats")
+    let extras = fixtures.first { $0.0 == "extras" }?.1 ?? []
+    let extrasResult = ZIPParser.parse(DataByteSource(extras), context: ParseContext())
+    let extraField = extrasResult.roots.first { $0.name == "Entry 1" }?.resolvedChildren().first { $0.name == "Local file header" }?.resolvedChildren().first { $0.name == "Extra field" }
+    let timestamp = extraField?.resolvedChildren().first { $0.name.hasPrefix("Item 0x5455") }
+    check(zipFields(timestamp)["Modified"] == "2023-11-14 22:13:20 UTC" && zipFields(timestamp)["Which times"]?.contains("modified") == true, "an extended timestamp is read as a time: \(zipFields(timestamp)["Modified"] ?? "none")")
+    let unixIDs = extraField?.resolvedChildren().first { $0.name.hasPrefix("Item 0x7875") }
+    check(zipFields(unixIDs)["User id"].flatMap { zipLeading($0) } == 1000, "and Unix ids")
+    let full = fixtures.first { $0.0 == "zip64_full" }?.1 ?? []
+    let fullResult = ZIPParser.parse(DataByteSource(full), context: ParseContext())
+    check(fullResult.summary?.contains("2 entries") == true && fullResult.roots.contains { $0.name == "Zip64 end of central directory" } && fullResult.problems.isEmpty, "a Zip64 archive takes its numbers from the Zip64 record: \(fullResult.summary ?? "none")")
+    check(zipFields(fullResult.roots.first { $0.name == "Zip64 end of central directory" })["Entries"] == "2", "and shows them")
+    check(zipFields(fullResult.roots.first { $0.name == "Entry 2" }?.resolvedChildren().first { $0.name == "Local file header" }?.resolvedChildren().first { $0.name == "Extra field" }?.resolvedChildren().first)["Id"]?.hasPrefix("0x0001") == true, "and its extra field is read")
+    // without the central directory the entries are found from the front, as far as sizes are known
+    let twoStored = fixtures.first { $0.0 == "trailing" }?.1 ?? []
+    let cutEnd = ZIPParser.parse(DataByteSource(Array(twoStored[0..<146])), context: ParseContext())
+    check(cutEnd.roots.map { $0.name } == ["Entry 1", "Entry 2"] && cutEnd.problems.contains { $0.contains("no end of central directory") }, "an archive with its end cut off still shows the entries it can: \(cutEnd.roots.map { $0.name })")
+    var smallLimit = ParseContext()
+    smallLimit.maxRecords = 3
+    let limited = ZIPParser.parse(DataByteSource(plain), context: smallLimit)
+    check(limited.listingLimit != nil && limited.roots.contains { $0.name == "Central directory" } && structureProblems(limited.roots, fileLength: Int64(plain.count)).isEmpty, "a limit on records stops the listing and says so")
+    if let issue = imgHostile("ZIP", fixtures: fixtures, prefix: [0x50, 0x4B, 3, 4], seed: 0x21B) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random archives give sound trees") }
+}
+
+// MARK: ELF
+
+// Programs, libraries and objects made by gcc, as and ld, and files built by hand in both classes and byte orders; every table is
+// read again by a walker written separately, and the section names were checked against readelf.
+
+/// A number as the decimal text of its value: "0x1F (…)" and "31 (0x1F)" and "-4" are all numbers.
+func elfNumber(_ text: String?) -> String {
+    guard var text else { return "-" }
+    var negative = false
+    if text.hasPrefix("-") { negative = true; text.removeFirst() }
+    if text.hasPrefix("0x") {
+        let digits = text.dropFirst(2).prefix { $0.isHexDigit }
+        return UInt64(digits, radix: 16).map { String($0) } ?? "-"
+    }
+    let digits = text.prefix { $0.isNumber }
+    return digits.isEmpty ? "-" : (negative ? "-" : "") + digits
+}
+
+func elfQuoted(_ text: String?) -> String? {
+    guard let text, let first = text.firstIndex(of: "\""), let last = text.lastIndex(of: "\""), first < last else { return nil }
+    return String(text[text.index(after: first)..<last])
+}
+
+func elfRow(_ node: FieldNode?, _ names: [String]) -> [String] {
+    let fields = zipFields(node)
+    return names.map { elfNumber(fields[$0]) }
+}
+
+do {
+    var wrong: [String] = []
+    var fixtures: [(String, [UInt8])] = []
+    let hostile: Set<String> = ["bad_shoff", "bad_phoff", "huge_phnum", "short_phentsize", "short_shentsize", "section_past_end", "section_big"]
+    let lying: Set<String> = hostile.union(["bad_shstrndx", "zero_shnum"])
+    do {
+        let name = "exe64"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e000100000018104000000000004000000000000000f0210000000000000000000040003800080040000a000900010000000400000000000000000000000000400000000000000040000000000044020000000000004402000000000000001000000000000001000000050000000010000000000000001040000000000000104000000000001e000000000000001e000000000000000010000000000000010000000400000000200000000000000020400000000000002040000000000054000000000000005400000000000000001000000000000001000000060000005420000000000000543040000000000054304000000000000400000000000000040000000000000000100000000000000400000004000000000200000000000000024000000000000002400000000000200000000000000020000000000000000800000000000000040000000400000020020000000000002002400000000000200240000000000024000000000000002400000000000000040000000000000053e574640400000000020000000000000002400000000000000240000000000020000000000000002000000000000000080000000000000051e5746406000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000040000001000000005000000474e5500020000c0040000000300000000000000040000001400000003000000474e550015dd1b04364723ad2323a06ed6ba999caebb414f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f30f1efa8d043fc3f30f1efa01fe0335402000008d047ec3f30f1efaebfe000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000017a5200017810011b0c070890010000100000001c000000e0efffff08000000000000001000000030000000d4efffff10000000000000001000000044000000d0efffff0600000000000000050000004743433a20285562756e74752031332e332e302d367562756e7475327e32342e30342e31292031332e332e3000000000000000000000000000000000000000000000000000000000010000000400f1ff000000000000000000000000000000000600000012000300001040000000000008000000000000000a00000012000300081040000000000010000000000000001b00000012000300181040000000000006000000000000000e00000011000500543040000000000004000000000000001600000010000500583040000000000000000000000000002200000010000500583040000000000000000000000000002900000010000500583040000000000000000000000000000074312e63006578740061646400636f756e746572005f5f6273735f7374617274005f6564617461005f656e6400002e73796d746162002e737472746162002e7368737472746162002e6e6f74652e676e752e70726f7065727479002e6e6f74652e676e752e6275696c642d6964002e74657874002e65685f6672616d65002e64617461002e636f6d6d656e74000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b0000000700000002000000000000000002400000000000000200000000000020000000000000000000000000000000080000000000000000000000000000002e00000007000000020000000000000020024000000000002002000000000000240000000000000000000000000000000400000000000000000000000000000041000000010000000600000000000000001040000000000000100000000000001e00000000000000000000000000000001000000000000000000000000000000470000000100000002000000000000000020400000000000002000000000000054000000000000000000000000000000080000000000000000000000000000005100000001000000030000000000000054304000000000005420000000000000040000000000000000000000000000000400000000000000000000000000000057000000010000003000000000000000000000000000000058200000000000002d000000000000000000000000000000010000000000000001000000000000000100000002000000000000000000000000000000000000008820000000000000d80000000000000008000000020000000800000000000000180000000000000009000000030000000000000000000000000000000000000060210000000000002e000000000000000000000000000000010000000000000000000000000000001100000003000000000000000000000000000000000000008e210000000000006000000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+448", "Section .note.gnu.property@512+32", "Section .note.gnu.build-id@544+36", "Bytes no header accounts for@580+3516", "Section .text@4096+30", "Bytes no header accounts for@4126+4066", "Section .eh_frame@8192+84", "Section .data@8276+4", "Section .comment@8280+45", "Bytes no header accounts for@8325+3", "Section .symtab@8328+216", "Section .strtab@8544+46", "Section .shstrtab@8590+96", "Bytes no header accounts for@8686+2", "Section headers@8688+640"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4198424", "64", "8688", "0", "64", "56", "8", "64", "10", "9"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "4", "0", "4194304", "4194304", "580", "580", "4096"], ["1", "5", "4096", "4198400", "4198400", "30", "30", "4096"], ["1", "4", "8192", "4202496", "4202496", "84", "84", "4096"], ["1", "6", "8276", "4206676", "4206676", "4", "4", "4096"], ["4", "4", "512", "4194816", "4194816", "32", "32", "8"], ["4", "4", "544", "4194848", "4194848", "36", "36", "4"], ["1685382483", "4", "512", "4194816", "4194816", "32", "32", "8"], ["1685382481", "6", "0", "0", "0", "0", "0", "16"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".note.gnu.property", "7", "2", "4194816", "512", "32", "0", "0", "8", "0"], [".note.gnu.build-id", "7", "2", "4194848", "544", "36", "0", "0", "4", "0"], [".text", "1", "6", "4198400", "4096", "30", "0", "0", "1", "0"], [".eh_frame", "1", "2", "4202496", "8192", "84", "0", "0", "8", "0"], [".data", "1", "3", "4206676", "8276", "4", "0", "0", "4", "0"], [".comment", "1", "48", "0", "8280", "45", "0", "0", "1", "1"], [".symtab", "2", "0", "0", "8328", "216", "8", "2", "8", "24"], [".strtab", "3", "0", "0", "8544", "46", "0", "0", "1", "0"], [".shstrtab", "3", "0", "0", "8590", "96", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 7
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["t1.c", "0", "0", "4", "0", "65521"], ["ext", "4198400", "8", "18", "0", "3"], ["add", "4198408", "16", "18", "0", "3"], ["_start", "4198424", "6", "18", "0", "3"], ["counter", "4206676", "4", "17", "0", "5"], ["__bss_start", "4206680", "0", "16", "0", "5"], ["_edata", "4206680", "0", "16", "0", "5"], ["_end", "4206680", "0", "16", "0", "5"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 7: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // notes of section 1
+                let want: [[String]] = [["GNU", "5", "16"]]
+                let got = (section(1)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 1: \(got) not \(want)") }
+            }
+            do { // notes of section 2
+                let want: [[String]] = [["GNU", "3", "20"]]
+                let got = (section(2)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 2: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "so64_so"
+        let bytes = structureBytes("7f454c4602010100000000000000000003003e0001000000e20300000000000040000000000000006808000000000000000000004000380008004000150014000100000005000000000000000000000000000000000000000000000000000000cc04000000000000cc0400000000000000100000000000000100000006000000d004000000000000d014000000000000d0140000000000006401000000000000640100000000000000100000000000000200000006000000d004000000000000d014000000000000d0140000000000003001000000000000300100000000000008000000000000000400000004000000000200000000000000020000000000000002000000000000200000000000000020000000000000000800000000000000040000000400000020020000000000002002000000000000200200000000000024000000000000002400000000000000040000000000000053e574640400000000020000000000000002000000000000000200000000000020000000000000002000000000000000080000000000000050e5746404000000fc03000000000000fc03000000000000fc0300000000000034000000000000003400000000000000040000000000000051e5746406000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000040000001000000005000000474e5500020000c0040000000300000000000000040000001400000003000000474e5500f623971c77ea380bc61be55f30e9e196bd679fd400000000030000000100000001000000060000000241000020004c00000000000100000003000000ce5c880b3362dbed7670880b6539f5d3000000000000000000000000000000000000000000000000000000000500000012000a00c8030000000000001a000000000000001100000012000a00e20300000000000019000000000000000100000012000a00c0030000000000000800000000000000090000001100100030160000000000000400000000000000006578740061646400636f756e746572005f7374617274006c696274312e736f00000000000000000016000000000000060000000400000000000000000000002016000000000000070000000300000000000000000000002816000000000000070000000100000000000000000000000000000000000000ff359a120000ff259c1200000f1f4000f30f1efa6800000000e9e2ffffff6690f30f1efa6801000000e9d2ffffff6690f30f1efaff2576120000660f1f440000f30f1efaff256e120000660f1f440000f30f1efa8d043fc3f30f1efa538d1c37488b05291200000318e8c2ffffff01d85bc3f30f1efa4883ec08be02000000bf01000000e8b7ffffffebef00011b033b300000000500000074ffffff94000000a4ffffffbc000000c4ffffff4c000000ccffffff60000000e6ffffff7c0000001400000000000000017a5200017810011b0c070890010000100000001c00000070ffffff0800000000000000180000003000000064ffffff1a00000000450e108302540e08000000140000004c00000062ffffff1900000000480e10000000002400000064000000d8feffff30000000000e10460e184a0f0b770880003f1a392a33242200000000100000008c000000e0feffff2000000000000000000000000e000000000000001800000000000000f5feff6f0000000048020000000000000500000000000000f802000000000000060000000000000080020000000000000a0000000000000021000000000000000b000000000000001800000000000000030000000000000008160000000000000200000000000000300000000000000014000000000000000700000000000000170000000000000038030000000000000700000000000000200300000000000008000000000000001800000000000000090000000000000018000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000d0140000000000000000000000000000000000000000000080030000000000009003000000000000050000004743433a20285562756e74752031332e332e302d367562756e7475327e32342e30342e31292031332e332e300000000000000000000000000000000000000000000000000000000000000000010000000400f1ff00000000000000000000000000000000000000000400f1ff000000000000000000000000000000000600000001000d00d01400000000000000000000000000000f00000000000b00fc0300000000000000000000000000002200000001000f00081600000000000000000000000000003800000012000a00c00300000000000008000000000000003c00000012000a00c8030000000000001a000000000000004000000012000a00e20300000000000019000000000000004700000011001000301600000000000004000000000000000074312e63005f44594e414d4943005f5f474e555f45485f4652414d455f484452005f474c4f42414c5f4f46465345545f5441424c455f0065787400616464005f737461727400636f756e74657200002e73796d746162002e737472746162002e7368737472746162002e6e6f74652e676e752e70726f7065727479002e6e6f74652e676e752e6275696c642d6964002e676e752e68617368002e64796e73796d002e64796e737472002e72656c612e64796e002e72656c612e706c74002e706c742e736563002e74657874002e65685f6672616d655f686472002e65685f6672616d65002e64796e616d6963002e676f74002e676f742e706c74002e64617461002e636f6d6d656e74000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b0000000700000002000000000000000002000000000000000200000000000020000000000000000000000000000000080000000000000000000000000000002e00000007000000020000000000000020020000000000002002000000000000240000000000000000000000000000000400000000000000000000000000000041000000f6ffff6f02000000000000004802000000000000480200000000000034000000000000000400000000000000080000000000000000000000000000004b0000000b000000020000000000000080020000000000008002000000000000780000000000000005000000010000000800000000000000180000000000000053000000030000000200000000000000f802000000000000f80200000000000021000000000000000000000000000000010000000000000000000000000000005b00000004000000020000000000000020030000000000002003000000000000180000000000000004000000000000000800000000000000180000000000000065000000040000004200000000000000380300000000000038030000000000003000000000000000040000000f000000080000000000000018000000000000006a0000000100000006000000000000007003000000000000700300000000000030000000000000000000000000000000100000000000000010000000000000006f000000010000000600000000000000a003000000000000a003000000000000200000000000000000000000000000001000000000000000100000000000000078000000010000000600000000000000c003000000000000c0030000000000003b000000000000000000000000000000010000000000000000000000000000007e000000010000000200000000000000fc03000000000000fc0300000000000034000000000000000000000000000000040000000000000000000000000000008c000000010000000200000000000000300400000000000030040000000000009c0000000000000000000000000000000800000000000000000000000000000096000000060000000300000000000000d014000000000000d00400000000000030010000000000000500000000000000080000000000000010000000000000009f000000010000000300000000000000001600000000000000060000000000000800000000000000000000000000000008000000000000000800000000000000a4000000010000000300000000000000081600000000000008060000000000002800000000000000000000000000000008000000000000000800000000000000ad000000010000000300000000000000301600000000000030060000000000000400000000000000000000000000000004000000000000000000000000000000b3000000010000003000000000000000000000000000000034060000000000002d000000000000000000000000000000010000000000000001000000000000000100000002000000000000000000000000000000000000006806000000000000f00000000000000013000000060000000800000000000000180000000000000009000000030000000000000000000000000000000000000058070000000000004f00000000000000000000000000000001000000000000000000000000000000110000000300000000000000000000000000000000000000a707000000000000bc00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+448", "Section .note.gnu.property@512+32", "Section .note.gnu.build-id@544+36", "Bytes no header accounts for@580+4", "Section .gnu.hash@584+52", "Bytes no header accounts for@636+4", "Section .dynsym@640+120", "Section .dynstr@760+33", "Bytes no header accounts for@793+7", "Section .rela.dyn@800+24", "Section .rela.plt@824+48", "Bytes no header accounts for@872+8", "Section .plt@880+48", "Section .plt.sec@928+32", "Section .text@960+59", "Bytes no header accounts for@1019+1", "Section .eh_frame_hdr@1020+52", "Section .eh_frame@1072+156", "Bytes no header accounts for@1228+4", "Section .dynamic@1232+304", "Section .got@1536+8", "Section .got.plt@1544+40", "Section .data@1584+4", "Section .comment@1588+45", "Bytes no header accounts for@1633+7", "Section .symtab@1640+240", "Section .strtab@1880+79", "Section .shstrtab@1959+188", "Bytes no header accounts for@2147+5", "Section headers@2152+1344"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["3", "62", "994", "64", "2152", "0", "64", "56", "8", "64", "21", "20"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "0", "0", "1228", "1228", "4096"], ["1", "6", "1232", "5328", "5328", "356", "356", "4096"], ["2", "6", "1232", "5328", "5328", "304", "304", "8"], ["4", "4", "512", "512", "512", "32", "32", "8"], ["4", "4", "544", "544", "544", "36", "36", "4"], ["1685382483", "4", "512", "512", "512", "32", "32", "8"], ["1685382480", "4", "1020", "1020", "1020", "52", "52", "4"], ["1685382481", "6", "0", "0", "0", "0", "0", "16"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".note.gnu.property", "7", "2", "512", "512", "32", "0", "0", "8", "0"], [".note.gnu.build-id", "7", "2", "544", "544", "36", "0", "0", "4", "0"], [".gnu.hash", "1879048182", "2", "584", "584", "52", "4", "0", "8", "0"], [".dynsym", "11", "2", "640", "640", "120", "5", "1", "8", "24"], [".dynstr", "3", "2", "760", "760", "33", "0", "0", "1", "0"], [".rela.dyn", "4", "2", "800", "800", "24", "4", "0", "8", "24"], [".rela.plt", "4", "66", "824", "824", "48", "4", "15", "8", "24"], [".plt", "1", "6", "880", "880", "48", "0", "0", "16", "16"], [".plt.sec", "1", "6", "928", "928", "32", "0", "0", "16", "16"], [".text", "1", "6", "960", "960", "59", "0", "0", "1", "0"], [".eh_frame_hdr", "1", "2", "1020", "1020", "52", "0", "0", "4", "0"], [".eh_frame", "1", "2", "1072", "1072", "156", "0", "0", "8", "0"], [".dynamic", "6", "3", "5328", "1232", "304", "5", "0", "8", "16"], [".got", "1", "3", "5632", "1536", "8", "0", "0", "8", "8"], [".got.plt", "1", "3", "5640", "1544", "40", "0", "0", "8", "8"], [".data", "1", "3", "5680", "1584", "4", "0", "0", "4", "0"], [".comment", "1", "48", "0", "1588", "45", "0", "0", "1", "1"], [".symtab", "2", "0", "0", "1640", "240", "19", "6", "8", "24"], [".strtab", "3", "0", "0", "1880", "79", "0", "0", "1", "0"], [".shstrtab", "3", "0", "0", "1959", "188", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 4
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["add", "968", "26", "18", "0", "10"], ["_start", "994", "25", "18", "0", "10"], ["ext", "960", "8", "18", "0", "10"], ["counter", "5680", "4", "17", "0", "16"]]
+                let got = (section(4)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 4: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 18
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["t1.c", "0", "0", "4", "0", "65521"], ["", "0", "0", "4", "0", "65521"], ["_DYNAMIC", "5328", "0", "1", "0", "13"], ["__GNU_EH_FRAME_HDR", "1020", "0", "0", "0", "11"], ["_GLOBAL_OFFSET_TABLE_", "5640", "0", "1", "0", "15"], ["ext", "960", "8", "18", "0", "10"], ["add", "968", "26", "18", "0", "10"], ["_start", "994", "25", "18", "0", "10"], ["counter", "5680", "4", "17", "0", "16"]]
+                let got = (section(18)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 18: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 13
+                let want: [[String]] = [["14", "24", "libt1.so"], ["1879047925", "584", ""], ["5", "760", ""], ["6", "640", ""], ["10", "33", ""], ["11", "24", ""], ["3", "5640", ""], ["2", "48", ""], ["20", "7", ""], ["23", "824", ""], ["7", "800", ""], ["8", "24", ""], ["9", "24", ""], ["0", "0", ""]]
+                let got = (section(13)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 13: \(got) not \(want)") }
+            }
+            do { // notes of section 1
+                let want: [[String]] = [["GNU", "5", "16"]]
+                let got = (section(1)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 1: \(got) not \(want)") }
+            }
+            do { // notes of section 2
+                let want: [[String]] = [["GNU", "3", "20"]]
+                let got = (section(2)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 2: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["5632", "17179869190", "0"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["5664", "12884901895", "0"], ["5672", "4294967303", "0"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "obj64_o"
+        let bytes = structureBytes("7f454c4602010100000000000000000001003e00010000000000000000000000000000000000000028030000000000000000000040000000000040000d000c00f30f1efa8d043fc3f30f1efa538d1c37488b05000000000318e80000000001d85bc3f30f1efa4883ec08be02000000bf01000000e800000000ebef0005000000004743433a20285562756e74752031332e332e302d367562756e7475327e32342e30342e31292031332e332e30000000040000001000000005000000474e5500020000c00400000003000000000000001400000000000000017a5200017810011b0c070890010000100000001c0000000000000008000000000000001800000030000000000000001a00000000450e108302540e08000000140000004c000000000000001900000000480e1000000000000000000000000000000000000000000000000000000000010000000400f1ff000000000000000000000000000000000000000003000100000000000000000000000000000000000600000012000100000000000000000008000000000000000a0000001200010008000000000000001a000000000000000e00000010000000000000000000000000000000000000002400000011000300000000000000000004000000000000002c00000012000100220000000000000019000000000000000074312e630065787400616464005f474c4f42414c5f4f46465345545f5441424c455f00636f756e746572005f737461727400000000000013000000000000002a00000006000000fcffffffffffffff1a000000000000000400000003000000fcffffffffffffff35000000000000000400000004000000fcffffffffffffff200000000000000002000000020000000000000000000000340000000000000002000000020000000800000000000000500000000000000002000000020000002200000000000000002e73796d746162002e737472746162002e7368737472746162002e72656c612e74657874002e64617461002e627373002e636f6d6d656e74002e6e6f74652e474e552d737461636b002e6e6f74652e676e752e70726f7065727479002e72656c612e65685f6672616d6500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000010000000600000000000000000000000000000040000000000000003b000000000000000000000000000000010000000000000000000000000000001b0000000400000040000000000000000000000000000000280200000000000048000000000000000a00000001000000080000000000000018000000000000002600000001000000030000000000000000000000000000007c0000000000000004000000000000000000000000000000040000000000000000000000000000002c00000008000000030000000000000000000000000000008000000000000000000000000000000000000000000000000100000000000000000000000000000031000000010000003000000000000000000000000000000080000000000000002e000000000000000000000000000000010000000000000001000000000000003a0000000100000000000000000000000000000000000000ae0000000000000000000000000000000000000000000000010000000000000000000000000000004a0000000700000002000000000000000000000000000000b0000000000000002000000000000000000000000000000008000000000000000000000000000000620000000100000002000000000000000000000000000000d00000000000000060000000000000000000000000000000080000000000000000000000000000005d0000000400000040000000000000000000000000000000700200000000000048000000000000000a00000008000000080000000000000018000000000000000100000002000000000000000000000000000000000000003001000000000000c0000000000000000b0000000300000008000000000000001800000000000000090000000300000000000000000000000000000000000000f0010000000000003300000000000000000000000000000001000000000000000000000000000000110000000300000000000000000000000000000000000000b8020000000000006c00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Section .text@64+59", "Bytes no header accounts for@123+1", "Section .data@124+4", "Section .comment@128+46", "Bytes no header accounts for@174+2", "Section .note.gnu.property@176+32", "Section .eh_frame@208+96", "Section .symtab@304+192", "Section .strtab@496+51", "Bytes no header accounts for@547+5", "Section .rela.text@552+72", "Section .rela.eh_frame@624+72", "Section .shstrtab@696+108", "Bytes no header accounts for@804+4", "Section headers@808+832"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["1", "62", "0", "0", "808", "0", "64", "0", "0", "64", "13", "12"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = []
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "0", "64", "59", "0", "0", "1", "0"], [".rela.text", "4", "64", "0", "552", "72", "10", "1", "8", "24"], [".data", "1", "3", "0", "124", "4", "0", "0", "4", "0"], [".bss", "8", "3", "0", "128", "0", "0", "0", "1", "0"], [".comment", "1", "48", "0", "128", "46", "0", "0", "1", "1"], [".note.GNU-stack", "1", "0", "0", "174", "0", "0", "0", "1", "0"], [".note.gnu.property", "7", "2", "0", "176", "32", "0", "0", "8", "0"], [".eh_frame", "1", "2", "0", "208", "96", "0", "0", "8", "0"], [".rela.eh_frame", "4", "64", "0", "624", "72", "10", "8", "8", "24"], [".symtab", "2", "0", "0", "304", "192", "11", "3", "8", "24"], [".strtab", "3", "0", "0", "496", "51", "0", "0", "1", "0"], [".shstrtab", "3", "0", "0", "696", "108", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 10
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["t1.c", "0", "0", "4", "0", "65521"], ["", "0", "0", "3", "0", "1"], ["ext", "0", "8", "18", "0", "1"], ["add", "8", "26", "18", "0", "1"], ["_GLOBAL_OFFSET_TABLE_", "0", "0", "16", "0", "0"], ["counter", "0", "4", "17", "0", "3"], ["_start", "34", "25", "18", "0", "1"]]
+                let got = (section(10)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 10: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // notes of section 7
+                let want: [[String]] = [["GNU", "5", "16"]]
+                let got = (section(7)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 7: \(got) not \(want)") }
+            }
+            do { // relocations of section 2
+                let want: [[String]] = [["19", "25769803818", "-4"], ["26", "12884901892", "-4"], ["53", "17179869188", "-4"]]
+                let got = (section(2)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 2: \(got) not \(want)") }
+            }
+            do { // relocations of section 9
+                let want: [[String]] = [["32", "8589934594", "0"], ["52", "8589934594", "8"], ["80", "8589934594", "34"]]
+                let got = (section(9)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 9: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "exe32"
+        let bytes = structureBytes("7f454c4601010100000000000000000002000300010000000090040834000000d4200000000000003400200003002800060005000100000000000000008004080080040894000000940000000400000000100000010000000010000000900408009004080d0000000d0000000500000000100000010000000020000000a0040800a0040804000000040000000600000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e807000000b801000000cd80c300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000100000000000000000000000400f1ff090000000c90040800000000000001000d00000000a004080000000000000200140000000090040800000000100001000f00000004a0040800000000100002001b00000004a0040800000000100002002200000004a004080000000010000200006f626a33322e6f006578740076005f5f6273735f7374617274005f6564617461005f656e6400002e73796d746162002e737472746162002e7368737472746162002e74657874002e64617461000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b000000010000000600000000900408001000000d0000000000000000000000010000000000000021000000010000000300000000a00408002000000400000000000000000000000100000000000000010000000200000000000000000000000420000080000000040000000400000004000000100000000900000003000000000000000000000084200000270000000000000000000000010000000000000011000000030000000000000000000000ab2000002700000000000000000000000100000000000000")
+        let expectedLayout = ["ELF header@0+52", "Program headers@52+96", "Bytes no header accounts for@148+3948", "Section .text@4096+13", "Bytes no header accounts for@4109+4083", "Section .data@8192+4", "Section .symtab@8196+128", "Section .strtab@8324+39", "Section .shstrtab@8363+39", "Bytes no header accounts for@8402+2", "Section headers@8404+240"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "3", "134516736", "52", "8404", "0", "52", "32", "3", "40", "6", "5"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "4", "0", "134512640", "134512640", "148", "148", "4096"], ["1", "5", "4096", "134516736", "134516736", "13", "13", "4096"], ["1", "6", "8192", "134520832", "134520832", "4", "4", "4096"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "134516736", "4096", "13", "0", "0", "1", "0"], [".data", "1", "3", "134520832", "8192", "4", "0", "0", "1", "0"], [".symtab", "2", "0", "0", "8196", "128", "4", "4", "4", "16"], [".strtab", "3", "0", "0", "8324", "39", "0", "0", "1", "0"], [".shstrtab", "3", "0", "0", "8363", "39", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["obj32.o", "0", "0", "4", "0", "65521"], ["ext", "134516748", "0", "0", "0", "1"], ["v", "134520832", "0", "0", "0", "2"], ["_start", "134516736", "0", "16", "0", "1"], ["__bss_start", "134520836", "0", "16", "0", "2"], ["_edata", "134520836", "0", "16", "0", "2"], ["_end", "134520836", "0", "16", "0", "2"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+        }
+    }
+    do {
+        let name = "obj32_o"
+        let bytes = structureBytes("7f454c4601010100000000000000000001000300010000000000000000000000c400000000000000340000000000280007000600e807000000b801000000cd80c30700000000000000000000000000000000000000000000010000000c00000000000000000001000500000000000000000000000000020007000000000000000000000010000100006578740076005f737461727400002e73796d746162002e737472746162002e7368737472746162002e74657874002e64617461002e627373000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b000000010000000600000000000000340000000d0000000000000000000000010000000000000021000000010000000300000000000000410000000400000000000000000000000100000000000000270000000800000003000000000000004500000000000000000000000000000001000000000000000100000002000000000000000000000048000000400000000500000003000000040000001000000009000000030000000000000000000000880000000e0000000000000000000000010000000000000011000000030000000000000000000000960000002c00000000000000000000000100000000000000")
+        let expectedLayout = ["ELF header@0+52", "Section .text@52+13", "Section .data@65+4", "Bytes no header accounts for@69+3", "Section .symtab@72+64", "Section .strtab@136+14", "Section .shstrtab@150+44", "Bytes no header accounts for@194+2", "Section headers@196+280"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["1", "3", "0", "0", "196", "0", "52", "0", "0", "40", "7", "6"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = []
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "0", "52", "13", "0", "0", "1", "0"], [".data", "1", "3", "0", "65", "4", "0", "0", "1", "0"], [".bss", "8", "3", "0", "69", "0", "0", "0", "1", "0"], [".symtab", "2", "0", "0", "72", "64", "5", "3", "4", "16"], [".strtab", "3", "0", "0", "136", "14", "0", "0", "1", "0"], [".shstrtab", "3", "0", "0", "150", "44", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 4
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["ext", "12", "0", "0", "0", "1"], ["v", "0", "0", "0", "0", "2"], ["_start", "0", "0", "16", "0", "1"]]
+                let got = (section(4)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 4: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+        }
+    }
+    do {
+        let name = "hand64le"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "hand64be"
+        let bytes = structureBytes("7f454c460202010000000000000000000003001500000001000000000000100000000000000000400000000000000348000000000040003800030040000c000b00000001000000050000000000000000000000000000100000000000000010000000000000000348000000000000034800000000000010000000000200000006000000000000018800000000000011880000000000001188000000000000006000000000000000600000000000000008000000040000000400000000000001e800000000000011e800000000000011e80000000000000064000000000000006400000000000000040000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000000000131200000100000000000010000000000000000010000000162102fff100000000000010100000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c0000000000001000000000006ffffffb000000000000000100000000000000000000000000000000000000040000001400000003474e55000102030405060708090a0b0c0d0e0f10111213140000000400000005000000076f64640061626364650000000000000200000002000000097800000031320000000000020000000100000001790000007a0000000000000000000000000010080000000500000007fffffffffffffffc00000000000010100000000100000001000000000000000c00000000000010080000000500000007000000000000000000000000000000000000000000000000000000011200000100000000000010000000000000000020000000060100000100000000000010200000000000000004006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e73687374727461620000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000000000000000600000000000010f000000000000000f00000000000000030000000000000000000000000000000100000000000000000000000070000000300000000000000020000000000001120000000000000012000000000000000190000000000000000000000000000000100000000000000000000000f0000000b0000000000000002000000000000114000000000000001400000000000000048000000020000000100000000000000080000000000000018000000170000000600000000000000030000000000001188000000000000018800000000000000600000000200000000000000000000000800000000000000100000002000000007000000000000000200000000000011e800000000000001e800000000000000640000000000000000000000000000000400000000000000000000002b000000040000000000000040000000000000000000000000000002500000000000000030000000030000000100000000000000080000000000000018000000360000000900000000000000400000000000000000000000000000028000000000000000100000000300000001000000000000000800000000000000100000004000000002000000000000000000000000000000000000000000000290000000000000004800000009000000020000000000000008000000000000001800000048000000030000000000000000000000000000000000000000000002d8000000000000000d0000000000000000000000000000000100000000000000000000005000000008000000000000000300000000000012e800000000000002e8000000000000004000000000000000000000000000000008000000000000000000000055000000030000000000000000000000000000000000000000000002e8000000000000005f000000000000000000000000000000010000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["3", "21", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "hand32le"
+        let bytes = structureBytes("7f454c4601010100000000000000000001000300010000000010000034000000680200000000000034002000030028000c000b000100000000000000001000000010000068020000680200000500000000100000020000001c0100001c1100001c11000030000000300000000600000008000000040000004c0100004c1100004c11000064000000640000000400000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000130000000010000010000000120001001600000010100000080000002102f1ff0100000001000000010000000b0000000e000000010000000c00000000100000fbffff6f010000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000810000007050000fcffffff0810000007050000000000000000000000000000000000000100000000100000200000001200010006000000201000000400000001000100006d61696e0068656c7065720000000000000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e7368737472746162000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000100000006000000a0100000a00000003000000000000000000000001000000000000000070000000300000002000000d0100000d000000019000000000000000000000001000000000000000f0000000b00000002000000ec100000ec00000030000000020000000100000004000000100000001700000006000000030000001c1100001c01000030000000020000000000000004000000080000002000000007000000020000004c1100004c01000064000000000000000000000004000000000000002b000000040000004000000000000000b00100000c0000000300000001000000040000000c00000036000000090000004000000000000000bc010000080000000300000001000000040000000800000040000000020000000000000000000000c4010000300000000900000002000000040000001000000048000000030000000000000000000000f40100000d000000000000000000000001000000000000005000000008000000030000000812000008020000400000000000000000000000080000000000000055000000030000000000000000000000080200005f00000000000000000000000100000000000000")
+        let expectedLayout = ["ELF header@0+52", "Program headers@52+96", "Bytes no header accounts for@148+12", "Section .text@160+48", "Section .dynstr@208+25", "Bytes no header accounts for@233+3", "Section .dynsym@236+48", "Section .dynamic@284+48", "Section .note.test@332+100", "Section .rela.text@432+12", "Section .rel.text@444+8", "Section .symtab@452+48", "Section .strtab@500+13", "Bytes no header accounts for@513+7", "Section .shstrtab@520+95", "Bytes no header accounts for@615+1", "Section headers@616+480"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["1", "3", "4096", "52", "616", "0", "52", "32", "3", "40", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "616", "616", "4096"], ["2", "6", "284", "4380", "4380", "48", "48", "8"], ["4", "4", "332", "4428", "4428", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4256", "160", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4304", "208", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4332", "236", "48", "2", "1", "4", "16"], [".dynamic", "6", "3", "4380", "284", "48", "2", "0", "4", "8"], [".note.test", "7", "2", "4428", "332", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "432", "12", "3", "1", "4", "12"], [".rel.text", "9", "64", "0", "444", "8", "3", "1", "4", "8"], [".symtab", "2", "0", "0", "452", "48", "9", "2", "4", "16"], [".strtab", "3", "0", "0", "500", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4616", "520", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "520", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "1287", "-4"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "1287"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "hand32be"
+        let bytes = structureBytes("7f454c460102010000000000000000000002000800000001000010000000003400000268000000000034002000030028000c000b0000000100000000000010000000100000000268000002680000000500001000000000020000011c0000111c0000111c00000030000000300000000600000008000000040000014c0000114c0000114c00000064000000640000000400000004000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000130000100000000010120000010000001600001010000000082102fff10000000100000001000000010000000b0000000e000000010000000c000010006ffffffb000000010000000000000000000000040000001400000003474e55000102030405060708090a0b0c0d0e0f10111213140000000400000005000000076f64640061626364650000000000000200000002000000097800000031320000000000020000000100000001790000007a0000000000100800000507fffffffc0000100800000507000000000000000000000000000000000000000100001000000000201200000100000006000010200000000401000001006d61696e0068656c7065720000000000000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e7368737472746162000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000100000006000010a0000000a00000003000000000000000000000001000000000000000070000000300000002000010d0000000d000000019000000000000000000000001000000000000000f0000000b00000002000010ec000000ec00000030000000020000000100000004000000100000001700000006000000030000111c0000011c00000030000000020000000000000004000000080000002000000007000000020000114c0000014c00000064000000000000000000000004000000000000002b000000040000004000000000000001b00000000c0000000300000001000000040000000c00000036000000090000004000000000000001bc000000080000000300000001000000040000000800000040000000020000000000000000000001c4000000300000000900000002000000040000001000000048000000030000000000000000000001f40000000d000000000000000000000001000000000000005000000008000000030000120800000208000000400000000000000000000000080000000000000055000000030000000000000000000002080000005f00000000000000000000000100000000")
+        let expectedLayout = ["ELF header@0+52", "Program headers@52+96", "Bytes no header accounts for@148+12", "Section .text@160+48", "Section .dynstr@208+25", "Bytes no header accounts for@233+3", "Section .dynsym@236+48", "Section .dynamic@284+48", "Section .note.test@332+100", "Section .rela.text@432+12", "Section .rel.text@444+8", "Section .symtab@452+48", "Section .strtab@500+13", "Bytes no header accounts for@513+7", "Section .shstrtab@520+95", "Bytes no header accounts for@615+1", "Section headers@616+480"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "8", "4096", "52", "616", "0", "52", "32", "3", "40", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "616", "616", "4096"], ["2", "6", "284", "4380", "4380", "48", "48", "8"], ["4", "4", "332", "4428", "4428", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4256", "160", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4304", "208", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4332", "236", "48", "2", "1", "4", "16"], [".dynamic", "6", "3", "4380", "284", "48", "2", "0", "4", "8"], [".note.test", "7", "2", "4428", "332", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "432", "12", "3", "1", "4", "12"], [".rel.text", "9", "64", "0", "444", "8", "3", "1", "4", "8"], [".symtab", "2", "0", "0", "452", "48", "9", "2", "4", "16"], [".strtab", "3", "0", "0", "500", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4616", "520", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "520", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "1287", "-4"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "1287"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "bad_shoff"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e000100000000100000000000004000000000000000ffffffffff7f00000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+1376"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "140737488355327", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = []
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+        }
+    }
+    do {
+        let name = "bad_phoff"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e0001000000001000000000000000ca9a3b0000000048030000000000000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Bytes no header accounts for@64+176", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "1000000000", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = []
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "huge_phnum"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800ffff40000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+1544"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "65535", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"], ["0", "0", "506097522914230528", "1084818905618843912", "506097522914230528", "1084818905618843912", "506097522914230528", "1084818905618843912"], ["1651076096", "1869819501", "3348534527873005102", "3631590361685585779", "0", "0", "0", "0"], ["19", "65554", "4096", "16", "18442524289816068118", "4112", "8", "1"], ["1", "0", "1", "11", "14", "1", "12", "4096"], ["1879048187", "0", "1", "0", "0", "85899345924", "24011439870050307", "578437695752307201"], ["202050057", "269422093", "17516663313", "30064771077", "7233733595245077615", "8589934693", "38654705666", "55186034786424"], ["2", "1", "519691042817", "122", "4104", "21474836487", "18446744073709551612", "4112"], ["1", "1", "12", "4104", "21474836487", "0", "0", "0"], ["1", "65554", "4096", "32", "281479271677958", "4128", "4", "7307090869623024896"], ["1919250540", "0", "3314777386191695360", "3314775170223077732", "3314769694139775332", "27981941201336676", "7310519108409191982", "7020097460236219507"], ["2019914798", "1915617396", "32783474434665573", "27691700398420782", "27691700481979182", "7526409981738050094", "108170705007731", "0"], ["0", "0", "0", "0", "0", "0", "0", "0"], ["1", "1", "6", "4336", "240", "48", "0", "16"], ["0", "0", "12884901895", "2", "4384", "288", "25", "0"], ["1", "0", "0", "47244640271", "2", "4416", "320", "72"], ["2", "1", "8", "24", "25769803799", "3", "4488", "392"], ["96", "0", "2", "8", "16", "30064771104", "2", "4584"], ["488", "0", "100", "0", "4", "0", "17179869227", "64"], ["0", "0", "592", "48", "4294967299", "8", "24", "38654705718"], ["64", "0", "0", "640", "16", "4294967299", "8", "16"], ["64", "2", "0", "0", "656", "72", "8589934601", "8"], ["24", "0", "12884901960", "0", "0", "728", "13", "0"], ["1", "0", "0", "34359738448", "3", "4840", "744", "64"], ["0", "0", "8", "0", "12884901973", "0", "0", "744"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "short_phentsize"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040000800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+24", "Bytes no header accounts for@88+152", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "8", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = []
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "short_shentsize"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030008000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+1376"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "8", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = []
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+        }
+    }
+    do {
+        let name = "bad_shstrndx"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030040000c00e703010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section 1@240+48", "Section 2@288+25", "Bytes no header accounts for@313+7", "Section 3@320+72", "Section 4@392+96", "Section 5@488+100", "Bytes no header accounts for@588+4", "Section 6@592+48", "Section 7@640+16", "Section 8@656+72", "Section 9@728+13", "Bytes no header accounts for@741+3", "Section 11@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "999"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], ["", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], ["", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], ["", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], ["", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], ["", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], ["", "4", "64", "0", "592", "48", "3", "1", "8", "24"], ["", "9", "64", "0", "640", "16", "3", "1", "8", "16"], ["", "2", "0", "0", "656", "72", "9", "2", "8", "24"], ["", "3", "0", "0", "728", "13", "0", "0", "1", "0"], ["", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], ["", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "section_past_end"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f01000000000000044060000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+56", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "1604", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "section_big"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000000000000000000040000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section .text@240+1368"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "4611686018427387904", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "zero_shnum"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e000100000000100000000000004000000000000000480300000000000000000000400038000300400000000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+1376"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "0", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = []
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+        }
+    }
+    do {
+        let name = "extended_counts"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800030040000000ffff010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e7368737472746162000000000000000000000000000000000000000000000000000000000000000000000c000000000000000b000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "3", "64", "0", "65535"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "12", "11", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "hand64arm"
+        let bytes = structureBytes("7f454c460201010000000000000000000300b700010000000010000000000000400000000000000048030000000000000000000040003800030040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+168", "Bytes no header accounts for@232+8", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["3", "183", "4096", "64", "840", "0", "64", "56", "3", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"], ["2", "6", "392", "4488", "4488", "96", "96", "8"], ["4", "4", "488", "4584", "4584", "100", "100", "4"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    do {
+        let name = "one_segment"
+        let bytes = structureBytes("7f454c4602010100000000000000000002003e00010000000010000000000000400000000000000048030000000000000000000040003800010040000c000b00010000000500000000000000000000000010000000000000001000000000000048030000000000004803000000000000001000000000000002000000060000008801000000000000881100000000000088110000000000006000000000000000600000000000000008000000000000000400000004000000e801000000000000e811000000000000e8110000000000006400000000000000640000000000000004000000000000000000000000000000000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f006c69626d2e736f2e36006c6962782e736f0066310066320000000000000000000000000000000000000000000000000000000000000000130000001200010000100000000000001000000000000000160000002102f1ff101000000000000008000000000000000100000000000000010000000000000001000000000000000b000000000000000e0000000000000001000000000000000c000000000000000010000000000000fbffff6f00000000010000000000000000000000000000000000000000000000040000001400000003000000474e55000102030405060708090a0b0c0d0e0f10111213140400000005000000070000006f64640061626364650000000200000002000000090000007800000031320000020000000100000001000000790000007a0000000000000008100000000000000700000005000000fcffffffffffffff101000000000000001000000010000000c0000000000000008100000000000000700000005000000000000000000000000000000000000000000000000000000010000001200010000100000000000002000000000000000060000000100010020100000000000000400000000000000006d61696e0068656c70657200000000002e74657874002e64796e737472002e64796e73796d002e64796e616d6963002e6e6f74652e74657374002e72656c612e74657874002e72656c2e74657874002e73796d746162002e737472746162002e627373002e736873747274616200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010000000600000000000000f010000000000000f0000000000000003000000000000000000000000000000010000000000000000000000000000000070000000300000002000000000000002011000000000000200100000000000019000000000000000000000000000000010000000000000000000000000000000f0000000b00000002000000000000004011000000000000400100000000000048000000000000000200000001000000080000000000000018000000000000001700000006000000030000000000000088110000000000008801000000000000600000000000000002000000000000000800000000000000100000000000000020000000070000000200000000000000e811000000000000e80100000000000064000000000000000000000000000000040000000000000000000000000000002b0000000400000040000000000000000000000000000000500200000000000030000000000000000300000001000000080000000000000018000000000000003600000009000000400000000000000000000000000000008002000000000000100000000000000003000000010000000800000000000000100000000000000040000000020000000000000000000000000000000000000090020000000000004800000000000000090000000200000008000000000000001800000000000000480000000300000000000000000000000000000000000000d8020000000000000d0000000000000000000000000000000100000000000000000000000000000050000000080000000300000000000000e812000000000000e8020000000000004000000000000000000000000000000008000000000000000000000000000000550000000300000000000000000000000000000000000000e8020000000000005f00000000000000000000000000000001000000000000000000000000000000")
+        let expectedLayout = ["ELF header@0+64", "Program headers@64+56", "Bytes no header accounts for@120+120", "Section .text@240+48", "Section .dynstr@288+25", "Bytes no header accounts for@313+7", "Section .dynsym@320+72", "Section .dynamic@392+96", "Section .note.test@488+100", "Bytes no header accounts for@588+4", "Section .rela.text@592+48", "Section .rel.text@640+16", "Section .symtab@656+72", "Section .strtab@728+13", "Bytes no header accounts for@741+3", "Section .shstrtab@744+95", "Bytes no header accounts for@839+1", "Section headers@840+768"]
+        fixtures.append((name, bytes))
+        let outcome = ELFParser.parse(DataByteSource(bytes), context: ParseContext())
+        let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !lying.contains(name) {
+            let header: [String] = ["2", "62", "4096", "64", "840", "0", "64", "56", "1", "64", "12", "11"]
+            let headerNode = outcome.roots.first { $0.name == "ELF header" }
+            let hr = elfRow(headerNode, ["Type", "Machine", "Entry point", "Program headers offset", "Section headers offset", "Flags", "Header size", "Program header size", "Program header count", "Section header size", "Section header count", "Section name table index"])
+            if hr != header { wrong.append("\(name) header \(hr) not \(header)") }
+            let segments: [[String]] = [["1", "5", "0", "4096", "4096", "840", "840", "4096"]]
+            let segmentNodes = outcome.roots.first { $0.name == "Program headers" }?.resolvedChildren() ?? []
+            let sr = segmentNodes.map { elfRow($0, ["Type", "Flags", "Offset in the file", "Virtual address", "Physical address", "Size in the file", "Size in memory", "Alignment"]) }
+            if sr != segments { wrong.append("\(name) segments \(sr) not \(segments)") }
+            let sections: [[String]] = [["", "0", "0", "0", "0", "0", "0", "0", "0", "0"], [".text", "1", "6", "4336", "240", "48", "0", "0", "16", "0"], [".dynstr", "3", "2", "4384", "288", "25", "0", "0", "1", "0"], [".dynsym", "11", "2", "4416", "320", "72", "2", "1", "8", "24"], [".dynamic", "6", "3", "4488", "392", "96", "2", "0", "8", "16"], [".note.test", "7", "2", "4584", "488", "100", "0", "0", "4", "0"], [".rela.text", "4", "64", "0", "592", "48", "3", "1", "8", "24"], [".rel.text", "9", "64", "0", "640", "16", "3", "1", "8", "16"], [".symtab", "2", "0", "0", "656", "72", "9", "2", "8", "24"], [".strtab", "3", "0", "0", "728", "13", "0", "0", "1", "0"], [".bss", "8", "3", "4840", "744", "64", "0", "0", "8", "0"], [".shstrtab", "3", "0", "0", "744", "95", "0", "0", "1", "0"]]
+            let sectionNodes = outcome.roots.first { $0.name == "Section headers" }?.resolvedChildren() ?? []
+            let cr = sectionNodes.map { node -> [String] in
+                let row = elfRow(node, ["Type", "Flags", "Address", "Offset in the file", "Size", "Link", "Info", "Alignment", "Entry size"])
+                return [elfQuoted(zipFields(node)["Name"]) ?? ""] + row
+            }
+            if cr != sections { wrong.append("\(name) section headers \(cr.prefix(3)) not \(sections.prefix(3))") }
+            func section(_ index: Int) -> FieldNode? { outcome.roots.first { $0.id == "elf/section-\(index)" } }
+            do { // symbols of section 3
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["f1", "4096", "16", "18", "0", "1"], ["f2", "4112", "8", "33", "2", "65521"]]
+                let got = (section(3)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 3: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // symbols of section 8
+                let want: [[String]] = [["", "0", "0", "0", "0", "0"], ["main", "4096", "32", "18", "0", "1"], ["helper", "4128", "4", "1", "0", "1"]]
+                let got = (section(8)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? ""] + ["Value", "Size", "Info", "Visibility", "Section"].map { elfNumber(fields[$0]) }
+                }
+                if got != want { wrong.append("\(name) symbols of 8: \(got.prefix(3)) not \(want.prefix(3))") }
+            }
+            do { // dynamic entries of section 4
+                let want: [[String]] = [["1", "1", "libm.so.6"], ["1", "11", "libx.so"], ["14", "1", "libm.so.6"], ["12", "4096", ""], ["1879048187", "1", ""], ["0", "0", ""]]
+                let got = (section(4)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Tag"]), elfNumber(fields["Value"]), elfQuoted(fields["Value"]) ?? ""]
+                }
+                if got != want { wrong.append("\(name) dynamic of 4: \(got) not \(want)") }
+            }
+            do { // notes of section 5
+                let want: [[String]] = [["GNU", "3", "20"], ["odd", "7", "5"], ["x", "9", "2"], ["y", "1", "1"]]
+                let got = (section(5)?.resolvedChildren() ?? []).map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfQuoted(fields["Name"]) ?? "", elfNumber(fields["Type"]), elfNumber(fields["Description size"])]
+                }
+                if got != want { wrong.append("\(name) notes of 5: \(got) not \(want)") }
+            }
+            do { // relocations of section 6
+                let want: [[String]] = [["4104", "21474836487", "-4"], ["4112", "4294967297", "12"]]
+                let got = (section(6)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 6: \(got) not \(want)") }
+            }
+            do { // relocations of section 7
+                let want: [[String]] = [["4104", "21474836487"]]
+                let got = (section(7)?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Relocation ") }.map { node -> [String] in
+                    let fields = zipFields(node)
+                    return [elfNumber(fields["Offset"]), elfNumber(fields["Info"])] + (fields["Addend"] != nil ? [elfNumber(fields["Addend"])] : [])
+                }
+                if got != want { wrong.append("\(name) relocations of 7: \(got) not \(want)") }
+            }
+        }
+    }
+    check(wrong.isEmpty, "every header, table, symbol, dynamic entry, note and relocation is what a separate walk says, for 21 files: \(wrong.prefix(2))")
+    func elfFixture(_ name: String) -> [UInt8] { fixtures.first { $0.0 == name }?.1 ?? [] }
+    let exe = FormatRegistry.analyze(DataByteSource(elfFixture("exe64")))
+    check(exe.identity?.id == "elf" && exe.identity?.hasParser == true && exe.message.isEmpty && exe.outcome.problems.isEmpty, "a program is taken for an ELF, with a structure view")
+    check(exe.outcome.summary == "ELF 64-bit little-endian executable, x86-64, 4 segments, 10 sections" || exe.outcome.summary?.hasPrefix("ELF 64-bit little-endian executable, x86-64,") == true, "its summary: \(exe.outcome.summary ?? "none")")
+    check(ELFParser.matches(head: [0x7F, 0x45, 0x4C, 0x46, 2, 1], length: 6) && !ELFParser.matches(head: [0x7F, 0x45, 0x4C, 0x46, 3, 1], length: 6) && !ELFParser.matches(head: [0x7F, 0x45, 0x4C, 0x46, 2, 0], length: 6) && !ELFParser.matches(head: [0x7F, 0x45, 0x4C], length: 3), "what an ELF begins with: a class and a byte order that are known")
+    check(ELFParser.parse(DataByteSource([0x7F, 0x45, 0x4C, 0x46, 2, 1]), context: ParseContext()).problems.contains { $0.contains("identification") }, "a file cut inside the identification says so")
+    check(ELFParser.parse(DataByteSource(Array(elfFixture("exe64")[0..<40])), context: ParseContext()).problems.contains { $0.contains("inside the ELF header") }, "and one cut inside the header")
+    let hand = ELFParser.parse(DataByteSource(elfFixture("hand64be")), context: ParseContext())
+    check(hand.summary?.contains("64-bit big-endian shared object") == true && hand.summary?.contains("PowerPC 64-bit") == true, "a big-endian PowerPC library is named as such: \(hand.summary ?? "none")")
+    let word = ELFParser.parse(DataByteSource(elfFixture("hand32le")), context: ParseContext())
+    check(word.summary?.contains("32-bit little-endian relocatable object") == true && word.summary?.contains("Intel 80386") == true, "a 32-bit object too: \(word.summary ?? "none")")
+    func firstSymbolInfo(_ name: String) -> String? {
+        let roots = ELFParser.parse(DataByteSource(elfFixture(name)), context: ParseContext()).roots
+        return zipFields(roots.first { $0.id == "elf/section-3" }?.resolvedChildren().dropFirst().first)["Info"]
+    }
+    check(firstSymbolInfo("hand64le")?.hasSuffix("GLOBAL, FUNC") == true && firstSymbolInfo("hand32be")?.hasSuffix("GLOBAL, FUNC") == true, "a symbol's binding and type are named: \(firstSymbolInfo("hand64le") ?? "none")")
+    let symbolFields = zipFields(ELFParser.parse(DataByteSource(elfFixture("hand64le")), context: ParseContext()).roots.first { $0.id == "elf/section-3" }?.resolvedChildren().last)
+    check(symbolFields["Section"]?.contains("ABS") == true && symbolFields["Visibility"]?.contains("HIDDEN") == true && symbolFields["Info"]?.contains("WEAK") == true, "a symbol's section, visibility and weakness: \(symbolFields)")
+    let dynamicNames = (ELFParser.parse(DataByteSource(elfFixture("hand64le")), context: ParseContext()).roots.first { $0.id == "elf/section-4" }?.resolvedChildren() ?? []).compactMap { $0.value }
+    check(dynamicNames.first == "NEEDED libm.so.6" && dynamicNames.contains("SONAME libm.so.6") && dynamicNames.last == "NULL", "the dynamic table names the libraries it needs: \(dynamicNames)")
+    let noteNodes = ELFParser.parse(DataByteSource(elfFixture("hand32be")), context: ParseContext()).roots.first { $0.id == "elf/section-5" }?.resolvedChildren() ?? []
+    check(noteNodes.compactMap { $0.value } == ["GNU", "odd", "x", "y"] && zipFields(noteNodes.first?.resolvedChildren().isEmpty == false ? noteNodes.first : nil)["Type"]?.contains("build ID") == true, "notes are told by name, and a GNU build ID by type")
+    check(ELFParser.sectionFlags(0x6).contains("ALLOC") && ELFParser.sectionFlags(0x6).contains("EXECINSTR") && !ELFParser.sectionFlags(0x6).contains("WRITE") && ELFParser.sectionFlags(0x0) == "0x00000000", "section flags are named")
+    check(ELFParser.segmentFlags(5).hasSuffix("R X") == false && ELFParser.segmentFlags(5).hasSuffix("RX") && ELFParser.segmentFlags(6).hasSuffix("RW") && ELFParser.segmentFlags(0) == "0x00000000", "segment flags read as permissions")
+    check(ELFParser.string(Array("abc\0def".utf8), at: 4) == "def" && ELFParser.string(Array("abc".utf8), at: 9) == nil && ELFParser.string([0x41, 0x01, 0], at: 0) == "A.", "a string in a table is read to its NUL, and unprintable bytes are dots")
+    check(ELFParser.parse(DataByteSource(elfFixture("hand64arm")), context: ParseContext()).summary?.contains("AArch64") == true && ELFParser.parse(DataByteSource(elfFixture("hand32be")), context: ParseContext()).summary?.contains("MIPS") == true, "machines are named")
+    check(ELFParser.parse(DataByteSource(elfFixture("one_segment")), context: ParseContext()).summary?.contains(" 1 segment, ") == true, "one segment is singular")
+    let extended = ELFParser.parse(DataByteSource(elfFixture("extended_counts")), context: ParseContext())
+    check(extended.summary?.contains("11 sections") == false && (extended.roots.first { $0.name == "Section headers" }?.resolvedChildren().count ?? 0) == 12 && extended.roots.contains { $0.name == "Section .shstrtab" }, "a section count and a name table index too large for the header are read from the first section header: \(extended.roots.map { $0.name })")
+    let relocationRoots = ELFParser.parse(DataByteSource(elfFixture("hand32le")), context: ParseContext()).roots
+    check(zipFields(relocationRoots.first { $0.id == "elf/section-6" }?.resolvedChildren().first)["Info"]?.hasSuffix("symbol 5, type 7") == true, "a 32-bit relocation's info is a symbol and a type: \(zipFields(relocationRoots.first { $0.id == "elf/section-6" }?.resolvedChildren().first)["Info"] ?? "none")")
+    let relocationRoots64 = ELFParser.parse(DataByteSource(elfFixture("hand64be")), context: ParseContext()).roots
+    check(zipFields(relocationRoots64.first { $0.id == "elf/section-6" }?.resolvedChildren().first)["Info"]?.hasSuffix("symbol 5, type 7") == true, "and a 64-bit one")
+    check(relocationRoots.contains { $0.id == "elf/section-9" } == true && relocationRoots.first { $0.id == "elf/section-10" } == nil, "a section with no bytes in the file (NOBITS) is not shown as data")
+    var smallLimit = ParseContext()
+    smallLimit.maxRecords = 3
+    let limited = ELFParser.parse(DataByteSource(elfFixture("so64_so")), context: smallLimit)
+    check(structureProblems(limited.roots, fileLength: Int64(elfFixture("so64_so").count)).isEmpty, "a limit on records keeps the tree sound")
+    if let issue = imgHostile("ELF", fixtures: fixtures, prefix: [0x7F, 0x45, 0x4C, 0x46, 2, 1], seed: 0xE1F) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random files give sound trees") }
+    if let issue = imgHostile("ELF 32-bit big-endian", fixtures: [], prefix: [0x7F, 0x45, 0x4C, 0x46, 1, 2], seed: 0xE20) { check(false, issue) } else { check(true, "random 32-bit big-endian files give sound trees") }
+}
+
+// MARK: Mach-O
+
+// Files from clang and lld (arm64 and x86-64: a program, two libraries, objects), files built by hand in both classes and byte orders, and
+// universal binaries; every command, section, symbol and string read again by a walker written separately, with lief as a second opinion.
+
+/// Bytes from hex digits, where {N} stands for N zero bytes.
+func machoBytes(_ text: String) -> [UInt8] {
+    var out: [UInt8] = []
+    var run = ""
+    var inRun = false
+    var pair = ""
+    for character in text {
+        if character == "{" { inRun = true; run = ""; continue }
+        if character == "}" { inRun = false; out += [UInt8](repeating: 0, count: Int(run) ?? 0); continue }
+        if inRun { run.append(character); continue }
+        pair.append(character)
+        if pair.count == 2 { out.append(UInt8(pair, radix: 16) ?? 0); pair = "" }
+    }
+    return out
+}
+
+/// What a parse of a thin Mach-O found, one line each, in the same words as the oracle.
+func machoRows(_ roots: [FieldNode]) -> [String] {
+    var rows: [String] = []
+    func number(_ key: String, _ fields: [String: String]) -> String { elfNumber(fields[key]) }
+    let header = zipFields(roots.first { $0.name == "Mach-O header" })
+    rows.append("header|" + ["CPU type", "CPU subtype", "File type", "Load command count", "Load commands size", "Flags"].map { number($0, header) }.joined(separator: "|"))
+    let symbols = (roots.first { $0.name == "Symbol table" }?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("Symbol ") }
+    let strings = (roots.first { $0.name == "String table" }?.resolvedChildren() ?? []).filter { $0.name.hasPrefix("String at ") }
+    for (i, node) in (roots.first { $0.name == "Load commands" }?.resolvedChildren() ?? []).enumerated() {
+        let label = node.name.components(separatedBy: ": ").last ?? ""
+        let f = zipFields(node)
+        rows.append("cmd|\(i)|\(label)|\(number("Size", f))")
+        func list(_ keys: [String]) -> String { keys.map { number($0, f) }.joined(separator: "|") }
+        switch label {
+        case "LC_SEGMENT", "LC_SEGMENT_64":
+            rows.append("seg|\(i)|\(elfQuoted(f["Segment name"]) ?? "")|" + list(["Address in memory", "Size in memory", "Offset in the file", "Size in the file", "Maximum protection", "Initial protection", "Section count", "Flags"]))
+            for (j, section) in node.resolvedChildren().filter({ $0.name.hasPrefix("Section ") && $0.name != "Section count" }).enumerated() {
+                let g = zipFields(section)
+                rows.append("sect|\(i)|\(j)|\(elfQuoted(g["Section name"]) ?? "")|\(elfQuoted(g["Segment name"]) ?? "")|" + ["Address", "Size", "Offset in the file", "Alignment", "Relocations offset", "Relocations count", "Flags", "Reserved 1", "Reserved 2"].map { number($0, g) }.joined(separator: "|"))
+            }
+        case "LC_SYMTAB":
+            rows.append("symtab|\(i)|" + list(["Symbol table offset", "Symbol count", "String table offset", "String table size"]))
+            for (k, symbol) in symbols.enumerated() {
+                let g = zipFields(symbol)
+                rows.append("sym|\(i)|\(k)|\(elfQuoted(g["Name"]) ?? "")|" + ["Type", "Section", "Description", "Value"].map { number($0, g) }.joined(separator: "|"))
+            }
+            for string in strings { rows.append("str|\(i)|\(elfNumber(String(string.name.dropFirst("String at ".count))))|\(elfQuoted(string.value) ?? "")") }
+        case "LC_DYSYMTAB":
+            rows.append("dysym|\(i)|" + list(["Local symbols index", "Local symbols count", "External symbols index", "External symbols count", "Undefined symbols index", "Undefined symbols count", "Table of contents offset", "Table of contents count", "Module table offset", "Module table count", "External references offset", "External references count", "Indirect symbols offset", "Indirect symbols count", "External relocations offset", "External relocations count", "Local relocations offset", "Local relocations count"]))
+        case "LC_LOAD_DYLIB", "LC_ID_DYLIB", "LC_LOAD_WEAK_DYLIB":
+            rows.append("dylib|\(i)|\(elfQuoted(f["Library"]) ?? "")|" + list(["Timestamp", "Current version", "Compatibility version"]))
+        case "LC_LOAD_DYLINKER", "LC_RPATH":
+            rows.append("path|\(i)|\(elfQuoted(f["Path"]) ?? "")")
+        case "LC_UUID":
+            rows.append("uuid|\(i)|\(f["UUID"] ?? "")")
+        case "LC_BUILD_VERSION":
+            let tools = (0..<Int(elfNumber(f["Tool count"]) == "-" ? "0" : elfNumber(f["Tool count"]))!).map { "\(number("Tool \($0 + 1)", f)):\(number("Tool \($0 + 1) version", f))" }
+            rows.append("build|\(i)|" + list(["Platform", "Minimum OS", "SDK", "Tool count"]) + "|" + tools.joined(separator: ","))
+        case "LC_VERSION_MIN_MACOSX":
+            rows.append("minver|\(i)|" + list(["Minimum OS", "SDK"]))
+        case "LC_SOURCE_VERSION":
+            rows.append("source|\(i)|\(f["Version"]?.components(separatedBy: " · ").last ?? "")")
+        case "LC_MAIN":
+            rows.append("main|\(i)|" + list(["Entry point offset", "Stack size"]))
+        default:
+            break
+        }
+    }
+    return rows
+}
+
+do {
+    var wrong: [String] = []
+    var fixtures: [(String, [UInt8])] = []
+    let hostile: Set<String> = ["ncmds_lies", "sizeofcmds_big", "cmdsize_small", "cmdsize_huge", "section_past_end", "symoff_past_end", "fat_bad_offset", "fat_big_count", "fat_overlap"]
+    do {
+        let name = "exe_arm64"
+        let bytes = machoBytes("cffaedfe0c00000100000000020000000e00000048030000850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000000040000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000008803000001000000240000000000000088030000020000000000000000000000000400800000000000000000000000005f5f756e77696e645f696e666f0000005f5f5445585400000000000000000000ac030000010000003810000000000000ac0300000200000000000000000000000000000000000000000000000000000019000000980000005f5f44415441000000000000000000000040000001000000004000000000000000400000000000000040000000000000030000000300000001000000000000005f5f64617461000000000000000000005f5f444154410000000000000000000000400000010000000400000000000000004000000200000000000000000000000000000000000000000000000000000019000000480000005f5f4c494e4b454449540000000000000080000001000000900200000000000000800000000000009002000000000000010000000100000000000000000000002200008030{36}8000005800000002000000180000006080000005000000b0800000380000000b000000500000000000000000000000000000000500000005{55}0e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b000000180000004c4c441c55553144a15a818d2526b70b32000000200000000100000000000b0000000b000100000004000000030112002800008018000000a803000000000000000000000000000026000000100000005880000008000000290000001000000060800000000000001d00000010000000f0800000a001{35}781f53c0035fd62800000b1f2003d549e301180805000b0001090bc0035fd600000014010000001c000000010000002000000000000000200000000200000000000002880300003800000038000000ac0300000000000038000000030000000c00010010{15379}05{16384}015f000500045f001d636f756e74657200426578740048616464004d0002737461727400396d685f657865637574655f686561646572003e0300a8070002000000040080800100030088070003009007000000000000008807081800000000020000000f010000a8030000010000000a0000000f01000088030000010000000f0000000f0100009003000001000000140000000f03000000400000010000001d0000000f011000000000000100000020005f5f7374617274005f657874005f616464005f636f756e746572005f5f6d685f657865637574655f68656164657200000000000000000000000000000000fade0cc0000001a000000001000000000000001800000000fade0c0200000188000204000002000200000068000000580000000000000009000080f02002000c{38}400000000000000000016578655f61726d3634000000000000005e35dee18d3b80ae8d936fddfe05e84cb1282223f9f16bef5606e7948bd3552aad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca72077e1b57a1ac1246f305a7da892b64d4d8c10b0b40b178ace55e5e4c719c5bfad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca75d3add782903025b8aa69340f49825e711d078fd190b87ef555c329056739778")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+840", "Bytes no load command accounts for@872+32", "Section __TEXT,__text@904+36", "Section __TEXT,__unwind_info@940+4152", "Bytes no load command accounts for@5092+11292", "Section __DATA,__data@16384+4", "Bytes no load command accounts for@16388+16380", "Dyld info: export@32768+88", "Data: function starts@32856+8", "Symbol table@32864+80", "String table@32944+56", "Bytes no load command accounts for@33000+8", "Code signature@33008+416"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777228|0|2|14|840|2097285", "cmd|0|LC_SEGMENT_64|72", "seg|0|__PAGEZERO|0|4294967296|0|0|0|0|0|0", "cmd|1|LC_SEGMENT_64|232", "seg|1|__TEXT|4294967296|16384|0|16384|5|5|2|0", "sect|1|0|__text|__TEXT|4294968200|36|904|2|0|0|2147484672|0|0", "sect|1|1|__unwind_info|__TEXT|4294968236|4152|940|2|0|0|0|0|0", "cmd|2|LC_SEGMENT_64|152", "seg|2|__DATA|4294983680|16384|16384|16384|3|3|1|0", "sect|2|0|__data|__DATA|4294983680|4|16384|2|0|0|0|0|0", "cmd|3|LC_SEGMENT_64|72", "seg|3|__LINKEDIT|4295000064|656|32768|656|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|32864|5|32944|56", "sym|5|0|__start|15|1|0|4294968232", "sym|5|1|_ext|15|1|0|4294968200", "sym|5|2|_add|15|1|0|4294968208", "sym|5|3|_counter|15|3|0|4294983680", "sym|5|4|__mh_execute_header|15|1|16|4294967296", "str|5|0| ", "str|5|2|__start", "str|5|10|_ext", "str|5|15|_add", "str|5|20|_counter", "str|5|29|__mh_execute_header", "str|5|49|", "str|5|50|", "str|5|51|", "str|5|52|", "str|5|53|", "str|5|54|", "str|5|55|", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|0|0|5|5|0|0|0|0|0|0|0|0|0|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|32", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|4C4C441C-5555-3144-A15A-818D2526B70B", "cmd|9|LC_BUILD_VERSION|32", "build|9|1|720896|720896|1|4:1179907", "cmd|10|LC_MAIN|24", "main|10|936|0", "cmd|11|LC_FUNCTION_STARTS|16", "cmd|12|LC_DATA_IN_CODE|16", "cmd|13|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "lib_x64_dylib"
+        let bytes = machoBytes("cffaedfe0700000103000000060000000b00000038030000850010000000000019000000380100005f5f54455854000000000000000000000000000000000000002000000000000000000000000000000020000000000000050000000500000003000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000008003000000000000420000000000000080030000040000000000000000000000000400800000000000000000000000005f5f756e77696e645f696e666f0000005f5f5445585400000000000000000000c4030000000000003810000000000000c4030000020000000000000000000000000000000000000000000000000000005f5f65685f6672616d650000000000005f5f544558540000000000000000000000140000000000001800000000000000001400000300000000000000000000000b00006000000000000000000000000019000000980000005f5f44415441000000000000000000000020000000000000001000000000000000200000000000000010000000000000030000000300000001000000000000005f5f64617461000000000000000000005f5f444154410000000000000000000000200000000000000400000000000000002000000200000000000000000000000000000000000000000000000000000019000000480000005f5f4c494e4b454449540000000000000030000000000000a0000000000000000030000000000000a000000000000000010000000100000000000000000000002200008030{36}300000380000000200000018000000403000000400000080300000200000000b000000500000000000000000000000000000000400000004{55}0d00000030000000180000000000000000000000000000004072706174682f6c6962742e64796c6962000000000000001b000000180000004c4c44b655553144a1caed4d843d6dbd320000002000000001000000000f0a00000f0a000100000004000000030112002600000010000000383000000800000029000000100000004030{46}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305611c00005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000010000001c000000010000002000000000000000200000000200000000000001800300003800000038000000c20300000000000038000000030000000c00010010{4091}1400000000000000017a520001781001100c07089001{3050}05{4096}015f0005000461646400226578740027636f756e746572002c5f737461727400310300900700030080070003008040000300b0070000008007102000000000020000000f0100008003000000000000070000000f01000090030000000000000c0000000f010000b003000000000000140000000f040000002000000000000020005f657874005f616464005f5f7374617274005f636f756e74657200000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+824", "Bytes no load command accounts for@856+40", "Section __TEXT,__text@896+66", "Bytes no load command accounts for@962+2", "Section __TEXT,__unwind_info@964+4152", "Bytes no load command accounts for@5116+4", "Section __TEXT,__eh_frame@5120+24", "Bytes no load command accounts for@5144+3048", "Section __DATA,__data@8192+4", "Bytes no load command accounts for@8196+4092", "Dyld info: export@12288+56", "Data: function starts@12344+8", "Symbol table@12352+64", "String table@12416+32"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777223|3|6|11|824|1048709", "cmd|0|LC_SEGMENT_64|312", "seg|0|__TEXT|0|8192|0|8192|5|5|3|0", "sect|0|0|__text|__TEXT|896|66|896|4|0|0|2147484672|0|0", "sect|0|1|__unwind_info|__TEXT|964|4152|964|2|0|0|0|0|0", "sect|0|2|__eh_frame|__TEXT|5120|24|5120|3|0|0|1610612747|0|0", "cmd|1|LC_SEGMENT_64|152", "seg|1|__DATA|8192|4096|8192|4096|3|3|1|0", "sect|1|0|__data|__DATA|8192|4|8192|2|0|0|0|0|0", "cmd|2|LC_SEGMENT_64|72", "seg|2|__LINKEDIT|12288|160|12288|160|1|1|0|0", "cmd|3|LC_DYLD_INFO_ONLY|48", "cmd|4|LC_SYMTAB|24", "symtab|4|12352|4|12416|32", "sym|4|0|_ext|15|1|0|896", "sym|4|1|_add|15|1|0|912", "sym|4|2|__start|15|1|0|944", "sym|4|3|_counter|15|4|0|8192", "str|4|0| ", "str|4|2|_ext", "str|4|7|_add", "str|4|12|__start", "str|4|20|_counter", "str|4|29|", "str|4|30|", "str|4|31|", "cmd|5|LC_DYSYMTAB|80", "dysym|5|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0", "cmd|6|LC_ID_DYLIB|48", "dylib|6|@rpath/libt.dylib|0|0|0", "cmd|7|LC_UUID|24", "uuid|7|4C4C44B6-5555-3144-A1CA-ED4D843D6DBD", "cmd|8|LC_BUILD_VERSION|32", "build|8|1|659200|659200|1|4:1179907", "cmd|9|LC_FUNCTION_STARTS|16", "cmd|10|LC_DATA_IN_CODE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "a64_o"
+        let bytes = machoBytes("cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+456", "Section __TEXT,__text@488+36", "Section __DATA,__data@524+4", "Section __LD,__compact_unwind@528+96", "Bytes no load command accounts for@624+40", "Data: linker optimization hint@664+8", "Symbol table@672+112", "String table@784+48"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777228|0|1|5|456|8192", "cmd|0|LC_SEGMENT_64|312", "seg|0||0|136|488|136|7|7|3|0", "sect|0|0|__text|__TEXT|0|36|488|2|624|2|2147484672|0|0", "sect|0|1|__data|__DATA|36|4|524|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|40|96|528|3|640|3|33554432|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|720896|0|0|", "cmd|2|LC_LINKER_OPTIMIZATION_HINT|16", "cmd|3|LC_SYMTAB|24", "symtab|3|672|7|784|48", "sym|3|0|ltmp0|14|1|0|0", "sym|3|1|ltmp1|14|2|0|36", "sym|3|2|ltmp2|14|3|0|40", "sym|3|3|__start|15|1|0|32", "sym|3|4|_add|15|1|0|8", "sym|3|5|_counter|15|2|0|36", "sym|3|6|_ext|15|1|0|0", "str|3|0|", "str|3|1|_ext", "str|3|6|__start", "str|3|14|_counter", "str|3|23|_add", "str|3|28|ltmp2", "str|3|34|ltmp1", "str|3|40|ltmp0", "str|3|46|", "str|3|47|", "cmd|4|LC_DYSYMTAB|80", "dysym|4|0|3|3|4|7|0|0|0|0|0|0|0|0|0|0|0|0|0"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "x64_o"
+        let bytes = machoBytes("cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f6164640000000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+520", "Section __TEXT,__text@552+66", "Bytes no load command accounts for@618+2", "Section __DATA,__data@620+4", "Section __LD,__compact_unwind@624+96", "Section __TEXT,__eh_frame@720+144", "Bytes no load command accounts for@864+32", "Symbol table@896+64", "String table@960+32"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777223|3|1|4|520|8192", "cmd|0|LC_SEGMENT_64|392", "seg|0||0|312|552|312|7|7|4|0", "sect|0|0|__text|__TEXT|0|66|552|4|864|1|2147484672|0|0", "sect|0|1|__data|__DATA|68|4|620|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|72|96|624|3|872|3|33554432|0|0", "sect|0|3|__eh_frame|__TEXT|168|144|720|3|0|0|1744830475|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|659200|0|0|", "cmd|2|LC_SYMTAB|24", "symtab|2|896|4|960|32", "sym|2|0|__start|15|1|0|48", "sym|2|1|_add|15|1|0|16", "sym|2|2|_counter|15|2|0|68", "sym|2|3|_ext|15|1|0|0", "str|2|0|", "str|2|1|_ext", "str|2|6|__start", "str|2|14|_counter", "str|2|23|_add", "str|2|28|", "str|2|29|", "str|2|30|", "str|2|31|", "cmd|3|LC_DYSYMTAB|80", "dysym|3|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "lib_arm64_dylib"
+        let bytes = machoBytes("cffaedfe0c00000100000000060000000c000000f8020000850010000000000019000000e80000005f5f54455854000000000000000000000000000000000000004000000000000000000000000000000040000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000003803000000000000240000000000000038030000020000000000000000000000000400800000000000000000000000005f5f756e77696e645f696e666f0000005f5f54455854000000000000000000005c0300000000000038100000000000005c0300000200000000000000000000000000000000000000000000000000000019000000980000005f5f44415441000000000000000000000040000000000000004000000000000000400000000000000040000000000000030000000300000001000000000000005f5f64617461000000000000000000005f5f444154410000000000000000000000400000000000000400000000000000004000000200000000000000000000000000000000000000000000000000000019000000480000005f5f4c494e4b454449540000000000000080000000000000400200000000000000800000000000004002000000000000010000000100000000000000000000002200008030{36}800000380000000200000018000000408000000400000080800000200000000b000000500000000000000000000000000000000400000004{55}0d00000030000000180000000000000000000000000000004072706174682f6c6962742e64796c6962000000000000001b000000180000004c4c448755553144a1f37a959feb5fa432000000200000000100000000000b0000000b0001000000040000000301120026000000100000003880000008000000290000001000000040800000000000001d00000010000000a0800000a001{35}781f53c0035fd62800000b1f2003d5c9e501180805000b0001090bc0035fd600000014010000001c0000000100000020000000000000002000000002000000000000023803000038000000380000005c0300000000000038000000030000000c00010010{15459}05{16384}015f0005000461646400226578740027636f756e746572002c5f737461727400320300c006000300b806000400808001000300d8060000b806081800000000020000000f0100003803000000000000070000000f01000040030000000000000c0000000f0100005803000000000000140000000f030000004000000000000020005f657874005f616464005f5f7374617274005f636f756e74657200000000fade0cc0000001a000000001000000000000001800000000fade0c0200000188000204000002000200000068000000580000000000000009000080a02002000c{38}400000000000000000006c6962742e64796c696200000000000099bce3ddc9d58e6cc3681a7e477f13f247cedc5583702f3921fdd29dbd70c241ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca72077e1b57a1ac1246f305a7da892b64d4d8c10b0b40b178ace55e5e4c719c5bfad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca792e2fd974c20cc86f3fa67b086a3c729dce7cef163b44d78fb93c2551deb47b7")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+760", "Bytes no load command accounts for@792+32", "Section __TEXT,__text@824+36", "Section __TEXT,__unwind_info@860+4152", "Bytes no load command accounts for@5012+11372", "Section __DATA,__data@16384+4", "Bytes no load command accounts for@16388+16380", "Dyld info: export@32768+56", "Data: function starts@32824+8", "Symbol table@32832+64", "String table@32896+32", "Code signature@32928+416"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777228|0|6|12|760|1048709", "cmd|0|LC_SEGMENT_64|232", "seg|0|__TEXT|0|16384|0|16384|5|5|2|0", "sect|0|0|__text|__TEXT|824|36|824|2|0|0|2147484672|0|0", "sect|0|1|__unwind_info|__TEXT|860|4152|860|2|0|0|0|0|0", "cmd|1|LC_SEGMENT_64|152", "seg|1|__DATA|16384|16384|16384|16384|3|3|1|0", "sect|1|0|__data|__DATA|16384|4|16384|2|0|0|0|0|0", "cmd|2|LC_SEGMENT_64|72", "seg|2|__LINKEDIT|32768|576|32768|576|1|1|0|0", "cmd|3|LC_DYLD_INFO_ONLY|48", "cmd|4|LC_SYMTAB|24", "symtab|4|32832|4|32896|32", "sym|4|0|_ext|15|1|0|824", "sym|4|1|_add|15|1|0|832", "sym|4|2|__start|15|1|0|856", "sym|4|3|_counter|15|3|0|16384", "str|4|0| ", "str|4|2|_ext", "str|4|7|_add", "str|4|12|__start", "str|4|20|_counter", "str|4|29|", "str|4|30|", "str|4|31|", "cmd|5|LC_DYSYMTAB|80", "dysym|5|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0", "cmd|6|LC_ID_DYLIB|48", "dylib|6|@rpath/libt.dylib|0|0|0", "cmd|7|LC_UUID|24", "uuid|7|4C4C4487-5555-3144-A1F3-7A959FEB5FA4", "cmd|8|LC_BUILD_VERSION|32", "build|8|1|720896|720896|1|4:1179907", "cmd|9|LC_FUNCTION_STARTS|16", "cmd|10|LC_DATA_IN_CODE|16", "cmd|11|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "hand64le"
+        let bytes = machoBytes("cffaedfe0c00000103000000020000001200000048040000850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+1096", "Bytes no load command accounts for@1128+8", "Section __TEXT,__text@1136+32", "Section __TEXT,__cstring@1168+6", "Bytes no load command accounts for@1174+2", "Section __DATA,__data@1176+20", "Dyld info: binding@1196+8", "Dyld info: export@1204+8", "Symbol table@1212+48", "Indirect symbol table@1260+8", "String table@1268+23", "Data: function starts@1291+8", "Code signature@1299+20"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777228|3|2|18|1096|2097285", "cmd|0|LC_SEGMENT_64|72", "seg|0|__PAGEZERO|0|4294967296|0|0|0|0|0|0", "cmd|1|LC_SEGMENT_64|232", "seg|1|__TEXT|4294967296|16384|0|1176|5|5|2|0", "sect|1|0|__text|__TEXT|4294968432|32|1136|2|0|0|2147484672|1|2", "sect|1|1|__cstring|__TEXT|4294968464|6|1168|0|0|0|2|1|2", "cmd|2|LC_SEGMENT_64|232", "seg|2|__DATA|4294983680|16384|1176|20|3|3|2|0", "sect|2|0|__data|__DATA|4294983680|20|1176|3|0|0|0|1|2", "sect|2|1|__bss|__DATA|4294983700|64|0|3|0|0|1|1|2", "cmd|3|LC_SEGMENT_64|72", "seg|3|__LINKEDIT|4295000064|4096|1196|127|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|1212|3|1268|23", "sym|5|0|_main|15|1|0|4096", "sym|5|1|_helper|14|1|32|4112", "sym|5|2|_printf|1|0|256|0", "str|5|0|", "str|5|1|_main", "str|5|7|_helper", "str|5|15|_printf", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|1|1|1|2|1|0|0|0|0|0|0|1260|2|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|32", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|10111213-1415-1617-1819-1A1B1C1D1E1F", "cmd|9|LC_BUILD_VERSION|40", "build|9|1|721152|917760|2|3:262400,1:983040", "cmd|10|LC_VERSION_MIN_MACOSX|16", "minver|10|659200|720896", "cmd|11|LC_MAIN|24", "main|11|1136|0", "cmd|12|LC_SOURCE_VERSION|16", "source|12|1.2.3.4.5", "cmd|13|LC_LOAD_DYLIB|56", "dylib|13|/usr/lib/libSystem.B.dylib|2|66051|65536", "cmd|14|LC_LOAD_WEAK_DYLIB|48", "dylib|14|@rpath/libweak.dylib|2|327680|327680", "cmd|15|LC_RPATH|48", "path|15|@executable_path/../Frameworks", "cmd|16|LC_FUNCTION_STARTS|16", "cmd|17|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "hand64be"
+        let bytes = machoBytes("feedfacf0100001200000003000000020000001200000448002000850000000000000019000000485f5f504147455a45524f000000000000000000000000000000000001{39}19000000e85f5f54455854000000000000000000000000000100000000000000000000400000000000000000000000000000000498000000050000000500000002000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000100000470000000000000002000000470000000020000000000000000800004000000000100000002000000035f5f63737472696e67000000000000005f5f544558540000000000000000000000000001000004900000000000000006000004900000000000000000000000000000000200000001000000020000000300000019000000e85f5f44415441000000000000000000000000000100004000000000000000400000000000000004980000000000000014000000030000000300000002000000005f5f64617461000000000000000000005f5f44415441000000000000000000000000000100004000000000000000001400000498000000030000000000000000000000000000000100000002000000035f5f62737300000000000000000000005f5f444154410000000000000000000000000001000040140000000000000040000000000000000300000000000000000000000100000001000000020000000300000019000000485f5f4c494e4b454449540000000000000000000100008000000000000000100000000000000004ac000000000000007f0000000100000001000000000000000080000022000000300000000000000000000004ac0000000800000000000000000000000000000000000004b4000000080000000200000018000004bc00000003000004f4000000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000004ec00000002000000000000000000000000000000000000000e000000200000000c2f7573722f6c69622f64796c64000000000000000000001b00000018101112131415161718191a1b1c1d1e1f000000320000002800000001000b0100000e010000000002000000030004010000000001000f00000000002400000010000a0f00000b00008000002800000018000000000000047000000000000000000000002a0000001000000100803010050000000c00000038000000180000000200010203000100002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000008000001800000030000000180000000200050000000500004072706174682f6c69627765616b2e64796c6962000000008000001c000000300000000c4065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000000000026000000100000050b000000080000001d0000001000000513000000180000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000000000010f0100000000000000001000000000070e01002000000000000010100000000f0100010000000000000000000000000280000000005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+32", "Load commands@32+1096", "Bytes no load command accounts for@1128+8", "Section __TEXT,__text@1136+32", "Section __TEXT,__cstring@1168+6", "Bytes no load command accounts for@1174+2", "Section __DATA,__data@1176+20", "Dyld info: binding@1196+8", "Dyld info: export@1204+8", "Symbol table@1212+48", "Indirect symbol table@1260+8", "String table@1268+23", "Data: function starts@1291+8", "Code signature@1299+20"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|16777234|3|2|18|1096|2097285", "cmd|0|LC_SEGMENT_64|72", "seg|0|__PAGEZERO|0|4294967296|0|0|0|0|0|0", "cmd|1|LC_SEGMENT_64|232", "seg|1|__TEXT|4294967296|16384|0|1176|5|5|2|0", "sect|1|0|__text|__TEXT|4294968432|32|1136|2|0|0|2147484672|1|2", "sect|1|1|__cstring|__TEXT|4294968464|6|1168|0|0|0|2|1|2", "cmd|2|LC_SEGMENT_64|232", "seg|2|__DATA|4294983680|16384|1176|20|3|3|2|0", "sect|2|0|__data|__DATA|4294983680|20|1176|3|0|0|0|1|2", "sect|2|1|__bss|__DATA|4294983700|64|0|3|0|0|1|1|2", "cmd|3|LC_SEGMENT_64|72", "seg|3|__LINKEDIT|4295000064|4096|1196|127|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|1212|3|1268|23", "sym|5|0|_main|15|1|0|4096", "sym|5|1|_helper|14|1|32|4112", "sym|5|2|_printf|1|0|256|0", "str|5|0|", "str|5|1|_main", "str|5|7|_helper", "str|5|15|_printf", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|1|1|1|2|1|0|0|0|0|0|0|1260|2|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|32", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|10111213-1415-1617-1819-1A1B1C1D1E1F", "cmd|9|LC_BUILD_VERSION|40", "build|9|1|721152|917760|2|3:262400,1:983040", "cmd|10|LC_VERSION_MIN_MACOSX|16", "minver|10|659200|720896", "cmd|11|LC_MAIN|24", "main|11|1136|0", "cmd|12|LC_SOURCE_VERSION|16", "source|12|1.2.3.4.5", "cmd|13|LC_LOAD_DYLIB|56", "dylib|13|/usr/lib/libSystem.B.dylib|2|66051|65536", "cmd|14|LC_LOAD_WEAK_DYLIB|48", "dylib|14|@rpath/libweak.dylib|2|327680|327680", "cmd|15|LC_RPATH|48", "path|15|@executable_path/../Frameworks", "cmd|16|LC_FUNCTION_STARTS|16", "cmd|17|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "hand32le"
+        let bytes = machoBytes("cefaedfe07000000030000000100000012000000cc0300008500200001000000380000005f5f504147455a45524f000000000000000000000010000000000000000000000000000000000000000000000000000001000000c00000005f5f544558540000000000000000000000100000004000000000000018040000050000000500000002000000000000005f5f74657874000000000000000000005f5f5445585400000000000000000000f013000020000000f00300000200000000000000000000000004008001000000020000005f5f63737472696e67000000000000005f5f544558540000000000000000000010140000060000001004000000000000000000000000000002000000010000000200000001000000c00000005f5f444154410000000000000000000000500000004000001804000014000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000050000014000000180400000300000000000000000000000000000001000000020000005f5f62737300000000000000000000005f5f444154410000000000000000000014500000400000000000000003000000000000000000000001000000010000000200000001000000380000005f5f4c494e4b4544495400000000000000900000001000002c0400007300000001000000010000000000000000000000220000803000000000000000000000002c0400000800000000000000000000000000000000000000340400000800000002000000180000003c0400000300000068040000170000000b000000500000000000000001000000010000000100000002000000010000000000000000000000000000000000000000000000000000006004000002000000000000000000000000000000000000000e0000001c0000000c0000002f7573722f6c69622f64796c640000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000f00300000000000000000000000000002a0000001000000005103080000100000c00000034000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c696200001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c0000802c0000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b73000026000000100000007f040000080000001d0000001000000087040000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f01000000100000070000000e012000101000000f00000001000001000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+28", "Load commands@28+972", "Bytes no load command accounts for@1000+8", "Section __TEXT,__text@1008+32", "Section __TEXT,__cstring@1040+6", "Bytes no load command accounts for@1046+2", "Section __DATA,__data@1048+20", "Dyld info: binding@1068+8", "Dyld info: export@1076+8", "Symbol table@1084+36", "Indirect symbol table@1120+8", "String table@1128+23", "Data: function starts@1151+8", "Code signature@1159+20"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|7|3|1|18|972|2097285", "cmd|0|LC_SEGMENT|56", "seg|0|__PAGEZERO|0|4096|0|0|0|0|0|0", "cmd|1|LC_SEGMENT|192", "seg|1|__TEXT|4096|16384|0|1048|5|5|2|0", "sect|1|0|__text|__TEXT|5104|32|1008|2|0|0|2147484672|1|2", "sect|1|1|__cstring|__TEXT|5136|6|1040|0|0|0|2|1|2", "cmd|2|LC_SEGMENT|192", "seg|2|__DATA|20480|16384|1048|20|3|3|2|0", "sect|2|0|__data|__DATA|20480|20|1048|3|0|0|0|1|2", "sect|2|1|__bss|__DATA|20500|64|0|3|0|0|1|1|2", "cmd|3|LC_SEGMENT|56", "seg|3|__LINKEDIT|36864|4096|1068|115|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|1084|3|1128|23", "sym|5|0|_main|15|1|0|4096", "sym|5|1|_helper|14|1|32|4112", "sym|5|2|_printf|1|0|256|0", "str|5|0|", "str|5|1|_main", "str|5|7|_helper", "str|5|15|_printf", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|1|1|1|2|1|0|0|0|0|0|0|1120|2|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|28", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|10111213-1415-1617-1819-1A1B1C1D1E1F", "cmd|9|LC_BUILD_VERSION|40", "build|9|1|721152|917760|2|3:262400,1:983040", "cmd|10|LC_VERSION_MIN_MACOSX|16", "minver|10|659200|720896", "cmd|11|LC_MAIN|24", "main|11|1008|0", "cmd|12|LC_SOURCE_VERSION|16", "source|12|1.2.3.4.5", "cmd|13|LC_LOAD_DYLIB|52", "dylib|13|/usr/lib/libSystem.B.dylib|2|66051|65536", "cmd|14|LC_LOAD_WEAK_DYLIB|48", "dylib|14|@rpath/libweak.dylib|2|327680|327680", "cmd|15|LC_RPATH|44", "path|15|@executable_path/../Frameworks", "cmd|16|LC_FUNCTION_STARTS|16", "cmd|17|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "hand32be"
+        let bytes = machoBytes("feedface00000012000000030000000600000012000003cc0020008500000001000000385f5f504147455a45524f000000000000000000000000100000000000000000000000000000000000000000000000000000000001000000c05f5f544558540000000000000000000000001000000040000000000000000418000000050000000500000002000000005f5f74657874000000000000000000005f5f5445585400000000000000000000000013f000000020000003f00000000200000000000000008000040000000001000000025f5f63737472696e67000000000000005f5f544558540000000000000000000000001410000000060000041000000000000000000000000000000002000000010000000200000001000000c05f5f444154410000000000000000000000005000000040000000041800000014000000030000000300000002000000005f5f64617461000000000000000000005f5f44415441000000000000000000000000500000000014000004180000000300000000000000000000000000000001000000025f5f62737300000000000000000000005f5f444154410000000000000000000000005014000000400000000000000003000000000000000000000001000000010000000200000001000000385f5f4c494e4b4544495400000000000000009000000010000000042c0000007300000001000000010000000000000000800000220000003000000000000000000000042c0000000800000000000000000000000000000000000004340000000800000002000000180000043c0000000300000468000000170000000b000000500000000000000001000000010000000100000002000000010000000000000000000000000000000000000000000000000000046000000002000000000000000000000000000000000000000e0000001c0000000c2f7573722f6c69622f64796c640000000000001b00000018101112131415161718191a1b1c1d1e1f000000320000002800000001000b0100000e010000000002000000030004010000000001000f00000000002400000010000a0f00000b0000800000280000001800000000000003f000000000000000000000002a0000001000000100803010050000000c00000034000000180000000200010203000100002f7573722f6c69622f6c696253797374656d2e422e64796c696200008000001800000030000000180000000200050000000500004072706174682f6c69627765616b2e64796c6962000000008000001c0000002c0000000c4065786563757461626c655f706174682f2e2e2f4672616d65776f726b73000000000026000000100000047f000000080000001d0000001000000487000000180000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000000000010f01000000001000000000070e010020000010100000000f01000100000000000000000280000000005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Mach-O header@0+28", "Load commands@28+972", "Bytes no load command accounts for@1000+8", "Section __TEXT,__text@1008+32", "Section __TEXT,__cstring@1040+6", "Bytes no load command accounts for@1046+2", "Section __DATA,__data@1048+20", "Dyld info: binding@1068+8", "Dyld info: export@1076+8", "Symbol table@1084+36", "Indirect symbol table@1120+8", "String table@1128+23", "Data: function starts@1151+8", "Code signature@1159+20"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let expectedRows = ["header|18|3|6|18|972|2097285", "cmd|0|LC_SEGMENT|56", "seg|0|__PAGEZERO|0|4096|0|0|0|0|0|0", "cmd|1|LC_SEGMENT|192", "seg|1|__TEXT|4096|16384|0|1048|5|5|2|0", "sect|1|0|__text|__TEXT|5104|32|1008|2|0|0|2147484672|1|2", "sect|1|1|__cstring|__TEXT|5136|6|1040|0|0|0|2|1|2", "cmd|2|LC_SEGMENT|192", "seg|2|__DATA|20480|16384|1048|20|3|3|2|0", "sect|2|0|__data|__DATA|20480|20|1048|3|0|0|0|1|2", "sect|2|1|__bss|__DATA|20500|64|0|3|0|0|1|1|2", "cmd|3|LC_SEGMENT|56", "seg|3|__LINKEDIT|36864|4096|1068|115|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|1084|3|1128|23", "sym|5|0|_main|15|1|0|4096", "sym|5|1|_helper|14|1|32|4112", "sym|5|2|_printf|1|0|256|0", "str|5|0|", "str|5|1|_main", "str|5|7|_helper", "str|5|15|_printf", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|1|1|1|2|1|0|0|0|0|0|0|1120|2|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|28", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|10111213-1415-1617-1819-1A1B1C1D1E1F", "cmd|9|LC_BUILD_VERSION|40", "build|9|1|721152|917760|2|3:262400,1:983040", "cmd|10|LC_VERSION_MIN_MACOSX|16", "minver|10|659200|720896", "cmd|11|LC_MAIN|24", "main|11|1008|0", "cmd|12|LC_SOURCE_VERSION|16", "source|12|1.2.3.4.5", "cmd|13|LC_LOAD_DYLIB|52", "dylib|13|/usr/lib/libSystem.B.dylib|2|66051|65536", "cmd|14|LC_LOAD_WEAK_DYLIB|48", "dylib|14|@rpath/libweak.dylib|2|327680|327680", "cmd|15|LC_RPATH|44", "path|15|@executable_path/../Frameworks", "cmd|16|LC_FUNCTION_STARTS|16", "cmd|17|LC_CODE_SIGNATURE|16"]
+            let rows = machoRows(outcome.roots)
+            if rows != expectedRows { wrong.append("\(name) rows: \(rows.filter { !expectedRows.contains($0) }.prefix(2)) not in oracle; missing \(expectedRows.filter { !rows.contains($0) }.prefix(2))") }
+        }
+    }
+    do {
+        let name = "fat2"
+        let bytes = machoBytes("cafebabe00000002010000070000000300004000000003e00000000e0100000c0000000000008000000003400000000e{16336}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Fat header@0+48", "Padding between slices@48+16336", "Slice 1: x86-64@16384+992", "Padding between slices@17376+15392", "Slice 2: ARM64@32768+832"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let slices: [[String]] = [["header|16777223|3|1|4|520|8192", "cmd|0|LC_SEGMENT_64|392", "seg|0||0|312|552|312|7|7|4|0", "sect|0|0|__text|__TEXT|0|66|552|4|864|1|2147484672|0|0", "sect|0|1|__data|__DATA|68|4|620|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|72|96|624|3|872|3|33554432|0|0", "sect|0|3|__eh_frame|__TEXT|168|144|720|3|0|0|1744830475|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|659200|0|0|", "cmd|2|LC_SYMTAB|24", "symtab|2|896|4|960|32", "sym|2|0|__start|15|1|0|48", "sym|2|1|_add|15|1|0|16", "sym|2|2|_counter|15|2|0|68", "sym|2|3|_ext|15|1|0|0", "str|2|0|", "str|2|1|_ext", "str|2|6|__start", "str|2|14|_counter", "str|2|23|_add", "str|2|28|", "str|2|29|", "str|2|30|", "str|2|31|", "cmd|3|LC_DYSYMTAB|80", "dysym|3|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0"], ["header|16777228|0|1|5|456|8192", "cmd|0|LC_SEGMENT_64|312", "seg|0||0|136|488|136|7|7|3|0", "sect|0|0|__text|__TEXT|0|36|488|2|624|2|2147484672|0|0", "sect|0|1|__data|__DATA|36|4|524|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|40|96|528|3|640|3|33554432|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|720896|0|0|", "cmd|2|LC_LINKER_OPTIMIZATION_HINT|16", "cmd|3|LC_SYMTAB|24", "symtab|3|672|7|784|48", "sym|3|0|ltmp0|14|1|0|0", "sym|3|1|ltmp1|14|2|0|36", "sym|3|2|ltmp2|14|3|0|40", "sym|3|3|__start|15|1|0|32", "sym|3|4|_add|15|1|0|8", "sym|3|5|_counter|15|2|0|36", "sym|3|6|_ext|15|1|0|0", "str|3|0|", "str|3|1|_ext", "str|3|6|__start", "str|3|14|_counter", "str|3|23|_add", "str|3|28|ltmp2", "str|3|34|ltmp1", "str|3|40|ltmp0", "str|3|46|", "str|3|47|", "cmd|4|LC_DYSYMTAB|80", "dysym|4|0|3|3|4|7|0|0|0|0|0|0|0|0|0|0|0|0|0"]]
+            let sliceLayouts: [[String]] = [["Mach-O header@16384+32", "Load commands@16416+520", "Section __TEXT,__text@16936+66", "Bytes no load command accounts for@17002+2", "Section __DATA,__data@17004+4", "Section __LD,__compact_unwind@17008+96", "Section __TEXT,__eh_frame@17104+144", "Bytes no load command accounts for@17248+32", "Symbol table@17280+64", "String table@17344+32"], ["Mach-O header@32768+32", "Load commands@32800+456", "Section __TEXT,__text@33256+36", "Section __DATA,__data@33292+4", "Section __LD,__compact_unwind@33296+96", "Bytes no load command accounts for@33392+40", "Data: linker optimization hint@33432+8", "Symbol table@33440+112", "String table@33552+48"]]
+            let sliceNodes = outcome.roots.filter { $0.name.hasPrefix("Slice ") }
+            if sliceNodes.count != slices.count { wrong.append("\(name) slices \(sliceNodes.count) not \(slices.count)") }
+            for (k, node) in sliceNodes.enumerated() where k < slices.count {
+                let children = node.resolvedChildren()
+                let rows = machoRows(children)
+                if rows != slices[k] { wrong.append("\(name) slice \(k + 1) rows: \(rows.filter { !slices[k].contains($0) }.prefix(2)) not in oracle") }
+                let childLayout = children.map { "\($0.name)@\($0.offset)+\($0.length)" }
+                if childLayout != sliceLayouts[k] { wrong.append("\(name) slice \(k + 1) layout: \(childLayout) not \(sliceLayouts[k])") }
+            }
+        }
+    }
+    do {
+        let name = "fat3"
+        let bytes = machoBytes("cafebabe00000003010000070000000300004000000003e00000000e0100000c0000000000008000000003400000000e00000007000000030000c0000000049b0000000e{16316}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030{15555}cefaedfe07000000030000000100000012000000cc0300008500200001000000380000005f5f504147455a45524f000000000000000000000010000000000000000000000000000000000000000000000000000001000000c00000005f5f544558540000000000000000000000100000004000000000000018040000050000000500000002000000000000005f5f74657874000000000000000000005f5f5445585400000000000000000000f013000020000000f00300000200000000000000000000000004008001000000020000005f5f63737472696e67000000000000005f5f544558540000000000000000000010140000060000001004000000000000000000000000000002000000010000000200000001000000c00000005f5f444154410000000000000000000000500000004000001804000014000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000050000014000000180400000300000000000000000000000000000001000000020000005f5f62737300000000000000000000005f5f444154410000000000000000000014500000400000000000000003000000000000000000000001000000010000000200000001000000380000005f5f4c494e4b4544495400000000000000900000001000002c0400007300000001000000010000000000000000000000220000803000000000000000000000002c0400000800000000000000000000000000000000000000340400000800000002000000180000003c0400000300000068040000170000000b000000500000000000000001000000010000000100000002000000010000000000000000000000000000000000000000000000000000006004000002000000000000000000000000000000000000000e0000001c0000000c0000002f7573722f6c69622f64796c640000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000f00300000000000000000000000000002a0000001000000005103080000100000c00000034000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c696200001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c0000802c0000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b73000026000000100000007f040000080000001d0000001000000087040000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f01000000100000070000000e012000101000000f00000001000001000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Fat header@0+68", "Padding between slices@68+16316", "Slice 1: x86-64@16384+992", "Padding between slices@17376+15392", "Slice 2: ARM64@32768+832", "Padding between slices@33600+15552", "Slice 3: x86@49152+1179"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let slices: [[String]] = [["header|16777223|3|1|4|520|8192", "cmd|0|LC_SEGMENT_64|392", "seg|0||0|312|552|312|7|7|4|0", "sect|0|0|__text|__TEXT|0|66|552|4|864|1|2147484672|0|0", "sect|0|1|__data|__DATA|68|4|620|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|72|96|624|3|872|3|33554432|0|0", "sect|0|3|__eh_frame|__TEXT|168|144|720|3|0|0|1744830475|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|659200|0|0|", "cmd|2|LC_SYMTAB|24", "symtab|2|896|4|960|32", "sym|2|0|__start|15|1|0|48", "sym|2|1|_add|15|1|0|16", "sym|2|2|_counter|15|2|0|68", "sym|2|3|_ext|15|1|0|0", "str|2|0|", "str|2|1|_ext", "str|2|6|__start", "str|2|14|_counter", "str|2|23|_add", "str|2|28|", "str|2|29|", "str|2|30|", "str|2|31|", "cmd|3|LC_DYSYMTAB|80", "dysym|3|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0"], ["header|16777228|0|1|5|456|8192", "cmd|0|LC_SEGMENT_64|312", "seg|0||0|136|488|136|7|7|3|0", "sect|0|0|__text|__TEXT|0|36|488|2|624|2|2147484672|0|0", "sect|0|1|__data|__DATA|36|4|524|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|40|96|528|3|640|3|33554432|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|720896|0|0|", "cmd|2|LC_LINKER_OPTIMIZATION_HINT|16", "cmd|3|LC_SYMTAB|24", "symtab|3|672|7|784|48", "sym|3|0|ltmp0|14|1|0|0", "sym|3|1|ltmp1|14|2|0|36", "sym|3|2|ltmp2|14|3|0|40", "sym|3|3|__start|15|1|0|32", "sym|3|4|_add|15|1|0|8", "sym|3|5|_counter|15|2|0|36", "sym|3|6|_ext|15|1|0|0", "str|3|0|", "str|3|1|_ext", "str|3|6|__start", "str|3|14|_counter", "str|3|23|_add", "str|3|28|ltmp2", "str|3|34|ltmp1", "str|3|40|ltmp0", "str|3|46|", "str|3|47|", "cmd|4|LC_DYSYMTAB|80", "dysym|4|0|3|3|4|7|0|0|0|0|0|0|0|0|0|0|0|0|0"], ["header|7|3|1|18|972|2097285", "cmd|0|LC_SEGMENT|56", "seg|0|__PAGEZERO|0|4096|0|0|0|0|0|0", "cmd|1|LC_SEGMENT|192", "seg|1|__TEXT|4096|16384|0|1048|5|5|2|0", "sect|1|0|__text|__TEXT|5104|32|1008|2|0|0|2147484672|1|2", "sect|1|1|__cstring|__TEXT|5136|6|1040|0|0|0|2|1|2", "cmd|2|LC_SEGMENT|192", "seg|2|__DATA|20480|16384|1048|20|3|3|2|0", "sect|2|0|__data|__DATA|20480|20|1048|3|0|0|0|1|2", "sect|2|1|__bss|__DATA|20500|64|0|3|0|0|1|1|2", "cmd|3|LC_SEGMENT|56", "seg|3|__LINKEDIT|36864|4096|1068|115|1|1|0|0", "cmd|4|LC_DYLD_INFO_ONLY|48", "cmd|5|LC_SYMTAB|24", "symtab|5|1084|3|1128|23", "sym|5|0|_main|15|1|0|4096", "sym|5|1|_helper|14|1|32|4112", "sym|5|2|_printf|1|0|256|0", "str|5|0|", "str|5|1|_main", "str|5|7|_helper", "str|5|15|_printf", "cmd|6|LC_DYSYMTAB|80", "dysym|6|0|1|1|1|2|1|0|0|0|0|0|0|1120|2|0|0|0|0", "cmd|7|LC_LOAD_DYLINKER|28", "path|7|/usr/lib/dyld", "cmd|8|LC_UUID|24", "uuid|8|10111213-1415-1617-1819-1A1B1C1D1E1F", "cmd|9|LC_BUILD_VERSION|40", "build|9|1|721152|917760|2|3:262400,1:983040", "cmd|10|LC_VERSION_MIN_MACOSX|16", "minver|10|659200|720896", "cmd|11|LC_MAIN|24", "main|11|1008|0", "cmd|12|LC_SOURCE_VERSION|16", "source|12|1.2.3.4.5", "cmd|13|LC_LOAD_DYLIB|52", "dylib|13|/usr/lib/libSystem.B.dylib|2|66051|65536", "cmd|14|LC_LOAD_WEAK_DYLIB|48", "dylib|14|@rpath/libweak.dylib|2|327680|327680", "cmd|15|LC_RPATH|44", "path|15|@executable_path/../Frameworks", "cmd|16|LC_FUNCTION_STARTS|16", "cmd|17|LC_CODE_SIGNATURE|16"]]
+            let sliceLayouts: [[String]] = [["Mach-O header@16384+32", "Load commands@16416+520", "Section __TEXT,__text@16936+66", "Bytes no load command accounts for@17002+2", "Section __DATA,__data@17004+4", "Section __LD,__compact_unwind@17008+96", "Section __TEXT,__eh_frame@17104+144", "Bytes no load command accounts for@17248+32", "Symbol table@17280+64", "String table@17344+32"], ["Mach-O header@32768+32", "Load commands@32800+456", "Section __TEXT,__text@33256+36", "Section __DATA,__data@33292+4", "Section __LD,__compact_unwind@33296+96", "Bytes no load command accounts for@33392+40", "Data: linker optimization hint@33432+8", "Symbol table@33440+112", "String table@33552+48"], ["Mach-O header@49152+28", "Load commands@49180+972", "Bytes no load command accounts for@50152+8", "Section __TEXT,__text@50160+32", "Section __TEXT,__cstring@50192+6", "Bytes no load command accounts for@50198+2", "Section __DATA,__data@50200+20", "Dyld info: binding@50220+8", "Dyld info: export@50228+8", "Symbol table@50236+36", "Indirect symbol table@50272+8", "String table@50280+23", "Data: function starts@50303+8", "Code signature@50311+20"]]
+            let sliceNodes = outcome.roots.filter { $0.name.hasPrefix("Slice ") }
+            if sliceNodes.count != slices.count { wrong.append("\(name) slices \(sliceNodes.count) not \(slices.count)") }
+            for (k, node) in sliceNodes.enumerated() where k < slices.count {
+                let children = node.resolvedChildren()
+                let rows = machoRows(children)
+                if rows != slices[k] { wrong.append("\(name) slice \(k + 1) rows: \(rows.filter { !slices[k].contains($0) }.prefix(2)) not in oracle") }
+                let childLayout = children.map { "\($0.name)@\($0.offset)+\($0.length)" }
+                if childLayout != sliceLayouts[k] { wrong.append("\(name) slice \(k + 1) layout: \(childLayout) not \(sliceLayouts[k])") }
+            }
+        }
+    }
+    do {
+        let name = "fat2_wide"
+        let bytes = machoBytes("cafebabf000000020100000700000003000000000000400000000000000003e00000000e000000000100000c00000000000000000000800000000000000003400000000e{16316}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+            let expectedLayout = ["Fat header@0+72", "Padding between slices@72+16312", "Slice 1: x86-64@16384+992", "Padding between slices@17376+15392", "Slice 2: ARM64@32768+832"]
+            let layout = outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+            if layout != expectedLayout { wrong.append("\(name) layout: \(layout) not \(expectedLayout)") }
+            let slices: [[String]] = [["header|16777223|3|1|4|520|8192", "cmd|0|LC_SEGMENT_64|392", "seg|0||0|312|552|312|7|7|4|0", "sect|0|0|__text|__TEXT|0|66|552|4|864|1|2147484672|0|0", "sect|0|1|__data|__DATA|68|4|620|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|72|96|624|3|872|3|33554432|0|0", "sect|0|3|__eh_frame|__TEXT|168|144|720|3|0|0|1744830475|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|659200|0|0|", "cmd|2|LC_SYMTAB|24", "symtab|2|896|4|960|32", "sym|2|0|__start|15|1|0|48", "sym|2|1|_add|15|1|0|16", "sym|2|2|_counter|15|2|0|68", "sym|2|3|_ext|15|1|0|0", "str|2|0|", "str|2|1|_ext", "str|2|6|__start", "str|2|14|_counter", "str|2|23|_add", "str|2|28|", "str|2|29|", "str|2|30|", "str|2|31|", "cmd|3|LC_DYSYMTAB|80", "dysym|3|0|0|0|4|4|0|0|0|0|0|0|0|0|0|0|0|0|0"], ["header|16777228|0|1|5|456|8192", "cmd|0|LC_SEGMENT_64|312", "seg|0||0|136|488|136|7|7|3|0", "sect|0|0|__text|__TEXT|0|36|488|2|624|2|2147484672|0|0", "sect|0|1|__data|__DATA|36|4|524|2|0|0|0|0|0", "sect|0|2|__compact_unwind|__LD|40|96|528|3|640|3|33554432|0|0", "cmd|1|LC_BUILD_VERSION|24", "build|1|1|720896|0|0|", "cmd|2|LC_LINKER_OPTIMIZATION_HINT|16", "cmd|3|LC_SYMTAB|24", "symtab|3|672|7|784|48", "sym|3|0|ltmp0|14|1|0|0", "sym|3|1|ltmp1|14|2|0|36", "sym|3|2|ltmp2|14|3|0|40", "sym|3|3|__start|15|1|0|32", "sym|3|4|_add|15|1|0|8", "sym|3|5|_counter|15|2|0|36", "sym|3|6|_ext|15|1|0|0", "str|3|0|", "str|3|1|_ext", "str|3|6|__start", "str|3|14|_counter", "str|3|23|_add", "str|3|28|ltmp2", "str|3|34|ltmp1", "str|3|40|ltmp0", "str|3|46|", "str|3|47|", "cmd|4|LC_DYSYMTAB|80", "dysym|4|0|3|3|4|7|0|0|0|0|0|0|0|0|0|0|0|0|0"]]
+            let sliceLayouts: [[String]] = [["Mach-O header@16384+32", "Load commands@16416+520", "Section __TEXT,__text@16936+66", "Bytes no load command accounts for@17002+2", "Section __DATA,__data@17004+4", "Section __LD,__compact_unwind@17008+96", "Section __TEXT,__eh_frame@17104+144", "Bytes no load command accounts for@17248+32", "Symbol table@17280+64", "String table@17344+32"], ["Mach-O header@32768+32", "Load commands@32800+456", "Section __TEXT,__text@33256+36", "Section __DATA,__data@33292+4", "Section __LD,__compact_unwind@33296+96", "Bytes no load command accounts for@33392+40", "Data: linker optimization hint@33432+8", "Symbol table@33440+112", "String table@33552+48"]]
+            let sliceNodes = outcome.roots.filter { $0.name.hasPrefix("Slice ") }
+            if sliceNodes.count != slices.count { wrong.append("\(name) slices \(sliceNodes.count) not \(slices.count)") }
+            for (k, node) in sliceNodes.enumerated() where k < slices.count {
+                let children = node.resolvedChildren()
+                let rows = machoRows(children)
+                if rows != slices[k] { wrong.append("\(name) slice \(k + 1) rows: \(rows.filter { !slices[k].contains($0) }.prefix(2)) not in oracle") }
+                let childLayout = children.map { "\($0.name)@\($0.offset)+\($0.length)" }
+                if childLayout != sliceLayouts[k] { wrong.append("\(name) slice \(k + 1) layout: \(childLayout) not \(sliceLayouts[k])") }
+            }
+        }
+    }
+    do {
+        let name = "ncmds_lies"
+        let bytes = machoBytes("cffaedfe0c0000010300000002000000c800000048040000850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "sizeofcmds_big"
+        let bytes = machoBytes("cffaedfe0c000001030000000200000012000000f0ffff7f850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "cmdsize_small"
+        let bytes = machoBytes("cffaedfe0c00000103000000020000001200000048040000850020000000000019000000030000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "cmdsize_huge"
+        let bytes = machoBytes("cffaedfe0c00000103000000020000001200000048040000850020000000000019000000ffffff7f5f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "section_past_end"
+        let bytes = machoBytes("cffaedfe0c00000103000000020000001200000048040000850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000000000000001000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000bc04000003000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "symoff_past_end"
+        let bytes = machoBytes("cffaedfe0c00000103000000020000001200000048040000850020000000000019000000480000005f5f504147455a45524f00000000000000000000000000000000000001{35}19000000e80000005f5f54455854000000000000000000000000000001000000004000000000000000000000000000009804000000000000050000000500000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000007004000001000000200000000000000070040000020000000000000000000000000400800100000002000000030000005f5f63737472696e67000000000000005f5f544558540000000000000000000090040000010000000600000000000000900400000000000000000000000000000200000001000000020000000300000019000000e80000005f5f44415441000000000000000000000040000001000000004000000000000098040000000000001400000000000000030000000300000002000000000000005f5f64617461000000000000000000005f5f44415441000000000000000000000040000001000000140000000000000098040000030000000000000000000000000000000100000002000000030000005f5f62737300000000000000000000005f5f444154410000000000000000000014400000010000004000000000000000000000000300000000000000000000000100000001000000020000000300000019000000480000005f5f4c494e4b4544495400000000000000800000010000000010000000000000ac040000000000007f000000000000000100000001000000000000000000000022000080300000000000000000000000ac0400000800000000000000000000000000000000000000b4040000080000000200000018000000f0ffff7f03000000f4040000170000000b00000050000000000000000100000001000000010000000200000001000000000000000000000000000000000000000000000000000000ec04000002000000000000000000000000000000000000000e000000200000000c0000002f7573722f6c69622f64796c64000000000000001b00000018000000101112131415161718191a1b1c1d1e1f32000000280000000100000000010b0000010e000200000003000000000104000100000000000f002400000010000000000f0a0000000b002800008018000000700400000000000000000000000000002a0000001000000005103080000100000c00000038000000180000000200000003020100000001002f7573722f6c69622f6c696253797374656d2e422e64796c69620000000000001800008030000000180000000200000000000500000005004072706174682f6c69627765616b2e64796c6962000000001c000080300000000c0000004065786563757461626c655f706174682f2e2e2f4672616d65776f726b7300000000000026000000100000000b050000080000001d0000001000000013050000180000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f68656c6c6f0000006465666768696a6b6c6d6e6f707172737475767700000000000000000300000000000000010000000f0100000010000000000000070000000e01200010100000000000000f0000000100000100000000000000000200000000000080005f6d61696e005f68656c706572005f7072696e7466001020300000000000fade0cc000000018000000010000000000000014")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "fat_bad_offset"
+        let bytes = machoBytes("cafebabe00000002010000070000000300000005000003e00000000e0100000c0000000000008000000003400000000e{16336}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "fat_overlap"
+        let bytes = machoBytes("cafebabe00000002010000070000000300004000000003e00000000e0100000c0000000000004000000003400000000e{16336}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    do {
+        let name = "fat_big_count"
+        let bytes = machoBytes("cafebabe0000001e010000070000000300004000000003e00000000e0100000c0000000000008000000003400000000e{16336}cffaedfe070000010300000001000000040000000802000000200000000000001900000088010000000000000000000000000000000000000000000000000000380100000000000028020000000000003801000000000000070000000700000004000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000420000000000000028020000040000006003000001000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000440000000000000004000000000000006c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c440000000000000000000000004800000000000000600000000000000070020000030000006803000003000000000000020000000000000000000000005f5f65685f6672616d650000000000005f5f5445585400000000000000000000a8000000000000009000000000000000d00200000300000000000000000000000b000068000000000000000000000000320000001800000001000000000f0a00000000000000000002000000180000008003000004000000c0030000200000000b000000500000000000000000000000000000000400000004{55}554889e58d043f5dc30f1f8000000000554889e501fe8d047e0305000000005dc36666666666662e0f1f840000000000554889e56666662e0f1f840000000000ebfe0000050000000000000000000000090000000000000100000000000000000000000000000000100000000000000011000000000000010000000000000000000000000000000030000000000000001200000000000001000000000000000000000000000000001400000000000000017a520001781001100c070890010000240000001c00000038ffffffffffffff090000000000000000410e108602430d0600000000000000240000004400000020ffffffffffffff110000000000000000410e108602430d0600000000000000240000006c00000018ffffffffffffff120000000000000000410e108602430d06000000000000001b0000000200001d400000000100000620000000010000060000000001000006060000000f0100003000000000000000170000000f01000010000000000000000e0000000f0200004400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464{15397}cffaedfe0c000001000000000100000005000000c8010000002000000000000019000000380100000000000000000000000000000000000000000000000000008800000000000000e8010000000000008800000000000000070000000700000003000000000000005f5f74657874000000000000000000005f5f544558540000000000000000000000000000000000002400000000000000e8010000020000007002000002000000000400800000000000000000000000005f5f64617461000000000000000000005f5f4441544100000000000000000000240000000000000004000000000000000c020000020000000000000000000000000000000000000000000000000000005f5f636f6d706163745f756e77696e645f5f4c4400000000000000000000000028000000000000006000000000000000100200000300000080020000030000000000000200000000000000000000000032000000180000000100000000000b0000000000000000002e0000001000000098020000080000000200000018000000a00200000700000010030000300000000b000000500000000000000003000000030000000400000007{56}781f53c0035fd62800000b09000090290140b90805000b0001090bc0035fd60000001405000000000000000000000008000000000000020000000000000000000000000000000008000000000000001800000000000002000000000000000000000000000000002000000000000000040000000000000200000000000000000000000000000000100000000500004c0c0000000500003d40000000010000062000000001000006000000000100000602020c1000000000280000000e0100000000000000000000220000000e02000024000000000000001c0000000e0300002800000000000000060000000f0100002000000000000000170000000f01000008000000000000000e0000000f0200002400000000000000010000000f0100000000000000000000005f657874005f5f7374617274005f636f756e746572005f616464006c746d7032006c746d7031006c746d7030000000")
+        fixtures.append((name, bytes))
+        let outcome = MachOParser.parse(DataByteSource(bytes), context: ParseContext())
+        if !structureProblems(outcome.roots, fileLength: Int64(bytes.count)).isEmpty { wrong.append("\(name) unsound: \(structureProblems(outcome.roots, fileLength: Int64(bytes.count)).first ?? "")") }
+        if hostile.contains(name) == outcome.problems.isEmpty { wrong.append("\(name) problems: \(outcome.problems)") }
+        if !hostile.contains(name) {
+        }
+    }
+    check(wrong.isEmpty, "every layout, command, section, symbol and string is what a separate walk says, for 21 files: \(wrong.prefix(2))")
+    func machoFixture(_ name: String) -> [UInt8] { fixtures.first { $0.0 == name }?.1 ?? [] }
+    let program = FormatRegistry.analyze(DataByteSource(machoFixture("exe_arm64")))
+    check(program.identity?.id == "macho" && program.identity?.hasParser == true && program.message.isEmpty && program.outcome.problems.isEmpty, "a program is taken for a Mach-O, with a structure view: \(program.outcome.problems)")
+    check(program.outcome.summary == "Mach-O ARM64 execute, 14 load commands", "its summary: \(program.outcome.summary ?? "none")")
+    let universal = FormatRegistry.analyze(DataByteSource(machoFixture("fat2")))
+    check(universal.identity?.id == "macho" && universal.outcome.summary == "Mach-O universal binary, 2 architectures (x86-64, ARM64)", "a universal binary names its architectures: \(universal.outcome.summary ?? "none")")
+    check(FormatRegistry.analyze(DataByteSource(machoFixture("fat2_wide"))).outcome.summary?.contains("2 architectures") == true, "and so does one with 64-bit offsets")
+    let javaClass: [UInt8] = [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 0x34] + [UInt8](repeating: 0, count: 64)
+    check(FormatRegistry.analyze(DataByteSource(javaClass)).identity?.id == "class" && !MachOParser.matches(head: javaClass, length: 72), "a Java class file, which begins the same way, is not taken for a universal binary")
+    check(!MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2], length: 10) && MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2], length: 48), "a universal binary has room for its table")
+    check(MachOParser.matches(head: [0xFE, 0xED, 0xFA, 0xCE, 0, 0, 0, 0], length: 8) && MachOParser.matches(head: [0xCF, 0xFA, 0xED, 0xFE, 0, 0, 0, 0], length: 8) && !MachOParser.matches(head: [0xFE, 0xED, 0xFA, 0xCD, 0, 0, 0, 0], length: 8), "the four thin magics")
+    check(MachOParser.parse(DataByteSource([0xCF, 0xFA, 0xED, 0xFE, 7, 0]), context: ParseContext()).problems.contains { $0.contains("inside the Mach-O header") }, "a file cut inside the header says so")
+    check(MachOParser.version(0x000B0100) == "11.1.0" && MachOParser.sourceVersion((1 << 40) | (2 << 30) | (3 << 20) | (4 << 10) | 5) == "1.2.3.4.5" && MachOParser.protection(5) == "5 · r-x" && MachOParser.protection(3) == "3 · rw-", "versions and protections are read")
+    check(MachOParser.uuid(Array(0x10...0x1F).map { UInt8($0) }[...]) == "10111213-1415-1617-1819-1A1B1C1D1E1F", "a UUID is written in its usual groups")
+    check(MachOParser.symbolType(0x0F) == "0x0F · SECT, EXT" && MachOParser.symbolType(0x01) == "0x01 · UNDF, EXT" && MachOParser.symbolType(0x1E) == "0x1E · SECT, PEXT" && MachOParser.symbolType(0x24).contains("STAB") && MachOParser.symbolType(0x02) == "0x02 · ABS", "a symbol's type bits are named")
+    check(MachOParser.flagsText(0x200085).contains("PIE") && MachOParser.flagsText(0x200085).contains("TWOLEVEL") && MachOParser.flagsText(0) == "0x00000000", "header flags are named")
+    check(MachOParser.fixedName(Array("__text\0\0\0abc".utf8)[...]) == "__text" && MachOParser.fixedName([0x41, 0x01, 0x00][...]) == "A.", "a fixed-size name ends at its first NUL")
+    let thin = MachOParser.parse(DataByteSource(machoFixture("hand64be")), context: ParseContext())
+    check(thin.summary?.contains("PowerPC 64") == true && thin.summary?.contains("14") == false, "a big-endian PowerPC 64 file is named: \(thin.summary ?? "none")")
+    let signature = thin.roots.first { $0.name == "Code signature" }?.resolvedChildren() ?? []
+    check(zipFields(signature.first)["Magic"] == nil && signature.first?.value?.contains("embedded signature") == true && signature.contains { $0.name == "Blob 1" }, "a code signature's blobs are listed: \(signature.map { $0.name })")
+    check(!MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 0], length: 100) && !MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 50], length: 5000) && !MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBF, 0, 0, 0, 2], length: 60) && MachOParser.matches(head: [0xCA, 0xFE, 0xBA, 0xBF, 0, 0, 0, 2], length: 72), "a universal binary has between one and 44 architectures, and room for its table, whose entries are 32 bytes with 64-bit offsets")
+    check(MachOParser.version(0x000B0120) == "11.1.32" && MachOParser.version(0x00010203) == "1.2.3", "a version's three numbers are each a byte")
+    let signatureBlob = zipFields(thin.roots.first { $0.name == "Code signature" }?.resolvedChildren().first { $0.name == "Blob 1" })
+    check(signatureBlob["Type"]?.contains("code directory") == true, "a signature's first blob is the code directory")
+    check(machoFixture("fat3").isEmpty == false && FormatRegistry.analyze(DataByteSource(machoFixture("fat3"))).outcome.summary?.contains("3 architectures (x86-64, ARM64, x86)") == true, "three architectures are all read")
+    check(MachOParser.parse(DataByteSource(machoFixture("fat_overlap")), context: ParseContext()).problems.contains { $0.contains("overlaps") } && MachOParser.parse(DataByteSource(machoFixture("fat_overlap")), context: ParseContext()).roots.filter { $0.name.hasPrefix("Slice ") }.count == 1, "two architectures at one place: the second is not shown again")
+    var smallLimit = ParseContext()
+    smallLimit.maxRecords = 3
+    let limited = MachOParser.parse(DataByteSource(machoFixture("hand64le")), context: smallLimit)
+    check(structureProblems(limited.roots, fileLength: Int64(machoFixture("hand64le").count)).isEmpty, "a limit on records keeps the tree sound")
+    if let issue = imgHostile("Mach-O", fixtures: fixtures.filter { $0.1.count < 3000 }, prefix: [0xCF, 0xFA, 0xED, 0xFE], seed: 0x4ACE) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random files give sound trees") }
+    if let issue = imgHostile("Mach-O 32-bit big-endian", fixtures: [], prefix: [0xFE, 0xED, 0xFA, 0xCE], seed: 0x4ACF) { check(false, issue) } else { check(true, "random 32-bit big-endian files give sound trees") }
+    if let issue = imgHostile("universal", fixtures: [], prefix: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2], seed: 0x4AD0) { check(false, issue) } else { check(true, "random universal files give sound trees") }
 }
 
 // MARK: The structure tree as lines

@@ -62,7 +62,7 @@ struct StructureResult {
 
 enum FormatRegistry {
     /// In the order they are tried.
-    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self, GIFParser.self, BMPParser.self, ICOParser.self, WebPParser.self, TIFFParser.self, JXLParser.self]
+    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self, GIFParser.self, BMPParser.self, ICOParser.self, WebPParser.self, TIFFParser.self, JXLParser.self, ZIPParser.self, ELFParser.self, MachOParser.self]
 
     static var parserIDs: Set<String> {
         Set(parsers.flatMap { [$0.identity.id] + $0.alsoParses })
