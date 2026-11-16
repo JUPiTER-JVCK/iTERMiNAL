@@ -494,6 +494,7 @@ enum MP4Parser: FormatParser {
 
     // MARK: Decoding the common boxes
 
+    @discardableResult
     private static func fullBox(_ list: inout FieldList, at body: Int64) -> UInt64 {
         let version = list.uint("Version", at: body, size: 1) ?? 0
         list.uint("Flags", at: body + 1, size: 3, kind: .flags, value: { FieldText.hexNumber($0, size: 3) })

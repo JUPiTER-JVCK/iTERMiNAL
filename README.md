@@ -526,7 +526,10 @@ A tour of the app in thirty-four pictures, in five groups.
   hex, a C array, Python bytes or Base64. Folders, pipes and devices are refused, as they
   are not a fixed set of bytes.
   A file you can write to can be **edited**: click the dump and type hex digits in the
-  cells (two to a byte) or characters in the text column. **Overwrite** changes the bytes
+  cells (two to a byte, when the cells are shown as hex) or characters in the text column;
+  the cursor's heavier outline shows which of the two takes the typing. A file that is
+  read-only, or in a folder that is, or that has other names (hard links, which a save
+  would leave with the old bytes) opens with a Read-only badge that says why. **Overwrite** changes the bytes
   under the cursor, so nothing moves, which is what you want when studying a format;
   **Insert** puts new bytes in before the cursor and lets Backspace and Delete take bytes
   out, and moves everything after them (the Edit menu's "Add bytes at the end" is how to
@@ -536,7 +539,8 @@ A tour of the app in thirty-four pictures, in five groups.
   checked (its length, and the room in the folder, before), and only then swapped in, so a
   crash or a full disk leaves the original as it was. When only bytes were overwritten the file
   is copied first (which APFS does without writing the data) and just the changed bytes are
-  written, so one byte changed in a multi-gigabyte video is not a multi-gigabyte write. The old
+  written, so one byte changed in a multi-gigabyte video is not a multi-gigabyte write, and
+  needs no more room than the bytes that changed. The old
   file is kept as `name.bak` unless you turn that off, and a save is refused if the file was
   changed by something else since it was opened. Changes you have not saved are asked
   about before another file replaces them, before the file is closed, and before the app quits.

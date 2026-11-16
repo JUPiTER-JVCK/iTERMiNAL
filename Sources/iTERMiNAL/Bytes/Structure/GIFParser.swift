@@ -149,7 +149,7 @@ enum GIFParser: FormatParser {
                 var cursor = position + 10
                 var local: Int64 = 0
                 if packed & 0x80 != 0 { local = min(tableSize(UInt64(packed), shift: 0), max(0, total - cursor)); cursor += local }
-                guard let minCode = scanner.byte(at: cursor) else {
+                guard scanner.byte(at: cursor) != nil else {
                     stop(id, "Cut off", at: start, "The image's data begins with a code size byte, and the file ends first.", "The file ends in the middle of image \(images + 1) at \(at).")
                     break
                 }

@@ -96,6 +96,8 @@ final class BytesViewerModel: ObservableObject {
     /// Whether the file can be changed and saved: it can be written, and so can the folder it is in, where a
     /// save makes its new file before swapping it in.
     @Published private(set) var isWritable = false
+    /// Why not, when it cannot: for the Read-only badge, and for a key typed all the same.
+    @Published private(set) var readOnlyReason: String?
     /// Overwrite changes bytes where they are; Insert puts bytes in and takes them out, and moves what follows.
     @Published var editMode: ByteTyping.Mode = .overwrite {
         didSet {
@@ -245,7 +247,8 @@ final class BytesViewerModel: ObservableObject {
             notice = nil
             savedNote = nil
             goToText = ""
-            isWritable = BytesViewerModel.canWrite(url)
+            readOnlyReason = BytesViewerModel.writeRefusal(url)
+            isWritable = readOnlyReason == nil
             typing = ByteTyping()
             typing.mode = editMode
             typingCursor = nil
@@ -277,6 +280,7 @@ final class BytesViewerModel: ObservableObject {
         refusal = nil
         savedNote = nil
         isWritable = false
+        readOnlyReason = nil
         reparseWork?.cancel()
         goToText = ""
         cancelFind()
@@ -474,11 +478,21 @@ final class BytesViewerModel: ObservableObject {
 
     // MARK: Editing
 
-    /// Whether the person can change this file at all.
-    private static func canWrite(_ url: URL) -> Bool {
+    /// Why the person cannot change this file, or nil if they can.
+    private static func writeRefusal(_ url: URL) -> String? {
         let manager = FileManager.default
-        return manager.isWritableFile(atPath: url.path)
-            && manager.isWritableFile(atPath: url.resolvingSymlinksInPath().deletingLastPathComponent().path)
+        let name = url.lastPathComponent
+        guard manager.isWritableFile(atPath: url.path) else {
+            return "\(name) is read-only, so it can be looked at but not changed."
+        }
+        // A save makes its new file beside the original before swapping it in.
+        guard manager.isWritableFile(atPath: url.resolvingSymlinksInPath().deletingLastPathComponent().path) else {
+            return "The folder \(name) is in cannot be written to, and a save makes its new file there, so it can be looked at but not changed."
+        }
+        if let names = ByteFileSaver.nameCount(ofFileAt: url.path), names > 1 {
+            return "\(name) has \(names - 1) other \(names == 2 ? "name" : "names") (hard links). A save would leave \(names == 2 ? "it" : "them") with the old bytes, so it can be looked at but not changed."
+        }
+        return nil
     }
 
     /// Types one hex digit (0 to 15) at the cursor.
@@ -521,7 +535,7 @@ final class BytesViewerModel: ObservableObject {
     private func perform(_ change: (inout ByteTyping, inout ByteEditBuffer, ByteSelection?) throws -> ByteSelection?) {
         guard var working = buffer, !isSaving else { return }
         guard isWritable else {
-            notice = "\(fileName) cannot be changed here: it, or the folder it is in, is read-only."
+            notice = readOnlyReason ?? "\(fileName) cannot be changed."
             return
         }
         var rules = typing
@@ -543,11 +557,14 @@ final class BytesViewerModel: ObservableObject {
             return
         }
         typing = rules
-        buffer = working
+        // A key that changed nothing (Backspace at the start, a character that is no byte) is not an edit:
+        // the map, the tree and the search's place stay as they are.
+        let changed = working.revision != buffer?.revision
+        if changed { buffer = working }
         typingCursor = next?.limited(toLength: working.length)
         selection = typingCursor
         if let head = selection?.head { reveal = BytesRevealRequest(offset: head, centered: false) }
-        editsChanged()
+        if changed { editsChanged() }
     }
 
     private static func message(for error: ByteEditError) -> String {
@@ -582,14 +599,18 @@ final class BytesViewerModel: ObservableObject {
     /// once the typing stops.
     private func editsChanged() {
         savedNote = nil
+        // A search under way is of the bytes as they were: what it found could be somewhere else now, or gone.
+        cancelFind()
         lastMatch = nil
         findStatus = nil
+        // The map is of the bytes as they were too. It is made again with the tree, when the typing stops,
+        // and not once for every key.
         resetMap()
-        if mode == .map { startMapIfNeeded() }
         reparseWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, let buffer = self.buffer else { return }
             self.startStructure(EditedBytesSource(buffer), keepingView: true)
+            if self.mode == .map { self.startMapIfNeeded() }
         }
         reparseWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -619,12 +640,15 @@ final class BytesViewerModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isSaving = false
+                // If another file was opened, or this one closed, while the save ran, the save is still done (or not),
+                // but what is shown now is not what was saved, and is left alone.
+                let stillOpen = self.openedSource === source
                 switch outcome {
                 case .success(let method):
-                    self.didSave(method: method)
+                    if stillOpen { self.didSave(method: method) }
                     completion?(true)
                 case .failure(let failure):
-                    self.notice = ByteFileSaver.message(failure, name: self.fileName)
+                    if stillOpen { self.notice = ByteFileSaver.message(failure, name: self.fileName) }
                     completion?(false)
                 }
             }
@@ -634,6 +658,8 @@ final class BytesViewerModel: ObservableObject {
     /// Saves now, on this thread, for a quit that is waiting on it. Nil when it worked, else why not.
     func saveNow() -> String? {
         guard let buffer, let source = openedSource, buffer.isDirty else { return nil }
+        // Two saves of one file at once would each take the other's work for someone else's.
+        guard !isSaving else { return "\(fileName) is still being saved. Try again in a moment." }
         do {
             try ByteFileSaver.save(buffer, over: source, keepsBackup: keepsBackup)
             return nil
@@ -767,6 +793,7 @@ final class BytesViewerModel: ObservableObject {
 
     /// Selects the bytes a search found, brings them to the middle of the dump, and says where they are.
     private func showMatch(_ range: Range<Int64>, searchedFrom start: Int64, direction: SearchDirection) {
+        guard range.upperBound <= length else { return }
         lastMatch = range
         selection = ByteSelection(anchor: range.lowerBound, head: range.upperBound - 1)
         reveal = BytesRevealRequest(offset: range.lowerBound, centered: true)

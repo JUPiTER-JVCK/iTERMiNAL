@@ -28,6 +28,11 @@ func check(_ condition: Bool, _ message: @autoclosure () -> String) {
     }
 }
 
+// Each group of checks below is a function of its own, called where it is written, and not a `do` block at the
+// top level. That is for the compiler's sake: top-level code is all one function, and the time the compiler takes
+// over a function grows much faster than its length. With every group its own function this file compiles in a
+// third of the time. A group's names are its own, as a block's were.
+
 // `input-logic-check --write-shell-integration <folder>` writes the zsh files the
 // app points ZDOTDIR at, exactly as the app does, and stops. CI then runs them in a
 // real zsh (scripts/shell-integration-check); none of the checks below run.
@@ -168,14 +173,15 @@ expect("export PATH=$HOME/bin:$PATH", ["command export", "variable $HOME", "vari
 expect("echo héllo wörld", ["command echo"])
 
 // Ranges are UTF-16 offsets, the unit NSRange uses: an emoji is two of them.
-do {
+func checkTokenizer() {
     let tokens = ShellTokenizer.tokenize("echo 😀 | ls")
     check(tokens.map(\.range) == [0..<4, 8..<9, 10..<12],
           "UTF-16 ranges after an emoji: \(tokens.map(\.range))")
 }
+checkTokenizer()
 
 // Whatever is typed, the tokens must be in order, inside the text, and apart.
-do {
+func checkTokenizer2() {
     let alphabet = Array(" \t\n\r\\'\"$`#|&;<>(){}-=a1é😀~*?!/.:%@,+[]^_").map(String.init)
     var seed: UInt64 = 0x9E3779B97F4A7C15
     func next() -> Int {
@@ -198,6 +204,7 @@ do {
     }
     check(bad == nil, "tokens out of order, empty, or out of bounds for \(String(describing: bad?.debugDescription))")
 }
+checkTokenizer2()
 
 // MARK: Palette
 
@@ -263,27 +270,30 @@ for (name, ansi, foreground) in themes {
 }
 
 // When the theme's own colours read, they are used as they are.
-do {
+func checkPalette() {
     let (_, ansi, foreground) = themes[0]
     let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, background: darkField, darkBackground: true)
     check(colors.command == ansi[2] && colors.flag == ansi[6] && colors.string == ansi[3]
           && colors.variable == ansi[5] && colors.op == ansi[4],
           "codex-dark on the dark field should keep its own colours, got \(all(colors).map { ColorMath.hex($0.1) })")
 }
+checkPalette()
 
 // A theme that would vanish on the field is replaced, not trusted.
-do {
+func checkPalette2() {
     let (_, ansi, foreground) = themes[4]   // Dracula's pastels
     let colors = SyntaxPalette.colors(ansi: ansi, foreground: foreground, background: lightField, darkBackground: false)
     check(colors.command == SyntaxPalette.lightFallback.command,
           "dracula green on the light field should fall back, got \(ColorMath.hex(colors.command))")
 }
+checkPalette2()
 
 // A palette with too few slots falls back rather than crashing.
-do {
+func checkPalette3() {
     let colors = SyntaxPalette.colors(ansi: [], foreground: 0xFFFFFF, background: darkField, darkBackground: true)
     check(colors.command == SyntaxPalette.darkFallback.command, "empty palette should fall back")
 }
+checkPalette3()
 
 // MARK: App themes
 
@@ -291,7 +301,7 @@ do {
 // a dark variant, its text reads on every colour it is drawn on, the default is
 // the look the app always had, and what a terminal shows when it matches the
 // theme is a scheme that exists.
-do {
+func checkAppThemes() {
     let themes = AppThemes.all
     let ids = themes.map(\.id)
     check(Set(ids).count == ids.count && !ids.contains(""), "every app theme has its own id: \(ids)")
@@ -366,6 +376,7 @@ do {
         check(false, "could not read \(path): run this from the repository root")
     }
 }
+checkAppThemes()
 
 // MARK: Fuzzy matching
 
@@ -397,7 +408,7 @@ check(score("dep", "dependabot") > score("dep", "npm run deploy"),
 // The match must be the best there is. Check it against every way of placing the
 // query in the candidate, over many small random cases — not just the cases a
 // person thought to write down, which a first-fit search can pass.
-do {
+func checkFuzzyMatching() {
     func bestPossible(_ query: String, _ candidate: String) -> Int? {
         let original = Array(candidate)
         let folded = FuzzyMatcher.folded(candidate)
@@ -459,10 +470,11 @@ do {
     }
     check(wrong == nil, "fuzzy match is not optimal or well-formed: \(wrong ?? "")")
 }
+checkFuzzyMatching()
 
 // MARK: History index
 
-do {
+func checkHistoryIndex() {
     // Composer history is oldest first; the shell's is newest first.
     let index = CommandHistoryIndex(
         composer: ["git status", "ls -la", "make test"],
@@ -505,10 +517,11 @@ do {
     let capped = CommandHistoryIndex(composer: (0..<50).map { "cmd \($0)" }, shell: [], limit: 10)
     check(capped.entries.count == 10 && capped.entries.first?.command == "cmd 49", "the index is capped at its limit, newest kept")
 }
+checkHistoryIndex()
 
 // MARK: Shell history parsing
 
-do {
+func checkShellHistoryParsing() {
     let zsh = ": 1690000000:0;ls -la\n: 1690000001:0;git status\n: 1690000002:0;ls -la\n"
     check(ShellHistory.entries(in: zsh, maxLength: 400) == ["ls -la", "git status", "ls -la"],
           "zsh extended history loses its timestamp prefix: \(ShellHistory.entries(in: zsh, maxLength: 400))")
@@ -584,10 +597,11 @@ do {
           "HISTFILE comes first, then zsh, then bash: \(candidates)")
     check(ShellHistory.candidateFiles(home: URL(fileURLWithPath: "/h"), histfile: "").count == 2, "an empty HISTFILE is ignored")
 }
+checkShellHistoryParsing()
 
 // MARK: Path completion
 
-do {
+func checkPathCompletion() {
     let root = NSTemporaryDirectory() + "path-check-\(UUID().uuidString)"
     let fm = FileManager.default
     func make(_ path: String, directory: Bool = false) {
@@ -743,6 +757,7 @@ do {
     }
     check(broken == nil, "malformed completion for \(broken ?? "")")
 }
+checkPathCompletion()
 
 // MARK: Completing flags and subcommands
 
@@ -750,7 +765,7 @@ do {
 // line on what it does; at anything else it is the file-name completer's. The table is read
 // from its text, so first that it is sound, then how the line before the caret is read, then
 // what the keys do with it.
-do {
+func checkCompletingFlagsAndSubcommands() {
     // The table.
     check(CommandSpecs.problems.isEmpty, "the table of tools is sound: \(CommandSpecs.problems)")
     check(CommandSpecs.toolNames.count >= 25, "the table covers a useful number of tools: \(CommandSpecs.toolNames.count)")
@@ -969,10 +984,11 @@ do {
     o = press(&s, .tab, "git add note", directory: dir)
     check(o.replacement?.text == "notes.txt", "after the subcommand too")
 }
+checkCompletingFlagsAndSubcommands()
 
 // MARK: Suggestion state
 
-do {
+func checkSuggestionState() {
     let root = NSTemporaryDirectory() + "state-check-\(UUID().uuidString)"
     let fm = FileManager.default
     try? fm.createDirectory(atPath: root, withIntermediateDirectories: true)
@@ -1189,10 +1205,11 @@ do {
         check(s.choose(nil) == nil, "choosing nothing is nothing")
     }
 }
+checkSuggestionState()
 
 // MARK: Secret masking
 
-do {
+func checkSecretMasking() {
     check(SecretRedactor.isOperational, "every redaction pattern compiled")
     func masked(_ text: String) -> String { SecretRedactor.redact(text) }
     func same(_ text: String, _ why: String) {
@@ -1292,10 +1309,11 @@ do {
     let slowest = hostile.map { (name: $0.name, took: seconds($0.text)) }.max { $0.took < $1.took }!
     check(slowest.took < 3, "masking a run of \(slowest.name) took \(slowest.took) s")
 }
+checkSecretMasking()
 
 // MARK: Sanitising output
 
-do {
+func checkSanitisingOutput() {
     check(ContextSanitizer.stripANSI("\u{1B}[31mred\u{1B}[0m plain") == "red plain", "colour codes are stripped: \(ContextSanitizer.stripANSI("\u{1B}[31mred\u{1B}[0m plain").debugDescription)")
     check(ContextSanitizer.stripANSI("\u{1B}]0;a title\u{07}text") == "text", "an OSC title is stripped")
     check(ContextSanitizer.stripANSI("\u{1B}[2K\u{1B}[1Gprompt") == "prompt", "cursor movement is stripped")
@@ -1326,10 +1344,11 @@ do {
               "a secret cut by the limit \(limit) leaves no fragment: \(result.debugDescription)")
     }
 }
+checkSanitisingOutput()
 
 // MARK: Failure signatures
 
-do {
+func checkFailureSignatures() {
     func reason(_ line: String, command: String? = nil) -> String? {
         FailureSignature.firstMatch(in: [line], excludingCommand: command)?.reason
     }
@@ -1408,10 +1427,11 @@ do {
     check(OutputDiff.newLines(baseline: "one\ntwo\nthree\n", current: "three\nfour\nfive\n") == ["four", "five"], "scrolled-away lines do not matter")
     check(OutputDiff.newLines(baseline: "x\nx\n", current: "x\nx\nx\n") == ["x"], "a line seen twice before and three times now is new once")
 }
+checkFailureSignatures()
 
 // MARK: Replies
 
-do {
+func checkReplies() {
     let reply = "The file is missing.\n\n```bash\nls -la src\n```\n\nThen:\n\n```python\nprint('hi')\n```\nDone."
     check(AssistReply.segments(of: reply) == [
         .prose("The file is missing."),
@@ -1443,10 +1463,11 @@ do {
         check(!AssistReply.isShell(language: tag), "\(tag) is not offered as a shell command")
     }
 }
+checkReplies()
 
 // MARK: Command warnings
 
-do {
+func checkCommandWarnings() {
     func warnings(_ command: String) -> [String] { CommandRisk.warnings(for: command) }
     let sudo = "Runs with administrator rights."
     let rmForced = "Deletes folders and everything in them, without asking."
@@ -1515,10 +1536,11 @@ do {
         check(warnings(command) == expected, "\(command.debugDescription): expected \(expected), got \(warnings(command))")
     }
 }
+checkCommandWarnings()
 
 // MARK: Where a request goes, and what asking says
 
-do {
+func checkWhereARequestGoesAndWhatAskingSays() {
     check(AssistantDestination.describe(baseURL: "https://api.openai.com/v1") == .init(name: "api.openai.com", staysOnThisMac: false), "a hosted endpoint is named")
     check(AssistantDestination.describe(baseURL: "http://127.0.0.1:11434/v1") == .init(name: "the assistant on this Mac", staysOnThisMac: true), "a loopback address stays on this Mac")
     check(AssistantDestination.describe(baseURL: "http://localhost:11434/v1").staysOnThisMac, "localhost stays on this Mac")
@@ -1638,6 +1660,7 @@ do {
           "explain and fix ask different things")
     check(ErrorHelpRequest.make(kind: .fix, command: nil, rawOutput: "x", baseURL: "https://a.b").prompt.contains("fenced code block"), "fix asks for a fenced command")
 }
+checkWhereARequestGoesAndWhatAskingSays()
 
 // MARK: Drops onto a terminal
 
@@ -1645,7 +1668,7 @@ do {
 // ending in Return; text with anything a terminal would act on removed, kept
 // from closing a bracketed paste early, and refused when it would run line by
 // line.
-do {
+func checkDropsOntoATerminal() {
     func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
     func occurrences(of needle: [UInt8], in haystack: [UInt8]) -> Int {
         guard !needle.isEmpty, haystack.count >= needle.count else { return 0 }
@@ -1714,12 +1737,13 @@ do {
     check(TerminalDrop.textPayload(String(repeating: "a", count: TerminalDrop.maxTextBytes + 1), bracketedPasteMode: false) == nil, "text over it is refused")
     check(TerminalDrop.textPayload("日本語 🎉", bracketedPasteMode: false) == bytes("日本語 🎉"), "CJK and emoji are sent as UTF-8")
 }
+checkDropsOntoATerminal()
 
 // MARK: Secure keyboard entry bookkeeping
 
 // The system switch counts, so an enable is made once and undone once, and
 // a call that failed leaves the state telling the truth.
-do {
+func checkSecureKeyboardEntryBookkeeping() {
     var state = SecureInputState()
     var calls: [SecureInputState.Action] = []
     func step(_ wanted: Bool, succeeding: Bool = true) {
@@ -1770,6 +1794,7 @@ do {
     }
     check(balanced, "enables minus disables is always the one outstanding, or none")
 }
+checkSecureKeyboardEntryBookkeeping()
 
 // MARK: Shell integration
 
@@ -1779,7 +1804,7 @@ do {
 // files that make zsh read them — written safely, and only into a folder that is
 // this user's alone. The scripts themselves are run in a real zsh by
 // scripts/shell-integration-check.
-do {
+func checkShellIntegration() {
     func mark(_ text: String) -> ShellIntegration.Mark? { ShellIntegration.parse(Array(text.utf8)[...]) }
 
     // The marks.
@@ -1906,6 +1931,7 @@ do {
     try? "x".write(toFile: plain, atomically: true, encoding: .utf8)
     check(ShellIntegrationFiles.install(into: plain) == .failure(.notPrivate(plain)), "so is a file where the folder should be")
 }
+checkShellIntegration()
 
 // MARK: Assistant output is never run
 
@@ -1913,7 +1939,7 @@ do {
 // the composer, after they were put in the input for review. Nothing in the AI
 // code, the composer's AI views, or the failure watcher may send text to a
 // terminal itself. Comments are skipped, so a comment may say so.
-do {
+func checkAssistantOutputIsNeverRun() {
     let fm = FileManager.default
     var files: [String] = []
     if let aiFiles = try? fm.contentsOfDirectory(atPath: "Sources/iTERMiNAL/AI") {
@@ -1935,13 +1961,14 @@ do {
     }
     check(offenders.isEmpty, "the AI path must not send to a terminal: \(offenders)")
 }
+checkAssistantOutputIsNeverRun()
 
 // MARK: Closing brackets and quotes
 
 // What the shell would read as an open quote or bracket, when typing an opener
 // also types its closer, and — the property that matters — that typing a
 // command through it ends up exactly as typed.
-do {
+func checkClosingBracketsAndQuotes() {
     // Reading a line the way a shell does.
     check(AutoPairing.scan("echo 'a").state == .single, "an open single quote")
     check(AutoPairing.scan("echo \"a b").state == .double, "an open double quote")
@@ -2037,13 +2064,14 @@ do {
         check(result.text == command && result.after.isEmpty, "typing \(command.debugDescription) leaves \(result.text.debugDescription) with \(result.after.debugDescription) after the caret")
     }
 }
+checkClosingBracketsAndQuotes()
 
 // MARK: Notes on a typed command
 
 // What is said about a line before Return, and when nothing is: a quote left
 // open, a bracket, a trailing backslash, and the dangers CommandRisk knows —
 // never about a line that is merely long, a comment, or fine.
-do {
+func checkNotesOnATypedCommand() {
     check(CommandNotes.notes(for: "").isEmpty && CommandNotes.notes(for: "ls -la").isEmpty, "an ordinary command has no notes")
     check(CommandNotes.notes(for: "echo 'hi").count == 1 && CommandNotes.notes(for: "echo 'hi")[0].hasPrefix("A quote is still open"), "an open quote is noted")
     check(CommandNotes.notes(for: "echo \"hi").first?.hasPrefix("A quote is still open") == true && CommandNotes.notes(for: "echo `hi").first?.hasPrefix("A quote is still open") == true, "so is a double quote or a backtick")
@@ -2062,10 +2090,11 @@ do {
     check(CommandNotes.notes(for: String(repeating: "'", count: CommandNotes.maxLength + 1)).isEmpty, "one past the limit is left alone")
     check(CommandNotes.notes(for: "sudo " + String(repeating: "a", count: CommandNotes.maxLength)).isEmpty, "a pasted wall of text is not read for dangers")
 }
+checkNotesOnATypedCommand()
 
 // MARK: HTTP methods and cURL
 
-do {
+func checkHTTPMethodsAndCURL() {
     check(HTTPMethod(rawValue: "get").rawValue == "GET", "a method is uppercased on the way in")
     check(HTTPMethod("propfind").rawValue == "PROPFIND", "an unlisted method is not forced into a default case")
     check(HTTPMethod.get == HTTPMethod("get"), "a static constant equals the same method built from text")
@@ -2146,10 +2175,11 @@ do {
     check(normalized("   ") == nil, "whitespace alone is not a URL")
     check(normalized("not a url with spaces") == nil, "text with raw spaces is rejected, not mangled into something that parses")
 }
+checkHTTPMethodsAndCURL()
 
 // MARK: HTTP response formatting
 
-do {
+func checkHTTPResponseFormatting() {
     // Classification: the header wins when there is one.
     check(HTTPResponseFormatter.classify(contentTypeHeader: "application/json; charset=utf-8", sampleBytes: Data()) == .json,
           "application/json classifies as json")
@@ -2264,10 +2294,11 @@ do {
     let longPlain = HTTPResponseFormatter.format(String(repeating: "x", count: 50).data(using: .utf8)!, contentType: "text/plain", maxCharacters: 10)
     check(longPlain.wasTruncated, "format applies the rendering limit, independent of any upstream byte cap")
 }
+checkHTTPResponseFormatting()
 
 // MARK: HTTP redaction
 
-do {
+func checkHTTPRedaction() {
     // Credential headers are masked whole, whatever the value looks like —
     // a session cookie has no shape for SecretRedactor to recognise.
     check(HTTPRedaction.redactedHeaderValue(name: "Cookie", value: "sessionid=abc123def456; theme=dark") == "[redacted]",
@@ -2317,10 +2348,11 @@ do {
     let once = HTTPRedaction.redactedURL("https://user:pass@example.com/a?code=1&token=2")
     check(HTTPRedaction.redactedURL(once) == once, "redacting an already-redacted URL changes nothing: \(once)")
 }
+checkHTTPRedaction()
 
 // MARK: Rail pins
 
-do {
+func checkRailPins() {
     check(RailPins.decode([]) == [], "nothing stored means nothing pinned")
     check(RailPins.decode(["tasks", "skills"]) == [.tasks, .skills], "stored pins keep their order")
     check(RailPins.decode(["skills", "tasks", "skills"]) == [.skills, .tasks],
@@ -2344,10 +2376,11 @@ do {
     check(Set(RailItem.allCases.map(\.title)).count == RailItem.allCases.count, "each item has its own title")
     check(RailItem.terminal.title == "Home", "the house icon is labelled Home")
 }
+checkRailPins()
 
 // MARK: Frame style
 
-do {
+func checkFrameStyle() {
     // Mixing
     check(FrameStyle.mix(base: 0x0C0C0E, tint: 0xFF0000, amount: 0) == 0x0C0C0E, "no tint amount leaves the base alone")
     check(FrameStyle.mix(base: 0x000000, tint: 0xFFFFFF, amount: 0.2) == 0x333333, "20% white into black is 0x33 per channel")
@@ -2423,10 +2456,11 @@ do {
           "four interface fonts with their own labels")
     check(FrameFontDesign(rawValue: "bogus") == nil, "an unknown stored font design is not accepted")
 }
+checkFrameStyle()
 
 // MARK: Site explorer: robots.txt
 
-do {
+func checkSiteExplorerRobotsTxt() {
     let robots = RobotsTxtParser.parse("""
     # a comment
     User-agent: *
@@ -2459,10 +2493,11 @@ do {
     check(RobotsTxtParser.parse("Disallow: relative/path").disallowed.isEmpty, "a rule that isn't an absolute path is ignored")
     check(RobotsTxtParser.parse("Sitemap:").sitemaps.isEmpty, "an empty Sitemap value is ignored")
 }
+checkSiteExplorerRobotsTxt()
 
 // MARK: Site explorer: sitemaps
 
-do {
+func checkSiteExplorerSitemaps() {
     func xml(_ body: String) -> Data { Data(body.utf8) }
     let urlset = SitemapParser.parse(xml("""
     <?xml version="1.0" encoding="UTF-8"?>
@@ -2508,10 +2543,11 @@ do {
     check(capped?.urls.count == SitemapParser.maxEntries && capped?.wasCapped == true,
           "a file past the entry cap stops at the cap and says so")
 }
+checkSiteExplorerSitemaps()
 
 // MARK: Site explorer: link scanner
 
-do {
+func checkSiteExplorerLinkScanner() {
     let page = """
     <html><head><link rel="stylesheet" href="/static/site.css"><script src='js/app.js'></script></head>
     <body>
@@ -2576,10 +2612,11 @@ do {
     check(ResponseLinkScanner.links(in: Data(deep.utf8), contentKind: .json, baseURL: "https://example.com").isEmpty,
           "absurdly deep JSON does not crash the walk")
 }
+checkSiteExplorerLinkScanner()
 
 // MARK: Site explorer: origin and tree
 
-do {
+func checkSiteExplorerOriginAndTree() {
     let origin = SiteOrigin(urlString: "https://Example.com")!
     check(origin == SiteOrigin(urlString: "https://example.com:443/anything")!, "host case and the default port don't distinguish origins")
     check(origin != SiteOrigin(urlString: "https://www.example.com")!, "www. is a different host — never folded")
@@ -2668,10 +2705,11 @@ do {
     counted.insert(path: "/b", provenance: .robotsDisallow)
     check(counted.counts() == (sitemap: 1, robots: 1, discovered: 1), "counts say how many paths each source contributed")
 }
+checkSiteExplorerOriginAndTree()
 
 // MARK: Site explorer: what may be fetched
 
-do {
+func checkSiteExplorerWhatMayBeFetched() {
     let origin = SiteOrigin(urlString: "https://example.com")!
     check(ExplorerPolicy.robotsURL(for: origin) == "https://example.com/robots.txt", "robots.txt is read from the root")
     check(ExplorerPolicy.robotsURL(for: SiteOrigin(urlString: "http://localhost:8080/x")!) == "http://localhost:8080/robots.txt",
@@ -2726,10 +2764,11 @@ do {
     check(ExplorerPolicy.sitemapConcurrency <= 6 && ExplorerPolicy.maxSitemapFiles <= 50 && ExplorerPolicy.maxSitemapDepth <= 4,
           "the fan-out limits stay small")
 }
+checkSiteExplorerWhatMayBeFetched()
 
 // MARK: Site explorer: the command line
 
-do {
+func checkSiteExplorerTheCommandLine() {
     func parse(_ line: String, open: Bool = true) -> ExplorerCommand { ExplorerCommandParser.parse(line, siteIsOpen: open) }
     check(parse("") == .empty && parse("   ") == .empty, "a blank line does nothing")
     check(parse("ls") == .ls(path: nil, long: false) && parse("ls blog") == .ls(path: "blog", long: false), "ls, with and without a path")
@@ -2766,10 +2805,11 @@ do {
     check(ExplorerCommandParser.split("''") == [""] && ExplorerCommandParser.split("a  b") == ["a", "b"], "an empty quoted word is a word; runs of spaces are one gap")
     check(ExplorerCommandParser.looksLikeAddress("a.co") && !ExplorerCommandParser.looksLikeAddress("./x") && !ExplorerCommandParser.looksLikeAddress("word"), "what looks like an address")
 }
+checkSiteExplorerTheCommandLine()
 
 // MARK: Site explorer: resolving a typed address
 
-do {
+func checkSiteExplorerResolvingATypedAddress() {
     let origin = SiteOrigin(urlString: "https://example.com")!
     var tree = SitePathTree(origin: origin)
     tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap)
@@ -2786,10 +2826,11 @@ do {
     if case .error = target("https://www.example.com/x") {} else { check(false, "www. is another site too") }
     check(target("../..", cwd: ["blog", "2024"]) == .url("https://example.com/"), ".. resolves before the address is built")
 }
+checkSiteExplorerResolvingATypedAddress()
 
 // MARK: Site explorer: layout and completion
 
-do {
+func checkSiteExplorerLayoutAndCompletion() {
     let origin = SiteOrigin(urlString: "https://example.com")!
     var tree = SitePathTree(origin: origin)
     tree.insert(url: "https://example.com/blog/2024/post-1", provenance: .sitemap)
@@ -2856,6 +2897,7 @@ do {
     check(ExplorerCompleter.complete(line: "cd bl", cwd: [], tree: nil) == nil, "with no site open there is nothing to complete")
     check(complete("cd \"bl") == nil, "a quoted word is left alone")
 }
+checkSiteExplorerLayoutAndCompletion()
 
 // MARK: Remote problems (SFTP)
 
@@ -2863,7 +2905,7 @@ do {
 // it. The strings are what OpenSSH prints; the first is the one that started
 // this: a Mac that offers a key, a password and keyboard-interactive, and a
 // file browser that can only use the first.
-do {
+func checkRemoteProblemsSFTP() {
     let host = SSHConnection(name: "Studio", host: "192.168.1.148", username: "mb_pro")
     func kind(_ output: String, _ connection: SSHConnection = host) -> RemoteProblem.Kind {
         RemoteProblem.classify(output: output, connection: connection).kind
@@ -3030,12 +3072,13 @@ do {
     check(!commands.isEmpty && commands.allSatisfy { !$0.contains("\n") && !$0.contains("\r") },
           "no command offered contains a line break, so typing one into a terminal cannot run it")
 }
+checkRemoteProblemsSFTP()
 
 // MARK: Local Network permission
 
 // Which hosts macOS's Local Network permission stands between this Mac and,
 // and when a failed connection is worth blaming on it.
-do {
+func checkLocalNetworkPermission() {
     check(LocalNetwork.isLocal(host: "192.168.1.194"), "a home network address")
     check(LocalNetwork.isLocal(host: "10.0.0.9") && LocalNetwork.isLocal(host: "172.16.4.2") && LocalNetwork.isLocal(host: "172.31.255.1"),
           "the other private ranges")
@@ -3063,6 +3106,7 @@ do {
     check(LocalNetwork.settingsURL.hasPrefix("x-apple.systempreferences:") && LocalNetwork.settingsURL.hasSuffix("Privacy_LocalNetwork"),
           "the settings link points at the Local Network list")
 }
+checkLocalNetworkPermission()
 
 // MARK: Remote start directory
 
@@ -3070,7 +3114,7 @@ do {
 // than the home folder. The command is run by the host's shell, with nothing of
 // this Mac's in between: the first version had a backslash before $SHELL, and
 // the host was asked to run a program called "$SHELL".
-do {
+func checkRemoteStartDirectory() {
     func command(_ path: String?) -> String? {
         SSHConnection(name: "h", host: "h.example.com", username: "u", initialPath: path).startupCommand
     }
@@ -3085,6 +3129,7 @@ do {
     check(command("/x'; rm -rf ~; echo '") == "cd '/x'\\''; rm -rf ~; echo '\\''' && exec $SHELL -l",
           "nothing in a start directory can end the command and begin another")
 }
+checkRemoteStartDirectory()
 
 // MARK: Shared sign-in (SSH control socket)
 
@@ -3094,7 +3139,7 @@ do {
 // own destination, that the folder it sits in is this account's alone (a socket
 // anyone else could have put there would be handed every file), that a socket
 // nobody is listening on is not mistaken for an open one, and what ssh is told.
-do {
+func checkSharedSignInSSHControlSocket() {
     let fm = FileManager.default
     let host = SSHConnection(name: "Files", host: "Files.Example.com", username: "deploy")
     let name = SSHControlSocket.name(for: host)
@@ -3209,6 +3254,7 @@ do {
     // A path that is too long for a socket is not an open one.
     check(!SSHControlSocket.isLive("/tmp/" + String(repeating: "x", count: 200)), "an address that cannot be a socket is not live")
 }
+checkSharedSignInSSHControlSocket()
 
 // MARK: Coloured command output
 
@@ -3216,7 +3262,7 @@ do {
 // ANSI numbers, so the theme decides what they look like; what is checked here
 // is that the two `ls` dialects are written from one table, that nothing a
 // person already set is replaced, and that NO_COLOR is obeyed.
-do {
+func checkColouredCommandOutput() {
     check(OutputColors.bsdLSColors == "ExGxFxdxCxegedabagacad", "BSD LSCOLORS is the eleven pairs, written from the table")
     check(OutputColors.bsdLSColors.count == 22, "eleven pairs of two letters")
     check(OutputColors.bsdPair(sgr: "01;34") == "Ex" && OutputColors.bsdPair(sgr: "34;46") == "eg"
@@ -3257,12 +3303,13 @@ do {
     check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": "1"]).isEmpty, "NO_COLOR turns it all off")
     check(OutputColors(listings: true, manPages: true).environment(inheriting: ["NO_COLOR": ""]).count == 11, "an empty NO_COLOR is not a request")
 }
+checkColouredCommandOutput()
 
 // MARK: Page parsing: entities, the tree, selectors
 
 // What extraction stands on: a parser that copes with the markup real pages
 // have, and selectors that find things in what it builds.
-do {
+func checkPageParsingEntitiesTheTreeSelectors() {
     // Character references.
     check(HTMLEntities.decode("a &amp; b &lt;i&gt; &quot;q&quot; &#39;s&#39; &apos;t&apos; &#x27;u&#x27;") == "a & b <i> \"q\" 's' 't' 'u'", "the usual references")
     check(HTMLEntities.decode("caf&eacute; &nbsp;&copy;&hellip;") == "café \u{A0}©…", "named ones beyond the basics")
@@ -3398,12 +3445,13 @@ do {
     QueryRunner.cssStepLimit = savedLimit
     check(runnerMessage?.contains("takes too long") == true, "the query box reports it as an error, in words")
 }
+checkPageParsingEntitiesTheTreeSelectors()
 
 // MARK: Results: export and file names
 
 // Anything found on a page goes out through these, and a file name from a page
 // is hostile text: the checks are the ways it could go wrong.
-do {
+func checkResultsExportAndFileNames() {
     var table = ResultTable(columns: ["Text", "URL"])
     table.append(["Home, sweet \"home\"", "https://example.com/"], url: "https://example.com/")
     table.append(["line\nbreak", "https://example.com/a?x=1"], url: "https://example.com/a?x=1")
@@ -3475,12 +3523,13 @@ do {
             && AssetNaming.kind(ofURL: "https://x.com/a.pdf") == .document && AssetNaming.kind(ofURL: "https://x.com/a.zip") == .archive && AssetNaming.kind(ofURL: "https://x.com/a") == .other
             && AssetNaming.kind(ofURL: "https://x.com/.gitignore") == .other, "what an address's ending says it is")
 }
+checkResultsExportAndFileNames()
 
 // MARK: Page extraction
 
 // What a page declares, sorted into lists. The page below has one of most
 // things; each list is checked against what is in it, in document order.
-do {
+func checkPageExtraction() {
     let base = URL(string: "https://news.example.com/2024/06/ledger-report?utm=1")!
 
     // Addresses.
@@ -3639,13 +3688,14 @@ do {
     check(markdown("<table><tr><td>a|b</td><td>c</td></tr><tr><td>1</td><td>2</td></tr></table>").hasPrefix("| a\\|b | c |\n| --- | --- |\n| 1 | 2 |"), "a pipe inside a table cell is escaped")
     check(markdown("<p>x <a href=\"javascript:void(0)\">act</a> <a href=\"#top\">up</a> <a href=\"/q\">go</a></p>").hasPrefix("x act up [go](https://news.example.com/q)"), "links that go nowhere are just their words")
 }
+checkPageExtraction()
 
 // MARK: Data formats: JSON, JSONPath, CSV, XML, feeds, XPath, queries
 
 // What a response that is not a page can be asked, and how a scraper's query
 // languages behave. JSON keeps the server's key order and number text, because
 // a table that reorders columns or rounds an id is wrong in a way nobody finds.
-do {
+func checkDataFormatsJSONJSONPathCSVXMLFeedsXPathQueries() {
     // JSON, in order.
     let doc = try! JSONValue.parse(Data(#"{"b":1,"a":[true,null,"x"],"n":1.50,"big":12345678901234567890,"e":""}"#.utf8))
     if case .object(let members) = doc {
@@ -3798,13 +3848,14 @@ do {
     let binary = ResponseExtractor.extract(body: Data([0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 1]), contentType: "image/png", url: "https://x.example/i.png", kind: .binary)
     check(binary.isEmpty && binary.languages.isEmpty && binary.note?.contains("Save") == true && binary.kindLabel == "Binary data (image/png)", "binary: nothing to take, and what to do instead")
 }
+checkDataFormatsJSONJSONPathCSVXMLFeedsXPathQueries()
 
 // MARK: Hostile shapes: nesting, length and number of parts
 
 // A selector, a path or a document can be written with thousands of levels, and every level is a call
 // — here and again when it is used — on a background thread with half a megabyte of stack. These ran
 // out of it. They are tried on a thread of that size, so that a regression takes the check down with it.
-do {
+func checkHostileShapesNestingLengthAndNumberOfParts() {
     func onSmallStack(_ work: @escaping () -> Void) {
         let finished = DispatchSemaphore(value: 0)
         let thread = Thread {
@@ -3874,12 +3925,13 @@ do {
     check(!XMLTree.hasTagWithTooManyAttributes(Data(("<a x=1>" + String(repeating: "<b y=2/>", count: 10_000) + "</a>").utf8)),
           "and counted for each tag, not for the document")
 }
+checkHostileShapesNestingLengthAndNumberOfParts()
 
 // MARK: Downloads: what a page may make this app fetch
 
 // A page chooses the addresses it lists, and an address is not always on the
 // internet. Everything below is a request a page must not be able to cause.
-do {
+func checkDownloadsWhatAPageMayMakeThisAppFetch() {
     func refusal(_ address: String, from page: String = "https://news.example.com/a") -> String? {
         DownloadPolicy.refusal(for: address, from: page)
     }
@@ -3940,13 +3992,14 @@ do {
     check(DownloadPolicy.referer(page: "https://a.example/x", target: "https://a.example:444/i.png") == "https://a.example/", "a different port is a different site")
     check(DownloadPolicy.referer(page: "https://a.example/x", target: "http://127.0.0.1/i.png") == nil && DownloadPolicy.referer(page: "not a url", target: "https://a.example/") == nil, "nothing from a secure page to an insecure one, or from a page that is not an address")
 }
+checkDownloadsWhatAPageMayMakeThisAppFetch()
 
 // MARK: Extract: image previews
 
 // A preview is a request to the site that hosts the picture, made because a
 // page named it. It follows the download rules, is capped, and refuses what it
 // would only waste time on.
-do {
+func checkExtractImagePreviews() {
     let internet = "https://news.example.org/post/1"
     let local = "http://localhost:3000/post/1"
     func decide(_ address: String, page: String = internet, requested: Int = 0) -> ImagePreviewPolicy.Decision {
@@ -3993,6 +4046,7 @@ do {
     check(!ImagePreviewPolicy.withinPixelLimit(width: 0, height: 10) && !ImagePreviewPolicy.withinPixelLimit(width: 10, height: -1),
           "a picture with no size is not one")
 }
+checkExtractImagePreviews()
 
 // MARK: Crawl: robots.txt, the frontier and the results
 
@@ -4000,7 +4054,7 @@ do {
 // politely as the site's robots.txt asks. Each rule that keeps it to that is
 // checked here: which pages robots.txt rules out (RFC 9309's examples), which
 // addresses join the queue, how far it goes, and what it keeps.
-do {
+func checkCrawlRobotsTxtTheFrontierAndTheResults() {
     func rules(_ text: String, agent: String = "iTERMiNAL") -> RobotsRules { RobotsRules.parse(text, agent: agent) }
     func allowed(_ rules: RobotsRules, _ path: String) -> Bool { rules.allows(path: path) }
 
@@ -4219,6 +4273,7 @@ do {
     capped.record(url: "https://example.org/", status: 200, note: "", depth: 0, foundOn: "", bytes: 1, milliseconds: 1, extracted: crowd)
     check(capped.links.rows.count == 60 && !capped.links.truncated, "a short list is kept whole")
 }
+checkCrawlRobotsTxtTheFrontierAndTheResults()
 
 // MARK: Extract: asking the assistant
 
@@ -4227,7 +4282,7 @@ do {
 // are masked and the size is capped, that the model is told the page is data,
 // and that whatever comes back is a table of text — with an address that can be
 // acted on only if the page itself named it.
-do {
+func checkExtractAskingTheAssistant() {
     func read(_ html: String, url: String = "https://shop.example.org/items") -> ExtractedPage {
         PageExtractor.extract(html: html, pageURL: url)
     }
@@ -4357,6 +4412,7 @@ do {
     let csv = formula.map { ResultExport.render($0.rows, columns: $0.columns, as: .csv) } ?? ""
     check(csv.contains("'=HYPERLINK") && csv.contains("'@SUM"), "an answer that starts with = or @ is made text on export: \(csv)")
 }
+checkExtractAskingTheAssistant()
 
 // MARK: Keyboard shortcuts
 
@@ -4365,7 +4421,7 @@ do {
 // parsed into a chord, and the catalog has to hold exactly those (the entries
 // marked `.bound`), no more and no fewer. The README's table is held to the
 // same list.
-do {
+func checkKeyboardShortcuts() {
     typealias Chord = ShortcutChord
     let all = ShortcutCatalog.all
 
@@ -4611,10 +4667,11 @@ do {
         }
     }
 }
+checkKeyboardShortcuts()
 
 // MARK: Background opacity
 
-do {
+func checkBackgroundOpacity() {
     let floor = BackgroundOpacity.range.lowerBound
     check(floor > 0 && floor < 1 && BackgroundOpacity.range.upperBound == 1,
           "the slider runs from a floor above zero up to a solid background")
@@ -4645,10 +4702,11 @@ do {
     check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xFDF6E3), "solarized light wants the light frost")
     check(!BackgroundOpacity.prefersDarkBackdrop(background: 0xEFF1F5), "a typical light theme wants the light frost")
 }
+checkBackgroundOpacity()
 
 // MARK: Jump hosts and agent forwarding
 
-do {
+func checkJumpHostsAndAgentForwarding() {
     func hops(_ text: String) -> [String]? {
         if case .hops(let list) = JumpHosts.parse(text) { return list }
         return nil
@@ -4756,10 +4814,11 @@ do {
         check(false, "a connection with jump hosts can be saved and read back")
     }
 }
+checkJumpHostsAndAgentForwarding()
 
 // MARK: Terminal links
 
-do {
+func checkTerminalLinks() {
     let size = TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 100, rows: 24)
     check(size?.width == 8 && size?.height == 20, "a cell is the grid divided by its cells")
     check(TerminalLinks.cellSize(gridWidth: 800, gridHeight: 480, cols: 0, rows: 24) == nil, "no columns, no cell size")
@@ -4813,12 +4872,13 @@ do {
     check(TerminalLinks.preview(String(repeating: "a", count: 40), limit: 4).count == 40, "a limit too small to show anything useful cuts nothing")
     check(TerminalLinks.preview(String(repeating: "e\u{301}", count: 30), limit: 10).count == 10, "it counts what is seen, not scalars")
 }
+checkTerminalLinks()
 
 // MARK: Saving a code block
 
 // A reply's code block saved as a file: a name from its language, a trailing
 // newline, and nothing else added.
-do {
+func checkSavingACodeBlock() {
     let names: [(String?, String)] = [
         (nil, "script.sh"), ("", "script.sh"), ("bash", "script.sh"), ("SH", "script.sh"), ("zsh", "script.zsh"), ("fish", "script.fish"),
         ("python", "script.py"), ("py", "script.py"), ("JavaScript", "script.js"), ("ts", "script.ts"), ("yaml", "script.yml"),
@@ -4836,10 +4896,11 @@ do {
           "a newline at the end, once")
     check(ScriptFile.contents(of: "a\nb") == "a\nb\n" && !ScriptFile.contents(of: "echo hi").hasPrefix("#!"), "and no shebang or header added")
 }
+checkSavingACodeBlock()
 
 // MARK: Cursor animation
 
-do {
+func checkCursorAnimation() {
     check(CursorAnimation.none.loop == nil, "no animation has no loop")
     check(CursorAnimation.allCases.count == 6, "six choices")
     check(Set(CursorAnimation.allCases.map(\.rawValue)).count == 6, "the choices have different names")
@@ -4899,6 +4960,7 @@ do {
     check((try? JSONDecoder().decode([CursorAnimation].self, from: encoded)) == CursorAnimation.allCases, "the choices survive being saved")
     check(CursorAnimation(rawValue: "teleport") == nil, "a name from a newer build reads as nothing, for the caller to default")
 }
+checkCursorAnimation()
 
 // MARK: Markdown to HTML
 
@@ -4907,7 +4969,7 @@ do {
 // Python, which was also fuzzed with 30,000 random documents; the rule they share is
 // that every character of the output is escaped text or a tag the converter wrote
 // itself, from a short list, properly nested, with attributes from a short list.
-do {
+func checkMarkdownToHTML() {
     let cases: [(String, String, String)] = [
         ("# Hi", "<h1 id=\"hi\">Hi</h1>", "heading"),
         ("###### Six\n####### Seven", "<h6 id=\"six\">Six</h6><p>####### Seven</p>", "six levels, not seven"),
@@ -5149,10 +5211,11 @@ do {
     check(MarkdownHTML.render(String(repeating: "a", count: MarkdownHTML.maxInput + 500)).count <= MarkdownHTML.maxInput + 20,
           "the source is cut at the limit")
 }
+checkMarkdownToHTML()
 
 // MARK: Font import
 
-do {
+func checkFontImport() {
     for good in ["JetBrainsMono-Regular.ttf", "a.otf", "Fonts.ttc", "x.OTC", "UPPER.TTF", "My Font (1).ttf"] {
         check(FontImport.refusal(fileName: good, size: 1000) == nil, "importable: \(good)")
     }
@@ -5211,6 +5274,7 @@ do {
     check(FontImport.groups([]).isEmpty, "no faces, no families")
     check(FontImport.sampleText.contains("\u{F07B}") && FontImport.sampleText.contains("Il1"), "the sample shows a symbol and look-alike letters")
 }
+checkFontImport()
 
 // MARK: Reconnecting a dropped ssh session
 
@@ -5218,7 +5282,7 @@ do {
 // messages are what OpenSSH really printed in each case, copied from runs against a
 // local sshd; the statuses are what waitpid gave for them, which is what SwiftTerm hands
 // over undecoded (an exit with code 255 arrives as 255 << 8 = 65280, `exit 3` as 768).
-do {
+func checkReconnectingADroppedSshSession() {
     // 255, as waitpid reports it and as a decoder would.
     check(AutoReconnect.isConnectionError(terminationStatus: 65280) && AutoReconnect.isConnectionError(terminationStatus: 255),
           "exit 255 is a lost connection, however it is written")
@@ -5359,12 +5423,13 @@ do {
             && AutoReconnect.waitAfterNetworkReturns(remaining: .nan, jitterSample: 0.5) == 2.5,
           "a wait that is not a number is treated as none")
 }
+checkReconnectingADroppedSshSession()
 
 // MARK: Connection defaults (ssh -G)
 
 // A keep-alive, a connect timeout and a second try, filled in only where ssh
 // would otherwise use its own defaults — never over a value someone set.
-do {
+func checkConnectionDefaultsSshG() {
     // The shape `ssh -G` prints: a lowercase name, a space, the value.
     let printed = """
     host example.com
@@ -5444,10 +5509,11 @@ do {
             && SSHDefaults.query(ssh: "/no/such/ssh", arguments: [], destination: "x") == nil,
           "an ssh that fails, or is not there, gives no answer")
 }
+checkConnectionDefaultsSshG()
 
 // MARK: A terminal tab's connection problem
 
-do {
+func checkATerminalTabSConnectionProblem() {
     let host = SSHConnection(name: "Web", host: "web1.example.com", username: "me")
     let lost: Int32 = 65280  // ssh's 255, as the wait status SwiftTerm hands over
     func diagnose(_ tail: String, ran: TimeInterval = 2, status: Int32? = lost, on connection: SSHConnection = host) -> RemoteProblem? {
@@ -5522,11 +5588,12 @@ do {
             && !TabConnectionProblem.neverConnected("Connection to x closed by remote host."),
           "the words that mean ssh never connected")
 }
+checkATerminalTabSConnectionProblem()
 
 // MARK: Models a local server offers
 
 // Only a server on this Mac is asked, with no key, and what comes back is names.
-do {
+func checkModelsALocalServerOffers() {
     func url(_ base: String) -> String? { LocalModels.listURL(baseURL: base)?.absoluteString }
     check(url("http://127.0.0.1:11434/v1") == "http://127.0.0.1:11434/v1/models", "Ollama's address: \(String(describing: url("http://127.0.0.1:11434/v1")))")
     check(url("http://localhost:1234/v1/") == "http://localhost:1234/v1/models" && url("http://localhost:1234/v1///") == "http://localhost:1234/v1/models",
@@ -5559,10 +5626,11 @@ do {
     check(LocalModels.parse(Data(repeating: 0x20, count: LocalModels.maxResponseBytes + 1)).isEmpty, "a huge reply is not read")
     check(names(#"{"data":[{"id":"<script>alert(1)</script>"}]}"#) == ["<script>alert(1)</script>"], "a name is only text; the menu shows it as such")
 }
+checkModelsALocalServerOffers()
 
 // MARK: Bundled tools on PATH
 
-do {
+func checkBundledToolsOnPATH() {
     let tools = "/Applications/iTERMiNAL.app/Contents/Resources/Tools/bin"
     check(ToolsPath.appending(tools, to: "/usr/bin:/bin") == "/usr/bin:/bin:" + tools, "the tools folder goes last")
     check(ToolsPath.appending(tools, to: "/usr/bin:/bin:" + tools) == "/usr/bin:/bin:" + tools, "already there: left alone")
@@ -5585,10 +5653,11 @@ do {
     check(ToolsPath.appending("/a\nb", to: "/usr/bin") == "/usr/bin", "a newline cannot be in an entry")
     check(ToolsPath.appending("/a\0b", to: "/usr/bin") == "/usr/bin", "a NUL cannot be in an entry")
 }
+checkBundledToolsOnPATH()
 
 // MARK: Editor command
 
-do {
+func checkEditorCommand() {
     func installed(_ names: [String: String]) -> (String) -> String? {
         { names[$0] }
     }
@@ -5678,6 +5747,7 @@ do {
     check(EditorChoice.automatic.candidates.first == "hx", "automatic looks for Helix first")
     check(EditorChoice.custom.candidates.isEmpty, "a custom command has no program to look for")
 }
+checkEditorCommand()
 
 // MARK: Opening folders from outside the window
 
@@ -5685,7 +5755,7 @@ do {
 // Services menu comes to: the folders to open, each once, in the order asked; a file
 // standing for the folder it is in; anything odd ignored; and no more than the limit.
 // What a path is on disk is handed in, so none of this touches the machine it runs on.
-do {
+func checkOpeningFoldersFromOutsideTheWindow() {
     let disk: [String: OpenFolders.Kind] = [
         "/Users/me/work": .folder, "/Users/me/work/notes.txt": .file, "/Users/me/other": .folder,
         "/Users/me/My Projects": .folder, "/": .folder, "/top.txt": .file,
@@ -5743,12 +5813,13 @@ do {
     check(plan(paths("~/work\n~/work/notes.txt\nnot a path\n\"/Users/me/other\"")).folders == ["/Users/me/work", "/Users/me/other"],
           "text goes through the same rules as files")
 }
+checkOpeningFoldersFromOutsideTheWindow()
 
 // MARK: Finding a file from the palette
 
 // The files under a folder, found without going where nobody means to search, and ranked for
 // what was typed: a match in the name above one in the folders, the shorter path first on a tie.
-do {
+func checkFindingAFileFromThePalette() {
     // Which folders may be walked at all.
     check(FileSearch.isSearchable(root: "/Users/me/work", home: "/Users/me"), "a project folder is searched")
     check(FileSearch.isSearchable(root: "/Users/me/Documents/proj", home: "/Users/me"), "a project inside Documents is searched")
@@ -5869,6 +5940,7 @@ do {
         check(false, "the test folder could not be made: \(error)")
     }
 }
+checkFindingAFileFromThePalette()
 
 // MARK: Terminal profiles
 
@@ -5876,7 +5948,7 @@ do {
 // without a shell: which variables are accepted and in what order they are set, which
 // startup commands are typed (one plain line, and nothing else), where a start folder
 // resolves to, and how a profile is summed up and named.
-do {
+func checkTerminalProfiles() {
     func profile(_ build: (inout TerminalProfile) -> Void = { _ in }) -> TerminalProfile {
         var made = TerminalProfile(name: "Work")
         build(&made)
@@ -5966,6 +6038,7 @@ do {
         check(false, "profiles can be saved and read back")
     }
 }
+checkTerminalProfiles()
 
 // MARK: Profile appearance
 
@@ -5974,7 +6047,7 @@ do {
 // and a choice not made leaves the settings in charge; that a size is kept in range; that a
 // profile saved before these existed still reads, as following the settings; and the same for
 // the host's profile reference.
-do {
+func checkProfileAppearance() {
     func profile(_ build: (inout TerminalProfile) -> Void = { _ in }) -> TerminalProfile {
         var made = TerminalProfile(name: "p")
         build(&made)
@@ -6057,10 +6130,11 @@ do {
         check(false, "a host with a profile can be saved and read back")
     }
 }
+checkProfileAppearance()
 
 // MARK: Tab order
 
-do {
+func checkTabOrder() {
     let a = UUID(), b = UUID(), c = UUID(), d = UUID(), missing = UUID()
     check(TabOrder.placing(c, before: a, in: [a, b, c]) == [c, a, b], "a tab dragged to the top goes before the first")
     check(TabOrder.placing(a, before: c, in: [a, b, c]) == [b, a, c], "a tab dragged down goes before its target")
@@ -6082,13 +6156,14 @@ do {
         }
     }
 }
+checkTabOrder()
 
 // MARK: Skills
 
 // A skill is text for the composer's input. What is checked is what goes in: normalised, one
 // plain block with only a tab and a line break as control characters, and added after what is
 // already typed rather than over it; and how a skill reads in a list.
-do {
+func checkSkills() {
     func skill(name: String = "Deploy", note: String = "", text: String) -> Skill {
         Skill(name: name, note: note, text: text)
     }
@@ -6137,10 +6212,11 @@ do {
         check(false, "skills can be saved and read back")
     }
 }
+checkSkills()
 
 // MARK: Terminal types
 
-do {
+func checkTerminalTypes() {
     check(TerminalType.resolve("xterm-ghostty") == .ghostty, "a terminal type is read from its TERM name")
     check(TerminalType.resolve("nonsense") == .default && TerminalType.resolve("") == .default,
           "a name this build does not know falls back to the default")
@@ -6174,6 +6250,7 @@ do {
     check(TerminfoLookup.directories(home: "/h", environment: [:]).contains("/Applications/Ghostty.app/Contents/Resources/terminfo"),
           "a Ghostty install's terminfo is searched")
 }
+checkTerminalTypes()
 
 // MARK: SSH keys
 
@@ -6182,7 +6259,7 @@ do {
 // tested against the real thing; the rest is what must be refused, and the commands
 // written for a tab, which are made only from names that were checked, are quoted,
 // and are never run from here.
-do {
+func checkSSHKeys() {
     let hashes = [
         "0kM/FikOXCUaXgXwgayL9cZwr9LK8lRPg23nzv9P0+0", "+TTeHeOkcUDbbYFDHR8FYwRX+XV662t6g1XRBsqAqQU",
         "HMjFK4D0K4r0CSQ1iO0y5FQdKCkHIoOSjxIAS/ijPzg", "vwjekhL+aEG5Jlkk8Kr0njIMqYdLh9ZTPFbSIksRNU4",
@@ -6339,12 +6416,13 @@ do {
         check(!kind.label.isEmpty && kind.options.hasPrefix("-t ") && !kind.defaultName.isEmpty, "\(kind) is described")
     }
 }
+checkSSHKeys()
 
 // MARK: Exit status of a process
 
 // SwiftTerm passes on the raw wait status. These are the values real processes
 // gave (an `exit 3` is 768, an ssh that lost its connection 65280).
-do {
+func checkExitStatusOfAProcess() {
     let cases: [(Int32?, Int32?)] = [
         (0, 0), (256, 1), (512, 2), (768, 3), (65280, 255), (32512, 127), (9, 137), (15, 143), (1, 129), (6, 134),
         (139, 139), (0x8B, 139), (0x7F, nil), (0x137F, nil), (nil, nil), (-1, nil), (Int32.min, nil),
@@ -6356,10 +6434,11 @@ do {
         if let code = ExitStatus.code(fromWaitStatus: status) { check(code >= 0 && code <= 255 + 127, "\(status) gave \(code)") }
     }
 }
+checkExitStatusOfAProcess()
 
 // MARK: Port forwards and host options
 
-do {
+func checkPortForwardsAndHostOptions() {
     let local = PortForward(kind: .local, bindPort: 8080, targetHost: "localhost", targetPort: 80)
     check(local.arguments == ["-L", "127.0.0.1:8080:localhost:80"], "a local forward binds the loopback")
     let remote = PortForward(kind: .remote, bindPort: 9000, targetHost: "localhost", targetPort: 22)
@@ -6414,13 +6493,14 @@ do {
         check(false, "a connection with forwards can be saved and read back")
     }
 }
+checkPortForwardsAndHostOptions()
 
 // MARK: Quick Look in the file browser
 
 // What is handed to the system's previewer: files, never folders; any local file as it
 // is; a remote one only if it is small enough to be worth fetching to look at. And the
 // name the fetched copy is given: one component, nothing odd in it, the extension kept.
-do {
+func checkQuickLookInTheFileBrowser() {
     let cap = QuickLookPolicy.maxRemoteBytes
 
     check(QuickLookPolicy.refusal(isDirectory: true, isRemote: false, size: nil) == .folder, "a local folder is not previewed")
@@ -6461,6 +6541,7 @@ do {
     let longOddExt = String(repeating: "z", count: 300) + "." + String(repeating: "e", count: 40)
     check(QuickLookPolicy.safeFileName(longOddExt) == "preview", "a long extension is not kept")
 }
+checkQuickLookInTheFileBrowser()
 
 // MARK: Scripted commands on hosts
 
@@ -6469,7 +6550,7 @@ do {
 // so across saving, loading and importing; the command line that results from a command or
 // from words; the time limit; how ssh's own failure is told from the command's status; the
 // cap on output; and what is said back and noted.
-do {
+func checkScriptedCommandsOnHosts() {
     func connection(allow: Bool = true, name: String = "web1", host: String = "web1.example.com",
                     transport: SSHTransport = .ssh, jumpHosts: String = "") -> SSHConnection {
         SSHConnection(name: name, host: host, username: "deploy", transport: transport, jumpHosts: jumpHosts, allowScriptedCommands: allow)
@@ -6593,10 +6674,11 @@ do {
     check(ScriptedCommand.summary(of: ran) == "exit 0" && ScriptedCommand.summary(of: ScriptedCommand.outcome(status: 2, output: "", errorOutput: "", timedOut: false)) == "exit 2", "the note says how it ended")
     check(ScriptedCommand.summary(of: slow) == "timed out" && ScriptedCommand.summary(of: refused).hasPrefix("didn't run: "), "including when it did not")
 }
+checkScriptedCommandsOnHosts()
 
 // MARK: Listening ports
 
-do {
+func checkListeningPorts() {
     let ss = """
     State   Recv-Q  Send-Q   Local Address:Port    Peer Address:Port Process
     LISTEN  0       4096     127.0.0.1:8080        0.0.0.0:*     users:(("node",pid=12,fd=19))
@@ -6658,10 +6740,11 @@ do {
             && !ListeningPort(port: 22, address: "*", process: nil).isLikelyWeb, "web ports are told apart")
     check(ListeningPort(port: 22, address: "*", process: nil).forwardHost == "localhost", "a wildcard port is reached as localhost")
 }
+checkListeningPorts()
 
 // MARK: Tunnels
 
-do {
+func checkTunnels() {
     let plain = SSHConnection(name: "n", host: "h", username: "u")
     check(TunnelPlan.specification(localPort: 5000, targetHost: "h", targetPort: 80) == "127.0.0.1:5000:h:80",
           "a forward listens on the loopback")
@@ -6696,10 +6779,11 @@ do {
         check(false, "a free local port can be found")
     }
 }
+checkTunnels()
 
 // MARK: Host shorthand
 
-do {
+func checkHostShorthand() {
     func targets(_ text: String) -> [HostShorthand.Target]? {
         if case .targets(let list) = HostShorthand.parse(text) { return list }
         return nil
@@ -6728,10 +6812,11 @@ do {
           "text that is not one host is refused, not trimmed to something that passes")
     check(invalid("-p") && invalid("-p abc host"), "an option without its value is refused")
 }
+checkHostShorthand()
 
 // MARK: Host lookup
 
-do {
+func checkHostLookup() {
     func kind(_ text: String) -> HostLookup.Kind? { HostLookup.classify(text)?.kind }
     check(kind("127.0.0.1") == .loopback && kind("::1") == .loopback, "loopback")
     check(kind("10.1.2.3") == .privateNetwork && kind("172.16.0.1") == .privateNetwork
@@ -6750,10 +6835,11 @@ do {
     check(HostLookup.Kind.publicInternet.isRoutableFromInternet && !HostLookup.Kind.privateNetwork.isRoutableFromInternet,
           "only a public address is routable from the internet")
 }
+checkHostLookup()
 
 // MARK: Ghostty themes and the settings that sit beside them
 
-do {
+func checkGhosttyThemesAndTheSettingsThatSitBesideThem() {
     var palette = ""
     for index in 0..<16 { palette += "palette = \(index)=#\(String(0x100000 + index, radix: 16))\n" }
     let sample = "# a comment\nbackground = #1e1e2e\nforeground = cdd6f4\nfont-family = Menlo\nkeybind = x=y\n" + palette
@@ -6806,10 +6892,11 @@ do {
     check(SplitFocusStyle.allCases.count == 4 && SplitFocusStyle(rawValue: "standard") == .standard
             && SplitFocusStyle(rawValue: "nope") == nil, "focus styles")
 }
+checkGhosttyThemesAndTheSettingsThatSitBesideThem()
 
 // MARK: Background tunnels and location lookups
 
-do {
+func checkBackgroundTunnelsAndLocationLookups() {
     let host = SSHConnection(name: "n", host: "h", username: "u")
     let local = PortForward(kind: .local, bindPort: 8080, targetHost: "localhost", targetPort: 80)
     check(TunnelPlan.savedArguments(for: host, forward: local)
@@ -6890,10 +6977,11 @@ do {
         check(false, "a sloppy answer is still read")
     }
 }
+checkBackgroundTunnelsAndLocationLookups()
 
 // MARK: Visual option limits
 
-do {
+func checkVisualOptionLimits() {
     check(VisualRange.clamp(1.0, to: VisualRange.lineSpacing) == 1.0, "a value in range is kept")
     check(VisualRange.clamp(0.1, to: VisualRange.lineSpacing) == 0.8 && VisualRange.clamp(9, to: VisualRange.lineSpacing) == 1.6,
           "line spacing is held to its range")
@@ -6906,10 +6994,11 @@ do {
     check(FrameStyle.parseHex("") == nil && FrameStyle.parseHex("#12") == nil && FrameStyle.parseHex("zzzzzz") == nil,
           "an empty or damaged override means no override")
 }
+checkVisualOptionLimits()
 
 // MARK: The VNC protocol's bytes
 
-do {
+func checkTheVNCProtocolSBytes() {
     func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
     check(RFB.parseVersion(bytes("RFB 003.008\n")) == RFB.Version(major: 3, minor: 8), "a version is read")
     check(RFB.parseVersion(bytes("RFB 003.889\n")) == RFB.Version(major: 3, minor: 889), "Apple's 3.889 is read as written")
@@ -6992,6 +7081,7 @@ do {
     check(RFBAuth.response(challenge: [1, 2, 3], password: "x") == nil, "a challenge that is not 16 bytes gets no answer")
     #endif
 }
+checkTheVNCProtocolSBytes()
 
 // MARK: Reading a log for the assistant
 
@@ -6999,7 +7089,7 @@ do {
 // is checked: how files are read (tails, line and character boundaries, what is refused), how
 // text is cut and notes grouped, how many requests there can be, what the sheet says it will
 // send, and the sequence of requests itself, against a sender that only records.
-do {
+func checkReadingALogForTheAssistant() {
     let fm = FileManager.default
     let folder = NSTemporaryDirectory() + "log-check-\(UUID().uuidString)"
     try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -7231,13 +7321,14 @@ do {
         check(false, "a cancelled analysis ends in cancellation")
     }
 }
+checkReadingALogForTheAssistant()
 
 // MARK: Reading a selection
 
 // What the right-click menu offers for selected text: an address to open, a
 // file that is really there, or just text — and nothing about a path for a
 // remote session, a missing file, or something a terminal would act on.
-do {
+func checkReadingASelection() {
     let home = "/Users/me"
     let folder = "/Users/me/code"
     let there: Set<String> = [
@@ -7285,12 +7376,13 @@ do {
     check(read(String(repeating: "a", count: TerminalSelection.maxLength + 1)) == .text, "a very long selection is text")
     check(!asked.isEmpty && asked.allSatisfy { $0.hasPrefix("/") && !$0.contains("//") && !$0.contains("/./") }, "only tidy absolute paths are looked up: \(asked.prefix(4))")
 }
+checkReadingASelection()
 
 // MARK: Explaining a selection
 
 // A selection is not an error, so it is asked about differently, named
 // differently to the person, and masked and cut like any other text.
-do {
+func checkExplainingASelection() {
     let secret = "AKIAIOSFODNN7EXAMPLE"
     let selected = ErrorHelpRequest.make(
         kind: .explainSelection, command: nil,
@@ -7310,12 +7402,13 @@ do {
     check(selected.consentMessage.contains("2 lines of selected text") && selected.consentMessage.contains("api.openai.com"), "the question names what and where: \(selected.consentMessage)")
     check(selected.command == nil && selected.workingDirectory == nil && selected.gitBranch == nil, "a selection carries no command or folder of its own")
 }
+checkExplainingASelection()
 
 // MARK: Explaining a typed command
 
 // A command that has not run has no output: it is asked about differently, never
 // described as output, and masked like anything else that is sent.
-do {
+func checkExplainingATypedCommand() {
     let secret = "AKIAIOSFODNN7EXAMPLE"
     let request = ErrorHelpRequest.make(
         kind: .explainCommand, command: "aws s3 rm s3://b --recursive --key \(secret)", rawOutput: "",
@@ -7337,10 +7430,11 @@ do {
     check(ErrorHelpRequest.make(kind: .explain, command: nil, rawOutput: "a\nb", baseURL: "https://a.b").contents == ["2 lines of output"],
           "the other kinds are unchanged")
 }
+checkExplainingATypedCommand()
 
 // MARK: Local model presets
 
-do {
+func checkLocalModelPresets() {
     let address = "http://127.0.0.1:1234/v1"
     check(AssistantProvider.lmstudio.baseURL == address && AssistantProvider.matching(baseURL: address) == .lmstudio, "LM Studio's own default address is its preset")
     check(AssistantProvider.lmstudio.label == "LM Studio (local)" && AssistantProvider.lmstudio.defaultModel == nil && AssistantProvider.lmstudio.keysPage == nil, "it has no stock model and no keys page")
@@ -7355,10 +7449,11 @@ do {
     check(!addresses.contains { $0.contains(":8080/") || $0.contains(":9931/") },
           "and no preset guesses a port llama-server might be listening on")
 }
+checkLocalModelPresets()
 
 // MARK: RIR delegation files and MMDB City records
 
-do {
+func checkRIRDelegationFilesAndMMDBCityRecords() {
     let file = """
     2.3|ripencc|1700000000|5|19830705|20261104|+0100
     # a comment
@@ -7437,6 +7532,7 @@ do {
     check(GeoProvider.allCases.contains(.rirDelegations) && !GeoProvider.rirDelegations.leavesTheMac,
           "the registries' files are read on this Mac")
 }
+checkRIRDelegationFilesAndMMDBCityRecords()
 
 // MARK: The cheatsheet
 
@@ -7444,7 +7540,7 @@ do {
 // every tool the composer completes (a program's flags are read from that table, so a page for each is
 // how they get shown); then how the table's text is read, how a command is split into its placeholders,
 // and what a search finds and says about it.
-do {
+func checkTheCheatsheet() {
     // The table.
     let library = CheatsheetCurated.library
     check(CheatsheetCurated.problems.isEmpty, "the cheatsheet table is sound: \(CheatsheetCurated.problems)")
@@ -7606,9 +7702,10 @@ do {
         check(zip(found.programs, found.programs.dropFirst()).allSatisfy { $0.score >= $1.score }, "so are programs for \"\(query)\"")
     }
 }
+checkTheCheatsheet()
 
 // The tldr-pages data, as the converter writes it, and how it joins the pages written for the app.
-do {
+func checkTheCheatsheet2() {
     let fixture = """
     {"format":1,"version":"9.9","pages":[
       {"n":"tool","p":"common","s":"A tool","u":"https://example.com/tool",
@@ -7691,12 +7788,13 @@ do {
     check(real.search("gc", token: given).isEmpty, "a search that was given up returns nothing")
     check(!real.search("gc", token: CheatSearchToken()).isEmpty, "one that was not still finds what it should")
 }
+checkTheCheatsheet2()
 
 // Finding a command by what its words mean: the words, the router that chooses between letters and
 // meaning, the ranking, and the assistant's part. The ranking is checked on the pages written for
 // the app, where every answer is known, and again against the real tldr-pages data by
 // --check-cheatsheets (above), where it has to tell the right command from thousands of others.
-do {
+func checkTheCheatsheet3() {
     // Words.
     check(CheatText.words("Undo the last commit!") == ["undo", "the", "last", "commit"], "words are lower-cased and stripped of marks")
     check(CheatText.words("git cherry-pick HEAD~1 --soft") == ["git", "cherry", "pick", "head", "1", "soft"], "a hyphen or a tilde is a gap")
@@ -7845,11 +7943,12 @@ do {
         check(picked(#"[{"n": 1}]"#).isEmpty && picked("[[1]]").isEmpty && picked("[null, true]").count <= 1, "an array of anything else picks nothing sensible")
     }
 }
+checkTheCheatsheet3()
 
 // The manual page: the Cheatsheet reads `man` on the Mac and shows the parts that say how a program is called. The page
 // below is written the way mandoc writes one, which was checked against its real output (bold is each letter twice with a
 // backspace between, underline an underscore, a backspace and the letter), and run through everything that follows.
-do {
+func checkTheCheatsheet4() {
     func bold(_ s: String) -> String { s.map { "\($0)\u{8}\($0)" }.joined() }
     func under(_ s: String) -> String { s.map { "_\u{8}\($0)" }.joined() }
     check(bold("fakeip") == "f\u{8}fa\u{8}ak\u{8}ke\u{8}ei\u{8}ip\u{8}p" && under("name") == "_\u{8}n_\u{8}a_\u{8}m_\u{8}e",
@@ -8032,14 +8131,16 @@ do {
     check(reader(Calls(), ManPageReader.Outcome(status: 0, output: minimized, timedOut: false)).read("ipconfig") == .missing,
           "and so is missing, though man exited zero")
 }
+checkTheCheatsheet4()
 
 // MARK: Rail item for the cheatsheet
 
-do {
+func checkRailItemForTheCheatsheet() {
     check(RailItem.cheatsheet.isPinnable && !RailItem.defaultPinned.contains(.cheatsheet),
           "the cheatsheet can be pinned, and starts out under the menu")
     check(RailPins.decode(["cheatsheet", "tasks", "cheatsheet", "bogus"]) == [.cheatsheet, .tasks], "it is kept when pins are read back")
 }
+checkRailItemForTheCheatsheet()
 
 // MARK: Dock layout
 
@@ -8047,7 +8148,7 @@ do {
 // (Workspace/DockLayout.swift, DockGeometry.swift). The tree is the saved state
 // and the thing every drag and menu choice edits, so each rule is pinned here.
 
-do {
+func checkDockLayout() {
     func dLeaf(_ id: String) -> DockNode { .leaf(id) }
     func dRow(_ children: [(Double, DockNode)]) -> DockNode {
         .split(.horizontal, children.map { DockChild(weight: $0.0, node: $0.1) })
@@ -8564,10 +8665,11 @@ do {
     check(landings > 500, "the random drags found places to land (\(landings))")
     check(landedWell, "any drop leaves a valid layout of the same panels, never on the dragged one, with its picture inside the region (\(landingFailure))")
 }
+checkDockLayout()
 
 // MARK: A destination that ssh would read as an option
 
-do {
+func checkADestinationThatSshWouldReadAsAnOption() {
     let plain = SSHConnection(name: "n", host: "build.example.com", username: "deploy")
     check(plain.destinationProblem == nil && plain.connectionRefusal == nil, "an ordinary host and user go on a command line")
     check(SSHConnection(name: "n", host: "h", username: "").destinationProblem == nil, "no user name is fine")
@@ -8599,10 +8701,11 @@ do {
     scripted.username = "u"
     check(ScriptedCommand.refusal(for: scripted) == nil, "…and allowed once it is fixed")
 }
+checkADestinationThatSshWouldReadAsAnOption()
 
 // MARK: A host from an imported snapshot
 
-do {
+func checkAHostFromAnImportedSnapshot() {
     // Asking first is saved with the host, and a host saved before it existed does not ask.
     let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"n","host":"h"}"#
     check((try? JSONDecoder().decode(SSHConnection.self, from: Data(old.utf8)))?.confirmBeforeConnecting == false,
@@ -8647,10 +8750,11 @@ do {
           "control and invisible characters are shown as a dot")
     check(hostile.count < 700 && hostile.contains("…"), "a long value is cut in the middle (\(hostile.count) characters)")
 }
+checkAHostFromAnImportedSnapshot()
 
 // MARK: A saved layout this build cannot read
 
-do {
+func checkASavedLayoutThisBuildCannotRead() {
     let fm = FileManager.default
     let folder = URL(fileURLWithPath: NSTemporaryDirectory() + "unreadable-state-check-\(UUID().uuidString)")
     try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -8681,10 +8785,11 @@ do {
     check(second != nil && second?.lastPathComponent != name, "a second one in the same second does not replace the first")
     check(first.map { fm.fileExists(atPath: $0.path) } == true, "the first is still there")
 }
+checkASavedLayoutThisBuildCannotRead()
 
 // MARK: Request lines on the API socket
 
-do {
+func checkRequestLinesOnTheAPISocket() {
     func bytes(_ text: String) -> Data { Data(text.utf8) }
     func drain(_ buffer: inout RequestLineBuffer) -> [RequestLineBuffer.Next] {
         var out: [RequestLineBuffer.Next] = []
@@ -8747,6 +8852,7 @@ do {
     check(refusedAfter == 12_288 && most <= 10_000 + 4096,
           "a line with no end is refused once it passes the limit (after \(refusedAfter ?? -1) bytes, holding at most \(most))")
 }
+checkRequestLinesOnTheAPISocket()
 
 // MARK: The Bytes panel
 
@@ -8784,7 +8890,7 @@ final class BytesCheckShortSource: ByteSource {
 
 // MARK: Bytes: sources
 
-do {
+func checkBytesSources() {
     let source = DataByteSource([10, 11, 12, 13, 14])
     check(source.count == 5, "a data source knows its length")
     check(source.read(1..<3) == [11, 12], "it reads a range")
@@ -8793,8 +8899,9 @@ do {
     check(source.read(-4..<2) == [10, 11], "a range that starts before the beginning starts at it")
     check(DataByteSource([]).read(0..<10).isEmpty, "an empty source gives nothing")
 }
+checkBytesSources()
 
-do {
+func checkBytesSources2() {
     let fileManager = FileManager.default
     let folder = NSTemporaryDirectory() + "bytes-check-\(UUID().uuidString)/"
     try? fileManager.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -8940,10 +9047,11 @@ do {
     check(BytesFilePolicy.refusal(forMode: S_IFSOCK | 0o600) == .special("a socket"), "and a socket")
     check(BytesFilePolicy.refusal(forMode: S_IFBLK | 0o600) == .special("a block device"), "and a disk")
 }
+checkBytesSources2()
 
 // MARK: Bytes: where the characters go
 
-do {
+func checkBytesWhereTheCharactersGo() {
     let hex16 = HexGeometry(bytesPerRow: 16)
     check(hex16.cellsStart == 10 && hex16.cellColumn(0) == 10 && hex16.cellColumn(7) == 31, "the cells start after the offset and a gutter")
     check(hex16.cellColumn(8) == 35 && hex16.cellColumn(15) == 56, "and a group of eight is followed by a wider gap")
@@ -9033,10 +9141,11 @@ do {
     check(fit(108) == 16 && fit(109) == 24 && fit(141) == 24 && fit(142) == 32 && fit(273) == 48 && fit(5000) == 64, "up to sixty-four")
     check(fit(90, radix: .binary) == 4 && fit(91, radix: .binary) == 8, "binary is wider and fits fewer")
 }
+checkBytesWhereTheCharactersGo()
 
 // MARK: Bytes: the selection
 
-do {
+func checkBytesTheSelection() {
     let one = ByteSelection(at: 5)
     check(one.range == 5..<6 && one.count == 1 && one.lowerBound == 5 && one.upperBound == 5, "one byte is a selection of one")
     let backwards = ByteSelection(anchor: 10, head: 4)
@@ -9071,10 +9180,11 @@ do {
     check(spanning.indices(inRow: 2, bytesPerRow: 16) == 0..<4 && spanning.indices(inRow: 3, bytesPerRow: 16) == nil, "and the start of the last, and none after")
     check(ByteSelection(at: 20).indices(inRow: 1, bytesPerRow: 16) == 4..<5 && ByteSelection(at: 20).indices(inRow: 0, bytesPerRow: 16) == nil, "a byte is in one row only")
 }
+checkBytesTheSelection()
 
 // MARK: Bytes: what the bytes might be
 
-do {
+func checkBytesWhatTheBytesMightBe() {
     func reading(_ bytes: [UInt8], _ label: String, _ order: Endianness = .little) -> String? {
         ByteInterpreter.interpret(bytes, endianness: order).first { $0.label == label }?.value
     }
@@ -9126,10 +9236,11 @@ do {
     check(Set(ByteInterpreter.interpret([1, 2, 3, 4, 5, 6, 7, 8], endianness: .little).map(\.label)).count
           == ByteInterpreter.interpret([1, 2, 3, 4, 5, 6, 7, 8], endianness: .little).count, "each reading has its own name")
 }
+checkBytesWhatTheBytesMightBe()
 
 // MARK: Bytes: go to
 
-do {
+func checkBytesGoTo() {
     func go(_ text: String, cursor: Int64 = 100, length: Int64 = 1000) -> Int64? {
         if case .success(let offset) = OffsetExpression.resolve(text, cursor: cursor, length: length) { return offset }
         return nil
@@ -9156,10 +9267,11 @@ do {
     check([OffsetExpression.Failure.empty, .notANumber, .outOfRange(length: 7)].allSatisfy { OffsetExpression.message($0).count > 10 }, "each failure has a sentence")
     check(OffsetExpression.message(.outOfRange(length: 7)).contains("7 bytes"), "which names the length")
 }
+checkBytesGoTo()
 
 // MARK: Bytes: copying out
 
-do {
+func checkBytesCopyingOut() {
     let hello: [UInt8] = [0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x0A]
     check(ByteExport.string(hello, as: .spacedHex) == "48 65 6C 6C 6F 0A", "hex, spaced")
     check(ByteExport.string(hello, as: .hex) == "48656C6C6F0A", "hex")
@@ -9173,10 +9285,11 @@ do {
     check(ByteExport.string([], as: .cArray) == "unsigned char data[] = {};" && ByteExport.string([], as: .pythonBytes) == "b\"\"", "in a form that is still valid")
     check(ByteExportFormat.allCases.allSatisfy { !$0.title.isEmpty }, "every format has a name")
 }
+checkBytesCopyingOut()
 
 // MARK: Bytes: editing
 
-do {
+func checkBytesEditing() {
     func makeBuffer(_ bytes: [UInt8]) -> ByteEditBuffer { ByteEditBuffer(source: DataByteSource(bytes)) }
     func ok(_ body: () throws -> Void) -> Bool {
         do { try body(); return true } catch { return false }
@@ -9436,6 +9549,7 @@ do {
         check(false, "the file to edit opens")
     }
 }
+checkBytesEditing()
 
 // MARK: The Bytes panel's structure view
 
@@ -9507,7 +9621,7 @@ func structureProblems(_ roots: [FieldNode], fileLength: Int64, limit: Int = 200
     return problems
 }
 
-do {
+func checkTheBytesPanelSStructureView() {
     // CRC-32: the check value every implementation is held to, and PNG's own end chunk.
     check(CRC32.checksum(Array("123456789".utf8)) == 0xCBF4_3926, "the CRC-32 of 123456789 is 0xCBF43926")
     check(CRC32.checksum(Array("IEND".utf8)) == 0xAE42_6082, "and of IEND the value every PNG ends with")
@@ -9587,10 +9701,11 @@ do {
     for i in 0..<5000 { wide.append(FieldNode(id: "w\(i)", name: "W\(i)", offset: Int64(i) * 10, length: 10, kind: .bytes)) }
     check(FieldNode.chain(containing: 49_999, in: wide).map(\.name) == ["W4999"] && FieldNode.chain(containing: 25_000, in: wide).map(\.name) == ["W2500"], "five thousand siblings are searched, not walked")
 }
+checkTheBytesPanelSStructureView()
 
 // MARK: What a file is
 
-do {
+func checkWhatAFileIs() {
     func identity(_ bytes: [UInt8], length: Int64? = nil) -> String? {
         FormatDetector.identify(head: bytes, length: length ?? Int64(bytes.count))?.id
     }
@@ -9618,10 +9733,11 @@ do {
     check(gzip.identity?.id == "gzip" && gzip.message.contains("gzip") && gzip.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
     check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf", "gif", "bmp", "ico", "webp", "tiff", "jxl", "heic", "avif", "jp2", "zip", "elf", "macho"], "eighteen formats so far, four of them read by the MP4 parser: \(FormatRegistry.parserIDs.sorted())")
 }
+checkWhatAFileIs()
 
 // MARK: PNG
 
-do {
+func checkPNG() {
     func png(_ name: String, _ hex: String) -> (bytes: [UInt8], result: StructureResult) {
         let bytes = structureBytes(hex)
         return (bytes, FormatRegistry.analyze(DataByteSource(bytes)))
@@ -9718,6 +9834,7 @@ do {
     stopped.isCancelled = { true }
     check(FormatRegistry.analyze(DataByteSource(pillow.bytes), context: stopped).outcome.problems.contains("Stopped before the end of the file."), "a parse that is cancelled says it stopped")
 }
+checkPNG()
 
 // MARK: Packet captures
 
@@ -9746,7 +9863,7 @@ func structurePath(_ roots: [FieldNode], _ path: String) -> FieldNode? {
     return found
 }
 
-do {
+func checkPacketCaptures() {
     func analyze(_ hex: String) -> (bytes: [UInt8], result: StructureResult, tree: [FieldNode]) {
         let bytes = structureBytes(hex)
         let result = FormatRegistry.analyze(DataByteSource(bytes))
@@ -9891,10 +10008,11 @@ do {
     check(FieldNode.chain(containing: Int64(24 + 58 * 12_345 + 20), in: large.outcome.roots).map(\.name) == ["Packet 12346", "Packet data", "Ethernet II", "Destination"], "and a byte in the middle of them is found without opening the rest")
     check(Date().timeIntervalSince(started) < 20, "in a few seconds")
 }
+checkPacketCaptures()
 
 // MARK: pcapng
 
-do {
+func checkPcapng() {
     func analyze(_ hex: String) -> (bytes: [UInt8], result: StructureResult, tree: [FieldNode]) {
         let bytes = structureBytes(hex)
         let result = FormatRegistry.analyze(DataByteSource(bytes))
@@ -9968,6 +10086,7 @@ do {
     wrongOrder[8] = 0x11
     check(FormatRegistry.analyze(DataByteSource(wrongOrder)).outcome.problems.first?.contains("byte-order magic") == true, "a section header with a bad byte-order magic says so")
 }
+checkPcapng()
 
 // MARK: Parsers and hostile files
 
@@ -9976,7 +10095,7 @@ do {
 // with its magic. Whatever comes back must be a sound tree: every field inside the file and
 // its parent, in order. A parser that trapped, or looped, or read outside what it was given,
 // would not finish this.
-do {
+func checkParsersAndHostileFiles() {
     let fixtures: [(String, String)] = [
         ("PNG by Pillow", "89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082"), ("PNG, many chunks", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c636080032e1139080200035c00b52cac443b0000000049454e44ae426082"), ("PNG, indexed", "89504e470d0a1a0a0000000d49484452000000020000000208030000004568fd1600000009504c5445ff000000ff000000ff2d4acd8a0000000274524e53ff80080fb36a0000000e49444154789c6360606460620000000e0004c6887cf80000000049454e44ae426082"),
         ("PNG, bad CRC", "89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000000467414d410000b18f0bfc6105000000017352474200aece1ce9000000097048597300000b1300000b1301009a9c180000000774494d4507e4021d0c22381f1828cc0000000b744558745469746c650048656c6c6fcdcfc0cf0000001049444154789c639f80032e1139080200035c00b52cac443b0000000049454e44ae426082545241494c455221"), ("pcap", "d4c3b2a1020004000000000000000000ffff000001000000d202964940e201004a0000004a00000066778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307d302964920a10700470000004700000066778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001d4029649000000002a0000002a000000ffffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002d50296493f420f00360000003600000066778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768d602964901000000460000004600000033330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121d702964990d003003c000000bf05000000112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31"), ("pcap, big-endian, nanoseconds", "a1b23c4d0002000400000000000000000000ffff00000001499602d2075bca000000004a0000004a66778899aabb00112233445508004500003c123440004006e8ac0a0000015db8d822c93a0050000003e800000000a002faf03fc00000020405b40402080a000000010000000001030307499602d31dcd6500000000470000004766778899aabb0011223344550800450000394321000040111d830a00000108080808cf84003500253438123401000001000000000000076578616d706c6503636f6d0000010001499602d4000000000000002a0000002affffffffffff001122334455080600010800060400010011223344550a0000010000000000000a000002499602d53b9ac618000000360000003666778899aabb00112233445581006064080045000024000700008001b776c0a8010ac0a8010108005435123400016162636465666768499602d6000003e8000000460000004633330000000100112233445586dd62a1234500103a40fe800000000000000000000000000001ff0200000000000000000000000000018000beef0042000170696e6736212121499602d70ee6b2800000003c000005bf00112233445566778899aabb0800450005b1999900003706a4d25db8d8220a0000010050c93a00001388000003e9501801f65e470000485454502f31"),
@@ -10053,6 +10172,7 @@ do {
     // Whole files of nothing, and of everything.
     check(sound([UInt8](repeating: 0, count: 5000)) == nil && sound([UInt8](repeating: 0xFF, count: 5000)) == nil, "files of zeros and of 0xFF have nothing to show, and no trouble showing it")
 }
+checkParsersAndHostileFiles()
 
 // MARK: JPEG and MP4
 
@@ -10100,7 +10220,7 @@ func structureNumber(_ text: String?) -> Int64? {
     return Int64(digits)
 }
 
-do {
+func checkJPEGAndMP4() {
     let jpegFixtures: [(String, String)] = [
         ("baseline", "ffd8ffe000104a46494600010100000100010000ffe1004a4578696600004d4d002a000000080003010f0002000000080000003201120003000000010006000001310002000000080000003a000000005465737443616d0067656e20312e3000ffe200254943435f50524f46494c45000101494343444154414943434441544149434344415441fffe000c68656c6c6f206a706567ffdb0043000a07070807060a0808080b0a0a0b0e18100e0d0d0e1d15161118231f2524221f2221262b372f26293429212230413134393b3e3e3e252e4449433c48373d3e3bffdb0043010a0b0b0e0d0e1c10101c3b2822283b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3bffc00011080020002803012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f0073c3e6c4b2952675de5dda35c6012b8f7e0f53ce0f1dcd2c8af24664454f23ccf9c292150f5dd8e38c023f1eb51c51f9a994958187682c482f927b0070dc1ea0608c919c8a9a580fcad0b2ac68708530bb5800490460804e47ae73d7072010a62585bf731294e5903119ea4755eb804f3d3a9a7bcb12a8585f69f2d8e7697e39247f789c10476381c81c5456eb04b72f23cf811b1d848040da482c3819fe123938cf4f5487ed50dbf96cae8eacde77cf91f781e07f09c9ce40c73f85004be62c891971e7799210441f217639c119faa9edc0e838a2a70774f2c6ae196145c6171c82bce771e324f51d89ed450057c279994390ae503336232a327208f739ee38fa52a4735bbc70346cb222f980c64ef3d7040e78c8c668798476cd1a79241215c152cf9c64b11dba8cf5c8cfe2af1dc97f29242de536e0182f60707f0cf5e7af3ea401b108ace5122ed925473f3103f7630a39eac32bce33c1cf39cd467ec52449223ed28d9c072be5a8f4ff0003d09fc9df63dc825925404382523c28fbc58b60f71d33ea38cf5a7de469bc9977db02731866e002bf305c2ffb3c71ea00eb40046255b80ca248485da10abff0939f55fccf4f971dc94ad1ba10b70f919663fbb572013bbb7a9ea1b9c927a6082803ffd9"), ("progressive", "ffd8ffe000104a46494600010100000100010000ffdb0043000d090a0b0a080d0b0a0b0e0e0d0f13201513121213271c1e17202e2931302e292d2c333a4a3e333646372c2d405741464c4e525352323e5a615a50604a51524fffdb0043010e0e0e131113261515264f352d354f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4fffc20011080020002803012200021101031101ffc400160001010100000000000000000000000000020001ffc40014010100000000000000000000000000000000ffda000c03010002100310000001d8b023829c0ad30ee95b1fffc4001d100002020203010000000000000000000000011121021012223141ffda00080101000105028a3d55a434286d4a5f4b428c5f58b99ab38996bfffc40014110100000000000000000000000000000020ffda0008010301013f015fffc40014110100000000000000000000000000000020ffda0008010201013f015fffc4001e100001020701000000000000000000000000112101103141516171b1ffda0008010100063f025b9a29018cf0e0c54f48ea486e582c20aa3b0e7fffc400221000020202010305000000000000000000011100213141516171d18191a1b1f0ffda0008010100013f212d451b2bd216430ad6b020ec1a709c0b474e3040791e87faa03144fda72021851c9381af3294820bdbacd40b01e253ae53d400a08162eb32c2881f696020a4794a0ca1d124614303bb6610e85abb98306703bb821e5c59e91119fc033fffda000c03010002000300000010224c18730fffc40014110100000000000000000000000000000020ffda0008010301013f105fffc40014110100000000000000000000000000000020ffda0008010201013f105fffc4002110010002010403010101000000000000000111213100415161718191a1c1e1ffda0008010100013f108a49988704c3ba7cc35bba30fd9d226662aa07eea09436465c64ce5bf3a10426699726395847e59a9a9c373266cfab6c78d5b0a82a8c976261cec424e6b4b491a140872a25938fb98644551a48410a2313b25b13f6b205c186386e6437d0c8402208c36cb52b936d6eb90413709b1f73c578d1cd1456cbb3aa8d001945b1583394ab8db59889294271fef3a2006216c37d7ef5da132ca012c8954db2735fab91960036187d7bef96c04413086498e7fa6ac214c9a01b041d57c37d2c09095cc059db9de7bf3affd9"), ("gray", "ffd8ffe000104a46494600010100000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffc0000b080020002801011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007326f40e41320ddb98a8e83231efd7f5fad0e19977a85f2f77cc012029eb9c71e8698b878cfeed015e4a83f9751d7bf34e6740008ce3e53d8b7a9c7a9e31fa526e0caa586fdcf83e5fca58f3cfea0fe1f4a445debf2b91b3009382724fd79ebf423d78a91e33c18c80aa7008c0c1ea718e7dbf3eb8a8a211bcaccd260293b72071824123a67b1ea71491f9c916d2195813e67cdc751f91e73902ac03991d43021146303dc73d4f73dc545f2efca9c80c54127e5c0cf39fc695564899632a43a8dc0a93b8fb8a44d903861867563c9c7c838fc471ce3b537f70c8acad82a73c311b47f9f5f5a728712820347c60290dd8fe5fe71ee559c2c4557cb3ce181196ce39247e5f852b2ca5b62b13b0e7040ec0ff009eff00d4b3c8ca876750430caae00ea4938f5fea29d70abbb2fba219ca8278008e40e3da82aca4094f1927ee8620139edfae7dfeb5ffd9"),
         ("cmyk", "ffd8ffee000e41646f626500640000000000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffc000140800100010044311004d11005911004b1100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda000e0443004d0059004b00003f00f40af40af40a69f9b07cccf63d4027aff8514514e2a5cfdee0f27f4e99a28a29ab969082e379c0042f4f7fe5cd14514e53f706ee84a9c8ea7f2f6affd9"), ("restart", "ffd8ffe000104a46494600010100000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffdb0043011112121815182f1a1a2f634238426363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363ffc00011080020002803012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffdd00040002ffda000c03010002110311003f007326f40e41320ddb98a8e83231efd7f5fad0e19977a85f2f77cc012029eb9c71e86988bbd7e572366012704e49faf3d7e847af1523c6783190154e0118183d4e31cfb7e7d714011ae1e33fbb405792a0fe5d475efcd399d0002338f94f62dea71ea78c7e94c8846f2b334980a4edc81c609048e99ec7a9c5247e7245b4865604f99f371d47e479ce40a00fffd03706552c37ee7c1f2fe52c79e7f507f0fa515283991d43021146303dc73d4f73dc5140117cbbf2a720315049f97033ce7f1a555922658ca90ea3702a4ee3ee28670b1155f2cf3860465b38e491f97e14acb296d8ac4ec39c103b03fe7bff005201ffd113640e18619d58f271f20e3f11c738ed4dfdc322b2b60a9cf0c46d1fe7d7d697c8ca876750430caae00ea4938f5fea29d70abbb2fba219ca8278008e40e3da801143894101a3e301486ec7f2ff0038f72529565204a78c93f7431009cf6fd73eff005a2803ffd9"), ("trailer", "ffd8ffe000104a46494600010100000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffc0000b080020002801011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007326f40e41320ddb98a8e83231efd7f5fad0e19977a85f2f77cc012029eb9c71e8698b878cfeed015e4a83f9751d7bf34e6740008ce3e53d8b7a9c7a9e31fa526e0caa586fdcf83e5fca58f3cfea0fe1f4a445debf2b91b3009382724fd79ebf423d78a91e33c18c80aa7008c0c1ea718e7dbf3eb8a8a211bcaccd260293b72071824123a67b1ea71491f9c916d2195813e67cdc751f91e73902ac03991d43021146303dc73d4f73dc545f2efca9c80c54127e5c0cf39fc695564899632a43a8dc0a93b8fb8a44d903861867563c9c7c838fc471ce3b537f70c8acad82a73c311b47f9f5f5a728712820347c60290dd8fe5fe71ee559c2c4557cb3ce181196ce39247e5f852b2ca5b62b13b0e7040ec0ff009eff00d4b3c8ca876750430caae00ea4938f5fea29d70abbb2fba219ca8278008e40e3da82aca4094f1927ee8620139edfae7dfeb5ffd9545241494c494e47204441544120414654455220454f49")
@@ -10201,8 +10321,9 @@ do {
     }
     check(unsound.isEmpty, "\(runs) cut, changed and random JPEGs all give sound trees: \(unsound.prefix(4))")
 }
+checkJPEGAndMP4()
 
-do {
+func checkJPEGAndMP42() {
     let mp4Fixtures: [(String, String)] = [
         ("h264.mp4", "000000206674797069736f6d0000020069736f6d69736f32617663316d703431000005796d6f6f760000006c6d766864000000000000000000000000000003e8000000c800010000010000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000030000025e7472616b0000005c746b68640000000300000000000000000000000100000000000000c800000000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000001000000010000000000024656474730000001c656c73740000000000000001000000c80000000000010000000001d66d646961000000206d646864000000000000000000000000000028000000080055c400000000002d68646c72000000000000000076696465000000000000000000000000566964656f48616e646c657200000001816d696e6600000014766d68640000000100000000000000000000002464696e660000001c6472656600000000000000010000000c75726c2000000001000001417374626c000000bd737473640000000000000001000000ad61766331000000000000000100000000000000000000000000000000001000100048000000480000000000000001154c61766336302e33312e313032206c696278323634000000000000000000000018ffff000000336176634301f4000affe1001767f4000a91969ec044000003000400000300503c489a8001000568ce0f1920fff8f80000000010706173700000000100000001000000146274727400000000000098f8000098f800000018737474730000000000000001000000020000040000000014737473730000000000000001000000010000001c7374736300000000000000010000000100000001000000010000001c7374737a000000000000000000000002000003ca00000009000000187374636f0000000000000002000007ec00000d50000002457472616b0000005c746b686400000003000000000000000000000002000000000000006400000000000000000000000101000000000100000000000000000000000000000001000000000000000000000000000040000000000000000000000000000024656474730000001c656c73740000000000000001000000640000040000010000000001bd6d646961000000206d64686400000000000000000000000000001f400000072055c400000000002d68646c720000000000000000736f756e000000000000000000000000536f756e6448616e646c657200000001686d696e6600000010736d686400000000000000000000002464696e660000001c6472656600000000000000010000000c75726c20000000010000012c7374626c0000007e7374736400000000000000010000006e6d7034610000000000000001000000000000000000010010000000001f4000000000003665736473000000000380808025000200048080801740150000000000bb800000878d0580808005158856e5000680808001020000001462747274000000000000bb800000878d00000020737474730000000000000002000000010000040000000001000003200000001c7374736300000000000000010000000100000001000000010000001c7374737a000000000000000000000002000002430000019a000000187374636f0000000000000002000005a900000bb60000001a7367706401000000726f6c6c0000000200000001ffff0000001c7362677000000000726f6c6c00000001000000020000000100000062756474610000005a6d657461000000000000002168646c7200000000000000006d6469726170706c0000000000000000000000002d696c737400000025a9746f6f0000001d6461746100000001000000004c61766636302e31362e3130300000000866726565000007b86d646174de02004c61766336302e33312e3130320002346851acd0e46d85cb9e37aa9ebc975bd4cf392599335935da23ffe51c5769f3ee8bb5749b35c69a470d89b946d7b238eb49a62d9f5531c9653a158725b4d69f64abb62b4cc572e92dbba1ad9d15c5bc4b54ebef85a9813287ecd904848a723045330088844ebdeb1a1cba1cd59043ff95021e52d23b8b9b74d5934f5b38ebd1db707c2e6e7707bafbbcec5cadcf3ab6ab271ab6351aa8af9291251226635e2999d14a65a8b7c96998cf08253cf8455bc736aad6ba2b4cc6bc532d457c96a2df25a6635e2998d79f25a8b7c9689bf78a9b1b8a3333b8af92d45bf78a6635e2998d79f25a8b7de289bef15a5bfcba5bfca8bee7bd7dcfa9d2dfe545fe545c6e537d4cb2a2fb9f53f73d874b7e6d17a32fa32cb2cb2cbe899f4761977b951cbfe5d87d1f91fa3f9b33f9bd87d1965965965965965965965965971965955299951ca8e594cca671472a3625338a3c51aa533281e28e54666503c40e546c2303c40f146c2362503c40dd1b08c8e20643e9afd5b27f7d7e1c10fcebfdea27f9ecfcc610fbe7f8a727f44be4e90fc5cfcbe27fa13fc6610fc91fe5bc9fd40fb9643ec57c4e27f977fb4043f3d1f96327f835fc7510fa0ff3e89fe167e5010fcf7fe2589fe56bf32e43eb27e0f89fd33f8fc43f235f5849fe7b3f29a43f0f3f94b27f373eb090fb93f1449fe75bf0b843f319f9ac27f667f14e43e797cbd27f8bafa5043f3cdf92827f8c0fcc590f9d7f7249fd82f90643f30df81e27f9b4fce290fb9bf91827f2cfe8d10fc22fd0227f9c4fc7d7000002540605ffff50dc45e9bde6d948b7962cd820d923eeef78323634202d20636f7265203136342072333130382033316531396639202d20482e3236342f4d5045472d342041564320636f646563202d20436f70796c65667420323030332d32303233202d20687474703a2f2f7777772e766964656f6c616e2e6f72672f783236342e68746d6c202d206f7074696f6e733a2063616261633d30207265663d31206465626c6f636b3d303a303a3020616e616c7973653d303a30206d653d646961207375626d653d30207073793d31207073795f72643d312e30303a302e3030206d697865645f7265663d30206d655f72616e67653d3136206368726f6d615f6d653d31207472656c6c69733d30203878386463743d302063716d3d3020646561647a6f6e653d32312c313120666173745f70736b69703d31206368726f6d615f71705f6f66667365743d3620746872656164733d31206c6f6f6b61686561645f746872656164733d3120736c696365645f746872656164733d30206e723d3020646563696d6174653d3120696e7465726c616365643d3020626c757261795f636f6d7061743d3020636f6e73747261696e65645f696e7472613d3020626672616d65733d3020776569676874703d30206b6579696e743d323530206b6579696e745f6d696e3d3130207363656e656375743d3020696e7472615f726566726573683d302072633d637266206d62747265653d30206372663d32332e302071636f6d703d302e36302071706d696e3d302071706d61783d3639207170737465703d342069705f726174696f3d312e34302061713d3000800000016e6588843a084003a00020ce1ca05d5b0796bdea562c6fc00166cd56fe6404c3405bf72d0542b8f8b83451a5b80440415eae72a1111b6fd5d88008023144423872f4f1e652ddad008a0a539f0835ca783855ff160080231c308a2b9a834c3dc2fca7880001017000100707dc1c01004600158ec016aaa028709dfd3408ca434f1887d83802008c0800802300765c07e22020d12bfb6e720037ae40080bebfe000b68004b401000990461491b48ff7e0017a5fb82859f8e214e8629bd580a1fb120d8120d89b8049100c155fb482d8467b49706c1706c0f06c0f06c018342389b0085c707dbd418d123c1b03c1b0cc003681423bb0321fe32008de0004c000c00096194820e8ba492182384002c452e6c884703f8aabf682213247e5503d97cf8401008c08020118a2220d87d354c76ed28844200e126ed258080460b01008c0e0201181c04023005408b842162a005886478bc9ea10540e0201181c040231340344d262d3f68159c05ef40e213d7a00118342db496422800000088c2200dd3a9798a9bee9b839bb56e99e92bcfb56c0ec2ccbc4799bdef9cdb1ebd99fc57876d2f85d09f9ed17f69e86eb6f6dde9fa6d8ffd9e88a98168865d064e1f879118fe8091c35a9ec5412136674117432034129b2a51ac471344952e004b9974025ca76e4eb308d6998238946460acac56482995c24464f4cc085df34483eede45f6dcd1f92ccfd53e2bb37b4e81f7d87f3dcdb7ae2792e3d3fc6701af616f39d3fed2f18ea8d2d7a1f12d2c57f59a286b2a89e4f1b04fd22b278dc6cc7e7995246daa454956b22da88aa6ad64e5890a9da94c53120d5ddb7cd5d58c617cd5d58c616635c94d182e36c94d182e2525335638c497cd5d58c607357252982cd6c94a56b31494d15ae3125f35638c487357553181cd6c94a56b31494a1a2a492a21a28d05922a8928aac7410a924a886d5345491544945563a48aa24a886d5345492544945563a48aa24a0436a9a2a492a21a2ab1d24551251558e9a2a492a21b54d3448aa24a2ab1d64ad04a886d5345495344945563a48ad04b10daa68a924a8a1ab58e922a892c55aab2549700000005419a206250"), ("frag.mp4", "0000001c6674797069736f350000020069736f3569736f366d703431000002ec6d6f6f760000006c6d766864000000000000000000000000000003e8000000000001000001000000000000000000000000010000000000000000000000000000000100000000000000000000000000004000000000000000000000000000000000000000000000000000000000000002000001ee7472616b0000005c746b68640000000300000000000000000000000100000000000000000000000000000000000000000000000000010000000000000000000000000000000100000000000000000000000000004000000000100000001000000000018a6d646961000000206d646864000000000000000000000000000028000000000055c400000000002d68646c72000000000000000076696465000000000000000000000000566964656f48616e646c657200000001356d696e6600000014766d68640000000100000000000000000000002464696e660000001c6472656600000000000000010000000c75726c2000000001000000f57374626c000000a97374736400000000000000010000009961766331000000000000000100000000000000000000000000000000001000100048000000480000000000000001154c61766336302e33312e313032206c696278323634000000000000000000000018ffff000000336176634301f4000affe1001767f4000a91969ec044000003000400000300503c489a8001000568ce0f1920fff8f800000000107061737000000001000000010000001073747473000000000000000000000010737473630000000000000000000000147374737a000000000000000000000000000000107374636f0000000000000000000000286d766578000000207472657800000000000000010000000100000000000000000000000000000062756474610000005a6d657461000000000000002168646c7200000000000000006d6469726170706c0000000000000000000000002d696c737400000025a9746f6f0000001d6461746100000001000000004c61766636302e31362e313030000000706d6f6f66000000106d666864000000000000000100000058747261660000001c74666864000200380000000100000400000003ca010100000000001474666474010000000000000000000000000000207472756e00000205000000020000007802000000000003ca00000009000003db6d646174000002540605ffff50dc45e9bde6d948b7962cd820d923eeef78323634202d20636f7265203136342072333130382033316531396639202d20482e3236342f4d5045472d342041564320636f646563202d20436f70796c65667420323030332d32303233202d20687474703a2f2f7777772e766964656f6c616e2e6f72672f783236342e68746d6c202d206f7074696f6e733a2063616261633d30207265663d31206465626c6f636b3d303a303a3020616e616c7973653d303a30206d653d646961207375626d653d30207073793d31207073795f72643d312e30303a302e3030206d697865645f7265663d30206d655f72616e67653d3136206368726f6d615f6d653d31207472656c6c69733d30203878386463743d302063716d3d3020646561647a6f6e653d32312c313120666173745f70736b69703d31206368726f6d615f71705f6f66667365743d3620746872656164733d31206c6f6f6b61686561645f746872656164733d3120736c696365645f746872656164733d30206e723d3020646563696d6174653d3120696e7465726c616365643d3020626c757261795f636f6d7061743d3020636f6e73747261696e65645f696e7472613d3020626672616d65733d3020776569676874703d30206b6579696e743d323530206b6579696e745f6d696e3d3130207363656e656375743d3020696e7472615f726566726573683d302072633d637266206d62747265653d30206372663d32332e302071636f6d703d302e36302071706d696e3d302071706d61783d3639207170737465703d342069705f726174696f3d312e34302061713d3000800000016e6588843a084003a00020ce1ca05d5b0796bdea562c6fc00166cd56fe6404c3405bf72d0542b8f8b83451a5b80440415eae72a1111b6fd5d88008023144423872f4f1e652ddad008a0a539f0835ca783855ff160080231c308a2b9a834c3dc2fca7880001017000100707dc1c01004600158ec016aaa028709dfd3408ca434f1887d83802008c0800802300765c07e22020d12bfb6e720037ae40080bebfe000b68004b401000990461491b48ff7e0017a5fb82859f8e214e8629bd580a1fb120d8120d89b8049100c155fb482d8467b49706c1706c0f06c0f06c018342389b0085c707dbd418d123c1b03c1b0cc003681423bb0321fe32008de0004c000c00096194820e8ba492182384002c452e6c884703f8aabf682213247e5503d97cf8401008c08020118a2220d87d354c76ed28844200e126ed258080460b01008c0e0201181c04023005408b842162a005886478bc9ea10540e0201181c040231340344d262d3f68159c05ef40e213d7a000000005419a206250000000436d6672610000002b746672610100000000000001000000000000000100000000000000000000000000000308010101000000106d66726f0000000000000043"), ("qt.mov", "00000014667479707174202000000200717420200000000877696465000007f86d646174000001b3001007000001b610c09b0bb00f8420780fe3c1e03f71066c7c258424c258060200863f051342501d128b93fbe5e01de12c420829d955fd1faa578c8410401c895fff2e0f982e6c3e2e4bf4b8f0da0c01c0c232b0780fd5418782384000d10c4b1e828d28943d0700701f10c208f5bd6021b00c06d38940ca55b3824efc4a6d284212120960e489d3e08d8de0f04056207cc0ec0f2506a0c2403c07f020c3b641e0604f00d127e10c1420a3052a4540883d2ed6e01f12c0e887a99503c1403696a70557803fd355fb03dcf6335a622b90c0a41e0209b0860de078081e414410010d283320803f89cb4729958923a0851277477e0f55fcbd2a26c491c2ed783d69423ff0c4122fc1957c1810da0600fefe821e0304280c0714c0781ff270bbd9419b1c87da24030e7c0cd457ad884b97d118194fd8f703fd1e6830590be6aa06681460c9c1445be0502780c9a88cd88c5b4bdac0fc1e0207bf83021a8109ae8431d792ab540c0a307006cd2e55e2fd1e81ff7cb6007a8067bf00006b05320ac50db60fcd0f050e940ae40581000ffb33f67ff264f021f0bff10cf5a6f9fffe760466093b0d7e0fed0f7a0e500bd006820106fc03f70ff3a4f009f051f157f4bdf8fefd7d039208a40c370ffd0fe00e000cb507810201fddcf7adf3f3f001f0f3f0acf3dbf700fd8002b407ff0bdf0efd0f370fa40c93087d03fffdbdf857f452f109f0a3f00ff302f705fc8101cf064f0b790eed0f7f0f3b0d67097704fffea6f90df5bff121f063f07ef232f60efb8000e305940a040ecd0fb70fc50d330a6c05010095facef53bf24af033f0fbf16cf51cfa7ffff104cd09810d9c0fdf0f410ef40a5a0601018afb9af6c5f282f013f086f1b0f430f97efefa03fd08f10c5c0ff70faf0ea90b4307020283fc6ef75cf3c9f003f020f100f44bf87ffdff022408530c0d0fff0f0d0f540c2508000380fd4cf801f421f103f0c9f05cf36df783fc01024307a90bae0ef70f5d0ff10cfe08fb037ffe31f9b1f487f113f081f0c5f299f689fb01015a06f30a410edf0f9d0f820dce09f20480ff1dfa6cf5fcf133f049f03bf2cdf594faffff6b05320ac50db60fcd0f050e940ae40581000ffb33f67ff264f021f0bff10cf5a6f9fffe760466093b0d7e0fed0f7a0e500bd006820106fc03f70ff3a4f009f051f157f4bdf8fefd7d039208a40c370ffd0fe00e000cb507810201fddcf7adf3f3f001f0f3f0acf3dbf700fd8002b407ff0bdf0efd0f370fa40c93087d03fffdbdf857f452f109f0a3f00ff302f705fc8101cf064f0b790eed0f7f0f3b0d67097704fffea6f90df5bff121f063f07ef232f60efb8000e305940a040ecd0fb70fc50d330a6c05010095facef53bf24af033f0fbf16cf51cfa7ffff104cd09810d9c0fdf0f410ef40a5a0601018afb9af6c5f282f013f086f1b0f430f97efefa03fd08f10c5c0ff70faf0ea90b4307020283fc6ef75cf3c9f003f020f100f44bf87ffdff022408530c0d0fff0f0d0f540c2508000380fd4cf801f421f103f0c9f05cf36df783fc01024307a90bae0ef70f5d0ff10cfe08fb037ffe31f9b1f487f113f081f0c5f299f689fb01015a06f30a410edf0f9d0f820dce09f20480ff1dfa6cf5fcf133f049f03bf2cdf594faffff6b05320ac50db60fcd0f050e940ae40581000ffb33f67ff264f021f0bff10cf5a6f9fffe760466093b0d7e0fed0f7a0e500bd006820106fc03f70ff3a4f009f051f157f4bdf8fefd7d039208a40c370ffd0fe00e000cb507810201fddcf7adf3f3f001f0f3f0acf3dbf700fd8002b407ff0bdf0efd0f370fa40c93087d03fffdbdf857f452f109f0a3f00ff302f705fc8101cf064f0b790eed0f7f0f3b0d67097704fffea6f90df5bff121f063f07ef232f60efb8000e305940a040ecd0fb70fc50d330a6c05010095facef53bf24af033f0fbf16cf51cfa7ffff104cd09810d9c0fdf0f410ef40a5a0601018afb9af6c5f282f013f086f1b0f430f97efefa03fd08f10c5c0ff70faf0ea90b4307020283fc6ef75cf3c9f003f020f100f44bf87ffdff022408530c0d0fff0f0d0f540c2508000380fd4cf801f421f103f0c9f05cf36df783fc01024307a90bae0ef70f5d0ff10cfe08fb037ffe31f9b1f487f113f081f0c5f299f689fb01015a06f30a410edf0f9d0f820dce09f20480ff1dfa6cf5fcf133f049f03bf2cdf594faffff6b05320ac50db60fcd0f050e940ae40581000ffb33f67ff264f021f0bff10cf5a6f9fffe760466093b0d7e0fed0f7a0e500bd006820106fc03f70ff3a4f009f051f157f4bdf8fefd7d039208a40c370ffd0fe00e000cb507810201fddcf7adf3f3f001f0f3f0acf3dbf700fd8002b407ff0bdf0efd0f370fa40c93087d03fffdbdf857f452f109f0a3f00ff302f705fc8101cf064f0b790eed0f7f0f3b0d67097704fffea6f90df5bff121f063f07ef232f60efb8000e305940a040ecd0fb70fc50d330a6c05010095facef53bf24af033f0fbf16cf51cfa7ffff104cd09810d9c0fdf0f410ef40a5a0601018afb9af6c5f282f013f086f1b0f430f97efefa03fd08f10c5c0ff70faf0ea90b4307020283fc6ef75cf3c9f003f020f100f44bf87ffdff022408530c0d0fff0f0d0f540c2508000380fd4cf801f421f103f0c9f05cf36df783fc01024307a90bae0ef70f5d0ff10cfe08fb037ffe31f9b1f487f113f081f0c5f299f689fb01015a06f30a410edf0f9d0f820dce09f20480ff1dfa6cf5fcf133f049f03bf2cdf594fa000001b651e0442a7e556fd55fdf28bb8a2b75a4cd7566069ff8ebf3d28f65052c61b4b0c0191e08a5884d0f40e08e22a30778fb0000052d6d6f6f760000006c6d766864000000000000000000000000000003e8000000c80001000001000000000000000000000000010000000000000000000000000000000100000000000000000000000000004000000000000000000000000000000000000000000000000000000000000003000002a37472616b0000005c746b68640000000300000000000000000000000100000000000000c800000000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000001000000010000000000024656474730000001c656c73740000000000000001000000c800000000000100000000021b6d646961000000206d64686400000000000000000000000000002800000008007fff00000000002d68646c72000000006d686c72766964650000000000000000000000000c566964656f48616e646c6572000001c66d696e6600000014766d68640000000100000000000000000000002c68646c720000000064686c7275726c200000000000000000000000000b4461746148616e646c65720000002464696e660000001c6472656600000000000000010000000c75726c20000000010000015a7374626c000000d6737473640000000000000001000000c66d70347600000000000000010000000046464d500000020000000200001000100048000000480000000000000001134c61766336302e33312e313032206d706567340000000000000000000000000018ffff000000606573647300000000038080804f0001000480808041201100000000030d4000004380058080802f000001b001000001b58913000001000000012000c48d8800550084021463000001b24c61766336302e33312e3130320680808001020000001070617370000000010000000100000018737474730000000000000001000000020000040000000014737473730000000000000001000000010000001c7374736300000000000000010000000100000001000000010000001c7374737a0000000000000000000000020000017c00000034000000187374636f000000000000000200000024000007e0000001f57472616b0000005c746b686400000003000000000000000000000002000000000000006400000000000000000000000101000000000100000000000000000000000000000001000000000000000000000000000040000000000000000000000000000024656474730000001c656c737400000000000000010000006400000000000100000000016d6d646961000000206d64686400000000000000000000000000001f40000003207fff00000000002d68646c72000000006d686c72736f756e0000000000000000000000000c536f756e6448616e646c6572000001186d696e6600000010736d686400000000000000000000002c68646c720000000064686c7275726c200000000000000000000000000b4461746148616e646c65720000002464696e660000001c6472656600000000000000010000000c75726c2000000001000000b07374626c0000004c7374736400000000000000010000003c736f77740000000000000001000000000000000000010010000000001f400000000000186368616e000000000064000100000000000000000000001873747473000000000000000100000320000000010000001c737473630000000000000001000000010000032000000001000000147374737a000000000000000200000320000000147374636f0000000000000001000001a0000000217564746100000019a9737772000d55c44c61766636302e31362e313030"),
         ("tone.m4a", "0000001c667479704d344120000002004d34412069736f6d69736f320000000866726565000003e56d646174de02004c61766336302e33312e3130320002346851acd0e46d85cb9e37aa9ebc975bd4cf392599335935da23ffe51c5769f3ee8bb5749b35c69a470d89b946d7b238eb49a62d9f5531c9653a158725b4d69f64abb62b4cc572e92dbba1ad9d15c5bc4b54ebef85a9813287ecd904848a723045330088844ebdeb1a1cba1cd59043ff95021e52d23b8b9b74d5934f5b38ebd1db707c2e6e7707bafbbcec5cadcf3ab6ab271ab6351aa8af9291251226635e2999d14a65a8b7c96998cf08253cf8455bc736aad6ba2b4cc6bc532d457c96a2df25a6635e2998d79f25a8b7c9689bf78a9b1b8a3333b8af92d45bf78a6635e2998d79f25a8b7de289bef15a5bfcba5bfca8bee7bd7dcfa9d2dfe545fe545c6e537d4cb2a2fb9f53f73d874b7e6d17a32fa32cb2cb2cbe899f4761977b951cbfe5d87d1f91fa3f9b33f9bd87d1965965965965965965965965971965955299951ca8e594cca671472a3625338a3c51aa533281e28e54666503c40e546c2303c40f146c2362503c40dd1b08c8e20643e9afd5b27f7d7e1c10fcebfdea27f9ecfcc610fbe7f8a727f44be4e90fc5cfcbe27fa13fc6610fc91fe5bc9fd40fb9643ec57c4e27f977fb4043f3d1f96327f835fc7510fa0ff3e89fe167e5010fcf7fe2589fe56bf32e43eb27e0f89fd33f8fc43f235f5849fe7b3f29a43f0f3f94b27f373eb090fb93f1449fe75bf0b843f319f9ac27f667f14e43e797cbd27f8bafa5043f3cdf92827f8c0fcc590f9d7f7249fd82f90643f30df81e27f9b4fce290fb9bf91827f2cfe8d10fc22fd0227f9c4fc7d70118342db496422800000088c2200dd3a9798a9bee9b839bb56e99e92bcfb56c0ec2ccbc4799bdef9cdb1ebd99fc57876d2f85d09f9ed17f69e86eb6f6dde9fa6d8ffd9e88a98168865d064e1f879118fe8091c35a9ec5412136674117432034129b2a51ac471344952e004b9974025ca76e4eb308d6998238946460acac56482995c24464f4cc085df34483eede45f6dcd1f92ccfd53e2bb37b4e81f7d87f3dcdb7ae2792e3d3fc6701af616f39d3fed2f18ea8d2d7a1f12d2c57f59a286b2a89e4f1b04fd22b278dc6cc7e7995246daa454956b22da88aa6ad64e5890a9da94c53120d5ddb7cd5d58c617cd5d58c616635c94d182e36c94d182e2525335638c497cd5d58c607357252982cd6c94a56b31494d15ae3125f35638c487357553181cd6c94a56b31494a1a2a492a21a28d05922a8928aac7410a924a886d5345491544945563a48aa24a886d5345492544945563a48aa24a0436a9a2a492a21a2ab1d24551251558e9a2a492a21b54d3448aa24a2ab1d64ad04a886d5345495344945563a48ad04b10daa68a924a8a1ab58e922a892c55aab25497000003396d6f6f760000006c6d766864000000000000000000000000000003e80000006400010000010000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000020000022d7472616b0000005c746b686400000003000000000000000000000001000000000000006400000000000000000000000101000000000100000000000000000000000000000001000000000000000000000000000040000000000000000000000000000024656474730000001c656c73740000000000000001000000640000040000010000000001a56d646961000000206d64686400000000000000000000000000001f400000072055c400000000002d68646c720000000000000000736f756e000000000000000000000000536f756e6448616e646c657200000001506d696e6600000010736d686400000000000000000000002464696e660000001c6472656600000000000000010000000c75726c2000000001000001147374626c0000006a7374736400000000000000010000005a6d7034610000000000000001000000000000000000010010000000001f4000000000003665736473000000000380808025000100048080801740150000000000bb800000878d0580808005158856e50006808080010200000020737474730000000000000002000000010000040000000001000003200000001c7374736300000000000000010000000100000002000000010000001c7374737a000000000000000000000002000002430000019a000000147374636f00000000000000010000002c0000001a7367706401000000726f6c6c0000000200000001ffff0000001c7362677000000000726f6c6c0000000100000002000000010000009875647461000000906d657461000000000000002168646c7200000000000000006d6469726170706c00000000000000000000000063696c73740000001ca96e616d00000014646174610000000100000000546f6e650000001aa9415254000000126461746100000001000000004d6500000025a9746f6f0000001d6461746100000001000000004c61766636302e31362e313030"), ("hevc.mp4", "0000001c6674797069736f6d0000020069736f6d69736f326d7034310000000866726565000002a96d646174000002792801ac461b8fd77b9ae8fbd19f354c8c59f4c02c2e2de2431ea8d518e3c193467ffff3a892a25f0d0fd5a871dbc60d0458221b86791013e8e7492f28c9faba4f7183a0eabeecdd176c27e3bb75ca21a4c2a39d63d55300ab8e42deea723c10a69ca45e6153d826c09b0ac4bb8f4247f6d8cd76de7520251e4a689f84c9387466b3e4e8f092ffffff0c37c2b3101efa09e8415ccf888f7e0083a650b56748f0c7a0ec317ab5edb45679713bcb7542bfc63b4dfaaf7d122a9841c8194f808d1d31e560b79cc132e9867235e020d7646fa057ad7a6997b6625c2b530cf9afffae30ce608a000aecfce49e54e03d381ebdbeb4d542fbeae9849169eb8285ab237ed613fa757760d447fe96725b0322291e5106b143a7c0bf85ade0cb9ab7f9ef39eda2ac4b0bb42426131275544e96cd6013352e8c6b5cc039f71ab3e52e22072bc69bb0b6e99015f9e07abf07a1b9d7e796389375751ae6bfd58c23543af57a381fa31fff2743c6a727c71c9b0818dbbd7d57ef7290fb81de1be722de8a651034898169d8e7027ba115aab038ecaabfc3706e153c25b3fdb61e93a54cb55b5f5f59ce315f322cf22c62ebc90916efcc622e96c09937f3dd4c0539cbdd8ce5de1fa10ae52c7e4b5efd70dbefec16cd5e40c21562ad4af8eb3a64f16995f9994600fe02179f9e205fe302e7f7b6563e294e7bd406801ec362d0e4c30c4920b7528be4787ab667bc0440e7f71ef434926581cdb3cd1aa54bf680b5ce07449981d71a40673febe62f781879030cba559a1e10370917cbce83175f55ad346d4a0ba84f6bba7dbb5e075368bb4aa8793054dfbe36c27607c6847ecf2eab593f9fe100dbc08893c3804457446a7039d73766333e0fc323e294733fc17f80000000200201d009788230283a2eb23d192b62830de91ce5ffe8a7c994b29aa62584007600000c816d6f6f760000006c6d766864000000000000000000000000000003e8000000c8000100000100000000000000000000000001000000000000000000000000000000010000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000200000bab7472616b0000005c746b68640000000300000000000000000000000100000000000000c800000000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000002000000010000000000024656474730000001c656c73740000000000000001000000c8000000000001000000000b236d646961000000206d646864000000000000000000000000000028000000080055c400000000002d68646c72000000000000000076696465000000000000000000000000566964656f48616e646c65720000000ace6d696e6600000014766d68640000000100000000000000000000002464696e660000001c6472656600000000000000010000000c75726c200000000100000a8e7374626c00000a0e737473640000000000000001000009fe68766331000000000000000100000000000000000000000000000000002000100048000000480000000000000001154c61766336302e33312e313032206c696278323635000000000000000000000018ffff0000097a687663430104080000009e08000000001ef000fcfff8f800000f04a00001001740010c01ffff0408000003009e0800000300001e959409a10001002a4201010408000003009e0800000300001e9008422cb2b2ade1780b702020004000000300400000030282a2000100084401c0731830089027000108fe4e0105fffffffffffffffff92ca2de09b51747dbbb55a4fe7fc2fc4e7832363520286275696c642031393929202d20332e352b312d6630633130323262363a5b4c696e75785d5b4743432031332e322e305d5b3634206269745d20386269742b31306269742b3132626974202d20482e3236352f4845564320636f646563202d20436f7079726967687420323031332d3230313820286329204d756c7469636f7265776172652c20496e63202d20687474703a2f2f783236352e6f7267202d206f7074696f6e733a2063707569643d31313131303339206672616d652d746872656164733d31206e6f2d777070206e6f2d706d6f6465206e6f2d706d65206e6f2d70736e72206e6f2d7373696d206c6f672d6c6576656c3d322062697464657074683d3820696e7075742d6373703d33206670733d31302f3120696e7075742d7265733d333278313620696e7465726c6163653d3020746f74616c2d6672616d65733d30206c6576656c2d6964633d3020686967682d746965723d31207568642d62643d30207265663d31206e6f2d616c6c6f772d6e6f6e2d636f6e666f726d616e6365206e6f2d7265706561742d6865616465727320616e6e657862206e6f2d617564206e6f2d68726420696e666f20686173683d30206e6f2d74656d706f72616c2d6c6179657273206f70656e2d676f70206d696e2d6b6579696e743d3130206b6579696e743d32353020676f702d6c6f6f6b61686561643d3020626672616d65733d3320622d61646170743d3020622d707972616d696420626672616d652d626961733d302072632d6c6f6f6b61686561643d35206c6f6f6b61686561642d736c696365733d30207363656e656375743d3020686973742d7363656e656375743d30207261646c3d30206e6f2d73706c696365206e6f2d696e7472612d72656672657368206374753d3136206d696e2d63752d73697a653d3136206e6f2d72656374206e6f2d616d70206d61782d74752d73697a653d31362074752d696e7465722d64657074683d312074752d696e7472612d64657074683d31206c696d69742d74753d302072646f712d6c6576656c3d302064796e616d69632d72643d302e3030206e6f2d7373696d2d7264206e6f2d7369676e68696465206e6f2d74736b6970206e722d696e7472613d30206e722d696e7465723d30206e6f2d636f6e73747261696e65642d696e747261207374726f6e672d696e7472612d736d6f6f7468696e67206d61782d6d657267653d32206c696d69742d726566733d30206e6f2d6c696d69742d6d6f646573206d653d30207375626d653d30206d6572616e67653d35372074656d706f72616c2d6d7670206e6f2d6672616d652d647570206e6f2d686d65206e6f2d77656967687470206e6f2d77656967687462206e6f2d616e616c797a652d7372632d70696373206465626c6f636b3d303a30206e6f2d73616f206e6f2d73616f2d6e6f6e2d6465626c6f636b2072643d322073656c6563746976652d73616f3d30206561726c792d736b69702072736b697020666173742d696e747261206e6f2d74736b69702d66617374206e6f2d63752d6c6f73736c657373206e6f2d622d696e747261206e6f2d73706c697472642d736b697020726470656e616c74793d30207073792d72643d322e3030207073792d72646f713d302e3030206e6f2d72642d726566696e65206e6f2d6c6f73736c65737320636271706f6666733d3620637271706f6666733d362072633d637266206372663d32382e302071636f6d703d302e3630207170737465703d342073746174732d77726974653d302073746174732d726561643d30206970726174696f3d312e3430207062726174696f3d312e33302061712d6d6f64653d312061712d737472656e6774683d302e303020637574726565207a6f6e652d636f756e743d30206e6f2d7374726963742d6362722071672d73697a653d3136206e6f2d72632d677261696e2071706d61783d36392071706d696e3d30206e6f2d636f6e73742d766276207361723d31206f7665727363616e3d3020766964656f666f726d61743d352072616e67653d3120636f6c6f727072696d3d32207472616e736665723d3220636f6c6f726d61747269783d30206368726f6d616c6f633d3020646973706c61792d77696e646f773d3020636c6c3d302c30206d696e2d6c756d613d30206d61782d6c756d613d323535206c6f67322d6d61782d706f632d6c73623d38207675692d74696d696e672d696e666f207675692d6872642d696e666f20736c696365733d31206e6f2d6f70742d71702d707073206e6f2d6f70742d7265662d6c6973742d6c656e6774682d707073206e6f2d6d756c74692d706173732d6f70742d727073207363656e656375742d626961733d302e303520686973742d7468726573686f6c643d302e3033206e6f2d6f70742d63752d64656c74612d7170206e6f2d61712d6d6f74696f6e206e6f2d6864723130206e6f2d68647231302d6f7074206e6f2d6468647231302d6f7074206e6f2d6964722d7265636f766572792d73656920616e616c797369732d72657573652d6c6576656c3d3020616e616c797369732d736176652d72657573652d6c6576656c3d3020616e616c797369732d6c6f61642d72657573652d6c6576656c3d30207363616c652d666163746f723d3020726566696e652d696e7472613d3020726566696e652d696e7465723d3020726566696e652d6d763d3120726566696e652d6374752d646973746f7274696f6e3d30206e6f2d6c696d69742d73616f206374752d696e666f3d30206e6f2d6c6f77706173732d64637420726566696e652d616e616c797369732d747970653d3020636f70792d7069633d31206d61782d617573697a652d666163746f723d312e30206e6f2d64796e616d69632d726566696e65206e6f2d73696e676c652d736569206e6f2d686576632d6171206e6f2d737674206e6f2d6669656c642071702d61646170746174696f6e2d72616e67653d312e3030207363656e656375742d61776172652d71703d30636f6e666f726d616e63652d77696e646f772d6f6666736574732072696768743d3020626f74746f6d3d30206465636f6465722d6d61782d726174653d30206e6f2d7662762d6c6976652d6d756c74692d70617373800000000a6669656c010000000010706173700000000100000001000000146274727400000000000069280000692800000018737474730000000000000001000000020000040000000014737473730000000000000001000000010000001c7374736300000000000000010000000100000002000000010000001c7374737a0000000000000000000000020000027d00000024000000147374636f00000000000000010000002c00000062756474610000005a6d657461000000000000002168646c7200000000000000006d6469726170706c0000000000000000000000002d696c737400000025a9746f6f0000001d6461746100000001000000004c61766636302e31362e313030")
@@ -10363,8 +10484,9 @@ do {
     }
     check(unsound.isEmpty, "\(runs) cut, changed and random MP4s all give sound trees: \(unsound.prefix(4))")
 }
+checkJPEGAndMP42()
 
-do {
+func checkJPEGAndMP43() {
     // Little-endian Exif with a SHORT and a LONG held in the tag itself.
     let exifLE = structureJoin([0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x2E], structureASCII("Exif"), [0, 0], structureASCII("II"), [0x2A, 0, 8, 0, 0, 0],
                                [2, 0], [0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0], [0x00, 0x01, 4, 0, 1, 0, 0, 0, 100, 0, 0, 0], [0, 0, 0, 0], [0xFF, 0xD9])
@@ -10415,8 +10537,9 @@ do {
     let stopped = SourceScanner(source: DataByteSource(data), budget: 1_000_000, isCancelled: { true })
     check(stopped.isExhausted && stopped.byte(at: 0) == nil, "and when it is cancelled")
 }
+checkJPEGAndMP43()
 
-do {
+func checkJPEGAndMP44() {
     func box(_ type: String, _ payload: [UInt8]) -> [UInt8] {
         let size = UInt32(8 + payload.count)
         return structureJoin([UInt8(size >> 24), UInt8((size >> 16) & 0xFF), UInt8((size >> 8) & 0xFF), UInt8(size & 0xFF)], structureASCII(type), payload)
@@ -10444,6 +10567,7 @@ do {
     let scanData = FormatRegistry.analyze(DataByteSource(scan)).outcome.roots.first { $0.name == "Scan data" }
     check(scanData?.value == "10 bytes · 2 restart markers" && scanData.map { $0.end } == 22, "RST0 and RST7 are inside the scan, and FF 00 is data")
 }
+checkJPEGAndMP44()
 
 // MARK: PDF
 
@@ -10460,7 +10584,7 @@ func pdfObjectList(_ roots: [FieldNode]) -> [String] {
 
 func pdfText(_ parts: String...) -> [UInt8] { Array(parts.joined().utf8) }
 
-do {
+func checkPDF() {
     let pdfFixtures: [(String, String)] = [
         ("pillow", "255044462d312e340a2520637265617465642062792050696c6c6f7720504446206472697665720a332030206f626a3c3c0a2f54797065202f436174616c6f670a2f50616765732034203020520a3e3e656e646f626a0a342030206f626a3c3c0a2f54797065202f50616765730a2f436f756e7420310a2f4b696473205b203120302052205d0a3e3e656e646f626a0a352030206f626a3c3c0a2f54797065202f584f626a6563740a2f53756274797065202f496d6167650a2f57696474682032340a2f4865696768742031360a2f46696c746572202f4443544465636f64650a2f42697473506572436f6d706f6e656e7420380a2f436f6c6f725370616365202f4465766963655247420a2f4c656e677468203737300a3e3e73747265616d0affd8ffe000104a46494600010100000100010000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffdb0043010909090c0b0c180d0d1832211c213232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232ffc00011080010001803012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f002f840c1ae21dbe748cea1480ed8c607ae73ec73827b1a6acf1b4188268de1326e3b888c16018e305b00e07d3afa805239c794111d5279498e2063c842f960720f18248e3b1356155e388492ac6899d819f0a08f9b208381d4f0d8279ce6801c204f2a02f12796ca7ef019cee38ddb4609e78e01279c13d4a8f26e4431dc039918b063280c873cfdde7a9edd8f419228a00ffd90a656e6473747265616d0a656e646f626a0a312030206f626a3c3c0a2f5265736f7572636573203c3c0a2f50726f63536574205b202f504446202f496d61676543205d0a2f584f626a656374203c3c0a2f696d6167652035203020520a3e3e0a3e3e0a2f4d65646961426f78205b203020302032342e302031362e30205d0a2f436f6e74656e74732032203020520a2f54797065202f506167650a2f506172656e742034203020520a3e3e656e646f626a0a322030206f626a3c3c0a2f4c656e6774682034350a3e3e73747265616d0a712032342e303030303030203020302031362e3030303030302030203020636d202f696d61676520446f20510a0a656e6473747265616d0a656e646f626a0a362030206f626a3c3c0a2f5469746c652028feff00540069006e0079290a2f4372656174696f6e446174652028443a32303236313131363031343933385a290a2f4d6f64446174652028443a32303236313131363031343933385a290a3e3e656e646f626a0a787265660a3020370a303030303030303030302036353533362066200a30303030303031303737203030303030206e200a30303030303031323337203030303030206e200a30303030303030303430203030303030206e200a30303030303030303837203030303030206e200a30303030303030313434203030303030206e200a30303030303031333330203030303030206e200a747261696c65720a3c3c0a2f526f6f742033203020520a2f53697a6520370a2f496e666f2036203020520a3e3e0a7374617274787265660a313433320a2525454f46"), ("pypdf", "255044462d312e330a25e2e3cfd30a312030206f626a0a3c3c0a2f50726f647563657220287079706466290a2f5469746c6520285468726565207061676573290a2f417574686f72202854657374205c3035307769746820706172656e735c303531290a3e3e0a656e646f626a0a322030206f626a0a3c3c0a2f54797065202f50616765730a2f436f756e7420330a2f4b696473205b203420302052203520302052203620302052205d0a3e3e0a656e646f626a0a332030206f626a0a3c3c0a2f54797065202f436174616c6f670a2f50616765732032203020520a3e3e0a656e646f626a0a342030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a352030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a362030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a787265660a3020370a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030313130203030303030206e200a30303030303030313831203030303030206e200a30303030303030323330203030303030206e200a30303030303030333234203030303030206e200a30303030303030343138203030303030206e200a747261696c65720a3c3c0a2f53697a6520370a2f526f6f742033203020520a2f496e666f2031203020520a3e3e0a7374617274787265660a3531320a2525454f460a"), ("hand", "255044462d312e340a25e2e3cfd30a312030206f626a0a3c3c202f54797065202f436174616c6f67202f5061676573203220302052203e3e0a656e646f626a0a322030206f626a0a3c3c202f54797065202f5061676573202f4b696473205b33203020525d202f436f756e742031203e3e0a656e646f626a0a332030206f626a0a3c3c202f54797065202f50616765202f506172656e74203220302052202f4d65646961426f78205b30203020313030203130305d202f436f6e74656e7473203420302052202f5265736f7572636573203c3c203e3e203e3e0a656e646f626a0a342030206f626a0a3c3c202f4c656e677468203530203e3e0a73747265616d0a302030206d203130203130206c20532025206120636f6d6d656e74207769746820656e6473747265616d20696e736964653f0a656e6473747265616d0a656e646f626a0a787265660a3020350a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030303634203030303030206e200a30303030303030313231203030303030206e200a30303030303030323235203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f496e666f203c3c202f5469746c65202848616e64205c286275696c745c2929203e3e203e3e0a7374617274787265660a3332350a2525454f460a"),
         ("incremental", "255044462d312e340a25e2e3cfd30a312030206f626a0a3c3c202f54797065202f436174616c6f67202f5061676573203220302052203e3e0a656e646f626a0a322030206f626a0a3c3c202f54797065202f5061676573202f4b696473205b33203020525d202f436f756e742031203e3e0a656e646f626a0a332030206f626a0a3c3c202f54797065202f50616765202f506172656e74203220302052202f4d65646961426f78205b30203020313030203130305d202f436f6e74656e7473203420302052202f5265736f7572636573203c3c203e3e203e3e0a656e646f626a0a342030206f626a0a3c3c202f4c656e677468203530203e3e0a73747265616d0a302030206d203130203130206c20532025206120636f6d6d656e74207769746820656e6473747265616d20696e736964653f0a656e6473747265616d0a656e646f626a0a787265660a3020350a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030303634203030303030206e200a30303030303030313231203030303030206e200a30303030303030323235203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f496e666f203c3c202f5469746c65202848616e64205c286275696c745c2929203e3e203e3e0a7374617274787265660a3332350a2525454f460a342030206f626a0a3c3c202f4c656e677468203236203e3e0a73747265616d0a4254202f4631203132205466202848656c6c6f2920546a2045540a656e6473747265616d0a656e646f626a0a787265660a3420310a30303030303030353234203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f5072657620333235203e3e0a7374617274787265660a3630300a2525454f460a"), ("xrefstream", "255044462d312e350a25e2e3cfd30a352030206f626a0a3c3c202f54797065202f4f626a53746d202f4e2033202f4669727374203134202f46696c746572202f466c6174654465636f6465202f4c656e67746820313037203e3e0a73747265616d0a789c3354305030523036513056303753b0b151d00fa92c4855d0774e2c49ccc94f57d00f484c4f2d062a31500852b0b3e342a88048e87b67a6142b441b83e46381daf24bf34a140c315582c8a254a01cc4247ddfd494cc44a7fc0a856803a0802908c582740100994d25c70a656e6473747265616d0a656e646f626a0a362030206f626a0a3c3c202f54797065202f58526566202f53697a652037202f57205b31203220315d202f526f6f74203120302052202f46696c746572202f466c6174654465636f6465202f4c656e677468203330203e3e0a73747265616d0a789c636060f8cfc4c0ca00c48c40ccc400048c0cfc407c9f01001cd802080a656e6473747265616d0a656e646f626a0a7374617274787265660a3232330a2525454f460a")
@@ -10605,8 +10729,9 @@ do {
     }
     check(unsound.isEmpty, "\(runs) cut, changed and random PDFs all give sound trees: \(unsound.prefix(3))")
 }
+checkPDF()
 
-do {
+func checkPDF2() {
     func parse(_ bytes: [UInt8]) -> ParseOutcome { FormatRegistry.analyze(DataByteSource(bytes)).outcome }
     func objects(_ outcome: ParseOutcome) -> [FieldNode] { outcome.roots.filter { $0.id.hasPrefix("pdf/obj") } }
     let eof = "%%EOF\n"
@@ -10647,6 +10772,7 @@ do {
     let tooMuch = parse(pdfText("%PDF-1.4\n", String(repeating: "!!junk\n1 0 obj\n<< >>\nendobj\n", count: 300), eof))
     check(objects(tooMuch).count == 200 && tooMuch.problems.contains { $0.contains("Too much") }, "and 300 do: the listing gives up at 200 and says so: \(objects(tooMuch).count)")
 }
+checkPDF2()
 
 // MARK: GIF, BMP, ICO and WebP
 
@@ -10690,7 +10816,7 @@ func imgHostile(_ label: String, fixtures: [(String, [UInt8])], prefix: [UInt8],
     return unsound.isEmpty ? nil : "\(label): \(runs) runs, unsound: \(unsound.prefix(3))"
 }
 
-do {
+func checkGIFBMPICOAndWebP() {
     // ------------------------------------------------------------------ GIF
     let gifFixtures: [(String, String)] = [("anim", "47494638396110000c00810000ff000000000000000000000021ff0b4e45545343415045322e30030100000021fe066869206769660021f904000a0000002c0000000010000c000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c2830200021f90401140001002c0000000010000c008100ff0000000000000000000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c2830200021f904011e0001002c0000000010000c00810000ff00000000000000000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c283020003b"), ("still", "47494638376114000a00860000cbcbcbcacacac7c7c7c2c2c2bebebebcbcbcbababab6b6b6b4b4b4b2b2b2afafafaeaeaeadadadaaaaaaa8a8a8a7a7a7a6a6a6a3a3a3a2a2a2a1a1a1a0a0a09e9e9e9d9d9d9c9c9c9b9b9b9a9a9a9999999797979696969595959494949393939292929191919090908f8f8f8e8e8e8d8d8d8c8c8c8b8b8b8a8a8a8989898888888787878686868585858484848383838282828181818080807f7f7f7e7e7e7d7d7d7c7c7c7b7b7b7a7a7a7979797878787777777676767575757474747373737272727070706f6f6f6d6d6d6c6c6c6b6b6b6a6a6a6969696868686767676666666565656363636161616060605f5f5f5e5e5e5d5d5d5c5c5c5a5a5a5959595858585757575353534d4d4d4c4c4c4b4b4b4949494242423b3b3b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002c0000000014000a000008e40027803092e547170d4d7a4089a161c08c232e725489e164438d2c445cc4b09162c98311372ce87832e2840d1f2b6a18d850618792063316383842c2488f22448a6880e121c68d1228a07019a0a2050b073008f4e000428211225264684171e403102c200ae008f1e24883200e227c18b101460f15491858b820c442950a47849c68b0a3c69109366830310180c390194c70703041e3c907244b76d810d1814606180a244471e0a18787215792505991e3009300117ad4109020880d0d3c82c03062c2c8142318a86cb1f222c69525545e8498f002420925157e4841b0e4841314140202003b"), ("loops", "4749463839610400040081000009080700000000000000000021ff0b4e45545343415045322e30030102000021f90400050000002c00000000040004000008090001081c48b02080800021f90401050001002c00000000040004008101020300000000000000000008090001081c48b0208080003b")]
     let gifWalks: [String: [String]] = ["anim": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+12", "Application extension@25+19", "Comment extension@44+10", "Graphic control extension@54+8", "Image 1@62+38", "Graphic control extension@100+8", "Image 2@108+50", "Graphic control extension@158+8", "Image 3@166+50", "Trailer@216+1"], "still": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+384", "Image 1@397+241", "Trailer@638+1"], "loops": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+12", "Application extension@25+19", "Graphic control extension@44+8", "Image 1@52+22", "Graphic control extension@74+8", "Image 2@82+34", "Trailer@116+1"]]
@@ -10867,6 +10993,7 @@ do {
     let webpHostile = imgHostile("WebP", fixtures: webpFixtures.map { ($0.0, structureBytes($0.1)) }, prefix: Array("RIFF".utf8) + [60, 0, 0, 0] + Array("WEBP".utf8), seed: 14)
     check(webpHostile == nil, "WebPs cut, changed and random are all sound: \(webpHostile ?? "")")
 }
+checkGIFBMPICOAndWebP()
 
 // MARK: TIFF
 
@@ -10874,7 +11001,7 @@ do {
 // directory, every kind of value), read back by Pillow, with the directories found by a walker written
 // separately from the parser.
 
-do {
+func checkTIFF() {
     let tiffFixtures: [(String, String)] = [("lzw", "49492a0000030000802b204988218e0c3b841be14258628a1c56881c624538a2062ca18c362347f8e18a3c86901da444a9220a4c559427e547d964207666984810d16409ee6c8c9c17274b49e2527c79a029a85223b4a0aa95a423e95363d9c29c8aa81f2a4cdaa4a93ea8ac1d2b45eae2e2bc7eb02f6c4b5b2186cc93b4418c71238992dc65b85c630a141dd537779a500f291be23afd14298b704d9c222f0c87c422314b6c649904d3c81cb249dca41130aecc5aa606628675019f1ce851ba3b318535a7376a479abcb3475c78d825f6484da478c55e5c1af758c5b2bf7c99e05212b56c75b30c8bae17979cb53f3684a634f479aa725f5553d7db744d34a47ee2b474961f74b0256532c07e2cfa521eb727b53def33fc6387f2d7d76078f7a7bd690f0953fcd3934304049d0b83ac0ca612d04b284ebce51c1cba9065fc24cc15c2942cde2ee4db2439432f88ce22c402fc4426448a81143bc5064c54f48b271c5cdf15f0daa43e1bf1a9871bb7435a98b9c363547d082d4fdad427488b514923c482606f25a482536842268224a50249327b644b95b2cc9e594b8494bc2ecc0eb952850dece8a0634d1023b8880acbf11c55ce042ce52209ce7c04304e055c9f080e73e9633fcbc493a70cb804cca4222989c118b989146cb256ce442c2065d292e1642bd30cf9011832069bfc2a44022d146ad48f998953adc323144446e61c503bb464685d598875ad0b26c16fdb561e1a15ed030d91360baa25c7262d8d56ae2ee27c4a09b66bc3084442fa1c513f6fbb9ec410ee4c72be12236dbd1f0d56c03971dc0fbb8e365d04e5d57053e585dc505e03d5e4cb428cb4c565c9ea70e148d5f451cb7fde05041624e089a4124b08d84b92de4c93f962d2c2c2915589ce9084c02ecef0714748d1a243ef362c85abc38ec0c3ab965e49ebd384992f53b94b97d56a356a21d1f132d535294d71a2bd514ed5bc36af41c684a34c527d76e7ba78761ca25dc58268e396fa8d1508173aaae375139364fa39af42debc99085b0b4ab9d025d6cd6e643ac55f4f8b1b6b8f7d58244bf36689b54a658d202010000001030001000000180000000101030001000000100000000201030003000000d60300000301030001000000050000000601030001000000020000000f01020008000000dc0300001101040001000000080000001201030001000000060000001501030001000000030000001601030001000000100000001701040001000000f80200001a01050001000000c60300001b01050001000000ce0300001c01030001000000010000002801030001000000020000003101020008000000e4030000000000002c010000010000002c010000010000000800080008005469666643616d0067656e20312e3000"), ("multi", "49492a0008000000090000010400010000000800000001010400010000000800000002010300010000000800000003010300010000000100000006010300010000000100000011010400010000007a0000001601040001000000080000001701040001000000400000001c0103000100000001000000c80000000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000000000049492a0008000000090000010400010000000800000001010400010000000800000002010300010000000800000003010300010000000100000006010300010000000100000011010400010000003a0100001601040001000000080000001701040001000000400000001c0103000100000001000000880100006464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646400000000000049492a000800000009000001040001000000080000000101040001000000080000000201030001000000080000000301030001000000010000000601030001000000010000001101040001000000fa0100001601040001000000080000001701040001000000400000001c010300010000000100000000000000c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8000000000000"), ("be", "4d4d002a000000f600000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020200000008000000300000005800000028000000280000002848616e6443616d000000004800000001fffffffb0000000340040000000000003fc00000c000000000000028000000010000001e000000010000000f00000001000200010002000000024e0000000002000500000003000000c000000000000a0100000300000001000800000101000300000001000c0000010300030000000100010000010f0002000000080000009801110004000000030000008001120003000000010003000001160003000000010004000001170004000000030000008c011a000500000001000000a08825000400000001000000d800000000"), ("le", "49492a00f600000000000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020208000000300000005800000028000000280000002800000048616e6443616d004800000001000000fbffffff0300000000000000000004400000c03f000000c028000000010000001e000000010000000f00000001000000020001000200020000004e0000000200050003000000c0000000000000000a0000010300010000000800000001010300010000000c0000000301030001000000010000000f010200080000009800000011010400030000008000000012010300010000000300000016010300010000000400000017010400030000008c0000001a01050001000000a00000002588040001000000d800000000000000"), ("tiled", "4d4d002a000000f600000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020200000008000000300000005800000028000000280000002848616e6443616d000000004800000001fffffffb0000000340040000000000003fc00000c000000000000028000000010000001e000000010000000f00000001000200010002000000024e0000000002000500000003000000c000000000000b0100000300000001000800000101000300000001000c0000010300030000000100010000010f00020000000800000098011200030000000100030000011a000500000001000000a001420003000000010010000001430003000000010010000001440004000000030000008001450004000000030000008c8825000400000001000000d800000000")]
     // Each directory: name, offset, length, then the tags as "tag:type:count".
     let walks: [String: [String]] = ["lzw": ["IFD 0@768+198 256:3:1,257:3:1,258:3:3,259:3:1,262:3:1,271:2:8,273:4:1,274:3:1,277:3:1,278:3:1,279:4:1,282:5:1,283:5:1,284:3:1,296:3:1,305:2:8"], "multi": ["IFD 0@8+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1", "IFD 1@200+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1", "IFD 2@392+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1"], "be": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+126 256:3:1,257:3:1,259:3:1,271:2:8,273:4:3,274:3:1,278:3:1,279:4:3,282:5:1,34853:4:1"], "le": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+126 256:3:1,257:3:1,259:3:1,271:2:8,273:4:3,274:3:1,278:3:1,279:4:3,282:5:1,34853:4:1"], "tiled": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+138 256:3:1,257:3:1,259:3:1,271:2:8,274:3:1,282:5:1,322:3:1,323:3:1,324:4:3,325:4:3,34853:4:1"]]
@@ -11013,6 +11140,7 @@ do {
     }
     check(unsound.isEmpty, "\(runs) cut, changed and random TIFFs all give sound trees: \(unsound.prefix(3))")
 }
+checkTIFF()
 
 // MARK: HEIC, AVIF, JPEG 2000 and JPEG XL
 
@@ -11040,7 +11168,7 @@ func heifField(_ box: FieldNode?, _ name: String) -> String? {
     box?.resolvedChildren().first { $0.name == name }?.value
 }
 
-do {
+func checkHEICAVIFJPEG2000AndJPEGXL() {
     var wrong: [String] = []
     var fixtures: [(String, [UInt8])] = []
     do {
@@ -11447,6 +11575,7 @@ do {
     if let issue = imgHostile("JPEG XL and 2000 signatures", fixtures: [], prefix: [0xFF, 0x0A], seed: 0xB0B) { check(false, issue) } else { check(true, "random JPEG XL codestreams give sound trees") }
     if let issue = imgHostile("JP2 signature", fixtures: [], prefix: [0, 0, 0, 12] + Array("jP  ".utf8) + [0x0D, 0x0A, 0x87, 0x0A], seed: 0xC0DE) { check(false, issue) } else { check(true, "random JPEG 2000 files give sound trees") }
 }
+checkHEICAVIFJPEG2000AndJPEGXL()
 
 // MARK: ZIP
 
@@ -11464,7 +11593,7 @@ func zipLeading(_ text: String?) -> Int64? {
     return Int64(text.prefix { $0.isNumber })
 }
 
-do {
+func checkZIP() {
     var wrong: [String] = []
     var fixtures: [(String, [UInt8])] = []
     let hostile: Set<String> = ["overlap", "bad_offset", "count_lies", "comment_cut", "tiny_cd", "long_entry", "overlap_sizes"]
@@ -12372,6 +12501,7 @@ do {
     check(limited.listingLimit != nil && limited.roots.contains { $0.name == "Central directory" } && structureProblems(limited.roots, fileLength: Int64(plain.count)).isEmpty, "a limit on records stops the listing and says so")
     if let issue = imgHostile("ZIP", fixtures: fixtures, prefix: [0x50, 0x4B, 3, 4], seed: 0x21B) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random archives give sound trees") }
 }
+checkZIP()
 
 // MARK: ELF
 
@@ -12401,7 +12531,7 @@ func elfRow(_ node: FieldNode?, _ names: [String]) -> [String] {
     return names.map { elfNumber(fields[$0]) }
 }
 
-do {
+func checkELF() {
     var wrong: [String] = []
     var fixtures: [(String, [UInt8])] = []
     let hostile: Set<String> = ["bad_shoff", "bad_phoff", "huge_phnum", "short_phentsize", "short_shentsize", "section_past_end", "section_big"]
@@ -13809,6 +13939,7 @@ do {
     if let issue = imgHostile("ELF", fixtures: fixtures, prefix: [0x7F, 0x45, 0x4C, 0x46, 2, 1], seed: 0xE1F) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random files give sound trees") }
     if let issue = imgHostile("ELF 32-bit big-endian", fixtures: [], prefix: [0x7F, 0x45, 0x4C, 0x46, 1, 2], seed: 0xE20) { check(false, issue) } else { check(true, "random 32-bit big-endian files give sound trees") }
 }
+checkELF()
 
 // MARK: Mach-O
 
@@ -13882,7 +14013,7 @@ func machoRows(_ roots: [FieldNode]) -> [String] {
     return rows
 }
 
-do {
+func checkMachO() {
     var wrong: [String] = []
     var fixtures: [(String, [UInt8])] = []
     let hostile: Set<String> = ["ncmds_lies", "sizeofcmds_big", "cmdsize_small", "cmdsize_huge", "section_past_end", "symoff_past_end", "fat_bad_offset", "fat_big_count", "fat_overlap"]
@@ -14228,13 +14359,14 @@ do {
     if let issue = imgHostile("Mach-O 32-bit big-endian", fixtures: [], prefix: [0xFE, 0xED, 0xFA, 0xCE], seed: 0x4ACF) { check(false, issue) } else { check(true, "random 32-bit big-endian files give sound trees") }
     if let issue = imgHostile("universal", fixtures: [], prefix: [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2], seed: 0x4AD0) { check(false, issue) } else { check(true, "random universal files give sound trees") }
 }
+checkMachO()
 
 // MARK: Byte search
 
 // Every place a pattern starts in a file of a few kinds of byte, as Python's re finds them (overlapping, "." for a wildcard, re.I for ASCII case),
 // found here a chunk at a time, in both directions, with chunks of 1 byte up to the whole file so that a match across a join cannot hide.
 
-do {
+func checkByteSearch() {
     let bytes = structureBytes("000042610262420042426202e9ff2061ff420100e9206200610200010002410202200101426162420200200220004241e900004241ff002000e96102e900200000200100000000000201420042426262010042ff200041626201ff61620061610242000048656c6c6f2068656c6c6f2048454c4c4f02ff4262200002610242000102e942e9620202ff62424102e900ff20e942000042010000000200e962424100e9000001e90000e900ffe96101200261000061e90020e9420002000062620000614100ff610000424100200100ff20424220410000020062e900006200420020ff6100626162e900e9410001420000000000614162e9e900610241ff000000e9e942010000e901ffe900ff20002041ff0042620102e9ff00e961004200ff004161ff00004261200000ff000141026100012061626161620101ffe902410242420262200100024242000061e962ff2020ff0200ff01410001ff00000042002062e9ff4202004142200061014101e902610241420241624142614200ff0101ff4101610041ff0120000042006141ff41410041424102ff0100e90100ff20016261e962610062006162420202e9ff41e9ff6100ff62000102000000e94101000042e900e942624141e9e9020061ff0241e92061620101610062000020ffffe90042004241000000424220ff200042ff410000420020ff0100620000410020414200624100200141000100420201000202004142ff6242420042000102ff0200000061006100e9e900416100006202e9026120000041426262ff00010002ff42e9ffff6200e901000000012062610101424220410041610142480065006c006c006f0000e941ff0062006241ffe9006202e920e94201e941000000616141ff00e900614142e90001000200026141004100ff0120010020ff200200200062614261004142202000e90101e9620141000101ff42006242414141010002006241ff00ff2062e9010120002000620000002001ff2062026100e961e920000141000142e96101ff00424200024102006162416201ffe9614262200042410261e900626141e9e901610061000000006262ff006202020261626162000001e9414262020020422042200042000201002000610061e901200000e961426100414201e962610001e9006120000002000042e9000242000261ff02410000420200000202e9006161000000ff02020062426100000020004141e942ff410200ff4162000042206241ff4200480065006c006c006f0262426241ffe9202000620261002062420102614201002001ff6100002000024262414200ffe9e900024220416161ff00022061ffe94200004261422062e901ff00ff42000120004100ff00e92020610000e9004100022062620020004142e902614162006162e96120206120624101e961e96100004162006101e900ff000200416220e9420002012000420041ff62e900610020010120e9420061006200ff00ff0062004201ff200041e9e96162e90262626261e90062e90200e900ff202041620001ff000001010000004161000162ff2062e9006141004262004142e942e920ffe92000e90042612002610000ff00ff0142206102e9000042016200e9020001ff4142204142004220e9010200e9ffff006120004162e92002e90002622002010242e9ff002062ff202062e9ff4102410261614220020200410262ff006200ff6142412061014100e9ff01000061416100e900010100200001e900ff00620062000142624242000201616100000042026101020262002020ff0200426200e902ff204120620162022020200262ff62026200000202ff42020241ff42e9e90002016241204262ff006220424120ff424100ff42000061000000624161620200000100410042006200206201614242002001e9200000e90100614202004100614100e96220620041ff00420000000020000000610061410020206262ff42e902624261020020026200ff02e9012002ffe9e96100000042614200e9e96100ff020241420001ff00610200010000000162ff4242614142010062614200424102000200000041016142e900026262e900624242e902ff0100020102610042000062000200424220ff00410000e9ff0200ff01024262004201622002ff00006120e96200000101e9e941200020422000ffff0002200002416242020000e90041e96161006200612062ff020020412000620002e94220022000e90002ff61000061004200426201010241000102ff02010201026162200100ffe96242000042200002ff4261614262e9e902e9ff00ffff00200161000002ff006262ff61204200000002e90200004101004200ff0101010241410200ff62ff00e9ff00614102ff006102000101ff62012042412041ffff2001002062e9e94141e941410000020062206142614100002062e961624200e961014201614242420200ff20200142e900614200ff41010100202020612000000000e900e90061ff004100426142000062ff01410100000062004201410020416202e920424100020200616201204200020042e90100ff000000022061614242ff01e9026100204100610100424201e92000e961e941000102ff000020204100410041ff20610120ff620020200000006201016162e94141ffe9ff00ffff616201ff024100620100014161ff00014200016120000042e9006200416141e961022020000042420020e941014162626100000100e9006201020100626200ffe90100010241e96100ff61020200e9622001002000426162e942ff41026100000262e902000202e94162e9e9ff0201022041012000ffe96161ff000000410041000200ff41ff41616200e900420041000042e90001000000000200206100e942420102ff02026220ff004142ff00410061e9002002020061000200420001200142422042000041ff0100e90002e9006200620041e90042200162622000006161ff61202062424220e901610061e9e9410162410042620020020020414200410200620020e92000e902000020e9e9e92001ff012002026101ff424120410061e9206100014100610002ff0100410142200000e90000e9ffe9014200420061200000610142004200016161200100e941ff000061e94100ff00204162ff0001e9200202014200ff6262204101410000416161200000006102616100ff2041e941000262624141624201e9e962024201e90241200020002041000141612062420100ff61620241004161ff6100e92000026200614142204102006100206220ff61410001200100204101426220624242426241420000410162020000ffe9620041ff02e902ff0061e90042000001ff6100426162204201ff41e9012020ff002001010200422000ffff012061200061000141000201006202e90000e90000e94120620120ffff0042416241624242e9002000000002610200e90001020041002020616202ff61414162ffe9")
     let source = DataByteSource(bytes)
     var wrong: [String] = []
@@ -14878,6 +15010,7 @@ do {
     }
     check(sweepWrong.isEmpty, "400 random searches agree with a plain loop: \(sweepWrong.prefix(2))")
 }
+checkByteSearch()
 
 // MARK: Typing and saving
 
@@ -14885,7 +15018,7 @@ do {
 // is checked on scenarios whose answers are written out, and against a plain array on random keystrokes. Saving is checked on
 // real files in a folder made for it: what is written, what is left behind, and what is refused.
 
-do {
+func checkTypingAndSaving() {
     func buffer(_ bytes: [UInt8]) -> ByteEditBuffer { ByteEditBuffer(source: DataByteSource(bytes)) }
     func content(_ buffer: ByteEditBuffer) -> [UInt8] { buffer.read(0..<buffer.length) }
     func digits(_ text: String) -> [UInt8] { text.compactMap { UInt8(String($0), radix: 16) } }
@@ -15242,7 +15375,8 @@ do {
         try b.overwrite(at: 0, with: [9])
         var failure: ByteFileSaver.Failure?
         do { try ByteFileSaver.save(b, over: source, keepsBackup: false, freeSpace: { _ in 100 }) } catch { failure = error as? ByteFileSaver.Failure }
-        if failure != .notEnoughSpace(needed: 4, available: 100) { saveWrong.append("room: \(String(describing: failure))") }
+        // All four bytes are needed where a copy is a copy; one, where the volume clones and only the changed byte is written.
+        if failure != .notEnoughSpace(needed: 4, available: 100) && failure != .notEnoughSpace(needed: 1, available: 100) { saveWrong.append("room: \(String(describing: failure))") }
         if read(url) != [1, 2, 3, 4] { saveWrong.append("room: the file was touched") }
         // Nothing left.
         try b.delete(0..<4)
@@ -15264,6 +15398,24 @@ do {
         if read(target) != [0, 1, 2, 3, 4] || kind != .typeSymbolicLink { saveWrong.append("link: target \(read(target)), kind \(String(describing: kind))") }
     } catch { saveWrong.append("link: \(error)") }
     do {
+        // A file with another name (a hard link): replacing it would leave the other name with the old bytes, so it is refused.
+        let url = make("linked.bin", [1, 2, 3, 4])
+        let other = folder.appendingPathComponent("other-name.bin")
+        try FileManager.default.linkItem(at: url, to: other)
+        if ByteFileSaver.nameCount(ofFileAt: url.path) != 2 { saveWrong.append("hard link: \(String(describing: ByteFileSaver.nameCount(ofFileAt: url.path))) names") }
+        guard let source = open(url) else { saveWrong.append("could not open linked.bin"); throw ByteEditError.tooManyPieces }
+        var b = ByteEditBuffer(source: source)
+        try b.overwrite(at: 0, with: [9])
+        var failure: ByteFileSaver.Failure?
+        do { try ByteFileSaver.save(b, over: source, keepsBackup: true) } catch { failure = error as? ByteFileSaver.Failure }
+        if failure != .hasOtherNames(2) { saveWrong.append("hard link: \(String(describing: failure))") }
+        if read(url) != [1, 2, 3, 4] || read(other) != [1, 2, 3, 4] { saveWrong.append("hard link: a file was touched") }
+        if names().contains(where: { $0.hasSuffix(".tmp") || $0 == "linked.bin.bak" }) { saveWrong.append("hard link: something was left behind: \(names())") }
+        try FileManager.default.removeItem(at: other)
+        try ByteFileSaver.save(b, over: source, keepsBackup: false)
+        if read(url) != [9, 2, 3, 4] { saveWrong.append("hard link: with the other name gone it should save: \(read(url))") }
+    } catch { saveWrong.append("hard link: \(error)") }
+    do {
         // A save that is done can be followed by opening the file again and saving again.
         let url = make("twice.bin", [1, 2, 3])
         var source = open(url)
@@ -15279,13 +15431,25 @@ do {
     check(saveWrong.isEmpty, "saving writes what the buffer holds, keeps the permissions and the link, makes a backup if asked, and refuses over a changed file, a full disk or an empty result: \(saveWrong.prefix(3))")
     check(ByteFileSaver.message(.changedOnDisk(.grew), name: "a").contains("changed") && ByteFileSaver.message(.changedOnDisk(.replaced), name: "a").contains("replaced") && ByteFileSaver.message(.changedOnDisk(.missing), name: "a").contains("gone")
           && ByteFileSaver.message(.notEnoughSpace(needed: 5, available: 2), name: "a").contains("5 bytes") && ByteFileSaver.message(.wouldBeEmpty, name: "a").contains("no bytes")
-          && ByteFileSaver.message(.cannotWrite("denied"), name: "a").contains("denied") && ByteFileSaver.message(.lengthMismatch(written: 1, expected: 2), name: "a").contains("1 byte") && ByteFileSaver.message(.unreadable(offset: 9), name: "a").contains("9"), "every way a save fails has words")
+          && ByteFileSaver.message(.cannotWrite("denied"), name: "a").contains("denied") && ByteFileSaver.message(.lengthMismatch(written: 1, expected: 2), name: "a").contains("1 byte") && ByteFileSaver.message(.unreadable(offset: 9), name: "a").contains("9")
+          && ByteFileSaver.message(.hasOtherNames(2), name: "a").contains("1 other name ") && ByteFileSaver.message(.hasOtherNames(3), name: "a").contains("2 other names"), "every way a save fails has words")
+    check(ByteFileSaver.nameCount(ofFileAt: "/no/such/file") == nil, "a file that is not there has no count of names")
+    do {
+        var b = buffer((0..<100).map { UInt8($0) })
+        try? b.overwrite(at: 10, with: [0xFF, 0xFE, 0xFD])
+        try? b.fill(50..<60, with: 0)
+        check(ByteFileSaver.spaceNeeded(for: b, clones: true) == 13 && ByteFileSaver.spaceNeeded(for: b, clones: false) == 100, "where a copy shares the original's data, a save of overwrites needs room for the changed bytes alone")
+        try? b.insert(at: 0, bytes: [1])
+        check(ByteFileSaver.spaceNeeded(for: b, clones: true) == 101 && ByteFileSaver.spaceNeeded(for: b, clones: false) == 101, "and an insert means the whole file is written, wherever it is")
+        check(ByteFileSaver.clonesFiles(inFolder: URL(fileURLWithPath: "/no/such/folder")) == false, "a folder that is not there clones nothing")
+    }
     check(ByteFileSaver.freeSpace(inFolder: folder.path).map { $0 > 0 } == true && ByteFileSaver.freeSpace(inFolder: "/no/such/folder") == nil, "free space is read from the folder")
 }
+checkTypingAndSaving()
 
 // MARK: The structure tree as lines
 
-do {
+func checkTheStructureTreeAsLines() {
     let png = FormatRegistry.analyze(DataByteSource(structureBytes("89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a0000000d74455874436f6d6d656e740068656c6c6fe6ffae240000000970485973000016250000162501495224f00000001149444154789c63f8cfc0f09f81e17f03000f7a037e0bcb2eb10000000049454e44ae426082")))
     let roots = png.outcome.roots
 
@@ -15357,6 +15521,7 @@ do {
     flag.cancel()
     check(flag.isCancelled, "and one that was is")
 }
+checkTheStructureTreeAsLines()
 
 // MARK: The Bytes panel's map and entropy graph
 
@@ -15452,7 +15617,7 @@ func mapNear(_ a: Double, _ b: Double, _ tolerance: Double = 1e-9) -> Bool {
 
 // MARK: The Hilbert curve
 
-do {
+func checkTheHilbertCurve() {
     // Order 2 is the textbook curve; checking it fixes which way up the others are.
     let textbook: [Int] = [0, 0, 1, 0, 1, 1, 0, 1, 0, 2, 0, 3, 1, 3, 1, 2, 2, 2, 2, 3, 3, 3, 3, 2, 3, 1, 2, 1, 2, 0, 3, 0]
     var textbookMatches = true
@@ -15513,10 +15678,11 @@ do {
           && HilbertCurve.index(order: 3, x: 99, y: -4) == HilbertCurve.index(order: 3, x: 7, y: 0), "a column or row off the grid is moved to its edge")
     check(HilbertCurve.cellCount(order: 99) == HilbertCurve.cellCount(order: HilbertCurve.maxOrder) && HilbertCurve.cellCount(order: -4) == 1, "an order is kept to what is allowed")
 }
+checkTheHilbertCurve()
 
 // MARK: Kinds of byte and entropy
 
-do {
+func checkKindsOfByteAndEntropy() {
     let table = ByteClass.table.map { String($0.rawValue) }.joined()
     check(table == "0333333332233233333333333333333322222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222344444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444441", "every byte value is in the class the rules give it")
     check(ByteClass.of(0x00) == .zero && ByteClass.of(0xFF) == .full, "0x00 and 0xFF are kinds of their own")
@@ -15581,10 +15747,11 @@ do {
     }
     check(inOrder && lastBand == 6, "up the scale from 0 to 8 bits the words only ever say more random, and end at random")
 }
+checkKindsOfByteAndEntropy()
 
 // MARK: Cutting a file into cells and windows
 
-do {
+func checkCuttingAFileIntoCellsAndWindows() {
     let fixtures: [MapLayoutFixture] = [
         MapLayoutFixture(length: 0, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 0], containing: []),
         MapLayoutFixture(length: 1, order: 0, cells: 1, windows: 1, starts: [0, 0, 1, 1], containing: [0, 0]),
@@ -15705,10 +15872,11 @@ do {
     check(layout.cellRange(layout.cellCount + 9) == layout.cellRange(layout.cellCount - 1) && layout.cellRange(-9) == layout.cellRange(0), "and so is a cell")
     check(ByteMapLayout(length: 1_000_000, maxOrder: 3).cellCount == 64 && ByteMapLayout(length: 1_000_000, maxOrder: -1).cellCount == 1, "the order can be limited")
 }
+checkCuttingAFileIntoCellsAndWindows()
 
 // MARK: Where a click lands
 
-do {
+func checkWhereAClickLands() {
     // The middle of every cell leads back to that cell, on maps of several sizes.
     var centresLeadBack = true
     for length: Int64 in [100_000, 5, 70, 5000, 1] {
@@ -15758,10 +15926,11 @@ do {
     }
     check(windowsLineUp, "the windows run along the graph from 0 to 1 with no gap, and a point in the middle of one is in it")
 }
+checkWhereAClickLands()
 
 // MARK: The pass over a file
 
-do {
+func checkThePassOverAFile() {
     check(ByteMapAnalyzer.analyze(DataByteSource([])) == nil, "an empty file has no map")
 
     // Four bytes of four kinds: a cell each, in the curve's order.
@@ -15843,10 +16012,11 @@ do {
     let histogramCounts: [Int] = [3907, 3906, 3907, 3906, 3906, 3907, 3908, 3906]
     check(zip(histogramValues, histogramCounts).allSatisfy { million.histogram[$0] == $1 }, "and how often eight of the byte values occur")
 }
+checkThePassOverAFile()
 
 // MARK: Files too big to read whole
 
-do {
+func checkFilesTooBigToReadWhole() {
     check(ByteMapAnalyzer.sampleRange(in: 100..<300, size: 64) == 128..<192, "a sample starts at the first aligned place in the cell")
     check(ByteMapAnalyzer.sampleRange(in: 128..<300, size: 64) == 128..<192, "or at the cell's start, when that is aligned")
     check(ByteMapAnalyzer.sampleRange(in: 130..<200, size: 64) == 130..<194, "or where the cell starts, when there is not room to align")
@@ -15906,10 +16076,11 @@ do {
     check(stride(from: 0, to: hugeStarts.count, by: 2).allSatisfy { huge.layout.cellStart(Int(hugeStarts[$0])) == hugeStarts[$0 + 1] }, "cells at 5 GiB start where Python says")
     check(huge.coverageNote?.hasPrefix("A file this big is sampled: 1.0 KiB from each of 1024 places, 1.0 MiB of 5.0 GiB.") == true, "the note for it: \(huge.coverageNote ?? "nothing")")
 }
+checkFilesTooBigToReadWhole()
 
 // MARK: Stopping, progress and files that shrink
 
-do {
+func checkStoppingProgressAndFilesThatShrink() {
     let source = MapProbeSource(MapFormulaSource(count: 50_000))
     var asked = 0
     let stopped = ByteMapAnalyzer.analyze(source, isCancelled: { asked += 1; return asked > 10 })
@@ -15952,10 +16123,11 @@ do {
     let nothing = ByteMapAnalyzer.analyze(MapProbeSource(DataByteSource([1, 2, 3, 4, 5, 6, 7, 8]), readable: 0))!
     check(nothing.readBytes == 0 && nothing.unreadBytes == 8 && nothing.entropy == 0, "a file that cannot be read at all is a map of nothing, not a crash")
 }
+checkStoppingProgressAndFilesThatShrink()
 
 // MARK: Colours
 
-do {
+func checkColours() {
     let colours = ByteClass.allCases.map { ByteMapPalette.color(of: $0) }
     var distinctColours = true
     for i in 0..<colours.count { for j in (i + 1)..<colours.count where colours[i] == colours[j] { distinctColours = false } }
@@ -16019,10 +16191,11 @@ do {
     }
     check(rightPatches, "by entropy each cell is the colour of its window: black for the zeros, bright for the random half")
 }
+checkColours()
 
 // MARK: What it says
 
-do {
+func checkWhatItSays() {
     check(ByteMapText.hex(0) == "0x0" && ByteMapText.hex(8000) == "0x1F40" && ByteMapText.hex(Int64.max) == "0x7FFFFFFFFFFFFFFF", "offsets in hex")
     check(ByteMapText.range(100..<101) == "0x64" && ByteMapText.range(0x1F40..<0x2000) == "0x1F40 to 0x1FFF" && ByteMapText.range(5..<5) == "0x5", "a run is first to last, one byte is one")
     check(ByteMapText.size(0) == "0 bytes" && ByteMapText.size(1) == "1 byte" && ByteMapText.size(1023) == "1023 bytes", "small sizes in bytes")
@@ -16045,13 +16218,14 @@ do {
     check(sampledText.cellLine(3).contains("sampled 64 bytes") && sampledText.summaryLine.hasPrefix("Sampled: "), "a sampled file says so in each line: \(sampledText.cellLine(3))")
     check(analysis.cellLine(9999) == analysis.cellLine(analysis.cells.count - 1) && analysis.windowLine(-3) == analysis.windowLine(0), "a cell or window out of range is the nearest one")
 }
+checkWhatItSays()
 
 // MARK: Any file at all
 
 // Random sizes, random contents, random limits and random places to stop: whatever happens, what comes
 // back is sound. Every cell and window is accounted for, every byte read is counted once, entropy is
 // between 0 and 8, the picture has a pixel for each cell, and a pass never reads more than it said it would.
-do {
+func checkAnyFileAtAll() {
     var random = BytesCheckRandom(seed: 777)
     var unsound: [String] = []
     var runs = 0
@@ -16132,6 +16306,7 @@ do {
     }
     check(stops.isEmpty, "a pass stopped at any cell stops there: \(stops.prefix(3))")
 }
+checkAnyFileAtAll()
 
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
