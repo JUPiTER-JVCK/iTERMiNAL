@@ -86,9 +86,25 @@ enum FormatDetector {
             default: return identity("riff", "a RIFF file", "chunked container")
             }
         }
+        if starts(with: [0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A]) {
+            return identity("jp2", "a JPEG 2000 image", "JP2 file format")
+        }
+        if starts(with: [0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A]) {
+            return identity("jxl", "a JPEG XL image", "in its ISO box container")
+        }
+        if starts(with: [0xFF, 0x0A]) {
+            return identity("jxl", "a JPEG XL image", "a bare codestream")
+        }
         if head.count >= 12, starts(with: ascii("ftyp"), at: 4) {
             let brand = String(decoding: head[8..<12], as: UTF8.self)
-            return identity("mp4", "an MP4 or QuickTime video", "ISO base media, brand \"\(brand)\"")
+            switch brand {
+            case "avif", "avis": return identity("avif", "an AVIF image", "AV1 in HEIF, brand \"\(brand)\"")
+            case "heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs":
+                return identity("heic", "a HEIC image", "H.265 in HEIF, brand \"\(brand)\"")
+            case "mif1", "msf1": return identity("heic", "a HEIF image", "brand \"\(brand)\"")
+            case "jp2 ", "jpx ": return identity("jp2", "a JPEG 2000 image", "brand \"\(brand)\"")
+            default: return identity("mp4", "an MP4 or QuickTime video", "ISO base media, brand \"\(brand)\"")
+            }
         }
         if head.count >= 8, ["moov", "mdat", "wide", "free", "skip"].contains(String(decoding: head[4..<8], as: UTF8.self)) {
             return identity("mp4", "a QuickTime movie", "begins with a \(String(decoding: head[4..<8], as: UTF8.self)) atom")

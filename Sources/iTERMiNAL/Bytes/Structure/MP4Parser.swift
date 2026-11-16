@@ -8,11 +8,13 @@ import Foundation
 /// opened. The movie data (`mdat`) is a size and nothing more, however many gigabytes it is.
 enum MP4Parser: FormatParser {
     static let identity = FormatIdentity(id: "mp4", name: "an MP4 or QuickTime video", detail: "ISO base media file format", hasParser: true)
+    /// The same boxes hold HEIC and AVIF images, JPEG 2000 images and the JPEG XL container.
+    static let alsoParses = ["heic", "avif", "jp2", "jxl"]
 
     /// Boxes whose contents are more boxes.
     static let containers: Set<String> = [
         "moov", "trak", "mdia", "minf", "dinf", "stbl", "edts", "udta", "moof", "traf", "mvex",
-        "tref", "sinf", "schi", "ipro", "mfra", "strk", "strd", "meco", "trgr", "ilst",
+        "tref", "sinf", "schi", "ipro", "mfra", "iprp", "ipco", "grpl", "jp2h", "strk", "strd", "meco", "trgr", "ilst",
         "\u{A9}nam", "\u{A9}ART", "\u{A9}alb", "\u{A9}day", "\u{A9}too", "\u{A9}gen", "\u{A9}cmt", "\u{A9}wrt", "\u{A9}grp",
         "aART", "trkn", "disk", "covr", "cpil", "tmpo", "desc", "ldes"
     ]
@@ -29,7 +31,7 @@ enum MP4Parser: FormatParser {
         "dinf": "Data information", "dref": "Data references", "stbl": "Sample table", "stsd": "Sample descriptions: the codec",
         "stts": "Decoding times", "ctts": "Composition time offsets", "stss": "Sync samples (key frames)",
         "stsc": "Samples to chunks", "stsz": "Sample sizes", "stz2": "Compact sample sizes", "stco": "Chunk offsets, 32-bit",
-        "co64": "Chunk offsets, 64-bit", "mdat": "Media data: the audio and video itself", "free": "Free space",
+        "co64": "Chunk offsets, 64-bit", "mdat": "Media data: the audio and video itself, or an image's coded data", "free": "Free space",
         "skip": "Free space", "wide": "Room for a 64-bit size", "udta": "User data", "meta": "Metadata",
         "ilst": "iTunes-style tags", "uuid": "Extension box", "moof": "Movie fragment", "mfhd": "Movie fragment header",
         "traf": "Track fragment", "tfhd": "Track fragment header", "tfdt": "Track fragment decode time", "trun": "Track run",
@@ -47,12 +49,21 @@ enum MP4Parser: FormatParser {
         "stdp": "Degradation priority", "padb": "Padding bits", "subs": "Sub-sample information", "url ": "Data entry URL",
         "urn ": "Data entry URN", "mp4a": "AAC audio sample entry", "avc1": "H.264 video sample entry",
         "hvc1": "H.265 video sample entry", "hev1": "H.265 video sample entry", "mp4v": "MPEG-4 video sample entry",
-        "av01": "AV1 video sample entry", "vp09": "VP9 video sample entry"
+        "av01": "AV1 video sample entry", "vp09": "VP9 video sample entry",
+        "ispe": "Image size", "pixi": "Bits per channel", "irot": "Rotation", "imir": "Mirroring", "ipma": "Property associations",
+        "ipco": "Item properties", "grpl": "Entity groups", "auxC": "Auxiliary image type", "clli": "Content light level", "mdcv": "Mastering display",
+        "infe": "Item information entry", "thmb": "Thumbnail of", "dimg": "Derived from",
+        "cdsc": "Describes", "auxl": "Auxiliary of",
+        "jP  ": "JPEG 2000 signature", "jp2h": "JP2 header", "ihdr": "Image header", "jp2c": "JPEG 2000 codestream", "bpcc": "Bits per component", "pclr": "Palette",
+        "cmap": "Component mapping", "cdef": "Channel definition", "res ": "Resolution", "resc": "Capture resolution", "resd": "Display resolution",
+        "jp2 ": "JPEG 2000 file", "JXL ": "JPEG XL signature", "jxlc": "JPEG XL codestream", "jxlp": "JPEG XL codestream part", "jxll": "JPEG XL level",
+        "jbrd": "JPEG reconstruction data", "Exif": "Exif metadata", "brob": "Brotli-compressed box"
     ]
 
     static func matches(head: [UInt8], length: Int64) -> Bool {
         guard head.count >= 8 else { return false }
         let type = String(decoding: head[4..<8], as: UTF8.self)
+        if head.count >= 12, head[0..<4] == [0, 0, 0, 12], type == "jP  " || type == "JXL " { return true }
         return ["ftyp", "moov", "mdat", "wide", "free", "skip", "styp", "sidx", "moof"].contains(type) && boxSize(head: head) != nil
     }
 
@@ -85,10 +96,19 @@ enum MP4Parser: FormatParser {
             }
             if root.name == "moov", movie == nil { movie = movieSummary(source: source, moov: root) }
         }
-        if !roots.contains(where: { $0.name == "moov" }), outcome.listingLimit == nil, !context.isCancelled() {
+        let imageKind = Self.imageKind(roots: roots, brand: brand)
+        if imageKind == nil, !roots.contains(where: { $0.name == "moov" }), outcome.listingLimit == nil, !context.isCancelled() {
             problems.append("There is no moov box, so a player has no index to the media: the file is cut short, or its moov is still being written.")
         }
         outcome.problems = Array(problems.prefix(20))
+        if let imageKind {
+            var summary = imageKind.name
+            if let size = Self.imageSize(roots: roots) { summary += ", " + size }
+            if let brand, imageKind.id != "jxl" { summary += ", brand \"\(brand)\"" }
+            summary += ", \(count) \(count == 1 ? "box" : "boxes") listed"
+            outcome.summary = summary
+            return outcome
+        }
         var summary = "MP4 / QuickTime"
         if let brand { summary += ", brand \"\(brand)\"" }
         if let movie { summary += ", " + movie }
@@ -235,7 +255,22 @@ enum MP4Parser: FormatParser {
         let contentStart = type == "uuid" ? body + 16 : body
         guard contentStart < end else { return list.nodes }
 
-        if depth < 24, containers.contains(type) || (type == "meta" && looksLikeFullBox(window, at: body)) || (type == "meta" && fullContainers.contains(type) && false) {
+        if depth < 24, type == "iinf" || type == "iref" {
+            let version = fullBox(&list, at: body)
+            var from = body + 4
+            if type == "iinf" {
+                list.uint("Entry count", at: from, size: version == 0 ? 2 : 4)
+                from += version == 0 ? 2 : 4
+            }
+            var problems: [String] = []
+            var limit: String?
+            var count = 0
+            let inner = boxes(source: source, idPrefix: id, from: from, end: end, depth: depth, context: context,
+                              problems: &problems, listingLimit: &limit, count: &count)
+            for node in inner { list.add(node) }
+            return list.nodes
+        }
+        if depth < 24, containers.contains(type) || (type == "meta" && looksLikeFullBox(window, at: body)) {
             var problems: [String] = []
             var limit: String?
             var count = 0
@@ -397,6 +432,64 @@ enum MP4Parser: FormatParser {
         if !kinds.isEmpty { text += " (" + kinds.joined(separator: ", ") + ")" }
         if let length { text += ", " + length }
         return text
+    }
+
+    // MARK: Images in boxes
+
+    /// The pictures that are kept in boxes: HEIC and AVIF (a box called meta that lists the pictures
+    /// and what is known of each), JPEG 2000 (a codestream in a jp2c box) and JPEG XL's container.
+    static func imageKind(roots: [FieldNode], brand: String?) -> (id: String, name: String)? {
+        if roots.contains(where: { $0.name == "JXL " || $0.name == "jxlc" || $0.name == "jxlp" }) { return ("jxl", "JPEG XL") }
+        if roots.contains(where: { $0.name == "jP  " || $0.name == "jp2c" }) { return ("jp2", "JPEG 2000") }
+        guard !roots.contains(where: { $0.name == "moov" }), roots.contains(where: { $0.name == "meta" }) else { return nil }
+        switch brand ?? "" {
+        case "avif", "avis": return ("avif", "AVIF")
+        case "heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs": return ("heic", "HEIC")
+        case "mif1", "msf1": return ("heic", "HEIF")
+        default: return nil
+        }
+    }
+
+    /// "4032 × 3024" from the first image size property or JPEG 2000 header found.
+    private static func imageSize(roots: [FieldNode]) -> String? {
+        func number(_ node: FieldNode?) -> String? {
+            guard let value = node?.value else { return nil }
+            return value.split(separator: " ").first.map(String.init)
+        }
+        func search(_ nodes: [FieldNode], depth: Int) -> String? {
+            guard depth < 8 else { return nil }
+            for node in nodes {
+                let children = node.resolvedChildren()
+                if node.name == "ipco" {
+                    // One picture: the size shown is after the crop (clap) and the turn (irot) that are stated.
+                    let sizes = children.filter { $0.name == "ispe" }
+                    if sizes.count == 1, let size = sizes.first?.resolvedChildren(),
+                       var width = number(size.first { $0.name == "Image width" }).flatMap({ Int64($0) }),
+                       var height = number(size.first { $0.name == "Image height" }).flatMap({ Int64($0) }) {
+                        if let clap = children.first(where: { $0.name == "clap" })?.resolvedChildren() {
+                            func part(_ name: String) -> Int64? { number(clap.first { $0.name == name }).flatMap { Int64($0) } }
+                            if let wn = part("Width numerator"), let wd = part("Width denominator"), wd > 0, wn / wd > 0 { width = wn / wd }
+                            if let hn = part("Height numerator"), let hd = part("Height denominator"), hd > 0, hn / hd > 0 { height = hn / hd }
+                        }
+                        if let angle = children.first(where: { $0.name == "irot" })?.resolvedChildren().first(where: { $0.name == "Angle" }),
+                           let quarter = number(angle).flatMap({ Int($0) }), quarter % 2 == 1 {
+                            swap(&width, &height)
+                        }
+                        return "\(width) × \(height)"
+                    }
+                }
+                if node.name == "ispe" || node.name == "ihdr" {
+                    let width = number(children.first { $0.name == "Image width" || $0.name == "Width" })
+                    let height = number(children.first { $0.name == "Image height" || $0.name == "Height" })
+                    if let width, let height { return "\(width) × \(height)" }
+                }
+                if node.name == "jxlc", let size = children.first(where: { $0.name == "Codestream" })?.resolvedChildren().first(where: { $0.name == "Size header" })?.value { return size }
+                if node.name == "jp2c", let size = children.first(where: { $0.name == "Codestream" })?.resolvedChildren().first(where: { $0.name == "Size marker" })?.value { return size }
+                if let found = search(children, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        return search(roots, depth: 0)
     }
 
     // MARK: Decoding the common boxes
@@ -639,13 +732,35 @@ enum MP4Parser: FormatParser {
             list.uint("Horizontal spacing", at: body, size: 4)
             list.uint("Vertical spacing", at: body + 4, size: 4)
             rest(&list, from: body + 8, end: end)
+        case "colr" where (window.u8(body) ?? 0) == 1 || (window.u8(body) ?? 0) == 2:
+            let method = list.uint("Method", at: body, size: 1, value: { $0 == 1 ? "1 · an enumerated colour space" : "2 · an ICC profile" }) ?? 0
+            list.uint("Precedence", at: body + 1, size: 1)
+            list.uint("Approximation", at: body + 2, size: 1)
+            if method == 1 {
+                list.uint("Colour space", at: body + 3, size: 4, value: { raw in
+                    switch raw {
+                    case 16: return "16 · sRGB"
+                    case 17: return "17 · greyscale"
+                    case 18: return "18 · sYCC"
+                    default: return "\(raw)"
+                    }
+                })
+                rest(&list, from: body + 7, end: end)
+            } else {
+                rest(&list, from: body + 3, end: end, name: "ICC profile")
+            }
         case "colr":
             list.text("Colour type", at: body, length: 4)
             if window.slice(body, 4).map({ String(decoding: $0, as: UTF8.self) }) == "nclx" || window.slice(body, 4).map({ String(decoding: $0, as: UTF8.self) }) == "nclc" {
                 list.uint("Colour primaries", at: body + 4, size: 2)
                 list.uint("Transfer characteristics", at: body + 6, size: 2)
                 list.uint("Matrix coefficients", at: body + 8, size: 2)
-                rest(&list, from: body + 10, end: end)
+                if window.slice(body, 4).map({ String(decoding: $0, as: UTF8.self) }) == "nclx" {
+                    list.bits("Full range", at: body + 10, size: 1, shift: 7, width: 1, value: { $0 == 1 ? "1 · yes, 0 to 255" : "0 · no, 16 to 235" })
+                    rest(&list, from: body + 11, end: end)
+                } else {
+                    rest(&list, from: body + 10, end: end)
+                }
             } else {
                 rest(&list, from: body + 4, end: end, name: "Profile")
             }
@@ -675,8 +790,204 @@ enum MP4Parser: FormatParser {
                 let isText = window.u32(body, .big) == 1
                 if isText { list.text("Value", at: body + 8, length: min(end - body - 8, 200)) } else { rest(&list, from: body + 8, end: end, name: "Value") }
             }
-        case "esds":
+        case "pitm":
+            let version = fullBox(&list, at: body)
+            list.uint("Item ID", at: body + 4, size: version == 0 ? 2 : 4, note: { _ in "The item that is the picture: the others are thumbnails, metadata, or its parts." })
+            rest(&list, from: body + (version == 0 ? 6 : 8), end: end)
+        case "infe":
+            let version = fullBox(&list, at: body)
+            guard version >= 2 else { rest(&list, from: body + 4, end: end, name: "Contents"); break }
+            let idSize = version == 2 ? 2 : 4
+            list.uint("Item ID", at: body + 4, size: idSize)
+            list.uint("Protection index", at: body + 4 + Int64(idSize), size: 2, value: { $0 == 0 ? "0 · not protected" : "\($0)" })
+            list.text("Item type", at: body + 6 + Int64(idSize), length: 4, note: "hvc1 or av01 for coded pictures, grid for a picture made of tiles, Exif and mime for metadata.")
+            rest(&list, from: body + 10 + Int64(idSize), end: end, name: "Name and type")
+        case "iloc":
+            let version = fullBox(&list, at: body)
+            let sizes = window.u8(body + 4) ?? 0
+            let base = window.u8(body + 5) ?? 0
+            let offsetSize = Int64(sizes >> 4)
+            let lengthSize = Int64(sizes & 0x0F)
+            let baseSize = Int64(base >> 4)
+            let indexSize = version >= 1 ? Int64(base & 0x0F) : 0
+            list.group("Field sizes", at: body + 4, length: 2, kind: .flags) { f in
+                f.bits("Offset size", at: body + 4, size: 1, shift: 4, width: 4, value: { "\($0) bytes" })
+                f.bits("Length size", at: body + 4, size: 1, shift: 0, width: 4, value: { "\($0) bytes" })
+                f.bits("Base offset size", at: body + 5, size: 1, shift: 4, width: 4, value: { "\($0) bytes" })
+                f.bits("Index size", at: body + 5, size: 1, shift: 0, width: 4, value: { "\($0) bytes" })
+            }
+            let countSize = version < 2 ? 2 : 4
+            let items = list.uint("Item count", at: body + 6, size: countSize) ?? 0
+            var at = body + 6 + Int64(countSize)
+            let idSize = version < 2 ? 2 : 4
+            for n in 0..<min(items, 32) {
+                let start = at
+                var itemLength = Int64(idSize) + (version >= 1 ? 2 : 0) + 2 + baseSize + 2
+                guard start + itemLength <= end else { break }
+                let extents = UInt64(window.uint(start + itemLength - 2, size: 2, .big) ?? 0)
+                itemLength += Int64(min(extents, 64)) * (indexSize + offsetSize + lengthSize)
+                guard start + itemLength <= end else { break }
+                list.group("Item \(n + 1)", at: start, length: itemLength) { f in
+                    var p = start
+                    let item = f.uint("Item ID", at: p, size: idSize) ?? 0
+                    p += Int64(idSize)
+                    var constructionMethod: UInt64 = 0
+                    if version >= 1 {
+                        constructionMethod = (f.uint("Construction method", at: p, size: 2, value: { $0 == 0 ? "0 · in the file" : ($0 == 1 ? "1 · in idat" : "\($0)") }) ?? 0)
+                        p += 2
+                    }
+                    f.uint("Data reference index", at: p, size: 2); p += 2
+                    var baseValue: UInt64 = 0
+                    if baseSize > 0 { baseValue = f.uint("Base offset", at: p, size: Int(baseSize)) ?? 0; p += baseSize }
+                    f.uint("Extent count", at: p, size: 2); p += 2
+                    var words: [String] = []
+                    for e in 0..<min(extents, 64) {
+                        if indexSize > 0 { f.uint("Extent \(e + 1) index", at: p, size: Int(indexSize)); p += indexSize }
+                        let o = offsetSize > 0 ? (f.uint("Extent \(e + 1) offset", at: p, size: Int(offsetSize)) ?? 0) : 0
+                        p += offsetSize
+                        let l = lengthSize > 0 ? (f.uint("Extent \(e + 1) length", at: p, size: Int(lengthSize)) ?? 0) : 0
+                        p += lengthSize
+                        words.append("\(l) bytes at \(o &+ (constructionMethod == 0 ? baseValue : 0))")
+                    }
+                    f.groupValue = "item \(item): " + words.joined(separator: ", ")
+                }
+                at += itemLength
+            }
+            rest(&list, from: at, end: end, name: items > 32 ? "More items" : "Extra bytes")
+        case "ispe":
+            _ = fullBox(&list, at: body)
+            list.uint("Image width", at: body + 4, size: 4, value: { "\($0) pixels" })
+            list.uint("Image height", at: body + 8, size: 4, value: { "\($0) pixels" })
+            rest(&list, from: body + 12, end: end)
+        case "pixi":
             fullBox(&list, at: body)
+            let channels = Int64(list.uint("Channels", at: body + 4, size: 1) ?? 0)
+            for n in 0..<min(channels, 8) { list.uint("Bits of channel \(n + 1)", at: body + 5 + n, size: 1) }
+            rest(&list, from: body + 5 + min(channels, 8), end: end)
+        case "irot":
+            list.bits("Angle", at: body, size: 1, shift: 0, width: 2, value: { "\($0) · \($0 * 90)° anticlockwise" })
+            rest(&list, from: body + 1, end: end)
+        case "imir":
+            list.bits("Axis", at: body, size: 1, shift: 0, width: 1, value: { $0 == 0 ? "0 · top to bottom (a vertical axis)" : "1 · left to right" })
+            rest(&list, from: body + 1, end: end)
+        case "clap":
+            for (n, name) in ["Width numerator", "Width denominator", "Height numerator", "Height denominator", "Horizontal offset numerator", "Horizontal offset denominator", "Vertical offset numerator", "Vertical offset denominator"].enumerated() {
+                if n == 4 || n == 6 {
+                    list.uint(name, at: body + Int64(n) * 4, size: 4, value: { "\(Int32(bitPattern: UInt32(truncatingIfNeeded: $0)))" })
+                } else {
+                    list.uint(name, at: body + Int64(n) * 4, size: 4)
+                }
+            }
+            rest(&list, from: body + 32, end: end)
+        case "ipma":
+            let version = fullBox(&list, at: body)
+            let flags = window.u32(body, .big).map { $0 & 0xFF_FFFF } ?? 0
+            let count = list.uint("Entry count", at: body + 4, size: 4) ?? 0
+            var at = body + 8
+            for n in 0..<min(count, 32) {
+                let idSize: Int64 = version < 1 ? 2 : 4
+                guard at + idSize + 1 <= end, let associations = window.u8(at + idSize).map({ Int64($0) }) else { break }
+                let each: Int64 = flags & 1 == 1 ? 2 : 1
+                let length = idSize + 1 + associations * each
+                guard at + length <= end else { break }
+                let start = at
+                list.group("Item \(n + 1)", at: start, length: length) { f in
+                    let item = f.uint("Item ID", at: start, size: Int(idSize)) ?? 0
+                    f.uint("Association count", at: start + idSize, size: 1)
+                    var numbers: [String] = []
+                    for a in 0..<associations {
+                        let at = start + idSize + 1 + a * each
+                        let raw = f.uint("Property \(a + 1)", at: at, size: Int(each), value: { raw in
+                            let index = each == 2 ? raw & 0x7FFF : raw & 0x7F
+                            let essential = each == 2 ? raw & 0x8000 != 0 : raw & 0x80 != 0
+                            return "box \(index) of ipco" + (essential ? " · essential" : "")
+                        }) ?? 0
+                        numbers.append("\(each == 2 ? raw & 0x7FFF : raw & 0x7F)")
+                    }
+                    f.groupValue = "item \(item): properties " + numbers.joined(separator: ", ")
+                }
+                at += length
+            }
+            rest(&list, from: at, end: end, name: count > 32 ? "More items" : "Extra bytes")
+        case "av1C":
+            list.bits("Marker", at: body, size: 1, shift: 7, width: 1)
+            list.bits("Version", at: body, size: 1, shift: 0, width: 7)
+            list.bits("Profile", at: body + 1, size: 1, shift: 5, width: 3, value: { ["0 · Main", "1 · High", "2 · Professional"].indices.contains(Int($0)) ? ["0 · Main", "1 · High", "2 · Professional"][Int($0)] : "\($0)" })
+            list.bits("Level", at: body + 1, size: 1, shift: 0, width: 5)
+            list.bits("Tier", at: body + 2, size: 1, shift: 7, width: 1)
+            list.bits("High bit depth", at: body + 2, size: 1, shift: 6, width: 1)
+            list.bits("Twelve bit", at: body + 2, size: 1, shift: 5, width: 1)
+            list.bits("Monochrome", at: body + 2, size: 1, shift: 4, width: 1)
+            list.bits("Chroma subsampling x", at: body + 2, size: 1, shift: 3, width: 1)
+            list.bits("Chroma subsampling y", at: body + 2, size: 1, shift: 2, width: 1)
+            rest(&list, from: body + 4, end: end, name: "Configuration OBUs")
+        case "hvcC":
+            list.uint("Configuration version", at: body, size: 1)
+            list.bits("Profile space", at: body + 1, size: 1, shift: 6, width: 2)
+            list.bits("Tier", at: body + 1, size: 1, shift: 5, width: 1)
+            list.bits("Profile", at: body + 1, size: 1, shift: 0, width: 5, value: { [1: "1 · Main", 2: "2 · Main 10", 3: "3 · Main Still Picture"][$0] ?? "\($0)" })
+            list.uint("Compatibility flags", at: body + 2, size: 4, kind: .flags, value: { FieldText.hexNumber($0, size: 4) })
+            list.bytes("Constraint flags", at: body + 6, length: 6)
+            list.uint("Level", at: body + 12, size: 1, value: { "\($0) · level \(Double($0) / 30)" })
+            rest(&list, from: body + 13, end: end, name: "Further configuration")
+        case "ihdr":
+            list.uint("Height", at: body, size: 4, value: { "\($0) pixels" })
+            list.uint("Width", at: body + 4, size: 4, value: { "\($0) pixels" })
+            list.uint("Components", at: body + 8, size: 2)
+            list.uint("Bits per component", at: body + 10, size: 1, value: { raw in raw == 255 ? "255 · varies, see bpcc" : "\((raw & 0x7F) + 1) bits, " + (raw & 0x80 != 0 ? "signed" : "unsigned") })
+            list.uint("Compression type", at: body + 11, size: 1, value: { $0 == 7 ? "7 · JPEG 2000" : "\($0)" })
+            list.uint("Colour space unknown", at: body + 12, size: 1)
+            list.uint("Intellectual property", at: body + 13, size: 1)
+            rest(&list, from: body + 14, end: end)
+        case "jP  ":
+            list.bytes("Signature", at: body, length: 4, kind: .magic, note: "0D 0A 87 0A: a carriage return and line feed, so that a transfer that rewrites line ends is noticed, and a byte with the top bit set.")
+        case "jp2c":
+            let length = end - body
+            if let marker = window.slice(body, 4), Array(marker) == [0xFF, 0x4F, 0xFF, 0x51], length >= 42 {
+                list.group("Codestream", at: body, length: length, kind: .bytes, value: FieldText.bytes(length),
+                           note: "The compressed image. It begins with the markers FF4F (start of codestream) and FF51 (size), whose fields are decoded here.") { f in
+                    f.uint("Start marker", at: body, size: 2, kind: .magic, value: { FieldText.hexNumber($0, size: 2) })
+                    f.group("Size marker", at: body + 2, length: 38, note: "The picture's size on the reference grid.") { g in
+                        g.uint("Marker", at: body + 2, size: 2, kind: .magic, value: { FieldText.hexNumber($0, size: 2) })
+                        g.uint("Length", at: body + 4, size: 2)
+                        g.uint("Capabilities", at: body + 6, size: 2)
+                        let w = g.uint("Reference grid width", at: body + 8, size: 4) ?? 0
+                        let h = g.uint("Reference grid height", at: body + 12, size: 4) ?? 0
+                        g.uint("Image offset x", at: body + 16, size: 4)
+                        g.uint("Image offset y", at: body + 20, size: 4)
+                        g.uint("Tile width", at: body + 24, size: 4)
+                        g.uint("Tile height", at: body + 28, size: 4)
+                        g.uint("Tile offset x", at: body + 32, size: 4)
+                        g.uint("Tile offset y", at: body + 36, size: 4)
+                        g.groupValue = "\(w) × \(h)"
+                    }
+                    f.bytes("Rest of the codestream", at: body + 40, length: length - 40, value: FieldText.bytes(length - 40))
+                }
+            } else {
+                list.bytes("Codestream", at: body, length: length, value: FieldText.bytes(length),
+                           note: "The compressed image. It should begin with FF4F FF51, which it does not.")
+            }
+        case "jxlc":
+            let length = end - body
+            if let signature = window.slice(body, 2), Array(signature) == [0xFF, 0x0A] {
+                list.group("Codestream", at: body, length: length, kind: .bytes, value: FieldText.bytes(length),
+                           note: "The compressed image, which begins as a bare JPEG XL codestream does.") { f in
+                    f.bytes("Signature", at: body, length: 2, kind: .magic, value: "FF 0A")
+                    let held = window.slice(body + 2, Int(min(length - 2, 62))).map(Array.init) ?? []
+                    if length > 2, let size = JXLParser.dimensions(held) {
+                        let bytes = Int64((size.bits + 7) / 8)
+                        f.bytes("Size header", at: body + 2, length: bytes, value: "\(size.width) × \(size.height)",
+                                note: "The picture's height, then its width, packed into \(size.bits) bits.")
+                        f.bytes("Rest of the codestream", at: body + 2 + bytes, length: length - 2 - bytes, value: FieldText.bytes(length - 2 - bytes))
+                    } else {
+                        f.bytes("Rest of the codestream", at: body + 2, length: length - 2, value: FieldText.bytes(length - 2))
+                    }
+                }
+            } else {
+                list.bytes("Codestream", at: body, length: length, value: FieldText.bytes(length))
+            }
+        case "esds":
+            _ = fullBox(&list, at: body)
             rest(&list, from: body + 4, end: end, name: "Descriptors")
         default:
             rest(&list, from: body, end: end, name: "Contents")

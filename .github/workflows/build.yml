@@ -284,6 +284,13 @@ jobs:
             Sources/iTERMiNAL/Bytes/Structure/JPEGParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/MP4Parser.swift \
             Sources/iTERMiNAL/Bytes/Structure/PDFParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/GIFParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/BMPParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/ICOParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/WebPParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/TIFFTags.swift \
+            Sources/iTERMiNAL/Bytes/Structure/TIFFParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/JXLParser.swift \
             Sources/iTERMiNAL/Bytes/Map/HilbertCurve.swift \
             Sources/iTERMiNAL/Bytes/Map/EntropyAnalysis.swift \
             Sources/iTERMiNAL/Bytes/Map/ByteMapLayout.swift \

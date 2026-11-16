@@ -9610,13 +9610,13 @@ do {
     check(identity(structureJoin(structureASCII("MZ"), [UInt8](repeating: 0, count: 58), [0x40, 0, 0, 0], structureASCII("PE"), [0, 0])) == "pe", "a Windows program by its PE header")
     check(identity(Array("just some words\nand a second line\n".utf8)) == "text" && FormatDetector.identify(head: Array("naïve café\n".utf8), length: 12)?.detail == "valid UTF-8", "text is text, and says if it is UTF-8")
     check(identity([0x00, 0x01, 0x02, 0xFE, 0xFF, 0x10, 0x00, 0x80]) == nil && identity([]) == nil, "bytes that are nothing known are nothing")
-    check(FormatDetector.identify(head: structureBytes("89504E470D0A1A0A"), length: 100)?.hasParser == true && FormatDetector.identify(head: structureASCII("GIF89a"), length: 100)?.hasParser == false && FormatDetector.identify(head: [0xFF, 0xD8, 0xFF], length: 100)?.hasParser == true,
+    check(FormatDetector.identify(head: structureBytes("89504E470D0A1A0A"), length: 100)?.hasParser == true && FormatDetector.identify(head: [0x1F, 0x8B, 0x08, 0], length: 100)?.hasParser == false && FormatDetector.identify(head: [0xFF, 0xD8, 0xFF], length: 100)?.hasParser == true,
           "and it says which it can take apart")
     let unknown = FormatRegistry.analyze(DataByteSource([0x01, 0x02, 0x00, 0xFF, 0x10]))
     check(unknown.identity == nil && unknown.outcome.roots.isEmpty && unknown.message.contains("Hex and Bits"), "a file nothing knows is told so, and pointed to the dump")
-    let gif = FormatRegistry.analyze(DataByteSource(Array("GIF89a\u{1}\0".utf8)))
-    check(gif.identity?.id == "gif" && gif.message.contains("GIF") && gif.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
-    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf"], "six parsers so far")
+    let gzip = FormatRegistry.analyze(DataByteSource([0x1F, 0x8B, 0x08, 0, 0, 0]))
+    check(gzip.identity?.id == "gzip" && gzip.message.contains("gzip") && gzip.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
+    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf", "gif", "bmp", "ico", "webp", "tiff", "jxl", "heic", "avif", "jp2"], "fifteen formats so far, four of them read by the MP4 parser: \(FormatRegistry.parserIDs.sorted())")
 }
 
 // MARK: PNG
@@ -10646,6 +10646,806 @@ do {
     check(objects(alternating).count == 150, "150 patches of nothing between objects do not stop the listing: \(objects(alternating).count)")
     let tooMuch = parse(pdfText("%PDF-1.4\n", String(repeating: "!!junk\n1 0 obj\n<< >>\nendobj\n", count: 300), eof))
     check(objects(tooMuch).count == 200 && tooMuch.problems.contains { $0.contains("Too much") }, "and 300 do: the listing gives up at 200 and says so: \(objects(tooMuch).count)")
+}
+
+// MARK: GIF, BMP, ICO and WebP
+
+// Files made by Pillow and by hand, read back by Pillow, with the blocks, headers and chunks found by
+// walkers written separately from the parsers; then files that are cut, lie, or are not files at all.
+
+func imgNames(_ roots: [FieldNode], prefix: String, strip: Bool = false) -> [String] {
+    roots.filter { $0.id.hasPrefix(prefix) }.map { "\($0.name)@\($0.offset)+\($0.length)" }
+}
+
+/// Cut at every length, every byte set to 0 and 0xFF (sampled), and random files that begin with `prefix`.
+func imgHostile(_ label: String, fixtures: [(String, [UInt8])], prefix: [UInt8], seed: UInt64) -> String? {
+    var unsound: [String] = []
+    var runs = 0
+    for (name, original) in fixtures {
+        for length in 0...original.count {
+            runs += 1
+            let result = FormatRegistry.analyze(DataByteSource(Array(original[0..<length])))
+            if let issue = structureProblems(result.outcome.roots, fileLength: Int64(length)).first { unsound.append("\(name) cut at \(length): \(issue)") }
+        }
+        for index in stride(from: 0, to: original.count, by: max(1, original.count / 400)) {
+            for value in [UInt8(0x00), UInt8(0xFF)] where original[index] != value {
+                var changed = original
+                changed[index] = value
+                runs += 1
+                let result = FormatRegistry.analyze(DataByteSource(changed))
+                if let issue = structureProblems(result.outcome.roots, fileLength: Int64(changed.count)).first { unsound.append("\(name) byte \(index) = \(value): \(issue)") }
+            }
+        }
+        if unsound.count > 5 { break }
+    }
+    var random = BytesCheckRandom(seed: seed)
+    for _ in 0..<300 {
+        var bytes = prefix
+        for _ in 0..<random.below(300) { bytes.append(random.below(4) == 0 ? 0 : random.byte()) }
+        runs += 1
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        if let issue = structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).first { unsound.append("random \(bytes.count): \(issue)") }
+        if unsound.count > 5 { break }
+    }
+    return unsound.isEmpty ? nil : "\(label): \(runs) runs, unsound: \(unsound.prefix(3))"
+}
+
+do {
+    // ------------------------------------------------------------------ GIF
+    let gifFixtures: [(String, String)] = [("anim", "47494638396110000c00810000ff000000000000000000000021ff0b4e45545343415045322e30030100000021fe066869206769660021f904000a0000002c0000000010000c000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c2830200021f90401140001002c0000000010000c008100ff0000000000000000000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c2830200021f904011e0001002c0000000010000c00810000ff00000000000000000008190001081c48b0a0c18308132a5cc8b0a1c38710234a9c283020003b"), ("still", "47494638376114000a00860000cbcbcbcacacac7c7c7c2c2c2bebebebcbcbcbababab6b6b6b4b4b4b2b2b2afafafaeaeaeadadadaaaaaaa8a8a8a7a7a7a6a6a6a3a3a3a2a2a2a1a1a1a0a0a09e9e9e9d9d9d9c9c9c9b9b9b9a9a9a9999999797979696969595959494949393939292929191919090908f8f8f8e8e8e8d8d8d8c8c8c8b8b8b8a8a8a8989898888888787878686868585858484848383838282828181818080807f7f7f7e7e7e7d7d7d7c7c7c7b7b7b7a7a7a7979797878787777777676767575757474747373737272727070706f6f6f6d6d6d6c6c6c6b6b6b6a6a6a6969696868686767676666666565656363636161616060605f5f5f5e5e5e5d5d5d5c5c5c5a5a5a5959595858585757575353534d4d4d4c4c4c4b4b4b4949494242423b3b3b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002c0000000014000a000008e40027803092e547170d4d7a4089a161c08c232e725489e164438d2c445cc4b09162c98311372ce87832e2840d1f2b6a18d850618792063316383842c2488f22448a6880e121c68d1228a07019a0a2050b073008f4e000428211225264684171e403102c200ae008f1e24883200e227c18b101460f15491858b820c442950a47849c68b0a3c69109366830310180c390194c70703041e3c907244b76d810d1814606180a244471e0a18787215792505991e3009300117ad4109020880d0d3c82c03062c2c8142318a86cb1f222c69525545e8498f002420925157e4841b0e4841314140202003b"), ("loops", "4749463839610400040081000009080700000000000000000021ff0b4e45545343415045322e30030102000021f90400050000002c00000000040004000008090001081c48b02080800021f90401050001002c00000000040004008101020300000000000000000008090001081c48b0208080003b")]
+    let gifWalks: [String: [String]] = ["anim": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+12", "Application extension@25+19", "Comment extension@44+10", "Graphic control extension@54+8", "Image 1@62+38", "Graphic control extension@100+8", "Image 2@108+50", "Graphic control extension@158+8", "Image 3@166+50", "Trailer@216+1"], "still": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+384", "Image 1@397+241", "Trailer@638+1"], "loops": ["Header@0+6", "Logical screen descriptor@6+7", "Global colour table@13+12", "Application extension@25+19", "Graphic control extension@44+8", "Image 1@52+22", "Graphic control extension@74+8", "Image 2@82+34", "Trailer@116+1"]]
+    let gifSizes: [String: [Int]] = ["anim": [16, 12], "still": [20, 10], "loops": [4, 4]]
+    let gifFrames: [String: Int] = ["anim": 3, "still": 1, "loops": 2]
+    let gifLoops: [String: Int] = ["anim": 0, "loops": 2]
+    let gifDurations: [String: [Int]] = ["anim": [100, 200, 300], "still": [], "loops": [50, 50]]
+    var gifWrong: [String] = []
+    for (name, hex) in gifFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == "gif" && result.identity?.hasParser == true && result.message.isEmpty, "\(name).gif is taken for a GIF, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name).gif: a sound tree, and nothing against it: \(result.outcome.problems)")
+        let names = result.outcome.roots.map { "\($0.name)@\($0.offset)+\($0.length)" }
+        if names != gifWalks[name] { gifWrong.append("\(name) blocks: \(names) not \(gifWalks[name] ?? [])") }
+        let size = gifSizes[name] ?? [0, 0]
+        let images = gifFrames[name] ?? 0
+        if result.outcome.summary?.contains("\(size[0]) × \(size[1]), \(images) \(images == 1 ? "image" : "images")") != true { gifWrong.append("\(name) summary: \(result.outcome.summary ?? "none")") }
+        let delays = result.outcome.roots.filter { $0.name == "Graphic control extension" }.compactMap { $0.value }
+        if let expected = gifDurations[name], !expected.isEmpty, delays != expected.map({ "\($0) ms" }) { gifWrong.append("\(name) delays: \(delays) not \(expected)") }
+        if let loops = gifLoops[name] {
+            let words = loops == 0 ? "loops forever" : "loops \(loops) times"
+            if result.outcome.summary?.contains(words) != true { gifWrong.append("\(name) loop: \(result.outcome.summary ?? "none") not \(words)") }
+        }
+    }
+    check(gifWrong.isEmpty, "the blocks, size, frames, delays and loop count of every GIF are what Pillow and a separate walk say: \(gifWrong.prefix(2))")
+    let animRoots = FormatRegistry.analyze(DataByteSource(structureBytes(gifFixtures[0].1))).outcome.roots
+    check(structureValue(animRoots, "Logical screen descriptor", field: "Width") == "16 pixels" && structureValue(animRoots, "Comment extension", "Sub-block 1", field: "Text") == "\"hi gif\"", "the screen descriptor and a comment")
+    check(structureValue(animRoots, "Image 1", field: "Width") == "16 pixels" && structureValue(animRoots, "Image 1", field: "LZW minimum code size") == "8 bits", "an image's descriptor and code size")
+    let gifBytes = structureBytes(gifFixtures[0].1)
+    check(FormatRegistry.analyze(DataByteSource(Array(gifBytes.dropLast()))).outcome.problems.contains { $0.contains("no trailer") }, "a GIF with no trailer is said to be cut short")
+    check(FormatRegistry.analyze(DataByteSource(gifBytes + [1, 2, 3])).outcome.roots.last?.name == "Data after the trailer", "and bytes after the trailer are shown")
+    let badBlock = Array(gifBytes[0..<25]) + [0x55]
+    check(FormatRegistry.analyze(DataByteSource(badBlock)).outcome.roots.last?.name == "Not a block", "a byte that begins no block is said so")
+    check(!GIFParser.matches(head: Array("GIF89b".utf8), length: 6), "GIF89b is not a GIF")
+    let slow = Array(gifBytes[0..<25]) + [0x21, 0xF9, 4, 0, 0x02, 0x01, 0, 0, 0x3B]
+    check(FormatRegistry.analyze(DataByteSource(slow)).outcome.roots.first { $0.name == "Graphic control extension" }?.value == "2580 ms", "a delay of 258 hundredths is over two bytes: \(FormatRegistry.analyze(DataByteSource(slow)).outcome.roots.first { $0.name == "Graphic control extension" }?.value ?? "none")")
+    check(FormatRegistry.analyze(DataByteSource(Array(gifBytes[0..<25]) + [0x2C, 0, 0, 0, 0, 1, 0, 1, 0])).outcome.roots.last?.name == "Cut off", "an image descriptor that is one byte short is cut off")
+    check(FormatRegistry.analyze(DataByteSource(gifBytes + [9])).outcome.roots.last?.name == "Data after the trailer", "one byte after the trailer is shown")
+    check(GIFParser.matches(head: Array("GIF89a".utf8), length: 6) && GIFParser.matches(head: Array("GIF87a".utf8), length: 6) && !GIFParser.matches(head: Array("GIF88a".utf8), length: 6), "what a GIF begins with")
+    var smallGIF = ParseContext()
+    smallGIF.maxRecords = 2
+    check(FormatRegistry.analyze(DataByteSource(gifBytes), context: smallGIF).outcome.listingLimit != nil, "the listing stops where it was told to")
+    let gifHostile = imgHostile("GIF", fixtures: gifFixtures.map { ($0.0, structureBytes($0.1)) }, prefix: Array("GIF89a".utf8) + [4, 0, 4, 0, 0x80, 0, 0], seed: 11)
+    check(gifHostile == nil, "GIFs cut, changed and random are all sound: \(gifHostile ?? "")")
+
+    // ------------------------------------------------------------------ BMP
+    let bmpFixtures: [(String, String)] = [("rgb24", "424d06030000000000003600000028000000140000000c0000000100180000000000d0020000c40e0000c40e000000000000000000007070706d6d6da6a6a66868683a3a3a8a8a8a8888889f9f9f7070707a7a7a808080656565969696a7a7a79494949191918d8d8dbababa7979797272724040406c6c6cb5b5b58080806d6d6db6b6b65b5b5b5c5c5c8f8f8f7b7b7b8585855f5f5f7a7a7a9494947676767a7a7a8282827272724f4f4f3737375a5a5a6b6b6b8484849a9a9a9696963535356a6a6a525252747474b1b1b17e7e7e6e6e6e6d6d6da0a0a08d8d8d7c7c7c919191747474878787a3a3a36161617676767b7b7b6464648484845252526969699999998e8e8eacacac8d8d8da8a8a89595957979795f5f5f6262628888887474748787879696967a7a7a4a4a4a6060609f9f9f8383834d4d4d9c9c9c9d9d9da5a5a5a5a5a5787878a4a4a4808080888888a9a9a9898989828282ababab6c6c6c9595958383837b7b7b8f8f8f8484847b7b7b6868689c9c9c868686606060525252a2a2a28888886a6a6a6565658b8b8bbdbdbd7b7b7b8989896f6f6f727272a9a9a9737373a5a5a56969695e5e5ea0a0a05b5b5b8282826666666868689a9a9a8383835656567a7a7a616161a8a8a87e7e7e565656777777adadad9898987b7b7b929292a2a2a29292929e9e9e8f8f8f838383747474838383797979898989cccccc9898989696965757578080809090905454546666669999998c8c8c7a7a7a9c9c9c8585856666667070708d8d8d7272726f6f6f8585853535356f6f6f7a7a7a8888887171719595956f6f6f5f5f5fa4a4a49393935858589696968c8c8c4d4d4dbcbcbc8e8e8e757575878787585858707070b4b4b4b2b2b26b6b6b8b8b8b8f8f8f5959597e7e7e828282676767828282b8b8b8a6a6a6616161808080a3a3a3bebebe5f5f5f535353898989c0c0c07f7f7fb3b3b36b6b6b868686b2b2b27979798a8a8a4343435252528383835b5b5b9c9c9c686868a0a0a0838383828282767676a5a5a58d8d8d9d9d9d9494949292925353537c7c7c898989989898565656a2a2a2838383"), ("gray8", "424d7e0400000000000036040000280000000a00000006000000010008000000000048000000c40e0000c40e00000001000000010000000000000101010002020200030303000404040005050500060606000707070008080800090909000a0a0a000b0b0b000c0c0c000d0d0d000e0e0e000f0f0f00101010001111110012121200131313001414140015151500161616001717170018181800191919001a1a1a001b1b1b001c1c1c001d1d1d001e1e1e001f1f1f00202020002121210022222200232323002424240025252500262626002727270028282800292929002a2a2a002b2b2b002c2c2c002d2d2d002e2e2e002f2f2f00303030003131310032323200333333003434340035353500363636003737370038383800393939003a3a3a003b3b3b003c3c3c003d3d3d003e3e3e003f3f3f00404040004141410042424200434343004444440045454500464646004747470048484800494949004a4a4a004b4b4b004c4c4c004d4d4d004e4e4e004f4f4f00505050005151510052525200535353005454540055555500565656005757570058585800595959005a5a5a005b5b5b005c5c5c005d5d5d005e5e5e005f5f5f00606060006161610062626200636363006464640065656500666666006767670068686800696969006a6a6a006b6b6b006c6c6c006d6d6d006e6e6e006f6f6f00707070007171710072727200737373007474740075757500767676007777770078787800797979007a7a7a007b7b7b007c7c7c007d7d7d007e7e7e007f7f7f00808080008181810082828200838383008484840085858500868686008787870088888800898989008a8a8a008b8b8b008c8c8c008d8d8d008e8e8e008f8f8f00909090009191910092929200939393009494940095959500969696009797970098989800999999009a9a9a009b9b9b009c9c9c009d9d9d009e9e9e009f9f9f00a0a0a000a1a1a100a2a2a200a3a3a300a4a4a400a5a5a500a6a6a600a7a7a700a8a8a800a9a9a900aaaaaa00ababab00acacac00adadad00aeaeae00afafaf00b0b0b000b1b1b100b2b2b200b3b3b300b4b4b400b5b5b500b6b6b600b7b7b700b8b8b800b9b9b900bababa00bbbbbb00bcbcbc00bdbdbd00bebebe00bfbfbf00c0c0c000c1c1c100c2c2c200c3c3c300c4c4c400c5c5c500c6c6c600c7c7c700c8c8c800c9c9c900cacaca00cbcbcb00cccccc00cdcdcd00cecece00cfcfcf00d0d0d000d1d1d100d2d2d200d3d3d300d4d4d400d5d5d500d6d6d600d7d7d700d8d8d800d9d9d900dadada00dbdbdb00dcdcdc00dddddd00dedede00dfdfdf00e0e0e000e1e1e100e2e2e200e3e3e300e4e4e400e5e5e500e6e6e600e7e7e700e8e8e800e9e9e900eaeaea00ebebeb00ececec00ededed00eeeeee00efefef00f0f0f000f1f1f100f2f2f200f3f3f300f4f4f400f5f5f500f6f6f600f7f7f700f8f8f800f9f9f900fafafa00fbfbfb00fcfcfc00fdfdfd00fefefe00ffffff00a7838e6dab609c578a5100008596a1858a82ac968a96000054b36598653d4d9f84a50000b48f5a8e605989b1845200007c725995518a809b815d00009b67895f8b4c76787bc20000"), ("mono", "424d52000000000000003e000000280000000d00000005000000010001000000000014000000c40e0000c40e0000020000000200000000000000ffffff0095a80000ab10000064e80000da900000b2a80000"), ("rgba", "424d960000000000000036000000280000000600000004000000010020000000000060000000c40e0000c40e00000000000000000000030201040302010403020104030201040302010403020104030201040302010403020104030201040302010403020104030201040302010403020104030201040302010403020104030201040302010403020104030201040302010403020104"), ("topdown", "424d6600000000000000360000002800000005000000fdffffff010018000000000030000000130b0000130b0000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b4249"), ("core", "424d4a000000000000001a0000000c000000050003000100180000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b4249"), ("v4", "424dba000000000000007a0000006c0000000400000004000000010020000000000040000000130b0000130b000000000000000000000000ff0000ff0000ff000000000000ff4247527300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9"), ("v5", "424dca000000000000008a0000007c0000000400000004000000010020000000000040000000130b0000130b000000000000000000000000ff0000ff0000ff000000000000ff424752730000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9"), ("bitfields", "424d620000000000000042000000280000000400000004000000010010000300000020000000130b0000130b0000000000000000000000f80000e00700001f00000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"), ("gap", "424d6c000000000000003c000000280000000400000004000000010018000000000030000000130b0000130b0000000000000000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b4249"), ("pal4", "424d860000000000000076000000280000000800000004000000010004000000000010000000130b0000130b00001000000000000000000000000101010002020200030303000404040005050500060606000707070008080800090909000a0a0a000b0b0b000c0c0c000d0d0d000e0e0e000f0f0f0000070e151c232a31383f464d545b6269"), ("pal8z", "424d560400000000000036040000280000000800000004000000010008000000000020000000130b0000130b00000000000000000000000000000101010002020200030303000404040005050500060606000707070008080800090909000a0a0a000b0b0b000c0c0c000d0d0d000e0e0e000f0f0f00101010001111110012121200131313001414140015151500161616001717170018181800191919001a1a1a001b1b1b001c1c1c001d1d1d001e1e1e001f1f1f00202020002121210022222200232323002424240025252500262626002727270028282800292929002a2a2a002b2b2b002c2c2c002d2d2d002e2e2e002f2f2f00303030003131310032323200333333003434340035353500363636003737370038383800393939003a3a3a003b3b3b003c3c3c003d3d3d003e3e3e003f3f3f00404040004141410042424200434343004444440045454500464646004747470048484800494949004a4a4a004b4b4b004c4c4c004d4d4d004e4e4e004f4f4f00505050005151510052525200535353005454540055555500565656005757570058585800595959005a5a5a005b5b5b005c5c5c005d5d5d005e5e5e005f5f5f00606060006161610062626200636363006464640065656500666666006767670068686800696969006a6a6a006b6b6b006c6c6c006d6d6d006e6e6e006f6f6f00707070007171710072727200737373007474740075757500767676007777770078787800797979007a7a7a007b7b7b007c7c7c007d7d7d007e7e7e007f7f7f00808080008181810082828200838383008484840085858500868686008787870088888800898989008a8a8a008b8b8b008c8c8c008d8d8d008e8e8e008f8f8f00909090009191910092929200939393009494940095959500969696009797970098989800999999009a9a9a009b9b9b009c9c9c009d9d9d009e9e9e009f9f9f00a0a0a000a1a1a100a2a2a200a3a3a300a4a4a400a5a5a500a6a6a600a7a7a700a8a8a800a9a9a900aaaaaa00ababab00acacac00adadad00aeaeae00afafaf00b0b0b000b1b1b100b2b2b200b3b3b300b4b4b400b5b5b500b6b6b600b7b7b700b8b8b800b9b9b900bababa00bbbbbb00bcbcbc00bdbdbd00bebebe00bfbfbf00c0c0c000c1c1c100c2c2c200c3c3c300c4c4c400c5c5c500c6c6c600c7c7c700c8c8c800c9c9c900cacaca00cbcbcb00cccccc00cdcdcd00cecece00cfcfcf00d0d0d000d1d1d100d2d2d200d3d3d300d4d4d400d5d5d500d6d6d600d7d7d700d8d8d800d9d9d900dadada00dbdbdb00dcdcdc00dddddd00dedede00dfdfdf00e0e0e000e1e1e100e2e2e200e3e3e300e4e4e400e5e5e500e6e6e600e7e7e700e8e8e800e9e9e900eaeaea00ebebeb00ececec00ededed00eeeeee00efefef00f0f0f000f1f1f100f2f2f200f3f3f300f4f4f400f5f5f500f6f6f600f7f7f700f8f8f800f9f9f900fafafa00fbfbfb00fcfcfc00fdfdfd00fefefe00ffffff0000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"), ("core8", "424d3a030000000000001a0300000c00000008000400010008000000000101010202020303030404040505050606060707070808080909090a0a0a0b0b0b0c0c0c0d0d0d0e0e0e0f0f0f1010101111111212121313131414141515151616161717171818181919191a1a1a1b1b1b1c1c1c1d1d1d1e1e1e1f1f1f2020202121212222222323232424242525252626262727272828282929292a2a2a2b2b2b2c2c2c2d2d2d2e2e2e2f2f2f3030303131313232323333333434343535353636363737373838383939393a3a3a3b3b3b3c3c3c3d3d3d3e3e3e3f3f3f4040404141414242424343434444444545454646464747474848484949494a4a4a4b4b4b4c4c4c4d4d4d4e4e4e4f4f4f5050505151515252525353535454545555555656565757575858585959595a5a5a5b5b5b5c5c5c5d5d5d5e5e5e5f5f5f6060606161616262626363636464646565656666666767676868686969696a6a6a6b6b6b6c6c6c6d6d6d6e6e6e6f6f6f7070707171717272727373737474747575757676767777777878787979797a7a7a7b7b7b7c7c7c7d7d7d7e7e7e7f7f7f8080808181818282828383838484848585858686868787878888888989898a8a8a8b8b8b8c8c8c8d8d8d8e8e8e8f8f8f9090909191919292929393939494949595959696969797979898989999999a9a9a9b9b9b9c9c9c9d9d9d9e9e9e9f9f9fa0a0a0a1a1a1a2a2a2a3a3a3a4a4a4a5a5a5a6a6a6a7a7a7a8a8a8a9a9a9aaaaaaabababacacacadadadaeaeaeafafafb0b0b0b1b1b1b2b2b2b3b3b3b4b4b4b5b5b5b6b6b6b7b7b7b8b8b8b9b9b9babababbbbbbbcbcbcbdbdbdbebebebfbfbfc0c0c0c1c1c1c2c2c2c3c3c3c4c4c4c5c5c5c6c6c6c7c7c7c8c8c8c9c9c9cacacacbcbcbcccccccdcdcdcecececfcfcfd0d0d0d1d1d1d2d2d2d3d3d3d4d4d4d5d5d5d6d6d6d7d7d7d8d8d8d9d9d9dadadadbdbdbdcdcdcdddddddedededfdfdfe0e0e0e1e1e1e2e2e2e3e3e3e4e4e4e5e5e5e6e6e6e7e7e7e8e8e8e9e9e9eaeaeaebebebecececedededeeeeeeefefeff0f0f0f1f1f1f2f2f2f3f3f3f4f4f4f5f5f5f6f6f6f7f7f7f8f8f8f9f9f9fafafafbfbfbfcfcfcfdfdfdfefefeffffff00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"), ("gap1", "424d670000000000000037000000280000000400000004000000010018000000000030000000130b0000130b000000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b4249"), ("wrongsize", "424d700000000000000036000000280000000400000004000000010018000000000030000000130b0000130b0000000000000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b4249")]
+    let bmpInfo: [String: [Int]] = ["rgb24": [20, 12, 40, 54, 24, 774, 774], "gray8": [10, 6, 40, 1078, 8, 1150, 1150], "mono": [13, 5, 40, 62, 1, 82, 82], "rgba": [6, 4, 40, 54, 32, 150, 150], "topdown": [5, 3, 40, 54, 24, 102, 102], "core": [5, 3, 12, 26, 24, 74, 74], "v4": [4, 4, 108, 122, 32, 186, 186], "v5": [4, 4, 124, 138, 32, 202, 202], "bitfields": [4, 4, 40, 66, 16, 98, 98], "gap": [4, 4, 40, 60, 24, 108, 108], "pal4": [8, 4, 40, 118, 4, 134, 134], "pal8z": [8, 4, 40, 1078, 8, 1110, 1110], "core8": [8, 4, 12, 794, 8, 826, 826], "gap1": [4, 4, 40, 55, 24, 103, 103], "wrongsize": [4, 4, 40, 54, 24, 112, 102]]
+    var bmpWrong: [String] = []
+    for (name, hex) in bmpFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        let info = bmpInfo[name] ?? []
+        check(result.identity?.id == "bmp" && result.identity?.hasParser == true && result.message.isEmpty, "\(name).bmp is taken for a BMP, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty, "\(name).bmp: a sound tree")
+        // [width, height, dib size, data offset, bits per pixel, declared length, length]
+        if result.outcome.summary?.contains("\(info[0]) × \(info[1]), \(info[4])-bit") != true { bmpWrong.append("\(name) summary: \(result.outcome.summary ?? "none")") }
+        if result.outcome.roots.first(where: { $0.name == "DIB header" })?.length != Int64(info[2]) { bmpWrong.append("\(name) DIB header length") }
+        if result.outcome.roots.first(where: { $0.name == "Pixel data" })?.offset != Int64(info[3]) { bmpWrong.append("\(name) pixel offset \(result.outcome.roots.first(where: { $0.name == "Pixel data" })?.offset ?? -1) not \(info[3])") }
+        let sizeProblem = result.outcome.problems.contains { $0.contains("the file is") }
+        if sizeProblem != (info[5] != info[6]) { bmpWrong.append("\(name) file size problem \(sizeProblem): \(result.outcome.problems)") }
+        if info[5] == info[6], !result.outcome.problems.isEmpty { bmpWrong.append("\(name) problems: \(result.outcome.problems)") }
+    }
+    check(bmpWrong.isEmpty, "every BMP's size, header, pixel offset and declared length are what Pillow and a separate reading say: \(bmpWrong.prefix(3))")
+    func bmp(_ name: String) -> ParseOutcome { FormatRegistry.analyze(DataByteSource(structureBytes(bmpFixtures.first { $0.0 == name }!.1))).outcome }
+    check(structureValue(bmp("rgb24").roots, "DIB header", field: "Height") == "12 pixels, rows from the bottom up" && structureValue(bmp("topdown").roots, "DIB header", field: "Height")?.hasPrefix("-3") == true, "bottom-up and top-down rows")
+    check(bmp("gray8").roots.first { $0.name == "Colour table" }?.value == "256 colours" && bmp("pal4").roots.first { $0.name == "Colour table" }?.value == "16 colours" && bmp("mono").roots.first { $0.name == "Colour table" }?.value == "2 colours", "colour tables for 8, 4 and 1 bit")
+    check(bmp("bitfields").roots.first { $0.name == "Colour masks" }?.length == 12 && bmp("gap").roots.first { $0.name == "Gap" }?.length == 6, "colour masks after a 40-byte header, and a gap before the pixels")
+    check(structureValue(bmp("v5").roots, "DIB header", field: "Header size")?.contains("BITMAPV5HEADER") == true && structureValue(bmp("v4").roots, "DIB header", field: "Alpha mask") != nil && structureValue(bmp("core").roots, "DIB header", field: "Header size")?.contains("OS/2") == true, "V4, V5 and OS/2 headers")
+    let bmpBytes = structureBytes(bmpFixtures[0].1)
+    check(FormatRegistry.analyze(DataByteSource(Array(bmpBytes.dropLast(30)))).outcome.problems.contains { $0.contains("cut short") }, "pixels cut short are said")
+    let headersOnly = FormatRegistry.analyze(DataByteSource(Array(bmpBytes[0..<54]))).outcome
+    check(!headersOnly.problems.contains { $0.contains("past the end") } && headersOnly.problems.contains { $0.contains("cut short") }, "pixels that begin at the end of the file are cut short, not past it: \(headersOnly.problems)")
+    check(FormatRegistry.analyze(DataByteSource(bmpBytes + [1, 2, 3, 4, 5])).outcome.problems.contains { $0.contains("the file is") }, "a file longer than its header says is said so")
+    check(bmp("pal8z").roots.first { $0.name == "Colour table" }?.value == "256 colours" && bmp("core8").roots.first { $0.name == "Colour table" }?.length == 768 && bmp("gap1").roots.first { $0.name == "Gap" }?.length == 1, "an 8-bit table with no count, a three-byte table, a one-byte gap")
+    check(bmp("topdown").roots.first { $0.name == "Pixel data" }?.note?.contains("top row first") == true && bmp("rgb24").roots.first { $0.name == "Pixel data" }?.note?.contains("bottom row first") == true, "which row comes first")
+    check(BMPParser.matches(head: Array(bmpBytes[0..<20]), length: Int64(bmpBytes.count)) && !BMPParser.matches(head: Array("BM".utf8) + [UInt8](repeating: 1, count: 20), length: 22), "what a BMP begins with")
+    let bmpHostile = imgHostile("BMP", fixtures: bmpFixtures.map { ($0.0, structureBytes($0.1)) }, prefix: Array("BM".utf8) + [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0], seed: 12)
+    check(bmpHostile == nil, "BMPs cut, changed and random are all sound: \(bmpHostile ?? "")")
+
+    // ------------------------------------------------------------------ ICO and CUR
+    let icoFixtures: [(String, String)] = [("png3", "0000010003001010000000002000560000003600000020200000000020006c0000008c00000030300000000020008d000000f800000089504e470d0a1a0a0000000d49484452000000100000001008060000001ff3ff610000001d49444154789c633c2127f79f8102c04489e65103460d183560301900006c5e022351345d530000000049454e44ae42608289504e470d0a1a0a0000000d4948445200000020000000200806000000737a7af40000003349444154789cedce4101003008c4b06342f02f05574c069fd44053d3bd39ec5dce01000000000000000000000000000092e40381240243a26bab9c0000000049454e44ae42608289504e470d0a1a0a0000000d49484452000000300000003008060000005702f9870000005449444154789cedcf410dc02000c0404008fea5e08a89e07159d253d0ceb3f71d3fb674c0ab06b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b406b40fb9070263287c8e030000000049454e44ae426082"), ("dib", "000001000200101000000100200068040000260000000808000001002000480100008e04000028000000100000002000000001002000000000004004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000080000001000000001002000000000002001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"), ("cur", "000002000200101000000300040068040000260000000808000003000400480100008e04000028000000100000002000000001002000000000004004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000080000001000000001002000000000002001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")]
+    let icoWalks: [String: [String]] = ["png3": ["Image 1@54+86", "Image 2@140+108", "Image 3@248+141"], "dib": ["Image 1@38+1128", "Image 2@1166+328"], "cur": ["Image 1@38+1128", "Image 2@1166+328"]]
+    let icoSizes: [String: [[Int]]] = ["png3": [[16, 16], [32, 32], [48, 48]], "dib": [[16, 16], [8, 8]], "cur": [[16, 16], [8, 8]]]
+    var icoWrong: [String] = []
+    for (name, hex) in icoFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == "ico" && result.identity?.hasParser == true && result.message.isEmpty, "\(name): taken for an icon, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree, and nothing against it: \(result.outcome.problems)")
+        if imgNames(result.outcome.roots, prefix: "ico/image") != icoWalks[name] { icoWrong.append("\(name) images: \(imgNames(result.outcome.roots, prefix: "ico/image")) not \(icoWalks[name] ?? [])") }
+        let entries = result.outcome.roots.filter { $0.name.hasPrefix("Entry ") }.map { $0.value ?? "" }
+        for (index, size) in (icoSizes[name] ?? []).enumerated() where index >= entries.count || !entries[index].hasPrefix("\(size[0]) × \(size[1])") {
+            icoWrong.append("\(name) entry \(index): \(index < entries.count ? entries[index] : "none")")
+        }
+    }
+    check(icoWrong.isEmpty, "the images and sizes of every icon are what Pillow and a separate reading of the directory say: \(icoWrong.prefix(2))")
+    let curRoots = FormatRegistry.analyze(DataByteSource(structureBytes(icoFixtures[2].1))).outcome
+    let dibRoots = FormatRegistry.analyze(DataByteSource(structureBytes(icoFixtures[1].1))).outcome
+    check(curRoots.summary == "Cursor, 2 images" && structureValue(curRoots.roots, "Entry 1", field: "Hotspot x") == "3" && dibRoots.summary == "Icon, 2 images" && structureValue(dibRoots.roots, "Entry 1", field: "Bits per pixel") == "32 (0x0020)", "a cursor has hotspots where an icon has planes and depth")
+    check(structureNode(dibRoots.roots, "Image 1", "DIB header") != nil && structureValue(dibRoots.roots, "Image 1", "DIB header", field: "Height") == "32 pixels, rows from the bottom up" && dibRoots.roots.first { $0.name == "Image 1" }?.value?.hasPrefix("DIB") == true, "an image held as a DIB has no file header, and a height that counts its mask")
+    check(FormatRegistry.analyze(DataByteSource(structureBytes(icoFixtures[0].1))).outcome.roots.first { $0.name == "Image 1" }?.value?.hasPrefix("PNG") == true, "and one held as a PNG is said to be")
+    check(!ICOParser.matches(head: [0, 0, 1, 0, 2, 0], length: 37) && ICOParser.matches(head: [0, 0, 1, 0, 2, 0], length: 38), "the directory must fit")
+    let dib40 = [UInt8]([40, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 32, 0] + [UInt8](repeating: 0, count: 24)) + [UInt8](repeating: 0, count: 12)
+    let wide = [UInt8]([0, 0, 1, 0, 1, 0]) + [0, 0, 0, 0, 1, 0, 32, 0, 52, 0, 0, 0, 22, 0, 0, 0] + dib40
+    check(FormatRegistry.analyze(DataByteSource(wide)).outcome.roots.first { $0.name == "Entry 1" }?.value?.hasPrefix("256 × 256") == true, "a width or height of 0 is 256")
+    check(ICOParser.matches(head: [0, 0, 1, 0, 1, 0], length: 22) && !ICOParser.matches(head: [0, 0, 1, 0, 0, 0], length: 22) && !ICOParser.matches(head: [0, 0, 3, 0, 1, 0], length: 22), "what an icon begins with")
+    let icoHostile = imgHostile("ICO", fixtures: icoFixtures.map { ($0.0, structureBytes($0.1)) }, prefix: [0, 0, 1, 0, 2, 0], seed: 13)
+    check(icoHostile == nil, "icons cut, changed and random are all sound: \(icoHostile ?? "")")
+
+    // ------------------------------------------------------------------ WebP
+    let webpFixtures: [(String, String)] = [("lossy", "524946460c0200005745425056503820000200007009009d012a280018003eb54e9f4c272422a22aa800e0168969001207c7b0380bba3ce7765de7c4ccdbd1dec05fad5e901eb77f5bbd8aff534272f9a3b518cc779db475f789566cc4c9682a643079f3a6e7280000cc8767bd1071aa9cabc3bb1758a302cf1d8a8cb625167790410010dfa7787bc99b09590a269e14ae9b031c55390447fea01a148c7e0900e3e4f6868e26658f2300133825c766efbf3472033dadef20f4c4116bcea65f3c643e184b0c6e2101079838bd4388fa1f77aca1533ae768cdc594ffb7a1d3e3ce3532c0e5f110dfc7ab4001f8b8ba8940d601ea7586a64567f6ac5cc732b058577dd712b4ec3445d5b69f3646e871a79d3195ad54e148de0e62a98b52ca28e4eb246d189fe08f5e69e1369ef927b25ece8f5994b77bb4f23e798b31722dcf523e569fecb31f3742ed1a377616d95e11d1e93f8b17c274999560194174dd4d10720b71a5d9ab5761fb17a1360fb6bcf56322e010cbc31f4873b99535dba9f5791e1bcd7a3999d53b7a5f90abdb41ff35857538acff0c5ee60b131a58f0919cbec97abd60f412d199e58ac54ebe15c9e33accd17b4e37373d4dbd12587278cc1c814f34558c808ee29901df520b277c5b5befbc0a650f24967de7f1418dde765e352a6cd2ce5bcfb8983f197276c2a756ec7e1d66390fd6d8c3b4c64ebadcfe07be0cee00844da92b9cdbf3693fb7f11ddaa3700000"), ("lossless", "52494646ac030000574542505650384ca00300002f27c0050005650b000847d279cf7bb36dab6d7727938ecd8a6d9b55492aa9b0ab277e6e1b63dbf6cc6d3f627f23a2fff1d0c1851703ff4b6b1d4be74bdab0e562ce5b32910bae3a0f68268cedc1338edcbf8d316206e16d8784b0f7bcd5149bc700951fad3ec261468eea366d3ad0281ff0df7727a4daba440f69923cbd0e8c69e0277ca364eea77ee8eca0392003a8ca3a33660923d5f52acc0f4eeaf80a0f95642b2b39cc1855f5f14b7ff07293a5f7b0093f7e2f94999beffd93a09cf6583ddc90f1184c8a94c0ed9c501ab4f62ac45ea4732cd375e8c97b3995f0015e96f2da0b2a349ce90ffb67196e8745146b0e1aa0f8f2563c08cab70268025896acfda2724ee48096525fb8205471e84e9b7ad253913ec6ebefd2c19f614859bd00e1fc91acfada07404602edab99f93ea7b709daf904845ed3948025b4df67cac3267bfa800586b043cc6b8d65d8fd5f37531ce0a47636a18201f28a71c4abb65583546efecc1c71b84b1a1d489362ba7e2f84fe3439da51ab0f5bbbf2b86b6e61e3a0e9fe0e1fb7f931865fb082298fa8ef44a0bded4e37c1ccccdc1a6c41bb22c8327c428647ed5f5994a1e0db9979b4b0c89a8b186e7dba9a1ac873f1fca3e174eba4bdc56ba47cab2cc3b17d6b7e1a3f23f1ddd64e5efa49ad9dd2c7cf356173748da53b042feeb80d96df747c0360a4e9b867ffc408254ca4f813e0c6f3c67584b7fcaebd79abe2ac5f231b36132d79dc22f65bb156fcb16572cdd5d77ef3c68c5e65fb0291b9a6ad6f1662c7cc344c43106655d56ddc29237a44832bdbf3286d6f2ee302b246b63d3b858250a0fdc2b8183e59f08c2f6542b498006fb20aef89eb67a44a3bacd6ccec041aab72d7e0d105468361f7292f78d8b8e96dc846dddc8cb7f2a2d4856def31b7af0d642ca26a4ff1e2232b199e0f069177641a650648af3a329cc813a7db1354430e87b2b579cfe5fb7b54902d5b6d394b42595c66753897ff45aa797b9d1757625206b30e0b7ec40ed9de494698b08f01827f7068e3addac69f5946a4eba75f27d6f1320ee462dbbd6e368e7221606a22247f17cd9ab3ecfca1f10bf31dc895444e01e730297314f1d788caf16476d698b64ee60c9433d988923cba629fe529196d9525a4897a4dc7f804971973cc10f4dd64420c6d01d9177fd86913851e889b3adc58a1eb80a137ba146938453846fad817158d4fffa89d52f569d8e760b156130affcb018e356b7ea329a91a4d243cbec02ab6e4e3df2de0cfc4211378b010fb990a4ef62f0b67be955614fd19419475a41f"), ("alpha", "52494646c000000057454250565038580a000000380000001d0000130000494343501e000000494343494343494343494343494343494343494343494343494343494343414c50480a000000010750b288084444ff0356503820400000007003009d012a1e0014003e6d349647a4232221280800800d896500ca2e807e000041941000fef09b43ffc82e585d7235fff203fe407fc80fff8f7d8c2830000045584946220000004d4d002a000000080001010f0002000000070000001a0000000057656243616d0000"), ("anim", "524946461801000057454250565038580a000000020000000f00000f0000414e494d06000000000000000300414e4d464a0000000000000000000f00000f00006400000256503820320000003001009d012a1000100001402625a000037000fef2eb7ffff9b03ff6f3ff047a01ffffd2e0fffe9707fff4b83ff4a4000000414e4d464c0000000000000000000f00000f00009600000056503820340000003401009d012a1000100000002625a000037000fee9221ffff79f3fffb9f3fffb9f3fe8cfffff29fbfff238ffff238ffe50200000414e4d46460000000000000000000f00000f0000c8000000565038202e0000003401009d012a1000100000002625a000037000fefb55e3ffff4b83fffa5c1fffd2e0ffd2e0fffad5e557acaba000")]
+    let webpWalks: [String: [String]] = ["lossy": ["VP8 @12+520"], "lossless": ["VP8L@12+936"], "alpha": ["VP8X@12+18", "ICCP@30+38", "ALPH@68+18", "VP8 @86+72", "EXIF@158+42"], "anim": ["VP8X@12+18", "ANIM@30+14", "ANMF@44+82", "  VP8 @68+58", "ANMF@126+84", "  VP8 @150+60", "ANMF@210+78", "  VP8 @234+54"]]
+    let webpSizes: [String: [Int]] = ["lossy": [40, 24], "lossless": [40, 24], "alpha": [30, 20], "anim": [16, 16]]
+    let webpFrames: [String: Int] = ["lossy": 1, "lossless": 1, "alpha": 1, "anim": 3]
+    let webpDurations: [String: [Int]] = ["lossy": [], "lossless": [], "alpha": [], "anim": [100, 150, 200]]
+    func chunkList(_ roots: [FieldNode]) -> [String] {
+        var out: [String] = []
+        for node in roots where node.id.hasPrefix("webp/chunk") {
+            out.append("\(node.name)@\(node.offset)+\(node.length)")
+            if node.name == "ANMF" {
+                for child in node.resolvedChildren() where child.id.contains("/frame/") { out.append("  \(child.name)@\(child.offset)+\(child.length)") }
+            }
+        }
+        return out
+    }
+    var webpWrong: [String] = []
+    for (name, hex) in webpFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == "webp" && result.identity?.hasParser == true && result.message.isEmpty, "\(name).webp is taken for a WebP, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name).webp: a sound tree, and nothing against it: \(result.outcome.problems)")
+        if chunkList(result.outcome.roots) != webpWalks[name] { webpWrong.append("\(name) chunks: \(chunkList(result.outcome.roots)) not \(webpWalks[name] ?? [])") }
+        let size = webpSizes[name] ?? [0, 0]
+        if result.outcome.summary?.contains("\(size[0]) × \(size[1])") != true { webpWrong.append("\(name) summary: \(result.outcome.summary ?? "none")") }
+        if let durations = webpDurations[name], !durations.isEmpty {
+            let got = result.outcome.roots.filter { $0.name == "ANMF" }.compactMap { $0.resolvedChildren().first { $0.name == "Duration" }?.value }
+            if got != durations.map({ "\($0) ms" }) { webpWrong.append("\(name) durations \(got)") }
+            if result.outcome.summary?.contains("\(webpFrames[name] ?? 0) frames") != true { webpWrong.append("\(name) frame count: \(result.outcome.summary ?? "none")") }
+        }
+    }
+    check(webpWrong.isEmpty, "the chunks, sizes, frames and durations of every WebP are what Pillow and a separate RIFF walk say: \(webpWrong.prefix(2))")
+    let alpha = FormatRegistry.analyze(DataByteSource(structureBytes(webpFixtures[2].1))).outcome
+    check(alpha.summary?.contains("with alpha") == true && structureNode(alpha.roots, "VP8X", "Flags", "Alpha")?.value == "1" && structureNode(alpha.roots, "VP8X", "Flags", "ICC profile")?.value == "1" && structureNode(alpha.roots, "VP8X", "Flags", "Exif")?.value == "1", "extended flags: alpha, a profile and Exif")
+    check(structureValue(FormatRegistry.analyze(DataByteSource(structureBytes(webpFixtures[3].1))).outcome.roots, "ANIM", field: "Loop count") == "3", "an animation's loop count")
+    check(structureValue(FormatRegistry.analyze(DataByteSource(structureBytes(webpFixtures[1].1))).outcome.roots, "VP8L", field: "Signature") != nil && FormatRegistry.analyze(DataByteSource(structureBytes(webpFixtures[1].1))).outcome.summary?.contains("lossless") == true, "a lossless image")
+    let webpBytes = structureBytes(webpFixtures[0].1)
+    check(FormatRegistry.analyze(DataByteSource(Array(webpBytes.dropLast(10)))).outcome.problems.contains { $0.contains("is cut off") }, "a chunk longer than the file is cut off")
+    check(FormatRegistry.analyze(DataByteSource(webpBytes + [1, 2, 3])).outcome.roots.last?.name == "Data after the RIFF", "bytes after the end the RIFF header gives are shown")
+    check(FormatRegistry.analyze(DataByteSource(webpBytes + [1, 2, 3])).outcome.problems.contains { $0.contains("says the file is") }, "a RIFF header that says the file is shorter than it is, is said so")
+    // An odd-sized chunk is followed by a pad byte.
+    let odd = structureJoin(structureASCII("RIFF"), [24, 0, 0, 0], structureASCII("WEBP"), structureASCII("ABCD"), [3, 0, 0, 0, 1, 2, 3, 0], structureASCII("EFGH"), [0, 0, 0, 0])
+    let oddResult = FormatRegistry.analyze(DataByteSource(odd)).outcome
+    check(chunkList(oddResult.roots) == ["ABCD@12+11", "EFGH@24+8"] && oddResult.problems.isEmpty && structureNode(oddResult.roots, "ABCD", "Pad byte") != nil, "a chunk of three bytes is followed by a pad byte before the next: \(chunkList(oddResult.roots)) \(oddResult.problems)")
+    check(FormatRegistry.analyze(DataByteSource(structureBytes(webpFixtures[3].1))).outcome.summary?.hasPrefix("WebP animation") == true, "an animation is called one")
+    func chunk(_ type: String, _ payload: [UInt8]) -> [UInt8] {
+        let pad: [UInt8] = payload.count % 2 == 1 ? [0] : []
+        return structureJoin(structureASCII(type), [UInt8(payload.count & 0xFF), UInt8(payload.count >> 8), 0, 0], payload, pad)
+    }
+    func riff(_ chunks: [UInt8]...) -> [UInt8] {
+        let body = structureJoin(structureASCII("WEBP"), chunks.flatMap { $0 })
+        return structureJoin(structureASCII("RIFF"), [UInt8(body.count & 0xFF), UInt8(body.count >> 8), 0, 0], body)
+    }
+    func vp8x(_ flags: UInt8) -> [UInt8] { chunk("VP8X", [flags, 0, 0, 0, 9, 0, 0, 4, 0, 0]) }
+    check(FormatRegistry.analyze(DataByteSource(riff(vp8x(0x10)))).outcome.summary?.contains("with alpha") == true && FormatRegistry.analyze(DataByteSource(riff(vp8x(0x08)))).outcome.summary?.contains("with alpha") == false, "only the alpha flag means alpha")
+    check(FormatRegistry.analyze(DataByteSource(riff(vp8x(0x10)))).outcome.summary?.contains("10 × 5") == true, "a canvas of 9 and 4, minus one, is 10 by 5")
+    let scaled = riff(chunk("VP8 ", [0x10, 0x02, 0x00, 0x9D, 0x01, 0x2A, 0x28, 0x40, 0x18, 0x80]))
+    check(FormatRegistry.analyze(DataByteSource(scaled)).outcome.summary?.contains("40 × 24") == true, "the scale bits of a lossy size are not part of it: \(FormatRegistry.analyze(DataByteSource(scaled)).outcome.summary ?? "none")")
+    let framed = riff(vp8x(0x02), chunk("ANMF", [3, 0, 0, 5, 0, 0, 7, 0, 0, 9, 0, 0, 120, 0, 0, 1]))
+    let frame = FormatRegistry.analyze(DataByteSource(framed)).outcome.roots.first { $0.name == "ANMF" }?.resolvedChildren() ?? []
+    check(frame.first { $0.name == "Frame X" }?.value == "6 pixels" && frame.first { $0.name == "Frame Y" }?.value == "10 pixels" && frame.first { $0.name == "Frame width minus one" }?.value == "8 pixels" && frame.first { $0.name == "Duration" }?.value == "120 ms", "frame position is stored halved")
+    check(WebPParser.matches(head: Array("RIFF".utf8) + [0, 0, 0, 0] + Array("WEBP".utf8), length: 12) && !WebPParser.matches(head: Array("RIFF".utf8) + [0, 0, 0, 0] + Array("WAVE".utf8), length: 12), "what a WebP begins with")
+    let webpHostile = imgHostile("WebP", fixtures: webpFixtures.map { ($0.0, structureBytes($0.1)) }, prefix: Array("RIFF".utf8) + [60, 0, 0, 0] + Array("WEBP".utf8), seed: 14)
+    check(webpHostile == nil, "WebPs cut, changed and random are all sound: \(webpHostile ?? "")")
+}
+
+// MARK: TIFF
+
+// TIFFs made by Pillow (LZW with tags, several pages) and by hand (either byte order, strips and tiles, a GPS
+// directory, every kind of value), read back by Pillow, with the directories found by a walker written
+// separately from the parser.
+
+do {
+    let tiffFixtures: [(String, String)] = [("lzw", "49492a0000030000802b204988218e0c3b841be14258628a1c56881c624538a2062ca18c362347f8e18a3c86901da444a9220a4c559427e547d964207666984810d16409ee6c8c9c17274b49e2527c79a029a85223b4a0aa95a423e95363d9c29c8aa81f2a4cdaa4a93ea8ac1d2b45eae2e2bc7eb02f6c4b5b2186cc93b4418c71238992dc65b85c630a141dd537779a500f291be23afd14298b704d9c222f0c87c422314b6c649904d3c81cb249dca41130aecc5aa606628675019f1ce851ba3b318535a7376a479abcb3475c78d825f6484da478c55e5c1af758c5b2bf7c99e05212b56c75b30c8bae17979cb53f3684a634f479aa725f5553d7db744d34a47ee2b474961f74b0256532c07e2cfa521eb727b53def33fc6387f2d7d76078f7a7bd690f0953fcd3934304049d0b83ac0ca612d04b284ebce51c1cba9065fc24cc15c2942cde2ee4db2439432f88ce22c402fc4426448a81143bc5064c54f48b271c5cdf15f0daa43e1bf1a9871bb7435a98b9c363547d082d4fdad427488b514923c482606f25a482536842268224a50249327b644b95b2cc9e594b8494bc2ecc0eb952850dece8a0634d1023b8880acbf11c55ce042ce52209ce7c04304e055c9f080e73e9633fcbc493a70cb804cca4222989c118b989146cb256ce442c2065d292e1642bd30cf9011832069bfc2a44022d146ad48f998953adc323144446e61c503bb464685d598875ad0b26c16fdb561e1a15ed030d91360baa25c7262d8d56ae2ee27c4a09b66bc3084442fa1c513f6fbb9ec410ee4c72be12236dbd1f0d56c03971dc0fbb8e365d04e5d57053e585dc505e03d5e4cb428cb4c565c9ea70e148d5f451cb7fde05041624e089a4124b08d84b92de4c93f962d2c2c2915589ce9084c02ecef0714748d1a243ef362c85abc38ec0c3ab965e49ebd384992f53b94b97d56a356a21d1f132d535294d71a2bd514ed5bc36af41c684a34c527d76e7ba78761ca25dc58268e396fa8d1508173aaae375139364fa39af42debc99085b0b4ab9d025d6cd6e643ac55f4f8b1b6b8f7d58244bf36689b54a658d202010000001030001000000180000000101030001000000100000000201030003000000d60300000301030001000000050000000601030001000000020000000f01020008000000dc0300001101040001000000080000001201030001000000060000001501030001000000030000001601030001000000100000001701040001000000f80200001a01050001000000c60300001b01050001000000ce0300001c01030001000000010000002801030001000000020000003101020008000000e4030000000000002c010000010000002c010000010000000800080008005469666643616d0067656e20312e3000"), ("multi", "49492a0008000000090000010400010000000800000001010400010000000800000002010300010000000800000003010300010000000100000006010300010000000100000011010400010000007a0000001601040001000000080000001701040001000000400000001c0103000100000001000000c80000000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000000000049492a0008000000090000010400010000000800000001010400010000000800000002010300010000000800000003010300010000000100000006010300010000000100000011010400010000003a0100001601040001000000080000001701040001000000400000001c0103000100000001000000880100006464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646464646400000000000049492a000800000009000001040001000000080000000101040001000000080000000201030001000000080000000301030001000000010000000601030001000000010000001101040001000000fa0100001601040001000000080000001701040001000000400000001c010300010000000100000000000000c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8000000000000"), ("be", "4d4d002a000000f600000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020200000008000000300000005800000028000000280000002848616e6443616d000000004800000001fffffffb0000000340040000000000003fc00000c000000000000028000000010000001e000000010000000f00000001000200010002000000024e0000000002000500000003000000c000000000000a0100000300000001000800000101000300000001000c0000010300030000000100010000010f0002000000080000009801110004000000030000008001120003000000010003000001160003000000010004000001170004000000030000008c011a000500000001000000a08825000400000001000000d800000000"), ("le", "49492a00f600000000000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020208000000300000005800000028000000280000002800000048616e6443616d004800000001000000fbffffff0300000000000000000004400000c03f000000c028000000010000001e000000010000000f00000001000000020001000200020000004e0000000200050003000000c0000000000000000a0000010300010000000800000001010300010000000c0000000301030001000000010000000f010200080000009800000011010400030000008000000012010300010000000300000016010300010000000400000017010400030000008c0000001a01050001000000a00000002588040001000000d800000000000000"), ("tiled", "4d4d002a000000f600000000000000000000000000000000000000000000000000000000000000000000000000000000010101010101010101010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020200000008000000300000005800000028000000280000002848616e6443616d000000004800000001fffffffb0000000340040000000000003fc00000c000000000000028000000010000001e000000010000000f00000001000200010002000000024e0000000002000500000003000000c000000000000b0100000300000001000800000101000300000001000c0000010300030000000100010000010f00020000000800000098011200030000000100030000011a000500000001000000a001420003000000010010000001430003000000010010000001440004000000030000008001450004000000030000008c8825000400000001000000d800000000")]
+    // Each directory: name, offset, length, then the tags as "tag:type:count".
+    let walks: [String: [String]] = ["lzw": ["IFD 0@768+198 256:3:1,257:3:1,258:3:3,259:3:1,262:3:1,271:2:8,273:4:1,274:3:1,277:3:1,278:3:1,279:4:1,282:5:1,283:5:1,284:3:1,296:3:1,305:2:8"], "multi": ["IFD 0@8+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1", "IFD 1@200+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1", "IFD 2@392+114 256:4:1,257:4:1,258:3:1,259:3:1,262:3:1,273:4:1,278:4:1,279:4:1,284:3:1"], "be": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+126 256:3:1,257:3:1,259:3:1,271:2:8,273:4:3,274:3:1,278:3:1,279:4:3,282:5:1,34853:4:1"], "le": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+126 256:3:1,257:3:1,259:3:1,271:2:8,273:4:3,274:3:1,278:3:1,279:4:3,282:5:1,34853:4:1"], "tiled": ["GPS IFD@216+30 1:2:2,2:5:3", "IFD 0@246+138 256:3:1,257:3:1,259:3:1,271:2:8,274:3:1,282:5:1,322:3:1,323:3:1,324:4:3,325:4:3,34853:4:1"]]
+    let tags: [String: [String: String]] = ["lzw": ["256": "24", "271": "TiffCam", "305": "gen 1.0"], "multi": ["256": "8"], "be": ["256": "8", "271": "HandCam"], "le": ["256": "8", "271": "HandCam"], "tiled": ["256": "8", "271": "HandCam"]]
+    let frames: [String: Int] = ["lzw": 1, "multi": 3, "be": 1, "le": 1, "tiled": 1]
+    let sizes: [String: [Int]] = ["lzw": [24, 16], "multi": [8, 8], "be": [8, 12], "le": [8, 12], "tiled": [8, 12]]
+    var wrong: [String] = []
+    func directories(_ roots: [FieldNode]) -> [String] {
+        roots.filter { $0.id.hasPrefix("tiff/ifd") && !$0.id.contains("/strip") && !$0.id.contains("/jpeg") && !$0.id.contains("/e") }.map { node in
+            let entries = node.resolvedChildren().filter { $0.id.contains("/e") }.map { entry -> String in
+                let kids = entry.resolvedChildren()
+                let tag = kids.first { $0.name == "Tag" }?.value?.prefix { $0 != " " } ?? "?"
+                let type = kids.first { $0.name == "Type" }?.value?.prefix { $0 != " " } ?? "?"
+                let count = kids.first { $0.name == "Count" }?.value ?? "?"
+                return "\(Int(tag.dropFirst(2), radix: 16) ?? -1):\(type):\(count)"
+            }
+            return "\(node.name)@\(node.offset)+\(node.length) " + entries.joined(separator: ",")
+        }
+    }
+    for (name, hex) in tiffFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == "tiff" && result.identity?.hasParser == true && result.message.isEmpty, "\(name).tif is taken for a TIFF, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty, "\(name).tif: a sound tree")
+        check(result.outcome.problems.isEmpty, "\(name).tif: nothing against it: \(result.outcome.problems)")
+        if directories(result.outcome.roots) != walks[name] { wrong.append("\(name) directories: \(directories(result.outcome.roots)) not \(walks[name] ?? [])") }
+        let size = sizes[name] ?? [0, 0]
+        if result.outcome.summary?.contains("first \(size[0]) × \(size[1])") != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none")") }
+        let pages = frames[name] ?? 0
+        if result.outcome.summary?.contains(", \(pages) \(pages == 1 ? "image" : "images")") != true { wrong.append("\(name) pages: \(result.outcome.summary ?? "none")") }
+    }
+    check(wrong.isEmpty, "the directories and tags of every TIFF are where, and what, an independent walk of the file says: \(wrong.prefix(2))")
+
+    func tiff(_ name: String) -> ParseOutcome { FormatRegistry.analyze(DataByteSource(structureBytes(tiffFixtures.first { $0.0 == name }!.1))).outcome }
+    func entry(_ outcome: ParseOutcome, _ directory: String, _ tag: String) -> FieldNode? {
+        outcome.roots.first { $0.name == directory && $0.id.hasPrefix("tiff/ifd") }?.resolvedChildren().first { $0.name == tag }
+    }
+    // Values against what Pillow reads.
+    let lzw = tiff("lzw")
+    check(entry(lzw, "IFD 0", "Make")?.value == "\"\(tags["lzw"]?["271"] ?? "?")\"" && entry(lzw, "IFD 0", "Software")?.value == "\"\(tags["lzw"]?["305"] ?? "?")\"" && entry(lzw, "IFD 0", "ImageWidth")?.value == "\(tags["lzw"]?["256"] ?? "?")", "text and numbers match Pillow's: \(entry(lzw, "IFD 0", "Make")?.value ?? "none")")
+    check(entry(lzw, "IFD 0", "Orientation")?.value == "6 · right top" && entry(lzw, "IFD 0", "Compression")?.value == "5 · LZW" && entry(lzw, "IFD 0", "PhotometricInterpretation")?.value == "2 · RGB", "tags with a list of meanings say them")
+    check(entry(lzw, "IFD 0", "XResolution")?.value == "300/1 = 300" && entry(lzw, "IFD 0", "BitsPerSample")?.value == "8, 8, 8", "a rational and a list")
+    let strip = lzw.roots.first { $0.id.contains("/strip") }
+    let pillowStrip = [8, 760]
+    check(strip?.name == "Strip 1 of IFD 0" && strip?.offset == Int64(pillowStrip[0]) && strip?.length == Int64(pillowStrip[1]), "a strip is where the StripOffsets and StripByteCounts say, and Pillow agrees: \(strip.map { "\($0.offset)+\($0.length)" } ?? "none")")
+    let multi = tiff("multi")
+    check(multi.roots.filter { $0.name.hasPrefix("IFD ") }.count == 3 && multi.roots.filter { $0.id.contains("/strip") }.count == 3, "three pages, each with a strip")
+    // By hand: both byte orders read alike.
+    let be = tiff("be")
+    let le = tiff("le")
+    for tag in ["ImageWidth", "ImageLength", "Make", "XResolution", "Orientation", "StripOffsets", "StripByteCounts"] {
+        check(entry(be, "IFD 0", tag)?.value == entry(le, "IFD 0", tag)?.value && entry(be, "IFD 0", tag)?.value != nil, "\(tag) reads the same either way round: \(entry(be, "IFD 0", tag)?.value ?? "none") and \(entry(le, "IFD 0", tag)?.value ?? "none")")
+    }
+    check(entry(be, "IFD 0", "ImageWidth")?.value == "8" && entry(be, "IFD 0", "Make")?.value == "\"HandCam\"" && entry(be, "IFD 0", "StripOffsets")?.value == "8, 48, 88", "values of the hand-made file")
+    check(entry(be, "GPS IFD", "GPSLatitudeRef")?.value == "\"N\"" && entry(be, "GPS IFD", "GPSLatitude")?.value == "40/1 = 40, 30/1 = 30, 15/1 = 15" && entry(be, "IFD 0", "GPSInfoIFDPointer") != nil, "a GPS directory is followed, with its own names for tags")
+    check(be.roots.filter { $0.id.contains("/strip") }.map { "\($0.name)@\($0.offset)+\($0.length)" } == ["Strip 1 of IFD 0@8+40", "Strip 2 of IFD 0@48+40", "Strip 3 of IFD 0@88+40"], "three strips of 40 bytes")
+    let tiled = tiff("tiled")
+    check(tiled.roots.filter { $0.id.contains("/strip") }.map { $0.name } == ["Tile 1 of IFD 0", "Tile 2 of IFD 0", "Tile 3 of IFD 0"], "tiles are named as such")
+    check(be.roots.contains { $0.name.hasPrefix("Value of Make") && $0.length == 8 }, "a value kept away from its entry is a node of its own")
+    check(structureNode(be.roots, "Header", "Byte order")?.note?.contains("big-endian") == true && structureNode(le.roots, "Header", "Byte order")?.note?.contains("little-endian") == true, "the byte order is said")
+
+    // Made by hand to be wrong.
+    func le32(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)] }
+    let header = structureJoin(structureASCII("II"), [0x2A, 0], le32(8))
+    func ifd(_ entries: [[UInt8]], next: Int = 0) -> [UInt8] {
+        structureJoin([UInt8(entries.count), 0], entries.flatMap { $0 }, le32(next))
+    }
+    func tag(_ id: Int, _ type: Int, _ count: Int, _ value: Int) -> [UInt8] { structureJoin([UInt8(id & 0xFF), UInt8(id >> 8), UInt8(type), 0], le32(count), le32(value)) }
+    let loop = structureJoin(header, ifd([tag(0x100, 4, 1, 5)], next: 8))
+    check(FormatRegistry.analyze(DataByteSource(loop)).outcome.problems.contains { $0.contains("points back") }, "a directory that points back to itself is not followed twice")
+    let far = structureJoin(header, ifd([tag(0x10F, 2, 100, 9999)]))
+    check(FormatRegistry.analyze(DataByteSource(far)).outcome.problems.contains { $0.contains("not inside the file") }, "a value outside the file is said")
+    let unordered = structureJoin(header, ifd([tag(0x101, 4, 1, 5), tag(0x100, 4, 1, 5)]))
+    check(FormatRegistry.analyze(DataByteSource(unordered)).outcome.problems.contains { $0.contains("not in order") }, "tags out of order are said")
+    let badStart = structureJoin(structureASCII("II"), [0x2A, 0], le32(9999))
+    check(FormatRegistry.analyze(DataByteSource(badStart)).outcome.problems.contains { $0.contains("not inside the file") }, "a first directory that is not in the file is said")
+    let manyTags = structureJoin(header, [0xFF, 0xFF], [UInt8](repeating: 0, count: 100))
+    check(structureProblems(FormatRegistry.analyze(DataByteSource(manyTags)).outcome.roots, fileLength: Int64(manyTags.count)).isEmpty, "a directory that says it has 65,535 tags, in a file of 100 bytes, is tolerated")
+    let padding = [UInt8](repeating: 0x41, count: 140)
+    for (offset, bad) in [(4, true), (7, true), (8, false)] {
+        let file = structureJoin(header, ifd([tag(0x10F, 2, 100, offset)]), padding)
+        check(FormatRegistry.analyze(DataByteSource(file)).outcome.problems.contains { $0.contains("not inside the file") } == bad, "a value stored at \(offset), where the header ends at 8: \(FormatRegistry.analyze(DataByteSource(file)).outcome.problems)")
+    }
+    let sameTag = structureJoin(header, ifd([tag(0x100, 4, 1, 5), tag(0x100, 4, 1, 6)]))
+    check(!FormatRegistry.analyze(DataByteSource(sameTag)).outcome.problems.contains { $0.contains("not in order") }, "two entries of one tag are not out of order")
+    let mismatched = structureJoin(header, ifd([tag(0x111, 4, 2, 60), tag(0x117, 4, 1, 10)]), padding)
+    check(!FormatRegistry.analyze(DataByteSource(mismatched)).outcome.roots.contains { $0.id.contains("/strip") }, "strips are listed only when there are as many sizes as places")
+    let earlyStrip = structureJoin(header, ifd([tag(0x111, 4, 1, 7), tag(0x117, 4, 1, 10)]), padding)
+    check(FormatRegistry.analyze(DataByteSource(earlyStrip)).outcome.problems.contains { $0.contains("outside the file") }, "a strip that begins inside the header is outside the file")
+    let signed = structureJoin(header, ifd([tag(0x100, 8, 1, 0xFFFF), tag(0x101, 9, 1, -5 & 0xFFFFFFFF), tag(0x102, 3, 1, 0xFFFF)]))
+    let signedIFD = FormatRegistry.analyze(DataByteSource(signed)).outcome
+    check(entry(signedIFD, "IFD 0", "ImageWidth")?.value == "-1" && entry(signedIFD, "IFD 0", "ImageLength")?.value == "-5" && entry(signedIFD, "IFD 0", "BitsPerSample")?.value == "65535", "signed and unsigned shorts and longs")
+    let zeroRational = structureJoin(header, ifd([tag(0x11A, 5, 1, 26)]), le32(5), le32(0))
+    check(entry(FormatRegistry.analyze(DataByteSource(zeroRational)).outcome, "IFD 0", "XResolution")?.value == "5/0", "a rational with 0 below is not divided: \(entry(FormatRegistry.analyze(DataByteSource(zeroRational)).outcome, "IFD 0", "XResolution")?.value ?? "none")")
+    for (raw, words) in [(7, "7 · right bottom"), (8, "8 · left bottom"), (1, "1 · top left")] {
+        let file = structureJoin(header, ifd([tag(0x112, 3, 1, raw)]))
+        check(entry(FormatRegistry.analyze(DataByteSource(file)).outcome, "IFD 0", "Orientation")?.value == words, "orientation \(raw) is \(words)")
+    }
+    check(TIFFTags.name(0x100, in: .gps) == nil && TIFFTags.name(0x100, in: .interoperability) == nil, "a GPS or interoperability directory does not borrow the image tags' names")
+    let unknownType = structureJoin(header, ifd([tag(0x100, 99, 1, 5)]))
+    check(entry(FormatRegistry.analyze(DataByteSource(unknownType)).outcome, "IFD 0", "ImageWidth")?.value == "unknown type 99", "an unknown type is said")
+    check(TIFFParser.matches(head: [0x49, 0x49, 0x2A, 0, 8, 0, 0, 0], length: 8) && TIFFParser.matches(head: [0x4D, 0x4D, 0, 0x2A, 0, 0, 0, 8], length: 8) && !TIFFParser.matches(head: [0x49, 0x4D, 0x2A, 0, 8, 0, 0, 0], length: 8), "what a TIFF begins with")
+    check(TIFFTags.name(1, in: .gps) == "GPSLatitudeRef" && TIFFTags.name(1, in: .image) == nil && TIFFTags.name(0x9003, in: .image) == "DateTimeOriginal" && TIFFTags.name(0x100, in: .exif) == "ImageWidth", "tag names depend on the directory")
+    var small = ParseContext()
+    small.maxRecords = 3
+    check(FormatRegistry.analyze(DataByteSource(structureBytes(tiffFixtures[1].1)), context: small).outcome.listingLimit != nil, "the listing stops where it was told to")
+
+    var unsound: [String] = []
+    var runs = 0
+    for (name, hex) in tiffFixtures {
+        let original = structureBytes(hex)
+        for length in 0...original.count {
+            runs += 1
+            let result = FormatRegistry.analyze(DataByteSource(Array(original[0..<length])))
+            if let issue = structureProblems(result.outcome.roots, fileLength: Int64(length)).first { unsound.append("\(name) cut at \(length): \(issue)") }
+        }
+        for index in stride(from: 0, to: original.count, by: max(1, original.count / 500)) {
+            for value in [UInt8(0x00), UInt8(0xFF)] where original[index] != value {
+                var changed = original
+                changed[index] = value
+                runs += 1
+                let result = FormatRegistry.analyze(DataByteSource(changed))
+                if let issue = structureProblems(result.outcome.roots, fileLength: Int64(changed.count)).first { unsound.append("\(name) byte \(index) = \(value): \(issue)") }
+            }
+        }
+        if unsound.count > 5 { break }
+    }
+    var random = BytesCheckRandom(seed: 9696)
+    for _ in 0..<400 {
+        var bytes = header
+        for _ in 0..<random.below(200) { bytes.append(random.below(3) == 0 ? 0 : random.byte()) }
+        runs += 1
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        if let issue = structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).first { unsound.append("random \(bytes.count): \(issue)") }
+        if unsound.count > 5 { break }
+    }
+    check(unsound.isEmpty, "\(runs) cut, changed and random TIFFs all give sound trees: \(unsound.prefix(3))")
+}
+
+// MARK: HEIC, AVIF, JPEG 2000 and JPEG XL
+
+// Files from Pillow, pillow-heif and libjxl, with their boxes, item tables and sizes found by a walker written separately.
+
+func heifBoxes(_ nodes: [FieldNode]) -> [String] {
+    var out: [String] = []
+    for node in nodes {
+        if node.id.split(separator: "/").last?.hasPrefix("box") == true { out.append("\(node.name)@\(node.offset)+\(node.length)") }
+        out += heifBoxes(node.resolvedChildren())
+    }
+    return out
+}
+
+func heifFind(_ nodes: [FieldNode], _ name: String) -> [FieldNode] {
+    var out: [FieldNode] = []
+    for node in nodes {
+        if node.name == name, node.id.split(separator: "/").last?.hasPrefix("box") == true { out.append(node) }
+        out += heifFind(node.resolvedChildren(), name)
+    }
+    return out
+}
+
+func heifField(_ box: FieldNode?, _ name: String) -> String? {
+    box?.resolvedChildren().first { $0.name == name }?.value
+}
+
+do {
+    var wrong: [String] = []
+    var fixtures: [(String, [UInt8])] = []
+    do {
+        let name = "heic64"
+        let bytes = structureBytes("0000001c6674797068656963000000006d696631686569636d696166000001566d657461000000000000002168646c720000000000000000706963740000000000000000000000000000000022696c6f630000000044400001000100000000017a000100000000000007c00000002369696e6600000000000100000015696e6665020000000001000068766331000000000e7069746d000000000001000000d669707270000000b76970636f00000078687663430103700000009000000000001ef000fcfdf8f800000f03600001001840010c01ffff03700000030090000003000003001eba0240610001002b42010103700000030090000003000003001ea020810596ea4929ae6e021a0c0800000300c800000300084062000100074401c172b0224000000013636f6c726e636c780001000d0006800000001469737065000000000000004000000040000000107069786900000000030808080000001769706d61000000000000000100010481020304000007c86d646174000007bc2801af1380e600f1c7fa9fea9fcb1c09bad1fa93dec8e776548fc2ed776060a3382b5b8d83644464c4f665f78b116c2aa5c2007310796a03d1e84f21165f1722794c0ba0973ab71665038a8051a35c9eb8ceb168d3511e27693f3c2e5fbe7be7f5570d0b3e36ccec24d8265aec7e0036e5b428d640391b7aed7653516afa4946d8b83b7abab051759839af2662c91cf20c2de2f5572cfa5ff5cbcb7507f0aef9a9cb3d6f11d39cd09215808bb0f42739cfeec5217ed1ae145b5447852538896f2df5c2889e674c860b3dd7295f02e0e1b724ae54e2a00e40b7b5bb1040328277f6df153b6df9be43469a3df88b853f80a986239fea65f02e39727e9400634c94a20446ffdc605b6817837cc2c89480f01e59852ce4e0d0518228c13ac7d0d113f4fc847eb2820397ea843e92818e84421fd02784a7eae63040a0a42cbdfa18e1d5e933b96d61ab709b6e83842a815f572792c914385d385737bb942392f9ae58f60222fa9adc566f98da43dbba5e84a9d497947cd8fb586346a19f725329458a989ae0340f7e574789e8e00b74d15e5630ea6f87e5bc8826163b4a3b7ac3e4041dc5b8c7809d38f799476a02233391f233613049d9c862f3c647e002987aa1760f43df8de4d278a53339d7f4dd9d2f8458706b0cc5f994b7ed47d07cfb63530d15dbe991c65e391ebcfaec7cef8c38a664d4d6c27b772e001bd02a31590cc6728d5fda231294681b0253d3226a038c8b97f8563c245651768e924912a8006d3c0afcd4482b5dc6b132ee850b73dfbd5df3288aba3013250196dae23925170ff7aecc653bfd1256dc0fedf831ca8bc6486390932e0ca0ed32fa0ea385a4204684abef54f40a38d0ccdac975c03fbfc40efc0f5ce2631ffdf31f99ff8c5f39abaec11cd6dc11e9d2008bdd1ea7cc69c748937f1863912d574d54191c1623541ae95149ff8d7efb6269567826dd33eafcbfe8f350756675fb876d5edfacd8d9a7716b796a19524e95b8c06086df9f5fcbda8f806aab98fd16f200fe0b8f4c8a7a56a7ae3aefdc40c09565e741c80dbadd62c5880d18b1942194c1d333bcd88e5b2bb2d14b12c4c100eebeba2c3bd1963339c10c4855809ff7062b2fd3dbf750e2ce1115136ab0b92f4a350086fa60beb21cac3de9025080e579456cf8633544351568e25f3595667ab88778338cd56eb71344ad17c29f6c43f1682de371cd2d231a25183ffb36828b7e10bb388c6198ca5402d24c7d4ff297a98b277d0b4c5fe98bc329c54f6a9474066affef6fcc41ac6a1a7851b3809a58a33f3cb7de9a554f63d6e852be335c3d92f7f33ec8a7607a574868320a535c29910d3e86cd80f489539cd7273da3efd495460d18de34e0741b83e1f0441f7fc2a7eaa0218fddfff77392ce88b0ff0b88c0b8b04d21280d65ff53e3eece475585f88cc96a5196522e16f702760296e559371a758a51e7d324824f4633beefd99ba71fbfd35f116d6711897471c889b55fb03988564063b1908608afda4a5e831d005f38c404caff669ea6b57e27817a6ccf734dfd5fc8cdec1a7ff24a98d70b5d5f4301ddfffc77852556c223907487dadbe09e175e1f95c182040db72d3b274fce7cc5f3369e1ebca5535039b3d96ee4f79e10bc3d7845f9af66fb3fed856d3a186e09a31f8af702227d03aa03f800d96c1c49ae9d4c3170a96743a2a0b1c8106518eb5308cfaa89c96374fef5d3a7fbff03f31f4e08c05e433d6d52db72c69dfbbaba255f709c5908a56d530c0baee33ef18c74ab06feeceb471a2bfd9c92b7d3049a939617178cace3f9128073c1a2824e174c6ec12adafe915015dd3d83e0b0d3e52d83c8564bee4cca61854ba7c7bb4bd1ac48bf4d5d387bc1b3ba725196cdeb79f64f1f8d4186966d51c185f2011eaa4229d520ff3633a444965b001064b8a606d2450775f28bedd0decc5927f0b71ada06b935a9015a413e1baf38d59b4800a82fcc447a47742de12d2e347945d4d968cf528df97d20648d622fa2bb10e10ec6ae31628249f8d3660049a2703fcb2f7428b6eb8f049aa0bc69daefa7cc2396caab345ab825183fc8fad5acdd3dd339c5e114072524b486a00b47d8c32fe8155086e375e03d79595ad663eaca4d6fa9990c0b8f4370f6d2d2a3c8978184c07723d735c221196ae9ce3d34ebb76bff171eeae60a5a56c9d5a777d4e0e77e6d2a28c283442ae40880845a3886e8e001baf38d37bbe24696b5fd25e4b08e7c81a77ff1cdf1e66db1c5fc2ac172f6befc2275d51b8854e9d48c3d650d166c4f47302413d2ca93bde9eac09297e8ec9ce04332eba6e29682604705c0f8515055eba8785cf6abd8d7e4fb69bc54ef3f1a06f6c9f356902d14e6b0ad4f849fb635d5013c034fa32a877ccd9223dc7848bf1d2955be1465dcd9d6d93d47be16bf4b98580dc2fbf8022bc11d005206f54cc7a8326810caa40964dab54d8fe5f0ebb506a0a01e55bb75153bcebf75f87e09d5f28b101b057a3ffb45917d148c0b53d7e7cba5d69127db26ca1f8adf9a57cdfece221e32396703443cb9a1c2448d81bc4acaa4c10f2d20fe7608f695db288d6a9330ef99ec6264c412583b8aff38e7961b6092d0eee547fd85e467f42b17201d58d15f051060132a10baecfc3e7ea245d5934d3c19d537289f541bc715674e0def36e7549b90c9b58d842f5db7b1cdb8f316e0a587a8a8e33cd0dec48cf60a94f299d5d3e6c9dbf8732ae8a8c62586f3ba61ffdce21ce59b215358c9e80354303f1ea2da57f104f19bab16fdc57f8d381641fe84ac")
+        let kind = "heic"
+        let expectedBoxes = ["ftyp@0+28", "meta@28+342", "hdlr@40+33", "iloc@73+34", "iinf@107+35", "infe@121+21", "pitm@142+14", "iprp@156+214", "ipco@164+183", "hvcC@172+120", "colr@292+19", "ispe@311+20", "pixi@331+16", "ipma@347+23", "mdat@370+1992"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "64 × 64"
+        let expectedIspe = ["64 × 64"]
+        let expectedItems = ["item 1: 1984 bytes at 378"]
+        let ispe = heifFind(result.outcome.roots, "ispe").map { "\(heifField($0, "Image width").flatMap { structureNumber($0) } ?? -1) × \(heifField($0, "Image height").flatMap { structureNumber($0) } ?? -1)" }
+        if ispe != expectedIspe { wrong.append("\(name) ispe: \(ispe) not \(expectedIspe)") }
+        let items = heifFind(result.outcome.roots, "iloc").first?.resolvedChildren().filter { $0.name.hasPrefix("Item ") && $0.name != "Item count" }.compactMap { $0.value } ?? []
+        if items != expectedItems { wrong.append("\(name) iloc: \(items) not \(expectedItems)") }
+        if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
+        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        let hevc = heifFind(result.outcome.roots, "hvcC").first
+        if heifField(hevc, "Level")?.hasPrefix("30 · level \(Double(30) / 30)") != true || heifField(hevc, "Profile")?.hasPrefix("3 ·") != true { wrong.append("\(name) hvcC: \(heifField(hevc, "Level") ?? "none")") }
+    }
+    do {
+        let name = "heic_wide"
+        let bytes = structureBytes("0000001c6674797068656963000000006d696631686569636d6961660000017d6d657461000000000000002168646c720000000000000000706963740000000000000000000000000000000022696c6f63000000004440000100010000000001a10001000000000000041c0000002369696e6600000000000100000015696e6665020000000001000068766331000000000e7069746d000000000001000000fd69707270000000dd6970636f00000076687663430103700000009000000000001ef000fcfdf8f800000f03600001001840010c01ffff03700000030090000003000003001eba0240610001002a42010103700000030090000003000003001ea030810596eae4a6b9b8086830200000030320000003002162000100064401c173c18900000013636f6c726e636c780001000d000680000000146973706500000000000000600000004000000028636c6170000000600000000100000028000000010000000000000002ffffffe800000002000000107069786900000000030808080000001869706d6100000000000000010001058102030584000004246d646174000004182801af1942b0f898b4a0155e8572a62d85e16fecd9daa8f4a89f4094b2ccf4286341d8ad986b40d194c1628e9ef2c4f43d0561a7f2be5f25b2301dd751ec84ca9631d6fc9065e3389d001a2aa1637a7f9d412c700c814513d6cea4e7a7173a32a5abe87c6065eeb5d55c66d8cfc576798793b556194cd7324457cbdebc7481a124f492036fbaa48115a35ed8c524295aff92d855506fa6378233c69d19ac474589be19d988d034d7144692f90dff61265e57b21d6da90134efae102b7aaf02268dfdf32c5dc85f4dbdeea870cdf0ce3a7c87849d566798b435a03b89b8e70177314e4f665d923d083b0fdb0ac134b3592a1222c835cee68d8a094c71a480e6f8dd7f37076fd6af4edd2ca821c598ee45ec9af4f03c401645597b91c6d6acb75606264a550be76f72123b605fec4cf222eca40017dc2287d482b8f7aeeec5abe81fe88efffdcaf5b3d0333fe1d890830157e333e6d7f0ccc21c6d49aaf936bd04f464824beb93527ee0127d6d320b1ab761cfdf47e5efba48b544835a387180e242556c305ebe2b082034376faa76780046d8763525fe9cb7fea07c771f3feb04b0ce67410818e587c815003e546a6e67f6c2fed2dc32c1ad8a73551debbc44444844626eea1de50cf9e80187a2da002871efe2ee668708872156188bb3b161d1264c1afacc856099d74b720f0824a4a80f1b0733ce1913bf9e7a6f2bdc2b19a37992a1de93e99ca6d544355e5a14c8b083227c21adcd6ffe03d22d66cee6aaee62bfe1a077e7f4d7df18df347a66839ee6c6c02284cab4f28ea6203c1e3b02035742c570ac4018bb5b642240f46913a17a8c495b43bbdb97f3ebf470a4ac3782e173507613fd0a2a07b7ddf443b3e92759d16603a19f7652ceab7304cdf6e4c09f7e7ab6c191e4ffbb2ac7e3f213fe0dc22315035fa0d42343cb2ac352403fcf00105838f1e1a32849f414e9396c13789dbe9bd91bba4a402054c0f024c67d44f3150b7987ef495b84399dc6caf9c4be1ffb006098dee6ab91086e4963656e982dc7407080b4b143c70ce9eaa232e69e9716ecb86ed6170571c9d9c95b44a16c624024a0459faa87884d1686889e4b312447985c8566a0fca59093b4279d77e1f24af746e81b652999f28c6bbd2335e6773ab5443d5758327b9a5f4eb60976fce5f1235df5a9ea8d0161432421f9b371927ef5966c53137a02ef4b63a1d07b587a23cbb6ebe3ca9d9d881c0f42ad79dfa3be93cb3d819d6ca3e627ace0a94333bebf212daf59326d0e34c41bfe9af15903efffc19a0804a0e9608db3dfbc3a8361cb840ba1a11a96751fa29e509f01bcf6bf812506d2e762e45e299940260da65137ef9e42249aac42f9094d91b8aab23f81f21c3c07e93d97bb7ce1ad971a58775982cc6b9bd1e72e06e8dc915324f426725c23648229af2a81c226844ccfdc63d0ca8be65a5df19b71a4d7d9a8735eb33220e35136962f")
+        let kind = "heic"
+        let expectedBoxes = ["ftyp@0+28", "meta@28+381", "hdlr@40+33", "iloc@73+34", "iinf@107+35", "infe@121+21", "pitm@142+14", "iprp@156+253", "ipco@164+221", "hvcC@172+118", "colr@290+19", "ispe@309+20", "clap@329+40", "pixi@369+16", "ipma@385+24", "mdat@409+1060"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "96 × 40"
+        let expectedIspe = ["96 × 64"]
+        let expectedItems = ["item 1: 1052 bytes at 417"]
+        let ispe = heifFind(result.outcome.roots, "ispe").map { "\(heifField($0, "Image width").flatMap { structureNumber($0) } ?? -1) × \(heifField($0, "Image height").flatMap { structureNumber($0) } ?? -1)" }
+        if ispe != expectedIspe { wrong.append("\(name) ispe: \(ispe) not \(expectedIspe)") }
+        let items = heifFind(result.outcome.roots, "iloc").first?.resolvedChildren().filter { $0.name.hasPrefix("Item ") && $0.name != "Item count" }.compactMap { $0.value } ?? []
+        if items != expectedItems { wrong.append("\(name) iloc: \(items) not \(expectedItems)") }
+        if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
+        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        let hevc = heifFind(result.outcome.roots, "hvcC").first
+        if heifField(hevc, "Level")?.hasPrefix("30 · level \(Double(30) / 30)") != true || heifField(hevc, "Profile")?.hasPrefix("3 ·") != true { wrong.append("\(name) hvcC: \(heifField(hevc, "Level") ?? "none")") }
+    }
+    do {
+        let name = "avif32"
+        let bytes = structureBytes("00000020667479706176696600000000617669666d6966316d6961664d413142000000eb6d657461000000000000002168646c72000000000000000070696374000000000000000000000000000000000e7069746d0000000000010000001e696c6f63000000004400000100010000000100000113000001160000002869696e660000000000010000001a696e6665020000000001000061763031436f6c6f72000000006a697072700000004b6970636f0000001469737065000000000000002000000010000000107069786900000000030808080000000c6176314381000c0000000013636f6c726e636c780001000d0006800000001769706d610000000000000001000104010283040000011e6d64617412000a091810ffed1010d0684032860214c7878664104104f280000000b55bbae7d4bbbed78d3206cde57f0b34c24fa28301b7c250b24ad1a7fc36d960159f2ed0c87110b94a63649fd580f707c2ac03554b6f71e2257170136a34cc67154f58f1605c90c24a9a978e99d6151b8ed65adbc69e1beed6a0ca4f6f6d522e765377b567eb8965a62e71c9208fc9a1708f760d579b6c5af2fdcef187bc193fe7f719976b649ca6697a3a2e225ddbcfa746d35f284241bed8155dd89e19decf67a52ac906cf84ee28cd240b248932a03640824d45b573bdb2bc0b626454e958de7149b1e2b9b235a27c703cf7d8dc757c1e9c33879627058be2ab610e2cce249cee1742a451b23c1a44eb39bddd555f5fb7334d4514b48525")
+        let kind = "avif"
+        let expectedBoxes = ["ftyp@0+32", "meta@32+235", "hdlr@44+33", "pitm@77+14", "iloc@91+30", "iinf@121+40", "infe@135+26", "iprp@161+106", "ipco@169+75", "ispe@177+20", "pixi@197+16", "av1C@213+12", "colr@225+19", "ipma@244+23", "mdat@267+286"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "32 × 16"
+        let expectedIspe = ["32 × 16"]
+        let expectedItems = ["item 1: 278 bytes at 275"]
+        let ispe = heifFind(result.outcome.roots, "ispe").map { "\(heifField($0, "Image width").flatMap { structureNumber($0) } ?? -1) × \(heifField($0, "Image height").flatMap { structureNumber($0) } ?? -1)" }
+        if ispe != expectedIspe { wrong.append("\(name) ispe: \(ispe) not \(expectedIspe)") }
+        let items = heifFind(result.outcome.roots, "iloc").first?.resolvedChildren().filter { $0.name.hasPrefix("Item ") && $0.name != "Item count" }.compactMap { $0.value } ?? []
+        if items != expectedItems { wrong.append("\(name) iloc: \(items) not \(expectedItems)") }
+        if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
+        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        let av1 = heifFind(result.outcome.roots, "av1C").first
+        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+    }
+    do {
+        let name = "avif_alpha"
+        let bytes = structureBytes("00000020667479706176696600000000617669666d6966316d6961664d413142000000eb6d657461000000000000002168646c72000000000000000070696374000000000000000000000000000000000e7069746d0000000000010000001e696c6f63000000004400000100010000000100000113000002010000002869696e660000000000010000001a696e6665020000000001000061763031436f6c6f72000000006a697072700000004b6970636f0000001469737065000000000000002800000018000000107069786900000000030808080000000c6176314381000c0000000013636f6c726e636c780001000d0006800000001769706d61000000000000000100010401028304000002096d64617412000a09181527bb4404341a1032f10314c7878664104104f280000000eb1ef2ba71d41ebc09a176aef70f96ccf2099dd911ace506e2db6507d087202dadb90e25cece6496a72d78bbb26629771477bdf94e5422db046f559482983314f48aab69a441d77e7543b258b8325e58ec5bde72dea09332cf6eb41f2cbe818549d0743edfa3308f0ddfef7228012aa359dcafd2719324764c021cb7feab3f9b39689550617de950a9415996feaa80143d8c5a53e22966245b71dc7d8980d83744c830f155396c3ebe92bfde5e686daf078e2ee9705d23c7ea48e5f79862b9e95add9002387a47866269d32d53f12081a007e5f5051768342f21fe36421cfde6c31145624e73cc0b1ab0620d4227c7226e0658bc42a22526a3a41239863301b22ae891a25c146c507b5751d92d073aa191ab03f0865682b7676d05203f2d45e0d97e3b6141dfd7ffe2650d18cb07f42808e3e337e78f4e7a359255d8bb9877384241981c367c03777132f8fde1dffcad33e2ede65a6d938174e2aebcd81c2a7aca961ca313cc38117568c3cdeefb5df02d1793ced802d927b32e875dd324a2d60d9ef9b5b2d84c13e16bf3036b2aa5c34695ed467817e916b025d2b7fcf2ee402a220cd220a919b73d7d10bd82820650209f4a7eca425cbd8297366bd2df912358e243b7ba2f5748dba8bc819c6e415fa872b39fa8394ca44f64d72168c24fb25af67fc0")
+        let kind = "avif"
+        let expectedBoxes = ["ftyp@0+32", "meta@32+235", "hdlr@44+33", "pitm@77+14", "iloc@91+30", "iinf@121+40", "infe@135+26", "iprp@161+106", "ipco@169+75", "ispe@177+20", "pixi@197+16", "av1C@213+12", "colr@225+19", "ipma@244+23", "mdat@267+521"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "40 × 24"
+        let expectedIspe = ["40 × 24"]
+        let expectedItems = ["item 1: 513 bytes at 275"]
+        let ispe = heifFind(result.outcome.roots, "ispe").map { "\(heifField($0, "Image width").flatMap { structureNumber($0) } ?? -1) × \(heifField($0, "Image height").flatMap { structureNumber($0) } ?? -1)" }
+        if ispe != expectedIspe { wrong.append("\(name) ispe: \(ispe) not \(expectedIspe)") }
+        let items = heifFind(result.outcome.roots, "iloc").first?.resolvedChildren().filter { $0.name.hasPrefix("Item ") && $0.name != "Item count" }.compactMap { $0.value } ?? []
+        if items != expectedItems { wrong.append("\(name) iloc: \(items) not \(expectedItems)") }
+        if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
+        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        let av1 = heifFind(result.outcome.roots, "av1C").first
+        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+    }
+    do {
+        let name = "avif_gray"
+        let bytes = structureBytes("0000001c667479706176696600000000617669666d6966316d696166000000e96d657461000000000000002168646c72000000000000000070696374000000000000000000000000000000000e7069746d0000000000010000001e696c6f6300000000440000010001000000010000010d0000013e0000002869696e660000000000010000001a696e6665020000000001000061763031436f6c6f72000000006869707270000000496970636f00000014697370650000000000000018000000180000000e706978690000000001080000000c6176314381001c0000000013636f6c726e636c780001000d0006800000001769706d61000000000000000100010401028304000001466d64617412000a0818112f769808683532af0214c6650209e50000bce2a52c0638fbf5f05043c7aa407076b0e12ec798dc35c3063ba6190dce43585a978d9707cc0c24ca7c07af993b5dc4981ad81a459f179be52f36222150481f803d99dafe221a4d46b7ee53312c4dbb6463c30fc8b2f09a12f53fa536eaa517f6b1ea98edd70cf070296d6e25dafaebfacc712a4b62640cae5a11c9d7e0cdc84129278f81dd715c52c49c42ec08357e8e152aa25600bba71735b9fe2d38b84e0d5c2a6b529db7cfbef56cdf664fb79c86b008f8716583c99199ee80c12b6a8ea4213f107f3a3d194e7e9250d44cee4abe18c2920efd469a5e8c78c5e38ed8e4c7f0edf03c5b020e85a6e37870da97ef37809998bf842e2fff6a4118519ff5c827b25e9bf3cb2a6d3d309799755cb3c089f7ea987156f86b32ae497932d42f353e5f3f09d4bc80")
+        let kind = "avif"
+        let expectedBoxes = ["ftyp@0+28", "meta@28+233", "hdlr@40+33", "pitm@73+14", "iloc@87+30", "iinf@117+40", "infe@131+26", "iprp@157+104", "ipco@165+73", "ispe@173+20", "pixi@193+14", "av1C@207+12", "colr@219+19", "ipma@238+23", "mdat@261+326"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "24 × 24"
+        let expectedIspe = ["24 × 24"]
+        let expectedItems = ["item 1: 318 bytes at 269"]
+        let ispe = heifFind(result.outcome.roots, "ispe").map { "\(heifField($0, "Image width").flatMap { structureNumber($0) } ?? -1) × \(heifField($0, "Image height").flatMap { structureNumber($0) } ?? -1)" }
+        if ispe != expectedIspe { wrong.append("\(name) ispe: \(ispe) not \(expectedIspe)") }
+        let items = heifFind(result.outcome.roots, "iloc").first?.resolvedChildren().filter { $0.name.hasPrefix("Item ") && $0.name != "Item count" }.compactMap { $0.value } ?? []
+        if items != expectedItems { wrong.append("\(name) iloc: \(items) not \(expectedItems)") }
+        if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
+        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        let av1 = heifFind(result.outcome.roots, "av1C").first
+        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+    }
+    do {
+        let name = "jp2_rgb"
+        let bytes = structureBytes("0000000c6a5020200d0a870a00000014667479706a703220000000006a7032200000002d6a703268000000166968647200000010000000200003070700000000000f636f6c72010000000000100000074c6a703263ff4fff51002f000000000020000000100000000000000000000000200000001000000000000000000003070101070101070101ff52000c00000001000404040001ff5c00104040484850484850484850484850ff640025000143726561746564206279204f70656e4a5045472076657273696f6e20322e352e34ff90000a0000000006c80001ff93c074200a7fc074200a7fc074200a7fc07c21403a1403e1080be3007f0bf1c07c21403a1403e1080be3007f0bf1c07c21403a1403e1080be3007f0bf1c3ea0887d41107d41216d7ddda93b84b4f0c47e65c38c1c4371681467980c5f535f1c3ea0887d41107d41216d7ddda93b84b4f0c47e65c38c1c4371681467980c5f535f1c3ea0887d41107d41216d7ddda93b84b4f0c47e65c38c1c4371681467980c5f535f1c7da411f690c7e04600cc5ce5f69a1afad772c304b72a53e407f4a6f446b2821e3a0b986fe099276df040759a77164c41e80d227a0e798a27fa67ece4e307d378a0eff162f9ea3e3ee3f1a905a48ed04cbbe71f5031d1a10040545f6816aa352b43fda724a426854eb5bd0e69fc7da411f690c7e04600cc5ce5f69a1afad772c304b72a53e407f4a6f446b2821e3a0b986fe099276df040759a77164c41e80d227a0e798a27fa67ece4e307d378a0eff162f9ea3e3ee3f1a905a48ed04cbbe71f5031d1a10040545f6816aa352b43fda724a426854eb5bd0e69fc7da411f690c7e04600cc5ce5f69a1afad772c304b72a53e407f4a6f446b2821e3a0b986fe099276df040759a77164c41e80d227a0e798a27fa67ece4e307d378a0eff162f9ea3e3ee3f1a905a48ed04cbbe71f5031d1a10040545f6816aa352b43fda724a426854eb5bd0e69fc7db4047db4247e146801954cc11654e799af4849f20950b9a5c121eddcfdfc43b19f5052119c328d0274a47b02a4403638cfaf97a799fba431e9ba8d2290ddfe7eb468f8793773114d84cd32e89e61292f61c57dba5ad3f21b4e90d0b621d677e2cc6f6de8eff00619d2342244a5f83f95c8aea3afc9d7792dd6080afac760f6afd1fbb3112aec866df1179bfbd5ec64a8bc70245019ad3f0d2e26c300010444cc2e02051a6f27624591fab8faad713483d6fcbb49f7bfbfc83b6a60542e15b0256de579d07cbd9022b1a01fd4eb229b2829cf868c30b4309c1692549683451e00474ed5ad075c99909de31a19078929f53481b8b54830413375bc887c6ed239a52857a1524793ce49b909d2a93198cc4f9a20265446213a9743d7b8797ee20f0b6134ed47a1e1285cc7fc10009d82eda2b1bdd2b165b404204c2c33dfc5bab6ffb2c78ac61a79f129539cf8f4434cf22d97b8b8acd0e18502e6d5f9dbe75198e54f5301d087eb38e98281b65a5ab37c52727e7411763d5e1afe5da73c2d8d6f1d12527104469dbaf8b8838b43617f13e073c0143e738bdb73b3fc7db4047db4247e146801954cc11654e799af4849f20950b9a5c121eddcfdfc43b19f5052119c328d0274a47b02a4403638cfaf97a799fba431e9ba8d2290ddfe7eb468f8793773114d84cd32e89e61292f61c57dba5ad3f21b4e90d0b621d677e2cc6f6de8eff00619d2342244a5f83f95c8aea3afc9d7792dd6080afac760f6afd1fbb3112aec866df1179bfbd5ec64a8bc70245019ad3f0d2e26c300010444cc2e02051a6f27624591fab8faad713483d6fcbb49f7bfbfc83b6a60542e15b0256de579d07cbd9022b1a01fd4eb229b2829cf868c30b4309c1692549683451e00474ed5ad075c99909de31a19078929f53481b8b54830413375bc887c6ed239a52857a1524793ce49b909d2a93198cc4f9a20265446213a9743d7b8797ee20f0b6134ed47a1e1285cc7fc10009d82eda2b1bdd2b165b404204c2c33dfc5bab6ffb2c78ac61a79f129539cf8f4434cf22d97b8b8acd0e18502e6d5f9dbe75198e54f5301d087eb38e98281b65a5ab37c52727e7411763d5e1afe5da73c2d8d6f1d12527104469dbaf8b8838b43617f13e073c0143e738bdb73b3fc7db4047db4247e146801954cc11654e799af4849f20950b9a5c121eddcfdfc43b19f5052119c328d0274a47b02a4403638cfaf97a799fba431e9ba8d2290ddfe7eb468f8793773114d84cd32e89e61292f61c57dba5ad3f21b4e90d0b621d677e2cc6f6de8eff00619d2342244a5f83f95c8aea3afc9d7792dd6080afac760f6afd1fbb3112aec866df1179bfbd5ec64a8bc70245019ad3f0d2e26c300010444cc2e02051a6f27624591fab8faad713483d6fcbb49f7bfbfc83b6a60542e15b0256de579d07cbd9022b1a01fd4eb229b2829cf868c30b4309c1692549683451e00474ed5ad075c99909de31a19078929f53481b8b54830413375bc887c6ed239a52857a1524793ce49b909d2a93198cc4f9a20265446213a9743d7b8797ee20f0b6134ed47a1e1285cc7fc10009d82eda2b1bdd2b165b404204c2c33dfc5bab6ffb2c78ac61a79f129539cf8f4434cf22d97b8b8acd0e18502e6d5f9dbe75198e54f5301d087eb38e98281b65a5ab37c52727e7411763d5e1afe5da73c2d8d6f1d12527104469dbaf8b8838b43617f13e073c0143e738bdb73b3fffd9")
+        let kind = "jp2"
+        let expectedBoxes = ["jP  @0+12", "ftyp@12+20", "jp2h@32+45", "ihdr@40+22", "colr@62+15", "jp2c@77+1868"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "32 × 16"
+        let ihdr = heifFind(result.outcome.roots, "ihdr").first
+        if heifField(ihdr, "Width").flatMap({ structureNumber($0) }) != 32 || heifField(ihdr, "Height").flatMap({ structureNumber($0) }) != 16 || heifField(ihdr, "Components").flatMap({ structureNumber($0) }) != 3 { wrong.append("\(name) ihdr") }
+        let siz = heifFind(result.outcome.roots, "jp2c").first?.resolvedChildren().first { $0.name == "Codestream" }?.resolvedChildren().first { $0.name == "Size marker" }?.value
+        if siz != "32 × 16" { wrong.append("\(name) SIZ: \(siz ?? "none")") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        if heifField(heifFind(result.outcome.roots, "colr").first, "Colour space") != "16 · sRGB" { wrong.append("\(name) colour space") }
+        if heifField(heifFind(result.outcome.roots, "ihdr").first, "Bits per component") != "8 bits, unsigned" { wrong.append("\(name) bit depth") }
+    }
+    do {
+        let name = "jp2_gray"
+        let bytes = structureBytes("0000000c6a5020200d0a870a00000014667479706a703220000000006a7032200000002d6a70326800000016696864720000001e000000280001070700000000000f636f6c7201000000000011000005696a703263ff4fff5100290000000000280000001e0000000000000000000000280000001e00000000000000000001070101ff52000c00000001000404040001ff5c00104040484850484850484850484850ff640025000143726561746564206279204f70656e4a5045472076657273696f6e20322e352e34ff90000a0000000004eb0001ff93c1f20407754dcdc1f38483e70b07d40a0b8f852311f1d879e704e25633efc3ea1387d4270fb4501c052655fa8842d95925ff52a2c5eb7333b65f12b0fa194f480fb4cc29468382b03dcb857b7f25f51ff3b59a13f78cd978b1b94880fb2e7a463fc7da9f1f6a1c7e096000a1521321cd05a4f0601669ef7c77e4c730163a344c83ef6b7e6ce1c7b4dfa9b3f018bb4b406895ee23e40dbe9a39c1d5616d426b2c2b00b5d1dd38a5571d43eb1fd7004f80c467cfc5c7a68fcb1f13aa57927323f3bb521c9acdef1e145709668120a061deb6d1dde614d01e20cbb07b3b4fcbcb88ff6f032c6d9ed5baf1344744ad915069dc154ab6cc3278f9cfc2f29d0745294c0b7f1d99999133db6ed853aebd0d7e50fdd333e91ab8741e7e61b65484ee638109d05b84d9cbe0fa892d6ec019db6b748f6c74c897796dfeef2f6fc527ee4005dd2b9a54d6960fcfc34a23edd299f9e9d890950da709ab8297c3170298f4493b06b87615a1b64e78ca851f0f1d6c9e4ede69dba6ba34b6a2831f1687e01f878f8e225e2fa1a8258565a32404db2f9085f24c183c4495dac807ba468ca81cf27a63ad8f498f4092befdbf659a6369eca25117ab68956bcdc3dd51f9a6ee269a91c5a47d86ea30366bc7cd1111c3346e1b8a7e31abc05a64d794c939ee620e9924f7fa5f14419f24707045d2951db5bbe8f5de27263b22afcb9b5981d03423874024058f0c80ee27b4f95aadd51520f88ec21c51398f171eb4430a9a546f963e05d3f1294300165dd4680b744cbe3dbc2eb5d363e78def8975dbd4300e61b882982afd443f8093b8a144669de327a5e4c6beb30adc9a5de45cf189aafb814dbd6507fd0a3ce724d22d1663c5a5b0b6786dcfdb6a45b045be871f142a46a6ab7c790eb67bea2662b43235aaec7ab7af034e45423cc8ccb1fba361ccedb3fc9e1793ad6f61032a9a3ac6c628db2a7065b58f678ebd869583ea053253e8725225b054be0108ab8f52fdc1f969c1096203d4d6755d6f773358f0c5e89b95c921a831f95a1fbfe58005a2ae3bd0138b11402f02fc99bc8185fe0f1c5b3ff4a2ce715d470cd7c4da1b9208d5a89f311cb724d3aff0a981687171352ab7e3071343e9dbc613cb952ad3706da5a80d397205e57a972247e56831ef44508d060d2bff57a69d8ee896840789b8a64e708d9e94a880dc5cb07f671b03280dcdf773feff30d6a263e08d630ee997760ca5c9ff6ff3d8c42320ab6aed304366298bc8075c6ce82619d247e1f2db5c4baf8714ca63ebd9ff2c1fdab6f3c443b5b54ba728976f2522de5993f84f19d149551b5ce175ee4498bb8adf097602fb137d1a2ae1145e900bd5b6546057781dc7b8e58e4139cd84c7b5945c58950eeeb993bb4b013f37061004e3a7892dd751ddd179fc67ac9277455adc2cb50fe9a2d9f1cbc93bd4d27c94ebe006353948e33826d4b7eea6baff2cfcfcbdc9b60e90a8087436518f5beec071335ab16280ae74b0c01f01e0ed8fe86358d32c4c04e31c5468122306dfc205d865edeb98f937ab5730aaf5cb26e309dac1ea692641ae0e4f9565b5a14b814e932513b80f7d5138254ab9efe42f8a441263ff23deac8ebd65f51b3cd869426624cbc643994e8282211adb21c82b48ad982315f21c4afc7eb3c065913751f760c44fad81d9b8024d5dcaca48189039aaf04177ac07fbb071f77f186cae8b48016499fc8c87674f07ee76c6fea164581bf949c3194424028a65cf0753c9ffd9")
+        let kind = "jp2"
+        let expectedBoxes = ["jP  @0+12", "ftyp@12+20", "jp2h@32+45", "ihdr@40+22", "colr@62+15", "jp2c@77+1385"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "40 × 30"
+        let ihdr = heifFind(result.outcome.roots, "ihdr").first
+        if heifField(ihdr, "Width").flatMap({ structureNumber($0) }) != 40 || heifField(ihdr, "Height").flatMap({ structureNumber($0) }) != 30 || heifField(ihdr, "Components").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) ihdr") }
+        let siz = heifFind(result.outcome.roots, "jp2c").first?.resolvedChildren().first { $0.name == "Codestream" }?.resolvedChildren().first { $0.name == "Size marker" }?.value
+        if siz != "40 × 30" { wrong.append("\(name) SIZ: \(siz ?? "none")") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        if heifField(heifFind(result.outcome.roots, "colr").first, "Colour space") != "17 · greyscale" { wrong.append("\(name) colour space") }
+        if heifField(heifFind(result.outcome.roots, "ihdr").first, "Bits per component") != "8 bits, unsigned" { wrong.append("\(name) bit depth") }
+    }
+    do {
+        let name = "jp2_rgba"
+        let bytes = structureBytes("0000000c6a5020200d0a870a00000014667479706a703220000000006a7032200000004f6a703268000000166968647200000009000000110004070700000000000f636f6c720100000000001000000022636465660004000000000001000100000002000200000003000300010000000002e16a703263ff4fff510032000000000011000000090000000000000000000000110000000900000000000000000004070101070101070101070101ff52000c00000001000304040001ff5c000d4040484850484850484850ff640025000143726561746564206279204f70656e4a5045472076657273696f6e20322e352e34ff90000a00000000025d0001ff93c7d40c11d4d8ebeae9c7d40c11d4d8ebeae9c7d40c11d4d8ebeae9cfb40c01d857c1f38487d40907d4060688f7270730b9bf0560afc1f38487d40907d4060688f7270730b9bf0560afc1f38487d40907d4060688f7270730b9bf0560af80c3ea0c87d4170fb4281108d64b4ef81ff5c42fe57f0e17e6db00fa7ae9fbad7f019025486b4c3b4c8edfc3ea0c87d4170fb4281108d64b4ef81ff5c42fe57f0e17e6db00fa7ae9fbad7f019025486b4c3b4c8edfc3ea0c87d4170fb4281108d64b4ef81ff5c42fe57f0e17e6db00fa7ae9fbad7f019025486b4c3b4c8edf80c7da551f692c3ed2300f4586738aafdc9871020eecbaca1e3575548d63dee3632718a8f9732a541c486602159dde2f762a066f218fa31aeb8824bdac5725d2cfd88c054c7ce0852bccd8a2524a9b643f9f6087e81c6157bf1433d0f49e218618beba4183fb4aa178585250bbbe02e6ce13256fc821d2e09a574aefc7da551f692c3ed2300f4586738aafdc9871020eecbaca1e3575548d63dee3632718a8f9732a541c486602159dde2f762a066f218fa31aeb8824bdac5725d2cfd88c054c7ce0852bccd8a2524a9b643f9f6087e81c6157bf1433d0f49e218618beba4183fb4aa178585250bbbe02e6ce13256fc821d2e09a574aefc7da551f692c3ed2300f4586738aafdc9871020eecbaca1e3575548d63dee3632718a8f9732a541c486602159dde2f762a066f218fa31aeb8824bdac5725d2cfd88c054c7ce0852bccd8a2524a9b643f9f6087e81c6157bf1433d0f49e218618beba4183fb4aa178585250bbbe02e6ce13256fc821d2e09a574aef80ffd9")
+        let kind = "jp2"
+        let expectedBoxes = ["jP  @0+12", "ftyp@12+20", "jp2h@32+79", "ihdr@40+22", "colr@62+15", "cdef@77+34", "jp2c@111+737"]
+        fixtures.append((name, bytes))
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == kind && result.identity?.hasParser == true && result.message.isEmpty, "\(name) is taken for \(kind), with a structure view: \(result.identity?.id ?? "none")")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty && result.outcome.problems.isEmpty, "\(name): a sound tree and nothing against the file: \(result.outcome.problems)")
+        let boxes = heifBoxes(result.outcome.roots)
+        if boxes != expectedBoxes { wrong.append("\(name) boxes: \(boxes) not \(expectedBoxes)") }
+        let size = "17 × 9"
+        let ihdr = heifFind(result.outcome.roots, "ihdr").first
+        if heifField(ihdr, "Width").flatMap({ structureNumber($0) }) != 17 || heifField(ihdr, "Height").flatMap({ structureNumber($0) }) != 9 || heifField(ihdr, "Components").flatMap({ structureNumber($0) }) != 4 { wrong.append("\(name) ihdr") }
+        let siz = heifFind(result.outcome.roots, "jp2c").first?.resolvedChildren().first { $0.name == "Codestream" }?.resolvedChildren().first { $0.name == "Size marker" }?.value
+        if siz != "17 × 9" { wrong.append("\(name) SIZ: \(siz ?? "none")") }
+        if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
+        if heifField(heifFind(result.outcome.roots, "colr").first, "Colour space") != "16 · sRGB" { wrong.append("\(name) colour space") }
+        if heifField(heifFind(result.outcome.roots, "ihdr").first, "Bits per component") != "8 bits, unsigned" { wrong.append("\(name) bit depth") }
+    }
+    check(wrong.isEmpty, "every box, size, item table and codestream size is what the separate walker says: \(wrong.prefix(2))")
+    var jxlWrong: [String] = []
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0090010012080100bc005de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("1 × 1") != true { jxlWrong.append("1x1: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("1x1 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("1x1 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a4106001208010070015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277048126b")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("8 × 8") != true { jxlWrong.append("8x8: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("8x8 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("8x8 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a20c00100120801007c015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("7 × 5") != true { jxlWrong.append("7x5: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("7x5 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("7x5 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a40d00100120801009c025de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("16 × 9") != true { jxlWrong.append("16x9: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("16x9 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("16x9 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a88f101001208010089285de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("100 × 50") != true { jxlWrong.append("100x50: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("100x50 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("100x50 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a7f060012080100b64e015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("256 × 256") != true { jxlWrong.append("256x256: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("256x256 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("256x256 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0af007000e00120801004c5106c0279a3e01f4035de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("257 × 255") != true { jxlWrong.append("257x255: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("257x255 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 4 { jxlWrong.append("257x255 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a589901001208010030511a001d963a01b15de95d75045de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db5")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("300 × 300") != true { jxlWrong.append("300x300: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("300x300 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("300x300 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0ada15e87c0c0012080100dcd22c471ea23f01823f012240010608016e3f01fe3e016240015208011eab009aaa006a")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("1000 × 700") != true { jxlWrong.append("1000x700: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("1000x700 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 5 { jxlWrong.append("1000x700 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a10800ee7001208010048814bdc4423e4120c900bd009100f500bd009500cd008d007d00b100d50105006100e100e")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("5000 × 3") != true { jxlWrong.append("5000x3: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("5000x3 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 4 { jxlWrong.append("5000x3 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a1fce0012080100393e5de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("64 × 128") != true { jxlWrong.append("64x128: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("64x128 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("64x128 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a93070012080100d53f5de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("100 × 80") != true { jxlWrong.append("100x80: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("100x80 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("100x80 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18c301001208010055845de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("150 × 100") != true { jxlWrong.append("150x100: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("150x100 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("150x100 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18f301001208010065b45de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("200 × 100") != true { jxlWrong.append("200x100: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("200x100 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("200x100 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18a301001208010065655de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("120 × 100") != true { jxlWrong.append("120x100: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("120x100 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("120x100 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0ad706001208010051645de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee061")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("128 × 96") != true { jxlWrong.append("128x96: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("128x96 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("128x96 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a5706001208010059485de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("96 × 96") != true { jxlWrong.append("96x96: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("96x96 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("96x96 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0800df221a0012080100508340fc833f08844000843ff0c33ff8833e00c43e040440f4833ff40340040440fc833f")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("70000 × 2") != true { jxlWrong.append("70000x2: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("70000x2 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 5 { jxlWrong.append("70000x2 size header bytes") }
+    }
+    do {
+        let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0080bf2709800100120801002804410c844020844118844020044114c4411484400c84401cc44018444010444010")))
+        if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("300000 × 1") != true { jxlWrong.append("300000x1: \(result.outcome.summary ?? "none")") }
+        if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("300000x1 unsound") }
+        if result.outcome.roots.dropFirst().first.map { $0.length } != 6 { jxlWrong.append("300000x1 size header bytes") }
+    }
+    check(jxlWrong.isEmpty, "the size packed into a JPEG XL header is what ffprobe says, for 19 sizes: \(jxlWrong.prefix(2))")
+    let wrappedBytes = structureBytes("0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c2000000e366a786c63ff0a88f101001208010089285de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0c0e9620cc6c5180f1b1a1919a31449c6635bb592783106c7316b04e40067fffa3ce4cbaf48e0dcbd9c426c2e2a334085b8c6419c1fe5f1154dcb97907f078fe2beaabb3b70801d9e81160dd3a4467047234e35c39c62b53381212f27f352a03efd16daf9176606f1cc315c96068b3d87357bd0b18b12ffaa108c63b70a50ae1d1a2e5200e89b07000945a69beb90d70000000000a8aa73ce1d638c85284290f3ff4a220033102920296051249851f244fa357a32349037b037b082c78c35cb0a336040053150315078152b403320414011217171722841f0dc09321028b03b90a5393e90331081723c30e9b057b129b8097297f072be4990204122d549baa4768cf86f00a85abd7f472ce1aefa415f4b6b1bc7f3ff854a8029ce7d7f57c88315500efaa036ead11bcdfcacbc0afa97ed4c2fdcd8dfa75ac13f94d66c9b4345d384420de3355654f7c7bcda68cc44eead010cb9f08e20821591bff62461adae772c2a686c6699c31d5a2d3794b938f86aca3d3e1577416e22c609bc0b70213195148972d66c258d2515fe7962a10f4c5109f82ddc794efd874406f694f41bc634cf1ba75cc6d6edce4ce97cf97cb2d3f7ee74f2e5d919d7e18a0aa5d286953a958be9340d7fc4c68444f9debeb3624a26e9070a0612948ba063cd910a6ec6cc8a1ca4f076cc3d5dea5268fecc963e1059e29e699ade76d6206963c20c909d76649cd56320fe3af0495f35c93be89052daba3d74c99daef572ee345c3404ed0f8502e7aad37800c29b84930eff0f1720c9682ee5a91f903d3c853054e4214b5d046565e1cd8cfce697bc928af50ba9287624cf60e02341af1ab300c22c541e036f6aaee7965a3e7839edc2b4be18881c5e4dcba6ca47d3c11c2cd86bb1413c316528a7ae26559192c53b93dd55539154ebb7932e4660e96d5fab4125af415ba1745077e89a5e62ab11f0a441690a5024473b3480715e248cb88e8b44e961a6928679a6c088d8b785008c433b72d393351e5b34622e6b4da851bfe094bd3fc1ddcdb1afc18f840a84f552ebf892c3170b824c544824241002d729d3fdc5edc430a1f9b477867690c52b4d39affc39fce0c9196aeb0ba2449a91f2e7e123f60110e8e179241dac6b753cc9f506fa94fb4592d9206cf18df7945e5fc453040b646913a953034906b9a4b4265dfabc593ad3e3b141d9aeedee7c6cb017121072195818b361686913e64c28db9c7b5dcca3e4ee04867c643b6d81dcfe97b3ab09549d292f9c9b1d126fe9819cd53d81e983a086358d532aebd075a87429fca1fa7a72c9b0173205ba72991792b721d3d98b30aeb3731f3de205723d14f50134aa5c6265f16d666e7f1c251e4739fc9c5ae2a48c8a1bb631f340a92509ca445be980ac3487bee789868de6edb24b9ee0a3df77bb5e3555b68bcb42ed0072bad487506f04d93830c107d8502898f715b4dce42fd9c6172928c20d69c6a92e0b4e587e493531f9a0a2d579d6a2ab9c7b8dc19fd100b9368ef1ac3db4ecd4fdb9511aeffb418d18042325cdd339a8e756a567770cc39eb0cf9d152c42cbd9b103c3e1340bba1be462566ca16492033ac86c85416912123fc22c43977df5b85212c81933b73e68461c0a2487803ffbc181807699d1bcfbce1ee82c2949489c7e94ec9310063d9e6ebb078c0737471ec9640a6353477462bfacf3298e3ab7e4cde49eb84eec9daca1f90ff98d65d8de82d82b73878a86669a513a8359087c1dc8917c512767db657be7ee1767d639b9e2a6dc41e2fc64772db21fec58d4278844e45440dcb9e0d7b9cf749700a93ad56916b1970efe87ff921af6045656842f0624c8b0a9cbcdaca8a5f5945cee9de6eab3db8af38f037f39c633fe60165f6504e540566a69ae2ef100b06ca4cd598d1e6a54b8a9255d7d2552193d744f67fdecfb989cc59b57408140bd8e2653a4acbdc13820baf52596e28fefe99b73d725b3702317f1b67e57854384c554ad8ab73199fb2798c809d126db8c6e3dc73a870f2f95e592e693d8bae9ff42159e87a31a9808ca7c719c57ca5865f42e3567dae052736de71e89acbc09a0faa2e9d56148c25df9ca70e008d297239984110bc253b5a4d39ce34d9e7828a33677c9659fee741751d8380f12df00a41cb3ec2384316c6007d3ab4401768bae935e24dbaefdc1dd129f69bfc0bfd50b53c198996c52a52613a275e993940fe347f01e167f4b5b761dbb7d01f57e5bb1952c9ba7fd8040f696d0abc4cdc9c44bcc4992192b9b1eef32d4379ad580ececcf5a5b99e78a31ff18aeecea59efda5ed9c95431f644a18b191ba396db5850c1a921fba82be1de9547df1db5f79275daf630ba060f20931c4938d4c8a772e4cf4a2f415f1eb194e14b13d6ec6da9ac515441b93d5d7420c25663e1009949941907082c7e5f8b5c7eb237f0a6d6ac78ae2dfb6bed57dda5deb6b72cec635a679da3e4428e7d4da294dc59038deed9c976053d0a869cbfaaef1fcb31b880439a4ad0548020369257fad92161e85a865ad3809f26ca6665dce3fb0bf55df73deeebf9989788770db6ba0f98891c8bb3bbc85de925d1d1ce309aac85aeeb89fe80953c35da607d6f980d77802c2c7bb80a230a2b3539f3c372949f9e42ffb84a04c12f83d4dee115648977d65770d7a2e7b42c996aacd4e4565a6c9268522844fdb3ac78e7da4e14b33bb56aa73e1a6ff379dcabbeb1ca9e051380265d6996c3b7ecb203c4e1e2be6a0b22eef65363e61b7035ca89b97007fdad6eb55b5c51bc1fb8ad1cc43eac07849c193fd029c71beb3445a16795ae57b11fc0b2f7ca93e965bd1edc866484f24625b929b60255fb55868f8d7a5ae65db3f2ac2423bf334446fd1000fc439e719f9cdeae711999945d8459a22b3c36e121cfe96ea801597869315b04bbaeeb7bca5f249a264d2cb33854c3b85b5480ebc3d7907aaf3a515e0eec68ce4bd5e79f71bfc5f029d333375bde4c46306f6c11a89f30a72121a760e719bd7682a42632e9ca89b604bcd6608a8c7e1cbafcb2820512bc10ae85220fa9b34da6566b6ad73f5a2bcd44a8ace6bb024b89e08b639d0a2d3535a310f88b98da5b720fd86b28f5e1e8d8db6e508605d8a7f42d4c7730e86585fce000dd908d4f1400238e3bcac069015af28a064a19a5afeae4ad633ed1ad9f48668fac3c0f724849d1e1ea8a07083cd72601bc3a8d5e10afd3c68acac334c7727e0e3f2585f9b25188e845902ab7f34ae83a990cddfc0171d36875a634672af04e6e5804c062c4abcc5c343256a899b1865e77b48b47a6438ffe845fac3dcbacabd00b8c602ba59187a2bf6b3db195c75e626b3ddec90419984a9d9d1c62b4371765d26979d903b810f10187f41f5727f8d1fcc005cef9071c1d65ab0ab303ee82771a9ad6cfeda9d4e5254c162d744e80f4620feff43700a98b4df21bceac8cad8336d177d5050043aa6b6e801b78a95c76589881fcb8376dffc8fcfd65b2faead9091f875f099ad626481144bc2e18e22b794d6947786d44a490294f966287a774b6ee7e207d7a4f7e45434449ecd055bb74242fa24f596dad4b0a2f882e4e3268acdd49b7c79ba92eb7ed3f77c312be8d9b2885ef77ef59cc0408da2714cfed15d7b2ae57a856917447d8e303cbde20484b049366615317b4620f6dd458f4e48a38d07f7236066617eefba4d55097daae30c94d237fb4006e0dcb5518ad9f90a165bf91f1c149b70fa0515d640f8c6c2c410d1ed30ffeb504622025b728932b4a57850825424a9401ea208f8381044c3ccab6e514bdbade82f01c659fd687df751b5e398c0379b48c9750bcefb240aae31f79ce01f0449318bbe3bcc459c0ce87fde348bbf3fdb0d2417d134857b837599e30217fdbd4804fd0fa75efbee9a263d63cada267a482d8ea4504ed7a88eaf24c32f0e280603268f933274a2bb98b4362d7e6fae99656a7a95641a5b882680802b567fb987e3d0e71ba18b07754c93f16cf1a88856a4dfb79d7edb852e198ee2f6c60c9ef20d792ef58a104c426c52a049aa6e69fb3d99f91a2f9e4895b3bd2f51e312a841fd6e463555c0d26f43949a8eeb0cd2a60f40861827969e1536765985b36cd60aecc90036ba68fccf817f1f7e4c81aaddab2b2401a88b66c4fc51c2a49cbbcb46b31efd64f70fda369f359a5c3f157b82396ef46086654d82016e8906bc05bb1e439b4a92a6b7d016f93d9aedd815ee9bfe5ee6ed7bd9bb5c16e66298c2007d0fdd290719345d7920fd8d6f195595a2287cd1efe2bc02548c31cbd022c36bbb7cb0a69e0437c2d8e2e14007fd5cab59364545199805fc31755e056d23de4129c720638b633f5a4b5c1c9d614a35545734ab6b3c84666582f6b9e79f7de5a83a7308568b5ab676ac603c407451e92c637ce32b7b1bc859b59774aeebd2f1da5c6d182072202c18010a9b2f54e612361555791ea11002de522e8bcb2226383cc480333c1800d0400427ca5bffdd12538e8cb177800610e8070367625e0d6483315470a135c5405053181536642fd77ffee41e4dad7bb585008bad49f1e56886e422a45f1042e4b8f044303024c78f2e78872a6499f670703d9919e61e900a81bc4b641940182ed1602c409ca402a8d2fdf06739bf347e935b358298d53c405201571a6cb4ec490f26e00380026e554eab11fe50c69e7bf99b5342bd2c1bf4f7dd34888c477fa7fb1662be1ae8c53302ba83275419ea3f5f29fbead6255b40cb35fe2452ac4142e328a881a0025112126506004e2a5fd3f37423b7ffcdd5b952003e7c5b5fc4200b2e5829f0ce225201588a00410001891100dfef4eb0deed86ad0cdeb79b4a7d0634a5dcaa64edc2f6a8676c049e40075280a10a9fcf4ed94b4fa3ffd17cd46a2aa3537469a1a206a8efedf9d50618222773b03ea0c252095cff97be8c2ed50078540e706293db3123ee54394e56708388a2166840c00425cedfd925a4df4c3bb2213823b0a48158253e2bf3793160cee66001c6520950ffd8b91cfc87209dbb80c52958f450412b1303a20b1418410801001")
+    let wrapped = FormatRegistry.analyze(DataByteSource(wrappedBytes))
+    check(wrapped.identity?.id == "jxl" && wrapped.identity?.hasParser == true && heifBoxes(wrapped.outcome.roots) == ["JXL @0+12", "ftyp@12+20", "jxlc@32+3638"] && wrapped.outcome.summary?.contains("100 × 50") == true, "a JPEG XL in its box container: its boxes, and the size inside the codestream: \(wrapped.outcome.summary ?? "none")")
+    check(structureProblems(wrapped.outcome.roots, fileLength: Int64(wrappedBytes.count)).isEmpty && wrapped.outcome.problems.isEmpty, "and its tree is sound, with nothing against it")
+    fixtures.append(("wrapped", wrappedBytes))
+    check(FormatRegistry.parserIDs.isSuperset(of: ["heic", "avif", "jp2", "jxl"]), "the registry says all four are taken apart")
+    func ftypHead(_ brand: String) -> [UInt8] { [0, 0, 0, 16] + Array("ftyp".utf8) + Array(brand.utf8) + [0, 0, 0, 0] }
+    for (brand, id) in [("heic", "heic"), ("heix", "heic"), ("mif1", "heic"), ("avif", "avif"), ("avis", "avif"), ("jp2 ", "jp2"), ("isom", "mp4"), ("qt  ", "mp4")] {
+        let result = FormatRegistry.analyze(DataByteSource(ftypHead(brand)))
+        check(result.identity?.id == id && result.identity?.hasParser == true, "brand \(brand) is taken for \(id): \(result.identity?.id ?? "none")")
+    }
+    func hbox(_ type: String, _ payload: [UInt8]) -> [UInt8] {
+        let size = UInt32(8 + payload.count)
+        return [UInt8(size >> 24), UInt8((size >> 16) & 255), UInt8((size >> 8) & 255), UInt8(size & 255)] + Array(type.utf8) + payload
+    }
+    func be32(_ value: UInt32) -> [UInt8] { [UInt8(value >> 24), UInt8((value >> 16) & 255), UInt8((value >> 8) & 255), UInt8(value & 255)] }
+    func heifWith(_ properties: [UInt8]) -> [UInt8] {
+        hbox("ftyp", Array("heic".utf8) + [0, 0, 0, 0] + Array("mif1".utf8))
+            + hbox("meta", [0, 0, 0, 0] + hbox("iprp", hbox("ipco", hbox("ispe", [0, 0, 0, 0] + be32(64) + be32(32)) + properties)))
+    }
+    for (label, properties, expected) in [("no properties", [UInt8](), "64 × 32"), ("a quarter turn", hbox("irot", [1]), "32 × 64"), ("a half turn", hbox("irot", [2]), "64 × 32"),
+                                          ("a crop", hbox("clap", be32(40) + be32(1) + be32(20) + be32(1) + be32(0) + be32(1) + be32(0) + be32(1)), "40 × 20"),
+                                          ("a crop and a quarter turn", hbox("clap", be32(40) + be32(1) + be32(20) + be32(1) + be32(0) + be32(1) + be32(0) + be32(1)) + hbox("irot", [3]), "20 × 40")] {
+        let bytes = heifWith(properties)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.outcome.summary?.contains(expected) == true && structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty, "\(label): the size shown is \(expected): \(result.outcome.summary ?? "none")")
+    }
+    func fullBox(_ version: UInt8, _ flags: UInt32 = 0) -> [UInt8] { [version, UInt8((flags >> 16) & 255), UInt8((flags >> 8) & 255), UInt8(flags & 255)] }
+    func be16(_ value: UInt32) -> [UInt8] { [UInt8((value >> 8) & 255), UInt8(value & 255)] }
+    func be64(_ value: UInt64) -> [UInt8] { structureJoin(be32(UInt32(value >> 32)), be32(UInt32(value & 0xFFFF_FFFF))) }
+    func heifMeta(_ children: [UInt8]) -> [UInt8] { structureJoin(hbox("ftyp", structureJoin(Array("heic".utf8), [0, 0, 0, 0], Array("mif1".utf8))), hbox("meta", structureJoin(fullBox(0), children))) }
+    func texts(_ roots: [FieldNode], _ box: String, _ field: String) -> [String] { heifFind(roots, box).compactMap { heifField($0, field) } }
+    // iloc version 2: 8-byte offsets, 2-byte lengths, 4-byte base, 4-byte indexes, 4-byte item ids, two extents
+    do {
+        let iloc = hbox("iloc", structureJoin(fullBox(2), [0x82, 0x44], be32(1), be32(7), be16(0), be16(0), be32(100), be16(2), be32(0), be64(5), be16(9), be32(1), be64(50), be16(3)))
+        let bytes = heifMeta(iloc)
+        let roots = FormatRegistry.analyze(DataByteSource(bytes)).outcome.roots
+        let group = heifFind(roots, "iloc").first?.resolvedChildren().first { $0.name == "Item 1" }
+        check(group?.value == "item 7: 9 bytes at 105, 3 bytes at 150", "an iloc of version 2 with every width different: \(group?.value ?? "none")")
+        check(group?.resolvedChildren().map { $0.name }.filter { $0.hasPrefix("Extent ") && $0 != "Extent count" } == ["Extent 1 index", "Extent 1 offset", "Extent 1 length", "Extent 2 index", "Extent 2 offset", "Extent 2 length"] && structureProblems(roots, fileLength: Int64(bytes.count)).isEmpty, "and its extents are listed, in a sound tree")
+    }
+    // iloc version 1 with a construction method that counts from idat, so the base offset is not added
+    do {
+        let iloc = hbox("iloc", structureJoin(fullBox(1), [0x44, 0x40], be16(1), be16(3), be16(1), be16(0), be32(1000), be16(1), be32(8), be32(16)))
+        let group = heifFind(FormatRegistry.analyze(DataByteSource(heifMeta(iloc))).outcome.roots, "iloc").first?.resolvedChildren().first { $0.name == "Item 1" }
+        check(group?.value == "item 3: 16 bytes at 8", "construction method 1 is inside idat, so the base is not added: \(group?.value ?? "none")")
+    }
+    // ipma: 1-byte entries and 2-byte entries with item ids of 2 and 4 bytes
+    do {
+        let small = hbox("ipma", structureJoin(fullBox(0, 0), be32(1), be16(9), [2, 0x83, 0x05]))
+        let wide = hbox("ipma", structureJoin(fullBox(1, 1), be32(1), be32(9), [2, 0x80, 0x03, 0x00, 0x7F]))
+        let a = heifFind(FormatRegistry.analyze(DataByteSource(heifMeta(hbox("iprp", small)))).outcome.roots, "ipma").first?.resolvedChildren().first { $0.name == "Item 1" }
+        let b = heifFind(FormatRegistry.analyze(DataByteSource(heifMeta(hbox("iprp", wide)))).outcome.roots, "ipma").first?.resolvedChildren().first { $0.name == "Item 1" }
+        check(a?.value == "item 9: properties 3, 5" && a?.resolvedChildren().compactMap { $0.value }.contains("box 3 of ipco · essential") == true, "ipma with one-byte entries: the essential bit is not part of the index: \(a?.value ?? "none")")
+        check(b?.value == "item 9: properties 3, 127" && b?.resolvedChildren().compactMap { $0.value } == ["9", "2", "box 3 of ipco · essential", "box 127 of ipco"], "ipma of version 1 with two-byte entries: \(b?.resolvedChildren().compactMap { $0.value } ?? [])")
+    }
+    // infe of versions 2 and 3, iinf of version 1 (four-byte count), pitm of version 1
+    do {
+        let infe3 = hbox("infe", structureJoin(fullBox(3), be32(70000), be16(0), Array("av01".utf8), [0x78, 0]))
+        let infe2 = hbox("infe", structureJoin(fullBox(2), be16(2), be16(0), Array("hvc1".utf8), [0]))
+        let iinf = hbox("iinf", structureJoin(fullBox(1), be32(2), infe3, infe2))
+        let pitm = hbox("pitm", fullBox(1) + be32(70000))
+        let bytes = heifMeta(iinf + pitm)
+        let roots = FormatRegistry.analyze(DataByteSource(bytes)).outcome.roots
+        check(texts(roots, "infe", "Item ID").map { structureNumber($0) ?? -1 } == [70000, 2] && texts(roots, "infe", "Item type") == [#""av01""#, #""hvc1""#], "infe of versions 3 and 2 inside an iinf of version 1: \(texts(roots, "infe", "Item ID"))")
+        check(texts(roots, "pitm", "Item ID").map { structureNumber($0) ?? -1 } == [70000] && heifBoxes(roots).filter { $0.hasPrefix("infe") }.count == 2, "pitm of version 1 has a four-byte id")
+        check(texts(roots, "iinf", "Entry count") == ["2"] && structureProblems(roots, fileLength: Int64(bytes.count)).isEmpty, "and the count is read with four bytes: \(texts(roots, "iinf", "Entry count"))")
+    }
+    // properties: irot and imir words, a crop with denominators, a bare JP2 codestream too short for its size marker
+    do {
+        let irot = FormatRegistry.analyze(DataByteSource(heifWith(hbox("irot", [1])))).outcome.roots
+        check(texts(irot, "irot", "Angle") == ["1 · 90° anticlockwise"], "a quarter turn is 90 degrees anticlockwise: \(texts(irot, "irot", "Angle"))")
+        let clap = hbox("clap", structureJoin(be32(80), be32(2), be32(30), be32(1), be32(0), be32(1), be32(0), be32(1)))
+        check(FormatRegistry.analyze(DataByteSource(heifWith(clap))).outcome.summary?.contains("40 × 30") == true, "a crop's width is its numerator over its denominator")
+        let short = structureJoin([0, 0, 0, 12], Array("jP  ".utf8), [0x0D, 0x0A, 0x87, 0x0A], hbox("jp2c", [0xFF, 0x4F, 0xFF, 0x51, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+        let roots = FormatRegistry.analyze(DataByteSource(short)).outcome.roots
+        let codestream = heifFind(roots, "jp2c").first?.resolvedChildren().first { $0.name == "Codestream" }
+        check(codestream != nil && codestream?.resolvedChildren().isEmpty == true && structureProblems(roots, fileLength: Int64(short.count)).isEmpty, "a codestream too short for the size marker is left whole")
+    }
+    do {
+        let av1C = hbox("av1C", [0x81, 0x41, 0x0C, 0x00])
+        let roots = FormatRegistry.analyze(DataByteSource(heifWith(av1C))).outcome.roots
+        let box = heifFind(roots, "av1C").first
+        check(heifField(box, "Profile") == "2 · Professional" && heifField(box, "Level") == "1" && heifField(box, "Monochrome") == "0" && heifField(box, "Chroma subsampling x") == "1", "an av1C of profile 2 and level 1: \(heifField(box, "Profile") ?? "none"), \(heifField(box, "Level") ?? "none")")
+        let clap = hbox("clap", structureJoin(be32(80), be32(2), be32(30), be32(1), be32(0xFFFF_FFFC), be32(2), be32(0xFFFF_FFFE), be32(2)))
+        let crop = heifFind(FormatRegistry.analyze(DataByteSource(heifWith(clap))).outcome.roots, "clap").first
+        check(heifField(crop, "Horizontal offset numerator") == "-4" && heifField(crop, "Vertical offset numerator") == "-2", "a crop's offsets are signed: \(heifField(crop, "Horizontal offset numerator") ?? "none")")
+    }
+    for (brand, id) in [("msf1", "heic"), ("hevc", "heic"), ("heim", "heic"), ("jpx ", "jp2")] {
+        check(FormatRegistry.analyze(DataByteSource(ftypHead(brand))).identity?.id == id, "brand \(brand) is taken for \(id)")
+    }
+    check(!JXLParser.matches(head: [0xFF, 0xD8], length: 2) && JXLParser.matches(head: [0xFF, 0x0A], length: 2), "FF 0A is JPEG XL and FF D8 is not")
+    let tiny = FormatRegistry.analyze(DataByteSource([0xFF, 0x0A]))
+    check(tiny.outcome.problems.contains { $0.contains("ends before") } && structureProblems(tiny.outcome.roots, fileLength: 2).isEmpty, "a JPEG XL cut after its signature says so: \(tiny.outcome.problems)")
+    check(JXLParser.dimensions([]) == nil && JXLParser.dimensions([0x00]) == nil, "an empty size header gives no size")
+    // small flag 1, height (0 → 8), ratio 0, width (1 → 16): bits LSB first are 1, 00000, 000, 10000
+    let small = JXLParser.dimensions([0b0000_0001, 0b0000_0010])
+    check(small?.width == 16 && small?.height == 8 && small?.bits == 14, "a small size is in whole eights: \(String(describing: small))")
+    if let issue = imgHostile("HEIC, AVIF, JPEG 2000 and JPEG XL", fixtures: fixtures, prefix: [0, 0, 0, 0x18] + Array("ftypheic".utf8), seed: 0xA11CE) { check(false, issue) } else { check(true, "cut at every length, bytes flipped, and random files give sound trees") }
+    if let issue = imgHostile("JPEG XL and 2000 signatures", fixtures: [], prefix: [0xFF, 0x0A], seed: 0xB0B) { check(false, issue) } else { check(true, "random JPEG XL codestreams give sound trees") }
+    if let issue = imgHostile("JP2 signature", fixtures: [], prefix: [0, 0, 0, 12] + Array("jP  ".utf8) + [0x0D, 0x0A, 0x87, 0x0A], seed: 0xC0DE) { check(false, issue) } else { check(true, "random JPEG 2000 files give sound trees") }
 }
 
 // MARK: The structure tree as lines

@@ -42,6 +42,13 @@ protocol FormatParser {
     /// Whether the start of the file (its first few kilobytes) looks like this format.
     static func matches(head: [UInt8], length: Int64) -> Bool
     static func parse(_ source: ByteSource, context: ParseContext) -> ParseOutcome
+    /// Other formats, by id, this parser also takes apart: one that reads a container
+    /// shared by several kinds of file says here which kinds.
+    static var alsoParses: [String] { get }
+}
+
+extension FormatParser {
+    static var alsoParses: [String] { [] }
 }
 
 /// The answer for one file: what it was taken for, what was found, and what to say
@@ -55,10 +62,10 @@ struct StructureResult {
 
 enum FormatRegistry {
     /// In the order they are tried.
-    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self]
+    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self, GIFParser.self, BMPParser.self, ICOParser.self, WebPParser.self, TIFFParser.self, JXLParser.self]
 
     static var parserIDs: Set<String> {
-        Set(parsers.map { $0.identity.id })
+        Set(parsers.flatMap { [$0.identity.id] + $0.alsoParses })
     }
 
     /// Takes `source` apart if a parser knows the format; says what it is if not; and
@@ -66,7 +73,12 @@ enum FormatRegistry {
     static func analyze(_ source: ByteSource, context: ParseContext = ParseContext()) -> StructureResult {
         let head = source.read(0..<4096)
         for parser in parsers where parser.matches(head: head, length: source.count) {
-            return StructureResult(identity: parser.identity, outcome: parser.parse(source, context: context), message: "")
+            var identity = parser.identity
+            if !parser.alsoParses.isEmpty, let named = FormatDetector.identify(head: head, length: source.count),
+               parser.alsoParses.contains(named.id) {
+                identity = named
+            }
+            return StructureResult(identity: identity, outcome: parser.parse(source, context: context), message: "")
         }
         let identity = FormatDetector.identify(head: head, length: source.count)
         let tail = "The Hex and Bits views show every byte of any file."
