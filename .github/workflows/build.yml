@@ -280,6 +280,13 @@ jobs:
             Sources/iTERMiNAL/Bytes/Structure/PcapParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/PcapNGParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/StructureOutline.swift \
+            Sources/iTERMiNAL/Bytes/Map/HilbertCurve.swift \
+            Sources/iTERMiNAL/Bytes/Map/EntropyAnalysis.swift \
+            Sources/iTERMiNAL/Bytes/Map/ByteMapLayout.swift \
+            Sources/iTERMiNAL/Bytes/Map/ByteMapPicking.swift \
+            Sources/iTERMiNAL/Bytes/Map/ByteMapAnalyzer.swift \
+            Sources/iTERMiNAL/Bytes/Map/ByteMapText.swift \
+            Sources/iTERMiNAL/Bytes/Map/ByteMapRaster.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
