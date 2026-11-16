@@ -29,6 +29,8 @@ struct HexGridView: NSViewRepresentable {
     let style: HexGridStyle
     let onSelect: (ByteSelection) -> Void
     let onCopy: () -> Void
+    /// ⌘F, ⌘G and ⇧⌘G while the dump has the keys.
+    let onFind: (HexGridFindCommand) -> Void
 
     /// Which reveal request was acted on, so one that is still on the model after
     /// a redraw is not acted on again.
@@ -51,6 +53,7 @@ struct HexGridView: NSViewRepresentable {
     private func apply(to view: HexGridNSView, context: Context) {
         view.onSelect = onSelect
         view.onCopy = onCopy
+        view.onFind = onFind
         view.update(buffer: buffer, radix: radix, requestedBytesPerRow: bytesPerRow, showsText: showsText,
                     selection: selection, style: style)
         if let reveal, reveal.id != context.coordinator.handledReveal {
@@ -58,6 +61,13 @@ struct HexGridView: NSViewRepresentable {
             view.reveal(offset: reveal.offset, centered: reveal.centered)
         }
     }
+}
+
+/// What the find keys ask for, passed from the dump to the pane.
+enum HexGridFindCommand {
+    case show
+    case next
+    case previous
 }
 
 /// The dump, drawn a row at a time.
@@ -79,6 +89,7 @@ struct HexGridView: NSViewRepresentable {
 final class HexGridNSView: NSView {
     var onSelect: ((ByteSelection) -> Void)?
     var onCopy: (() -> Void)?
+    var onFind: ((HexGridFindCommand) -> Void)?
 
     private var buffer: ByteEditBuffer?
     private var radix = ByteRadix.hex
@@ -416,7 +427,30 @@ final class HexGridNSView: NSView {
 
     // MARK: Keys
 
+    /// ⌘F opens the find bar, ⌘G goes to the next match and ⇧⌘G to the one before, when this view has the keys.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self, let command = HexGridNSView.findCommand(for: event) {
+            onFind?(command)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private static func findCommand(for event: NSEvent) -> HexGridFindCommand? {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard flags.contains(.command), !flags.contains(.option), !flags.contains(.control) else { return nil }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "f" where !flags.contains(.shift): return .show
+        case "g": return flags.contains(.shift) ? .previous : .next
+        default: return nil
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
+        if let command = HexGridNSView.findCommand(for: event) {
+            onFind?(command)
+            return
+        }
         guard let buffer, buffer.length > 0, let move = HexGridNSView.move(for: event) else {
             super.keyDown(with: event)
             return

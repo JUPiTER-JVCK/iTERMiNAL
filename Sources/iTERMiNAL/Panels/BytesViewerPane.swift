@@ -14,6 +14,7 @@ struct BytesViewerPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var isDropTargeted = false
+    @FocusState private var findFocused: Bool
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
@@ -21,6 +22,7 @@ struct BytesViewerPaneView: View {
             if let buffer = model.buffer {
                 header(theme: theme)
                 modeBar(theme: theme)
+                if model.showsFind { findBar(theme: theme) }
                 FadedDivider()
                 if let refusal = model.refusal {
                     noticeStrip(refusal.message, isError: refusal.isProblem, theme: theme, dismiss: model.dismissRefusal)
@@ -53,6 +55,9 @@ struct BytesViewerPaneView: View {
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             openDropped(providers)
             return true
+        }
+        .onChange(of: model.showsFind) { _, shown in
+            if shown { findFocused = true }
         }
     }
 
@@ -97,7 +102,16 @@ struct BytesViewerPaneView: View {
             reveal: model.reveal,
             style: gridStyle(theme: theme),
             onSelect: { model.select($0) },
-            onCopy: { model.copySelection(as: .spacedHex) }
+            onCopy: { model.copySelection(as: .spacedHex) },
+            onFind: { command in
+                switch command {
+                case .show:
+                    model.showFind()
+                    findFocused = true
+                case .next: model.findNext()
+                case .previous: model.findPrevious()
+                }
+            }
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Bytes of \(model.fileName)")
@@ -156,6 +170,12 @@ struct BytesViewerPaneView: View {
                 .font(.system(size: 11))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            Button(action: model.toggleFind) {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .help("Find bytes or text in the file (⌘F while the dump has the keys; ⌘G for the next, ⇧⌘G for the one before)")
+            .accessibilityLabel("Find in the file")
             Button(action: chooseFile) {
                 Image(systemName: "folder")
             }
@@ -198,6 +218,87 @@ struct BytesViewerPaneView: View {
                 .help("A byte to go to: 0x1F40, 8000, +16, end-0x20 or 50%")
             displayMenu
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+    }
+
+    private func findBar(theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Picker("Look for", selection: $model.findKind) {
+                    Text("Hex").tag(BytesViewerModel.FindKind.hex)
+                    Text("Text").tag(BytesViewerModel.FindKind.text)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 86)
+                .help("Hex: bytes such as DE AD ?? EF, where ?? is any byte · Text: letters, in the encoding chosen")
+                TextField(model.findKind == .hex ? "DE AD ?? EF" : "Text to find", text: $model.findText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(theme.surface))
+                    .focused($findFocused)
+                    .onSubmit { model.findNext() }
+                    .onExitCommand { model.closeFind() }
+                if model.findKind == .text {
+                    Toggle(isOn: $model.findIgnoresCase) {
+                        Text("Aa")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .toggleStyle(.button)
+                    .help("Ignore the case of A to Z")
+                    Menu {
+                        Picker("Look for it as", selection: $model.findEncoding) {
+                            ForEach(SearchPattern.TextEncoding.allCases, id: \.self) { encoding in
+                                Text(encoding.title).tag(encoding)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Text(model.findEncoding.title)
+                            .font(.system(size: 11))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("The bytes the text is looked for as")
+                }
+                Button(action: model.findPrevious) {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.plain)
+                .disabled(model.findText.isEmpty)
+                .help("The match before the cursor")
+                .accessibilityLabel("Find the previous match")
+                Button(action: model.findNext) {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .disabled(model.findText.isEmpty)
+                .help("The match after the cursor")
+                .accessibilityLabel("Find the next match")
+                Button(action: model.closeFind) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .help("Close the find bar")
+                .accessibilityLabel("Close the find bar")
+            }
+            if model.findStatus != nil || model.findProgress != nil {
+                HStack(spacing: 6) {
+                    if let progress = model.findProgress {
+                        ProgressView(value: progress)
+                            .frame(width: 60)
+                    }
+                    Text(model.findStatus ?? "")
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(theme.textSecondary)
+            }
+        }
+        .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
     }

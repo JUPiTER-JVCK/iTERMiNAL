@@ -86,6 +86,50 @@ final class BytesViewerModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var goToText = ""
 
+    // MARK: Find
+
+    /// What the find bar looks for.
+    enum FindKind: String, CaseIterable {
+        case hex
+        case text
+    }
+
+    @Published private(set) var showsFind = false
+    /// What is typed in the find bar: bytes as hex ("DE AD ?? EF") or text, by `findKind`.
+    @Published var findText = "" {
+        didSet {
+            guard findText != oldValue else { return }
+            findStatus = nil
+            lastMatch = nil
+        }
+    }
+    @Published var findKind: FindKind = BytesViewerModel.storedFindKind() {
+        didSet {
+            UserDefaults.standard.set(findKind.rawValue, forKey: "bytes.findKind")
+            findStatus = nil
+            lastMatch = nil
+        }
+    }
+    /// For text: A to Z match in either case.
+    @Published var findIgnoresCase: Bool = BytesViewerModel.storedFlag("bytes.findIgnoresCase", default: true) {
+        didSet { UserDefaults.standard.set(findIgnoresCase, forKey: "bytes.findIgnoresCase") }
+    }
+    /// For text: the bytes it is looked for as.
+    @Published var findEncoding: SearchPattern.TextEncoding = BytesViewerModel.storedFindEncoding() {
+        didSet {
+            UserDefaults.standard.set(findEncoding.rawValue, forKey: "bytes.findEncoding")
+            findStatus = nil
+            lastMatch = nil
+        }
+    }
+    /// What the last search found, or why it did not.
+    @Published private(set) var findStatus: String?
+    /// How far through the file a search that is under way has got, from 0 to 1.
+    @Published private(set) var findProgress: Double?
+    private var findCancellation: ParseCancellation?
+    /// The bytes the last search found, so that "next" goes past them and not onto them again.
+    private var lastMatch: Range<Int64>?
+
     // MARK: Structure
 
     /// The file taken apart by the parser that knows its format, made in the background.
@@ -167,6 +211,9 @@ final class BytesViewerModel: ObservableObject {
             refusal = nil
             notice = nil
             goToText = ""
+            cancelFind()
+            findStatus = nil
+            lastMatch = nil
             selection = ByteSelection(at: 0)
             reveal = BytesRevealRequest(offset: 0, centered: false)
             startStructure(source)
@@ -190,6 +237,9 @@ final class BytesViewerModel: ObservableObject {
         notice = nil
         refusal = nil
         goToText = ""
+        cancelFind()
+        findStatus = nil
+        lastMatch = nil
         structure = .idle
         structureRows = []
         focusedNode = nil
@@ -372,6 +422,113 @@ final class BytesViewerModel: ObservableObject {
         }
     }
 
+    // MARK: Finding
+
+    /// Shows the find bar, and asks the pane to put the cursor in it.
+    func showFind() {
+        guard hasFile else { return }
+        showsFind = true
+    }
+
+    func closeFind() {
+        cancelFind()
+        showsFind = false
+    }
+
+    func toggleFind() {
+        if showsFind { closeFind() } else { showFind() }
+    }
+
+    func findNext() { find(.forward) }
+
+    func findPrevious() { find(.backward) }
+
+    private func cancelFind() {
+        findCancellation?.cancel()
+        findCancellation = nil
+        findProgress = nil
+    }
+
+    /// Looks for what is in the find bar, from the cursor, in `direction`, and round again if it is not found that way.
+    /// The file is read in the background a megabyte at a time, so a search of a big file can be stopped by searching again.
+    private func find(_ direction: SearchDirection) {
+        guard let buffer else { return }
+        let made: Result<SearchPattern, SearchPattern.Failure>
+        switch findKind {
+        case .hex: made = SearchPattern.hex(findText)
+        case .text: made = SearchPattern.text(findText, encoding: findEncoding, ignoresCase: findIgnoresCase)
+        }
+        let pattern: SearchPattern
+        switch made {
+        case .success(let value):
+            pattern = value
+        case .failure(let failure):
+            findStatus = SearchPattern.message(failure)
+            return
+        }
+        cancelFind()
+        let token = ParseCancellation()
+        findCancellation = token
+
+        // From the cursor: onto it going forward, unless it is the match found last, which is gone past.
+        let head = selection?.lowerBound ?? 0
+        let onLastMatch = lastMatch != nil && selection?.range == lastMatch
+        let start: Int64
+        switch direction {
+        case .forward: start = onLastMatch ? head + 1 : head
+        case .backward: start = head - 1
+        }
+        findStatus = "Searching…"
+        findProgress = 0
+        let source = EditedBytesSource(buffer)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var lastReport = DispatchTime.now().uptimeNanoseconds
+            let outcome = ByteSearcher.find(
+                pattern, in: source, startingAt: start, direction: direction, wraps: true,
+                isCancelled: { token.isCancelled },
+                progress: { fraction in
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    guard now - lastReport > 80_000_000 else { return }
+                    lastReport = now
+                    DispatchQueue.main.async {
+                        guard let self, !token.isCancelled, self.findProgress != nil else { return }
+                        self.findProgress = fraction
+                    }
+                }
+            )
+            DispatchQueue.main.async {
+                guard let self, !token.isCancelled else { return }
+                self.findCancellation = nil
+                self.findProgress = nil
+                switch outcome {
+                case .found(let range):
+                    self.showMatch(range, searchedFrom: start, direction: direction)
+                case .notFound:
+                    self.lastMatch = nil
+                    self.findStatus = "No match."
+                case .cancelled:
+                    self.findStatus = nil
+                }
+            }
+        }
+    }
+
+    /// Selects the bytes a search found, brings them to the middle of the dump, and says where they are.
+    private func showMatch(_ range: Range<Int64>, searchedFrom start: Int64, direction: SearchDirection) {
+        lastMatch = range
+        selection = ByteSelection(anchor: range.lowerBound, head: range.upperBound - 1)
+        reveal = BytesRevealRequest(offset: range.lowerBound, centered: true)
+        if mode == .map { mode = .hex }
+        if mode == .structure { followSelection(scroll: true) }
+        var text = "Found at 0x\(String(range.lowerBound, radix: 16, uppercase: true)) (\(range.lowerBound))"
+        switch direction {
+        case .forward where range.lowerBound < start: text += " · started again from the top"
+        case .backward where range.lowerBound > start: text += " · started again from the end"
+        default: break
+        }
+        findStatus = text
+    }
+
     // MARK: Copying
 
     /// Puts the selected bytes on the pasteboard as `format`.
@@ -408,6 +565,14 @@ final class BytesViewerModel: ObservableObject {
 
     private static func storedColoring() -> ByteMapColoring {
         ByteMapColoring(rawValue: UserDefaults.standard.string(forKey: "bytes.mapColoring") ?? "") ?? .byteClass
+    }
+
+    private static func storedFindKind() -> FindKind {
+        FindKind(rawValue: UserDefaults.standard.string(forKey: "bytes.findKind") ?? "") ?? .hex
+    }
+
+    private static func storedFindEncoding() -> SearchPattern.TextEncoding {
+        SearchPattern.TextEncoding(rawValue: UserDefaults.standard.string(forKey: "bytes.findEncoding") ?? "") ?? .utf8
     }
 
     private static func storedEndianness() -> Endianness {
