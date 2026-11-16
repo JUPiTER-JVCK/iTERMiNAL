@@ -524,6 +524,7 @@ A tour of the app in thirty-four pictures, in five groups.
   are not a fixed set of bytes.
   The **Structure** outlook takes a PNG, a JPEG, a GIF, a BMP, an icon, a WebP, a TIFF,
   a HEIC or AVIF, a JPEG 2000 or JPEG XL image, an MP4 or QuickTime movie, a PDF,
+  a ZIP archive (or a .docx, .xlsx, .jar, .apk), an ELF or Mach-O program or library,
   a pcap or a pcapng capture apart into its fields, each tied to its bytes: click a field and its bytes are selected
   in the dump below, select bytes and the field that holds them is shown. A PNG
   is its chunks, with their CRCs checked (the first 512 MB of chunk data; past
@@ -545,7 +546,15 @@ A tour of the app in thirty-four pictures, in five groups.
   found. A HEIC or AVIF is its boxes, the items listed with where each one's bytes
   are, and the properties of the picture (size, crop, turn, bit depth, colour,
   codec setup); a JPEG 2000 is its boxes and the size in its codestream; a JPEG XL is
-  its size header, bare or in its box container. A PDF is read from the front, as it was
+  its size header, bare or in its box container. A ZIP is read from the central
+  directory at its end, and each entry is shown where it lies: its local header, its
+  compressed data (a stored entry's CRC is checked when it is opened), and its data
+  descriptor, with the extra fields (Zip64, timestamps, Unix ids) opened and any program
+  in front or bytes between entries named. An ELF is its header, program headers and
+  section headers, with the symbols, dynamic table, notes and relocations of each
+  section opened, in either class and byte order; a Mach-O is its header and load
+  commands (segments with their sections, symbols, libraries, build version, entry point,
+  code signature), and a universal binary shows each architecture where it lies. A PDF is read from the front, as it was
   written: the header, every object with its dictionary and its stream (skipped by
   its length, not decoded), the cross-reference tables checked against the objects
   they point at, the trailers, `startxref` and each `%%EOF`, so a file saved again
@@ -1660,7 +1669,7 @@ Sources/
 │   │                and the copy formats, and an edit buffer the panel does not
 │   │                use yet; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
 │   │                ICO, WebP, TIFF, MP4 and the images in its boxes, JPEG XL,
-│   │                PDF, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
+│   │                PDF, ZIP, ELF, Mach-O, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
 │   │                entropy, the byte map and the Hilbert curve — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),
