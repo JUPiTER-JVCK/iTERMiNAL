@@ -9441,7 +9441,7 @@ do {
 
 // A file taken apart into fields, each tied to its bytes. The parsers are Foundation only,
 // and every one is checked against files made, and read back, by other software: the
-// PNGs and JPEGs by Pillow and by hand with zlib's CRC, the captures by dpkt, the MP4s by ffmpeg and ffprobe.
+// PNGs and JPEGs by Pillow and by hand with zlib's CRC, the captures by dpkt, the MP4s by ffmpeg and ffprobe, the PDFs by pypdf and pdfinfo.
 
 /// Bytes from the hex digits of a string, spaces ignored.
 func structureBytes(_ hex: String) -> [UInt8] {
@@ -9616,7 +9616,7 @@ do {
     check(unknown.identity == nil && unknown.outcome.roots.isEmpty && unknown.message.contains("Hex and Bits"), "a file nothing knows is told so, and pointed to the dump")
     let gif = FormatRegistry.analyze(DataByteSource(Array("GIF89a\u{1}\0".utf8)))
     check(gif.identity?.id == "gif" && gif.message.contains("GIF") && gif.message.contains("no structure view"), "a file it knows but cannot take apart is named, and the lack is said")
-    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4"], "five parsers so far")
+    check(FormatRegistry.parserIDs == ["png", "pcap", "pcapng", "jpeg", "mp4", "pdf"], "six parsers so far")
 }
 
 // MARK: PNG
@@ -10443,6 +10443,209 @@ do {
     let scan = structureJoin([0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00], [0xAA, 0xFF, 0xD0, 0xBB, 0xFF, 0xD7, 0xCC, 0xFF, 0x00, 0xDD], [0xFF, 0xD9])
     let scanData = FormatRegistry.analyze(DataByteSource(scan)).outcome.roots.first { $0.name == "Scan data" }
     check(scanData?.value == "10 bytes · 2 restart markers" && scanData.map { $0.end } == 22, "RST0 and RST7 are inside the scan, and FF 00 is data")
+}
+
+// MARK: PDF
+
+// PDFs made by Pillow, by pypdf and by hand, read back by pypdf and by poppler's pdfinfo, with the objects
+// found by a scan written separately from the parser; then files built to be wrong in the ways PDFs are.
+
+/// "number generation @offset+length" for each object of a PDF, as the parser lists them.
+func pdfObjectList(_ roots: [FieldNode]) -> [String] {
+    roots.filter { $0.id.hasPrefix("pdf/obj") }.map { node in
+        let words = node.name.split(separator: " ")
+        return "\(words[0]) \(words[1]) @\(node.offset)+\(node.length)"
+    }
+}
+
+func pdfText(_ parts: String...) -> [UInt8] { Array(parts.joined().utf8) }
+
+do {
+    let pdfFixtures: [(String, String)] = [
+        ("pillow", "255044462d312e340a2520637265617465642062792050696c6c6f7720504446206472697665720a332030206f626a3c3c0a2f54797065202f436174616c6f670a2f50616765732034203020520a3e3e656e646f626a0a342030206f626a3c3c0a2f54797065202f50616765730a2f436f756e7420310a2f4b696473205b203120302052205d0a3e3e656e646f626a0a352030206f626a3c3c0a2f54797065202f584f626a6563740a2f53756274797065202f496d6167650a2f57696474682032340a2f4865696768742031360a2f46696c746572202f4443544465636f64650a2f42697473506572436f6d706f6e656e7420380a2f436f6c6f725370616365202f4465766963655247420a2f4c656e677468203737300a3e3e73747265616d0affd8ffe000104a46494600010100000100010000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffdb0043010909090c0b0c180d0d1832211c213232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232ffc00011080010001803012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f002f840c1ae21dbe748cea1480ed8c607ae73ec73827b1a6acf1b4188268de1326e3b888c16018e305b00e07d3afa805239c794111d5279498e2063c842f960720f18248e3b1356155e388492ac6899d819f0a08f9b208381d4f0d8279ce6801c204f2a02f12796ca7ef019cee38ddb4609e78e01279c13d4a8f26e4431dc039918b063280c873cfdde7a9edd8f419228a00ffd90a656e6473747265616d0a656e646f626a0a312030206f626a3c3c0a2f5265736f7572636573203c3c0a2f50726f63536574205b202f504446202f496d61676543205d0a2f584f626a656374203c3c0a2f696d6167652035203020520a3e3e0a3e3e0a2f4d65646961426f78205b203020302032342e302031362e30205d0a2f436f6e74656e74732032203020520a2f54797065202f506167650a2f506172656e742034203020520a3e3e656e646f626a0a322030206f626a3c3c0a2f4c656e6774682034350a3e3e73747265616d0a712032342e303030303030203020302031362e3030303030302030203020636d202f696d61676520446f20510a0a656e6473747265616d0a656e646f626a0a362030206f626a3c3c0a2f5469746c652028feff00540069006e0079290a2f4372656174696f6e446174652028443a32303236313131363031343933385a290a2f4d6f64446174652028443a32303236313131363031343933385a290a3e3e656e646f626a0a787265660a3020370a303030303030303030302036353533362066200a30303030303031303737203030303030206e200a30303030303031323337203030303030206e200a30303030303030303430203030303030206e200a30303030303030303837203030303030206e200a30303030303030313434203030303030206e200a30303030303031333330203030303030206e200a747261696c65720a3c3c0a2f526f6f742033203020520a2f53697a6520370a2f496e666f2036203020520a3e3e0a7374617274787265660a313433320a2525454f46"), ("pypdf", "255044462d312e330a25e2e3cfd30a312030206f626a0a3c3c0a2f50726f647563657220287079706466290a2f5469746c6520285468726565207061676573290a2f417574686f72202854657374205c3035307769746820706172656e735c303531290a3e3e0a656e646f626a0a322030206f626a0a3c3c0a2f54797065202f50616765730a2f436f756e7420330a2f4b696473205b203420302052203520302052203620302052205d0a3e3e0a656e646f626a0a332030206f626a0a3c3c0a2f54797065202f436174616c6f670a2f50616765732032203020520a3e3e0a656e646f626a0a342030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a352030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a362030206f626a0a3c3c0a2f54797065202f506167650a2f5265736f7572636573203c3c0a3e3e0a2f4d65646961426f78205b20302e3020302e302032303020313030205d0a2f506172656e742032203020520a3e3e0a656e646f626a0a787265660a3020370a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030313130203030303030206e200a30303030303030313831203030303030206e200a30303030303030323330203030303030206e200a30303030303030333234203030303030206e200a30303030303030343138203030303030206e200a747261696c65720a3c3c0a2f53697a6520370a2f526f6f742033203020520a2f496e666f2031203020520a3e3e0a7374617274787265660a3531320a2525454f460a"), ("hand", "255044462d312e340a25e2e3cfd30a312030206f626a0a3c3c202f54797065202f436174616c6f67202f5061676573203220302052203e3e0a656e646f626a0a322030206f626a0a3c3c202f54797065202f5061676573202f4b696473205b33203020525d202f436f756e742031203e3e0a656e646f626a0a332030206f626a0a3c3c202f54797065202f50616765202f506172656e74203220302052202f4d65646961426f78205b30203020313030203130305d202f436f6e74656e7473203420302052202f5265736f7572636573203c3c203e3e203e3e0a656e646f626a0a342030206f626a0a3c3c202f4c656e677468203530203e3e0a73747265616d0a302030206d203130203130206c20532025206120636f6d6d656e74207769746820656e6473747265616d20696e736964653f0a656e6473747265616d0a656e646f626a0a787265660a3020350a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030303634203030303030206e200a30303030303030313231203030303030206e200a30303030303030323235203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f496e666f203c3c202f5469746c65202848616e64205c286275696c745c2929203e3e203e3e0a7374617274787265660a3332350a2525454f460a"),
+        ("incremental", "255044462d312e340a25e2e3cfd30a312030206f626a0a3c3c202f54797065202f436174616c6f67202f5061676573203220302052203e3e0a656e646f626a0a322030206f626a0a3c3c202f54797065202f5061676573202f4b696473205b33203020525d202f436f756e742031203e3e0a656e646f626a0a332030206f626a0a3c3c202f54797065202f50616765202f506172656e74203220302052202f4d65646961426f78205b30203020313030203130305d202f436f6e74656e7473203420302052202f5265736f7572636573203c3c203e3e203e3e0a656e646f626a0a342030206f626a0a3c3c202f4c656e677468203530203e3e0a73747265616d0a302030206d203130203130206c20532025206120636f6d6d656e74207769746820656e6473747265616d20696e736964653f0a656e6473747265616d0a656e646f626a0a787265660a3020350a303030303030303030302036353533352066200a30303030303030303135203030303030206e200a30303030303030303634203030303030206e200a30303030303030313231203030303030206e200a30303030303030323235203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f496e666f203c3c202f5469746c65202848616e64205c286275696c745c2929203e3e203e3e0a7374617274787265660a3332350a2525454f460a342030206f626a0a3c3c202f4c656e677468203236203e3e0a73747265616d0a4254202f4631203132205466202848656c6c6f2920546a2045540a656e6473747265616d0a656e646f626a0a787265660a3420310a30303030303030353234203030303030206e200a747261696c65720a3c3c202f53697a652035202f526f6f74203120302052202f5072657620333235203e3e0a7374617274787265660a3630300a2525454f460a"), ("xrefstream", "255044462d312e350a25e2e3cfd30a352030206f626a0a3c3c202f54797065202f4f626a53746d202f4e2033202f4669727374203134202f46696c746572202f466c6174654465636f6465202f4c656e67746820313037203e3e0a73747265616d0a789c3354305030523036513056303753b0b151d00fa92c4855d0774e2c49ccc94f57d00f484c4f2d062a31500852b0b3e342a88048e87b67a6142b441b83e46381daf24bf34a140c315582c8a254a01cc4247ddfd494cc44a7fc0a856803a0802908c582740100994d25c70a656e6473747265616d0a656e646f626a0a362030206f626a0a3c3c202f54797065202f58526566202f53697a652037202f57205b31203220315d202f526f6f74203120302052202f46696c746572202f466c6174654465636f6465202f4c656e677468203330203e3e0a73747265616d0a789c636060f8cfc4c0ca00c48c40ccc400048c0cfc407c9f01001cd802080a656e6473747265616d0a656e646f626a0a7374617274787265660a3232330a2525454f460a")
+    ]
+    let objects: [String: [String]] = ["pillow": ["3 0 @40+46", "4 0 @87+56", "5 0 @144+932", "1 0 @1077+159", "2 0 @1237+92", "6 0 @1330+101"], "pypdf": ["1 0 @15+94", "2 0 @110+70", "3 0 @181+48", "4 0 @230+93", "5 0 @324+93", "6 0 @418+93"], "hand": ["1 0 @15+48", "2 0 @64+56", "3 0 @121+103", "4 0 @225+99"], "incremental": ["1 0 @15+48", "2 0 @64+56", "3 0 @121+103", "4 0 @225+99", "4 0 @524+75"], "xrefstream": ["5 0 @15+207", "6 0 @223+143"]]
+    let startxrefs: [String: Int] = ["pillow": 1432, "pypdf": 512, "hand": 325, "incremental": 600, "xrefstream": 223]
+    let xrefs: [String: [Int: Int]] = ["pillow": [1: 1077, 2: 1237, 3: 40, 4: 87, 5: 144, 6: 1330], "pypdf": [1: 15, 2: 110, 3: 181, 4: 230, 5: 324, 6: 418], "hand": [1: 15, 2: 64, 3: 121, 4: 225], "incremental": [4: 524, 1: 15, 2: 64, 3: 121], "xrefstream": [5: 15, 6: 223]]
+    let pages: [String: Int] = ["pillow": 1, "pypdf": 3, "hand": 1, "incremental": 1, "xrefstream": 1]
+    let versions: [String: String] = ["pillow": "1.4", "pypdf": "1.3", "hand": "1.4", "incremental": "1.4", "xrefstream": "1.5"]
+    let roots: [String: Int] = ["pillow": 3, "pypdf": 3, "hand": 1, "incremental": 1, "xrefstream": 1]
+    let sizes: [String: Int] = ["pillow": 7, "pypdf": 7, "hand": 5, "incremental": 5, "xrefstream": 7]
+    var wrong: [String] = []
+    for (name, hex) in pdfFixtures {
+        let bytes = structureBytes(hex)
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        check(result.identity?.id == "pdf" && result.identity?.hasParser == true && result.message.isEmpty, "\(name): taken for a PDF, with a structure view")
+        check(structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).isEmpty, "\(name): the tree is sound")
+        check(result.outcome.problems.isEmpty, "\(name): nothing is said against a good file: \(result.outcome.problems)")
+        if pdfObjectList(result.outcome.roots) != objects[name] { wrong.append("\(name) objects: \(pdfObjectList(result.outcome.roots)) not \(objects[name] ?? [])") }
+        let summary = result.outcome.summary ?? ""
+        let pageWord = pages[name] == 1 ? "1 page" : "\(pages[name] ?? 0) pages"
+        if !summary.hasPrefix("PDF \(versions[name] ?? "?")") || (name != "xrefstream" && !summary.contains(pageWord)) { wrong.append("\(name) summary: \(summary)") }
+        // The startxref the file ends with, and where it points.
+        let startNode = result.outcome.roots.last { $0.name == "startxref" }
+        if startNode?.value?.hasPrefix("\(startxrefs[name] ?? -1) · ") != true { wrong.append("\(name) startxref: \(startNode?.value ?? "none")") }
+        // A classic cross-reference table says what pypdf reads from it.
+        let table = result.outcome.roots.filter { $0.name == "Cross-reference table" }
+        if let expected = xrefs[name], !table.isEmpty {
+            var rows: [Int: String] = [:]
+            for node in table { for section in node.resolvedChildren() { for row in section.resolvedChildren() where row.name.hasPrefix("Object ") {
+                rows[Int(row.name.dropFirst(7)) ?? -1] = row.value
+            } } }
+            for (number, offset) in expected where rows[number]?.hasPrefix("offset \(offset) · in use · points at \(number) ") != true {
+                wrong.append("\(name) xref \(number): \(rows[number] ?? "none") not offset \(offset)")
+            }
+        }
+        // The trailer's own words.
+        if let trailer = result.outcome.roots.last(where: { $0.name == "Trailer" }), let root = roots[name] {
+            let entries = trailer.resolvedChildren().first { $0.name == "Dictionary" }?.resolvedChildren() ?? []
+            if entries.first(where: { $0.name == "/Root" })?.value != "\(root) 0 R" || entries.first(where: { $0.name == "/Size" })?.value != "\(sizes[name] ?? -1)" {
+                wrong.append("\(name) trailer: \(entries.map { $0.name + "=" + ($0.value ?? "") })")
+            }
+        }
+    }
+    check(wrong.isEmpty, "objects, summaries, startxref, cross-reference tables and trailers of every PDF are what pypdf and pdfinfo say: \(wrong.prefix(3))")
+
+    func summary(_ text: [UInt8], context: ParseContext = ParseContext()) -> ParseOutcome {
+        FormatRegistry.analyze(DataByteSource(text), context: context).outcome
+    }
+    let hand = structureBytes(pdfFixtures[2].1)
+    let handRoots = FormatRegistry.analyze(DataByteSource(hand)).outcome.roots
+    func handNode(_ path: String...) -> FieldNode? {
+        var level = handRoots
+        var found: FieldNode?
+        for name in path {
+            guard let hit = level.first(where: { $0.name == name }) else { return nil }
+            found = hit
+            level = hit.resolvedChildren()
+        }
+        return found
+    }
+    check(handNode("Header")?.value == "PDF 1.4" && handNode("Binary marker")?.kind == .padding && handNode("End of file marker")?.value == "%%EOF", "the header, its binary marker and the end of file marker")
+    check(handNode("1 0 obj", "Dictionary", "/Type")?.value == "/Catalog" && handNode("3 0 obj", "Dictionary", "/MediaBox")?.value == "[0 0 100 100]" && handNode("3 0 obj", "Dictionary", "/Contents")?.value == "4 0 R", "dictionary entries, with a reference taken as one value")
+    check(handNode("3 0 obj", "Dictionary", "/Resources")?.kind == .container && handNode("Trailer", "Dictionary", "/Info")?.resolvedChildren().first?.value == "(Hand \\(built\\))", "a dictionary inside a dictionary opens, and a string with escaped parentheses is whole")
+    check(handNode("4 0 obj", "Stream data")?.length == 50 && handNode("4 0 obj", "Stream data")?.note?.contains("Not decoded") == true, "a stream is skipped by its length, though its data says endstream inside it")
+    check(handNode("Cross-reference table", "Objects 0 to 4", "Object 0")?.value == "offset 0 · free" && handNode("startxref", "Offset")?.value == "325 · a cross-reference table", "the table's free entry, and startxref pointing at the table")
+    check(handRoots.count == 10 && handNode("xref") == nil, "ten items at the top: header, binary marker, four objects, table, trailer, startxref and the end marker: \(handRoots.map { $0.name })")
+    let incremental = FormatRegistry.analyze(DataByteSource(structureBytes(pdfFixtures[3].1))).outcome
+    check(incremental.summary?.contains("2 revisions") == true && incremental.roots.filter { $0.name == "End of file marker" }.count == 2, "a file saved again by appending shows both revisions, and the object that was replaced")
+    let xrefStream = FormatRegistry.analyze(DataByteSource(structureBytes(pdfFixtures[4].1))).outcome
+    check(xrefStream.summary?.contains("compressed cross-references") == true && xrefStream.roots.first { $0.name == "6 0 obj" }?.note?.contains("Not decoded") == true && xrefStream.roots.first { $0.name == "5 0 obj" }?.value?.hasPrefix("ObjStm") == true, "a cross-reference stream and an object stream are named, and said not to be decoded")
+
+    // Made by hand, to be wrong.
+    let eof = "%%EOF\n"
+    let noEOF = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"))
+    check(noEOF.problems.contains { $0.contains("no %%EOF") }, "no end of file marker is said")
+    let noEndobj = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /A 1 >>\n2 0 obj\n<< >>\nendobj\n", eof))
+    check(noEndobj.problems.contains { $0.contains("Object 1") && $0.contains("no endobj") } && noEndobj.roots.filter { $0.id.hasPrefix("pdf/obj") }.count == 2, "an object with no endobj is said, and the next is still found")
+    let shortLength = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /Length 3 >>\nstream\nABCDEFG\nendstream\nendobj\n", eof))
+    let shortStream = shortLength.roots.first { $0.id.hasPrefix("pdf/obj") }?.resolvedChildren().first { $0.name == "Stream data" }
+    check(shortStream?.length == 7 && shortStream?.note?.contains("not 3 bytes long") == true && shortLength.problems.isEmpty, "a length that is wrong is noted, and the stream is found by searching")
+    let indirect = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /Length 2 0 R >>\nstream\nABCDE\nendstream\nendobj\n", eof))
+    let indirectStream = indirect.roots.first { $0.id.hasPrefix("pdf/obj") }?.resolvedChildren().first { $0.name == "Stream data" }
+    check(indirectStream?.length == 5 && indirectStream?.note?.contains("another object") == true, "a length held in another object: the stream is found by searching")
+    let strings = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /A (a (nested) b \\) c) /B <48656C6C6F> /C [1 2 (z)] /D /Name#20x >>\nendobj\n", eof))
+    let stringEntries = strings.roots.first { $0.id.hasPrefix("pdf/obj") }?.resolvedChildren().first { $0.name == "Dictionary" }?.resolvedChildren() ?? []
+    check(stringEntries.map { $0.name } == ["/A", "/B", "/C", "/D"] && stringEntries[1].value == "<48656C6C6F>" && stringEntries[0].value == "(a (nested) b \\) c)" && strings.problems.isEmpty, "strings with escapes and unbalanced-looking parentheses, hex strings, arrays and names: \(stringEntries.map { $0.name + "=" + ($0.value ?? "") })")
+    let unterminated = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /A (abc >>\nendobj\n", eof))
+    check(unterminated.roots.last?.kind == .problem && unterminated.problems.contains { $0.contains("does not end properly") }, "a string that never ends makes the object damaged, and nothing after it is guessed at")
+    let garbage = summary(pdfText("%PDF-1.4\n!!!! garbage here\n1 0 obj\n<< >>\nendobj\n", eof))
+    check(garbage.roots.contains { $0.name == "Unrecognised data" && $0.kind == .problem } && garbage.roots.contains { $0.id.hasPrefix("pdf/obj") }, "bytes that are nothing are said so, and the object after them is found")
+    let badXref = summary(pdfText("%PDF-1.4\n1 0 obj\n<< >>\nendobj\nxref\n0 2\n0000000000 65535 f \n0000000005 00000 n \ntrailer\n<< /Size 2 >>\nstartxref\n33\n", eof))
+    check(badXref.problems.contains { $0.contains("do not point at the object") || $0.contains("does not point at the object") }, "a cross-reference entry that points at the wrong place is said: \(badXref.problems)")
+    let badStart = summary(pdfText("%PDF-1.4\n1 0 obj\n<< >>\nendobj\nstartxref\n3\n", eof))
+    check(badStart.problems.contains { $0.contains("startxref") && $0.contains("nothing recognisable") }, "startxref pointing at nothing is said")
+    let encrypted = summary(pdfText("%PDF-1.4\n1 0 obj\n<< >>\nendobj\ntrailer\n<< /Size 2 /Encrypt 5 0 R >>\n", eof))
+    check(encrypted.problems.contains { $0.contains("encrypted") }, "an encrypted file is said to be")
+    let linearized = summary(pdfText("%PDF-1.4\n1 0 obj\n<< /Linearized 1 /L 100 >>\nendobj\n", eof))
+    check(linearized.summary?.contains("linearized") == true, "a linearized file is said to be")
+    check(summary(pdfText("not a pdf\n1 0 obj\n<< >>\nendobj\n")).roots.isEmpty && PDFParser.matches(head: Array("%PDF-1.7".utf8), length: 8) && !PDFParser.matches(head: Array("%PDF".utf8), length: 4), "what a PDF begins with")
+    var small = ParseContext()
+    small.maxRecords = 2
+    let limited = FormatRegistry.analyze(DataByteSource(hand), context: small).outcome
+    check(limited.roots.map { $0.name } == ["Header", "Binary marker", "More items"] && limited.listingLimit != nil, "the listing stops where it was told to")
+    let nested = summary(pdfText("%PDF-1.4\n1 0 obj\n", String(repeating: "<< /A ", count: 5000), String(repeating: ">> ", count: 5000), "\nendobj\n", eof))
+    check(structureProblems(nested.roots, fileLength: 60_000).isEmpty && nested.problems.contains { $0.contains("does not end properly") }, "5,000 dictionaries inside each other are given up on, and do not crash")
+    let brackets = summary(pdfText("%PDF-1.4\n1 0 obj\n", String(repeating: "[", count: 200_000), "\nendobj\n"))
+    check(brackets.roots.contains { $0.kind == .problem }, "200,000 open brackets are given up on")
+
+    // Cut at every length, every byte set to 0 and 0xFF, and random files made of the words of a PDF.
+    var unsound: [String] = []
+    var runs = 0
+    for (name, hex) in pdfFixtures {
+        let original = structureBytes(hex)
+        for length in 0...original.count {
+            runs += 1
+            let result = FormatRegistry.analyze(DataByteSource(Array(original[0..<length])))
+            if let issue = structureProblems(result.outcome.roots, fileLength: Int64(length)).first { unsound.append("\(name) cut at \(length): \(issue)") }
+        }
+        for index in stride(from: 0, to: original.count, by: max(1, original.count / 500)) {
+            for value in [UInt8(0x00), UInt8(0xFF)] where original[index] != value {
+                var changed = original
+                changed[index] = value
+                runs += 1
+                let result = FormatRegistry.analyze(DataByteSource(changed))
+                if let issue = structureProblems(result.outcome.roots, fileLength: Int64(changed.count)).first { unsound.append("\(name) byte \(index) = \(value): \(issue)") }
+            }
+        }
+        if unsound.count > 5 { break }
+    }
+    var random = BytesCheckRandom(seed: 8086)
+    let words = ["1 0 obj\n", "2 5 obj", "<<", ">>", "/Length 5 ", "/Length 2 0 R", "\nstream\n", "endstream", "endobj\n", "xref\n0 1\n0000000000 65535 f \n", "xref\n3 2\n", "trailer\n", "startxref\n5\n",
+                 "%%EOF\n", "(", ")", "\\", "[", "]", "<", ">", "/Type /Page ", "R ", "0 ", "99999999999999999999 ", "\n", "\r\n", " ", "%", "abc", "\u{1}"]
+    for _ in 0..<500 {
+        var text = "%PDF-1.4\n"
+        for _ in 0..<(1 + random.below(40)) { text += words[random.below(words.count)] }
+        let bytes = Array(text.utf8)
+        runs += 1
+        let result = FormatRegistry.analyze(DataByteSource(bytes))
+        if let issue = structureProblems(result.outcome.roots, fileLength: Int64(bytes.count)).first { unsound.append("random \(text.debugDescription): \(issue)") }
+        if unsound.count > 5 { break }
+    }
+    check(unsound.isEmpty, "\(runs) cut, changed and random PDFs all give sound trees: \(unsound.prefix(3))")
+}
+
+do {
+    func parse(_ bytes: [UInt8]) -> ParseOutcome { FormatRegistry.analyze(DataByteSource(bytes)).outcome }
+    func objects(_ outcome: ParseOutcome) -> [FieldNode] { outcome.roots.filter { $0.id.hasPrefix("pdf/obj") } }
+    let eof = "%%EOF\n"
+    // A form feed is white space, and a comment may hold anything, even brackets, inside a dictionary.
+    let formFeed = parse(pdfText("%PDF-1.4\n1 0 obj\u{0C}<< /A 1 \u{0C}/B 2 >>\u{0C}endobj\n", eof))
+    check(objects(formFeed).count == 1 && objects(formFeed).first?.kind == .container, "a form feed is white space")
+    let comment = parse(pdfText("%PDF-1.4\n1 0 obj\n<< /A 1 % a comment ) ( >> \n/B 2 >>\nendobj\n", eof))
+    let commentEntries = objects(comment).first?.resolvedChildren().first { $0.name == "Dictionary" }?.resolvedChildren().map { $0.name } ?? []
+    check(commentEntries == ["/A", "/B"] && comment.problems.isEmpty, "a comment inside a dictionary is skipped, and may hold brackets")
+    // Words are whole words.
+    check(parse(pdfText("%PDF-1.4\nxrefs\n", eof)).roots.contains { $0.name == "Unrecognised data" } && !parse(pdfText("%PDF-1.4\nxrefs\n", eof)).roots.contains { $0.name == "Cross-reference table" }, "xrefs is not xref")
+    check(objects(parse(pdfText("%PDF-1.4\n1 0obj\n<< >>\nendobj\n", eof))).isEmpty, "1 0obj is not an object header")
+    let wordEnd = parse(pdfText("%PDF-1.4\n1 0 obj\n<< >>\nendobjx\n", eof))
+    check(wordEnd.problems.contains { $0.contains("no endobj") }, "endobjx is not endobj")
+    // Streams: lines end in CR LF, and the length may be somewhere else.
+    let crlf = parse(pdfText("%PDF-1.4\n1 0 obj\n<< /Length 5 >>\nstream\r\nABCDE\r\nendstream\r\nendobj\r\n", eof))
+    let crlfData = objects(crlf).first?.resolvedChildren().first { $0.name == "Stream data" }
+    check(crlfData?.length == 5 && crlfData?.note?.contains("not decoded") == true || crlfData?.note?.contains("Not decoded") == true, "a stream that begins after CR LF")
+    let crlfSearched = parse(pdfText("%PDF-1.4\n1 0 obj\n<< /Length 9 0 R >>\nstream\r\nABCDE\r\nendstream\r\nendobj\r\n", eof))
+    check(objects(crlfSearched).first?.resolvedChildren().first { $0.name == "Stream data" }?.length == 5, "and one found by searching ends before the CR LF that precedes endstream")
+    // Cross-reference entries: generation, offset 0 and the object they name.
+    let entry = { (offset: String, generation: String, flag: String) in
+        parse(pdfText("%PDF-1.4\n1 0 obj\n<< >>\nendobj\nxref\n0 2\n0000000000 65535 f \n\(offset) \(generation) \(flag) \ntrailer\n<< /Size 2 >>\nstartxref\n33\n", eof))
+    }
+    check(entry("0000000009", "00001", "n").problems.contains { $0.contains("do not point") || $0.contains("does not point") }, "a cross-reference entry with the wrong generation is said")
+    check(!entry("0000000000", "00000", "n").problems.contains { $0.contains("do not point") || $0.contains("does not point") }, "an entry of offset 0 is not checked against an object")
+    check(!entry("0000000009", "00000", "n").problems.contains { $0.contains("do not point") || $0.contains("does not point") }, "and a right one is not complained of")
+    // The page count is the root of the tree's.
+    let tree = parse(pdfText("%PDF-1.4\n1 0 obj\n<< /Type /Pages /Parent 2 0 R /Count 2 >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 5 >>\nendobj\n", eof))
+    check(tree.summary?.contains("5 pages") == true, "the page count is that of the node with no parent: \(tree.summary ?? "none")")
+    // Many lines of nothing do not stop the listing.
+    let noise = parse(pdfText("%PDF-1.4\n", String(repeating: "!! nothing here\n", count: 50), "1 0 obj\n<< >>\nendobj\n", eof))
+    check(objects(noise).count == 1 && noise.roots.filter { $0.name == "Unrecognised data" }.count >= 1 && noise.problems.count <= 4, "fifty lines of nothing are skipped, and the object after them is found")
+    let percent = parse(pdfText("%PDF-1.4\n1 0 obj\n<< /B 2% c\n/C 3 >>\nendobj\n", eof))
+    check(objects(percent).first?.resolvedChildren().first { $0.name == "Dictionary" }?.resolvedChildren().map { $0.value ?? "" } == ["2", "3"], "a number ends at a comment")
+    let alternating = parse(pdfText("%PDF-1.4\n", String(repeating: "!!junk\n1 0 obj\n<< >>\nendobj\n", count: 150), eof))
+    check(objects(alternating).count == 150, "150 patches of nothing between objects do not stop the listing: \(objects(alternating).count)")
+    let tooMuch = parse(pdfText("%PDF-1.4\n", String(repeating: "!!junk\n1 0 obj\n<< >>\nendobj\n", count: 300), eof))
+    check(objects(tooMuch).count == 200 && tooMuch.problems.contains { $0.contains("Too much") }, "and 300 do: the listing gives up at 200 and says so: \(objects(tooMuch).count)")
 }
 
 // MARK: The structure tree as lines
