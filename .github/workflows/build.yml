@@ -280,6 +280,9 @@ jobs:
             Sources/iTERMiNAL/Bytes/Structure/PcapParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/PcapNGParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/StructureOutline.swift \
+            Sources/iTERMiNAL/Bytes/Structure/SourceScanner.swift \
+            Sources/iTERMiNAL/Bytes/Structure/JPEGParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/MP4Parser.swift \
             Sources/iTERMiNAL/Bytes/Map/HilbertCurve.swift \
             Sources/iTERMiNAL/Bytes/Map/EntropyAnalysis.swift \
             Sources/iTERMiNAL/Bytes/Map/ByteMapLayout.swift \

@@ -55,7 +55,7 @@ struct StructureResult {
 
 enum FormatRegistry {
     /// In the order they are tried.
-    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self]
+    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self]
 
     static var parserIDs: Set<String> {
         Set(parsers.map { $0.identity.id })
