@@ -518,6 +518,10 @@ A tour of the app in thirty-four pictures, in five groups.
   the part you are looking at, so a multi-gigabyte video opens as quickly as a
   note. Click or drag to select; the inspector reads the selection as numbers of
   each size (little- or big-endian), a character, text, a time and an address.
+  Find bytes or text (the magnifier, or ⌘F while the dump has the keys; ⌘G and ⇧⌘G for the next
+  and the one before): hex such as `DE AD ?? EF` where `??` is any byte, or text in UTF-8, UTF-16
+  or Latin-1, with A to Z in either case if you like; it wraps round the file, and a big file is
+  searched in the background and can be stopped by searching again.
   Go to an offset (`0x1F40`, `+16`, `end-0x20`, `50%`), and copy the selection as
   hex, a C array, Python bytes or Base64. It only looks: the file is opened
   read-only and never changed. Folders, pipes and devices are refused, as they
@@ -1665,9 +1669,9 @@ Sources/
 │   │                with the site explorer and the Extract tab (previews, crawler,
 │   │                assistant), the Bytes panel and its hex grid
 │   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
-│   │                file, rows and columns, what a selection reads as, go-to
-│   │                and the copy formats, and an edit buffer the panel does not
-│   │                use yet; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
+│   │                file, rows and columns, what a selection reads as, go-to,
+│   │                search and the copy formats, and an edit buffer the panel
+│   │                does not use yet; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
 │   │                ICO, WebP, TIFF, MP4 and the images in its boxes, JPEG XL,
 │   │                PDF, ZIP, ELF, Mach-O, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
 │   │                entropy, the byte map and the Hilbert curve — Foundation-only

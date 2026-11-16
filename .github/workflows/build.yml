@@ -264,6 +264,7 @@ jobs:
             Sources/iTERMiNAL/Bytes/BytesFilePolicy.swift \
             Sources/iTERMiNAL/Bytes/FileByteSource.swift \
             Sources/iTERMiNAL/Bytes/ByteEditBuffer.swift \
+            Sources/iTERMiNAL/Bytes/ByteSearch.swift \
             Sources/iTERMiNAL/Bytes/HexLayout.swift \
             Sources/iTERMiNAL/Bytes/ByteSelection.swift \
             Sources/iTERMiNAL/Bytes/OffsetExpression.swift \
