@@ -97,6 +97,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SecureKeyboardEntry.shared.refresh(enabled: AppSettings.shared.secureKeyboardEntry)
     }
 
+    /// A quit with changes in the Bytes panel that are not saved asks first; with none, it does nothing at all.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let bytes = WorkspaceStore.shared.panelBytes
+        guard bytes.isDirty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Save the changes to \(bytes.fileName)?"
+        alert.informativeText = "The Bytes panel has changes that are not in the file yet. If you quit without saving them, they are lost."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            guard let why = bytes.saveNow() else { return .terminateNow }
+            let failed = NSAlert()
+            failed.messageText = "The changes were not saved"
+            failed.informativeText = why
+            failed.runModal()
+            return .terminateCancel
+        case .alertSecondButtonReturn:
+            return .terminateNow
+        default:
+            return .terminateCancel
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         SecureKeyboardEntry.shared.release()
         LocalAPIServer.shared.stop()
