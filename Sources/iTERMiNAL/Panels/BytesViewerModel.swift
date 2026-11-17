@@ -83,8 +83,11 @@ final class BytesViewerModel: ObservableObject {
         didSet {
             // A half-typed byte belongs to where the cursor was when its first digit went in.
             if selection != typingCursor { typing.forget() }
+            syncBitColumn()
         }
     }
+    /// In the Bits outlook, which of the eight digits of the cursor's cell the next 0 or 1 sets (0 the highest bit).
+    @Published private(set) var bitColumn = 0
     @Published private(set) var reveal: BytesRevealRequest?
     /// A line to say something to the person: a go-to that found nothing, a copy
     /// that was too big.
@@ -103,6 +106,7 @@ final class BytesViewerModel: ObservableObject {
         didSet {
             typing.mode = editMode
             typing.forget()
+            syncBitColumn()
         }
     }
     /// Leave the file as it was beside the new one, as `name.bak`, when saving.
@@ -326,6 +330,7 @@ final class BytesViewerModel: ObservableObject {
         }
         var context = ParseContext()
         context.isCancelled = { token.isCancelled }
+        context.fileName = fileURL?.lastPathComponent
         let work = context
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = FormatRegistry.analyze(source, context: work)
@@ -500,6 +505,24 @@ final class BytesViewerModel: ObservableObject {
         perform { rules, buffer, selection in try rules.hexDigit(digit, in: &buffer, at: selection) }
     }
 
+    /// A 0 or 1 typed in the Bits outlook.
+    func typeBit(_ value: Bool) {
+        perform { rules, buffer, selection in try rules.bit(value, in: &buffer, at: selection) }
+    }
+
+    /// A click on one of the eight digits of a cell in the Bits outlook: the next 0 or 1 sets that bit.
+    func placeBit(_ index: Int) {
+        guard isWritable, let head = selection?.lowerBound else { return }
+        typing.placeBit(index, at: head)
+        typingCursor = selection
+        syncBitColumn()
+    }
+
+    private func syncBitColumn() {
+        let column = typing.bitIndex(at: selection)
+        if column != bitColumn { bitColumn = column }
+    }
+
     /// Types characters in the text column.
     func typeText(_ text: String) {
         perform { rules, buffer, selection in try rules.text(text, in: &buffer, at: selection) }
@@ -563,6 +586,7 @@ final class BytesViewerModel: ObservableObject {
         if changed { buffer = working }
         typingCursor = next?.limited(toLength: working.length)
         selection = typingCursor
+        syncBitColumn()
         if let head = selection?.head { reveal = BytesRevealRequest(offset: head, centered: false) }
         if changed { editsChanged() }
     }

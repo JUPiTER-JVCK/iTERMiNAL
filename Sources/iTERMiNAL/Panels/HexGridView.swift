@@ -35,6 +35,10 @@ struct HexGridView: NSViewRepresentable {
     let isEditable: Bool
     /// Whether the cells take typed digits: they are written in hex. The text column, Delete, undo and save do not need it.
     let takesHexDigits: Bool
+    /// Whether the cells take typed 0s and 1s: they are written in bits.
+    let takesBits: Bool
+    /// Which of the eight digits of the cursor's cell a typed bit sets.
+    let bitColumn: Int
     let onEdit: (HexGridEdit) -> Void
 
     /// Which reveal request was acted on, so one that is still on the model after
@@ -61,6 +65,8 @@ struct HexGridView: NSViewRepresentable {
         view.onFind = onFind
         view.isEditable = isEditable
         view.takesHexDigits = takesHexDigits
+        view.takesBits = takesBits
+        view.bitColumn = bitColumn
         view.onEdit = onEdit
         view.update(buffer: buffer, radix: radix, requestedBytesPerRow: bytesPerRow, showsText: showsText,
                     selection: selection, style: style)
@@ -84,6 +90,10 @@ enum HexGridEdit: Equatable {
     case hexDigit(UInt8)
     /// Characters typed in the text column.
     case text(String)
+    /// A 0 or 1 typed in the cells, when they are bits.
+    case bit(Bool)
+    /// A click on one of the eight digits of a cell: which bit the next one typed sets, 0 the highest.
+    case placeBit(Int)
     case deleteBackward
     case deleteForward
     case undo
@@ -115,6 +125,10 @@ final class HexGridNSView: NSView {
         didSet { if isEditable != oldValue { needsDisplay = true } }
     }
     var takesHexDigits = true
+    var takesBits = false
+    var bitColumn = 0 {
+        didSet { if bitColumn != oldValue { needsDisplay = true } }
+    }
     var onEdit: ((HexGridEdit) -> Void)?
     /// Whether the last click was on the text column, so that typing goes there and not to the hex cells.
     private var typesInText = false
@@ -355,10 +369,18 @@ final class HexGridNSView: NSView {
                 let cell = NSRect(x: x(g.cellColumn(index)) - 1, y: y, width: cellWidth + 2, height: lineHeight)
                 // When the file can be edited, the column that takes the typing has the heavier outline.
                 let inText = typesInText && g.showsText
-                let cellLine: CGFloat = isEditable && !inText ? 2 : 1
+                // Bits are typed one at a time, so the digit that takes the next one has the heavier outline.
+                let bitTyping = isEditable && !inText && takesBits && g.radix == .binary
+                let cellLine: CGFloat = isEditable && !inText && !bitTyping ? 2 : 1
                 let outline = NSBezierPath(rect: cell.insetBy(dx: cellLine / 2, dy: cellLine / 2))
                 outline.lineWidth = cellLine
                 outline.stroke()
+                if bitTyping {
+                    let digit = NSRect(x: x(g.cellColumn(index) + min(max(bitColumn, 0), 7)), y: y + 1, width: charWidth, height: lineHeight - 2)
+                    let digitOutline = NSBezierPath(rect: digit.insetBy(dx: 1, dy: 1))
+                    digitOutline.lineWidth = 2
+                    digitOutline.stroke()
+                }
                 if g.showsText {
                     let glyph = NSRect(x: x(g.textColumn(index)), y: y, width: charWidth, height: lineHeight)
                     let textLine: CGFloat = isEditable && inText ? 2 : 1
@@ -399,10 +421,17 @@ final class HexGridNSView: NSView {
             typesInText = false
         }
         needsDisplay = true
-        guard let target = byteOffset(at: convert(event.locationInWindow, from: nil)) else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let target = byteOffset(at: point) else { return }
         let anchor = event.modifierFlags.contains(.shift) ? (selection?.anchor ?? target) : target
         dragAnchor = anchor
         publish(ByteSelection(anchor: anchor, head: target))
+        // In the Bits outlook a click on one of a cell's eight digits picks the bit a typed 0 or 1 sets.
+        let g = geometry
+        let column = Int(((point.x - padding.width + panX) / charWidth).rounded(.down))
+        if isEditable, takesBits, g.radix == .binary, !event.modifierFlags.contains(.shift), case .cell(let index) = g.hit(column: column) {
+            onEdit?(.placeBit(min(max(column - g.cellColumn(index), 0), 7)))
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -492,8 +521,8 @@ final class HexGridNSView: NSView {
         }
     }
 
-    /// A key that types: a hex digit in the cells, a character in the text column, or Delete.
-    private static func typedEdit(for event: NSEvent, inText: Bool, hexDigits: Bool) -> HexGridEdit? {
+    /// A key that types: a hex digit (or, in the Bits outlook, a 0 or 1) in the cells, a character in the text column, or Delete.
+    private static func typedEdit(for event: NSEvent, inText: Bool, hexDigits: Bool, bits: Bool) -> HexGridEdit? {
         let flags = event.modifierFlags.intersection([.command, .control])
         guard flags.isEmpty else { return nil }
         switch event.keyCode {
@@ -505,6 +534,13 @@ final class HexGridNSView: NSView {
         // Escape and the like are keys, not text.
         guard !characters.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else { return nil }
         if inText { return .text(characters) }
+        if bits {
+            switch characters {
+            case "0": return .bit(false)
+            case "1": return .bit(true)
+            default: return nil
+            }
+        }
         guard hexDigits, characters.count == 1, let first = characters.unicodeScalars.first, first.isASCII,
               let digit = UInt8(characters, radix: 16) else { return nil }
         return .hexDigit(digit)
@@ -526,7 +562,8 @@ final class HexGridNSView: NSView {
             return
         }
         if isEditable, HexGridNSView.move(for: event) == nil,
-           let edit = HexGridNSView.typedEdit(for: event, inText: typesInText && showsText, hexDigits: takesHexDigits) {
+           let edit = HexGridNSView.typedEdit(for: event, inText: typesInText && showsText, hexDigits: takesHexDigits,
+                                                  bits: takesBits && radix == .binary) {
             onEdit?(edit)
             return
         }

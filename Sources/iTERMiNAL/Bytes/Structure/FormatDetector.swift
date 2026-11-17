@@ -38,6 +38,8 @@ enum FormatDetector {
         Signature(id: "macho", name: "a Mach-O program or library", detail: "64-bit, big-endian", offset: 0, bytes: [0xFE, 0xED, 0xFA, 0xCF]),
         Signature(id: "macho", name: "a Mach-O program or library", detail: "32-bit, little-endian", offset: 0, bytes: [0xCE, 0xFA, 0xED, 0xFE]),
         Signature(id: "macho", name: "a Mach-O program or library", detail: "64-bit, little-endian", offset: 0, bytes: [0xCF, 0xFA, 0xED, 0xFE]),
+        Signature(id: "cfb", name: "a compound file", detail: "Office 97–2003 documents, Outlook messages, installers", offset: 0,
+                  bytes: [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]),
         Signature(id: "sqlite", name: "an SQLite database", detail: "database file format 3", offset: 0, bytes: ascii("SQLite format 3\0")),
         Signature(id: "matroska", name: "a Matroska or WebM video", detail: "EBML header", offset: 0, bytes: [0x1A, 0x45, 0xDF, 0xA3]),
         Signature(id: "mp3", name: "an MP3 audio file", detail: "with an ID3 tag", offset: 0, bytes: ascii("ID3")),
@@ -146,7 +148,8 @@ enum FormatDetector {
         let allowedControls: Set<UInt8> = [0x09, 0x0A, 0x0C, 0x0D]
         let odd = sample.filter { ($0 < 0x20 && !allowedControls.contains($0)) || $0 == 0x7F }.count
         guard odd * 50 <= sample.count else { return nil }
-        return FormatIdentity(id: "text", name: "text", detail: isUTF8(Array(sample)) ? "valid UTF-8" : "not valid UTF-8", hasParser: false)
+        return FormatIdentity(id: "text", name: "text", detail: isUTF8(Array(sample)) ? "valid UTF-8" : "not valid UTF-8",
+                              hasParser: FormatRegistry.parserIDs.contains("text"))
     }
 
     /// Whether `bytes` is valid UTF-8, allowing the last character to have been cut

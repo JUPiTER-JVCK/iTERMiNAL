@@ -526,8 +526,10 @@ A tour of the app in thirty-four pictures, in five groups.
   hex, a C array, Python bytes or Base64. Folders, pipes and devices are refused, as they
   are not a fixed set of bytes.
   A file you can write to can be **edited**: click the dump and type hex digits in the
-  cells (two to a byte, when the cells are shown as hex) or characters in the text column;
-  the cursor's heavier outline shows which of the two takes the typing. A file that is
+  cells (two to a byte, when the cells are shown as hex), 0s and 1s in the Bits outlook
+  (one bit at a time, from the highest; click one of a cell's eight digits to start at that
+  bit, which is how to flip one flag), or characters in the text column; the heavier outline
+  shows what takes the typing. A file that is
   read-only, or in a folder that is, or that has other names (hard links, which a save
   would leave with the old bytes) opens with a Read-only badge that says why. **Overwrite** changes the bytes
   under the cursor, so nothing moves, which is what you want when studying a format;
@@ -546,8 +548,9 @@ A tour of the app in thirty-four pictures, in five groups.
   about before another file replaces them, before the file is closed, and before the app quits.
   The **Structure** outlook takes a PNG, a JPEG, a GIF, a BMP, an icon, a WebP, a TIFF,
   a HEIC or AVIF, a JPEG 2000 or JPEG XL image, an MP4 or QuickTime movie, a PDF,
-  a ZIP archive (or a .docx, .xlsx, .jar, .apk), an ELF or Mach-O program or library,
-  a pcap or a pcapng capture apart into its fields, each tied to its bytes: click a field and its bytes are selected
+  a ZIP archive (or a .docx, .xlsx, .jar, .apk), a Word 97–2003 document (.doc) or another
+  compound file (.xls, .ppt, .msg, .msi), a CSV or TSV table, any text file, an ELF or
+  Mach-O program or library, a pcap or a pcapng capture apart into its fields, each tied to its bytes: click a field and its bytes are selected
   in the dump below, select bytes and the field that holds them is shown. A PNG
   is its chunks, with their CRCs checked (the first 512 MB of chunk data; past
   that a CRC is shown, not checked). A capture is its packets, and a packet is
@@ -559,8 +562,10 @@ A tour of the app in thirty-four pictures, in five groups.
   Exif and the other application data, each scan of the compressed image) and an
   MP4 its tree of boxes, with the movie, track and sample headers, the codec
   setup, the tables that index the samples and the tags decoded, and the
-  media data itself left unread. A GIF is its blocks, with each frame's delay and
-  the loop count; a BMP its headers (of any of the seven sizes), colour masks and
+  media data itself left unread. A GIF is its blocks, with each frame's delay, how long
+  one loop of an animation takes, and the loop count, and each frame's pixels are
+  decompressed when it is opened to check they are as many as its size says, that none
+  uses a colour its table does not have, and that the data is not damaged; a BMP its headers (of any of the seven sizes), colour masks and
   table; an icon its directory and each image, PNG or bitmap; a WebP its RIFF chunks,
   animation frames included; and a TIFF its directories with every tag named and
   its values worked out, including the Exif, GPS and interoperability directories
@@ -570,13 +575,31 @@ A tour of the app in thirty-four pictures, in five groups.
   codec setup); a JPEG 2000 is its boxes and the size in its codestream; a JPEG XL is
   its size header, bare or in its box container. A ZIP is read from the central
   directory at its end, and each entry is shown where it lies: its local header, its
-  compressed data (a stored entry's CRC is checked when it is opened), and its data
-  descriptor, with the extra fields (Zip64, timestamps, Unix ids) opened and any program
+  compressed data (when it is opened, a stored entry is read and a deflated one
+  decompressed, up to 64 MB, and its CRC-32 and size checked against what the archive
+  records, so a damaged entry is found), and its data descriptor, with the extra fields (Zip64, timestamps, Unix ids) opened and any program
   in front or bytes between entries named. An ELF is its header, program headers and
   section headers, with the symbols, dynamic table, notes and relocations of each
   section opened, in either class and byte order; a Mach-O is its header and load
   commands (segments with their sections, symbols, libraries, build version, entry point,
-  code signature), and a universal binary shows each architecture where it lies. A PDF is read from the front, as it was
+  code signature), and a universal binary shows each architecture where it lies. A
+  compound file, the container of the old Office formats, is a small file system in a
+  file, and is shown as it lies on disk: its header, then its sectors in runs, each named
+  by what it belongs to (the FAT, the DIFAT, the directory with every entry's fields,
+  the mini FAT, the mini stream and the small streams in it, or a stream such as
+  WordDocument), with every chain of sectors checked for loops and for sectors two
+  streams claim; a Word document adds its file information block and its text, piece
+  by piece, and the summary gives its opening words, its length, and the title and
+  author. A CSV is its rows and fields, read as Python's `csv` module reads them (quotes,
+  doubled quotes, delimiters and line ends inside quotes): the delimiter (comma, tab,
+  semicolon or bar) is found from the rows, the header is found when there is one and
+  names each field, and rows with the wrong number of fields, quotes that are never
+  closed and stray quotes are pointed out. A file is taken for a table by its name
+  (.csv, .tsv) or when its first rows agree. Any other text (scripts, XML, HTML and RTF
+  included) is its lines, in groups of a thousand: the encoding (UTF-8, UTF-16 or UTF-32
+  from a byte order mark or without one, or 8-bit Windows-1252), how its lines end
+  (LF, CRLF or CR, and whether they are mixed), and every run of bytes that is not a
+  valid character, shown in the line it is in. A PDF is read from the front, as it was
   written: the header, every object with its dictionary and its stream (skipped by
   its length, not decoded), the cross-reference tables checked against the objects
   they point at, the trailers, `startxref` and each `%%EOF`, so a file saved again
@@ -1690,7 +1713,8 @@ Sources/
 │   │                file, rows and columns, what a selection reads as, go-to,
 │   │                search, the copy formats, editing and its safe save; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,
 │   │                ICO, WebP, TIFF, MP4 and the images in its boxes, JPEG XL,
-│   │                PDF, ZIP, ELF, Mach-O, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
+│   │                PDF, ZIP and the deflate decoder its checks use, compound files and Word, CSV, text,
+│   │                ELF, Mach-O, pcap, pcapng, the packet dissector) and what they make; Map/ holds the
 │   │                entropy, the byte map and the Hilbert curve — Foundation-only
 │   ├── HTTP/        request/response types, formatting, the site-explorer and
 │   │                Extract parsers (HTML, CSS, XPath, JSONPath, CSV, XML),

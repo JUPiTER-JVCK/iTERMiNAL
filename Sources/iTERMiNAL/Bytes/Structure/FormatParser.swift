@@ -18,6 +18,9 @@ struct ParseContext {
     /// Asked every so often by a parser that loops; true means stop and hand back
     /// what there is.
     var isCancelled: () -> Bool = { false }
+    /// The file's name, for the formats that have no signature and are known by their extension as much as by
+    /// their bytes: a CSV is text until its name says otherwise.
+    var fileName: String?
 }
 
 /// What a parser found.
@@ -29,6 +32,9 @@ struct ParseOutcome {
     var summary: String?
     /// Set when the tree stops short of the end of the file, and says why.
     var listingLimit: String?
+    /// What the file turned out to be, when that takes more than its first bytes to say: a compound file is a
+    /// Word document if it has a WordDocument stream.
+    var identity: FormatIdentity?
 }
 
 /// One kind of file that can be taken apart.
@@ -41,6 +47,8 @@ protocol FormatParser {
     static var identity: FormatIdentity { get }
     /// Whether the start of the file (its first few kilobytes) looks like this format.
     static func matches(head: [UInt8], length: Int64) -> Bool
+    /// The same, knowing the file's name. Most formats go by their bytes alone and leave this as it is.
+    static func matches(head: [UInt8], length: Int64, name: String?) -> Bool
     static func parse(_ source: ByteSource, context: ParseContext) -> ParseOutcome
     /// Other formats, by id, this parser also takes apart: one that reads a container
     /// shared by several kinds of file says here which kinds.
@@ -49,6 +57,10 @@ protocol FormatParser {
 
 extension FormatParser {
     static var alsoParses: [String] { [] }
+
+    static func matches(head: [UInt8], length: Int64, name: String?) -> Bool {
+        matches(head: head, length: length)
+    }
 }
 
 /// The answer for one file: what it was taken for, what was found, and what to say
@@ -62,7 +74,9 @@ struct StructureResult {
 
 enum FormatRegistry {
     /// In the order they are tried.
-    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self, GIFParser.self, BMPParser.self, ICOParser.self, WebPParser.self, TIFFParser.self, JXLParser.self, ZIPParser.self, ELFParser.self, MachOParser.self]
+    static let parsers: [FormatParser.Type] = [PNGParser.self, PcapParser.self, PcapNGParser.self, JPEGParser.self, MP4Parser.self, PDFParser.self, GIFParser.self, BMPParser.self, ICOParser.self, WebPParser.self, TIFFParser.self, JXLParser.self, ZIPParser.self, ELFParser.self, MachOParser.self, CFBParser.self,
+                                                 // Last, as they have no signature: what is left that reads as text.
+                                                 TableParser.self, TextParser.self]
 
     static var parserIDs: Set<String> {
         Set(parsers.flatMap { [$0.identity.id] + $0.alsoParses })
@@ -72,13 +86,14 @@ enum FormatRegistry {
     /// never fails: a file nothing recognises gets an honest line saying so.
     static func analyze(_ source: ByteSource, context: ParseContext = ParseContext()) -> StructureResult {
         let head = source.read(0..<4096)
-        for parser in parsers where parser.matches(head: head, length: source.count) {
+        for parser in parsers where parser.matches(head: head, length: source.count, name: context.fileName) {
             var identity = parser.identity
             if !parser.alsoParses.isEmpty, let named = FormatDetector.identify(head: head, length: source.count),
                parser.alsoParses.contains(named.id) {
                 identity = named
             }
-            return StructureResult(identity: identity, outcome: parser.parse(source, context: context), message: "")
+            let outcome = parser.parse(source, context: context)
+            return StructureResult(identity: outcome.identity ?? identity, outcome: outcome, message: "")
         }
         let identity = FormatDetector.identify(head: head, length: source.count)
         let tail = "The Hex and Bits views show every byte of any file."
