@@ -16360,7 +16360,10 @@ func checkInflate() {
     for block in 0..<40 {
         let data = (0..<4000).map { UInt8(truncatingIfNeeded: $0 &* 7 &+ block) }
         made += data
-        long += [block == 39 ? 1 : 0, UInt8(4000 & 0xFF), UInt8(4000 >> 8), UInt8(~4000 & 0xFF), UInt8((~4000 >> 8) & 0xFF)] + data
+        // A stored block of 4000 bytes: its flag (final on the last), then 4000 = 0x0FA0 and its complement, low byte first.
+        let header: [UInt8] = [block == 39 ? 1 : 0, 0xA0, 0x0F, 0x5F, 0xF0]
+        long += header
+        long += data
     }
     var crc = CRC32()
     var count = 0

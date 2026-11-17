@@ -80,6 +80,19 @@ enum CFBParser: FormatParser {
         return "{" + hex([3, 2, 1, 0]) + "-" + hex([5, 4]) + "-" + hex([7, 6]) + "-" + hex([8, 9]) + "-" + hex(Array(10..<16)) + "}"
     }
 
+    // MARK: Reading numbers
+
+    /// The little-endian 32-bit number at `at` in `bytes`; nil if it is not all there. In steps, which the type
+    /// checker takes at once, where one expression of four shifts takes it too long.
+    static func le32(_ bytes: [UInt8], _ at: Int) -> UInt32? {
+        guard at >= 0, at + 4 <= bytes.count else { return nil }
+        var value = UInt32(bytes[at + 3])
+        value = value << 8 | UInt32(bytes[at + 2])
+        value = value << 8 | UInt32(bytes[at + 1])
+        value = value << 8 | UInt32(bytes[at])
+        return value
+    }
+
     // MARK: The file as a file system
 
     /// One directory entry.
@@ -216,7 +229,7 @@ enum CFBParser: FormatParser {
         func valid(_ sector: UInt32) -> Bool { sector <= maxRegularSector && Int(sector) < count }
         func sectorWords(_ sector: UInt32) -> [UInt32] {
             let bytes = source.read(compound.sectorOffset(Int(sector))..<(compound.sectorOffset(Int(sector)) + sectorSize))
-            return stride(from: 0, to: bytes.count - 3, by: 4).map { UInt32(bytes[$0]) | UInt32(bytes[$0 + 1]) << 8 | UInt32(bytes[$0 + 2]) << 16 | UInt32(bytes[$0 + 3]) << 24 }
+            return stride(from: 0, to: bytes.count - 3, by: 4).map { (at: Int) -> UInt32 in le32(bytes, at) ?? freeSector }
         }
         func claim(_ sector: UInt32, _ owner: Owner, _ what: String) -> Bool {
             guard valid(sector) else {
@@ -424,7 +437,7 @@ enum CFBParser: FormatParser {
         guard let document = compound.entry(named: "WordDocument"), let map = compound.maps[document.index] else { return nil }
         let fib = map.read(source, 0..<min(map.length, 1024))
         func u16(_ at: Int) -> UInt16? { at + 2 <= fib.count ? UInt16(fib[at]) | UInt16(fib[at + 1]) << 8 : nil }
-        func u32(_ at: Int) -> Int64? { at + 4 <= fib.count ? Int64(fib[at]) | Int64(fib[at + 1]) << 8 | Int64(fib[at + 2]) << 16 | Int64(fib[at + 3]) << 24 : nil }
+        func u32(_ at: Int) -> Int64? { le32(fib, at).map { Int64($0) } }
         var word = Word()
         guard u16(0) == 0xA5EC else {
             word.problems.append("The WordDocument stream does not start with Word's signature, 0xA5EC.")
@@ -445,7 +458,7 @@ enum CFBParser: FormatParser {
             return word
         }
         let clx = tableMap.read(source, word.fcClx..<(word.fcClx + word.lcbClx))
-        func clx32(_ at: Int) -> Int64 { Int64(clx[at]) | Int64(clx[at + 1]) << 8 | Int64(clx[at + 2]) << 16 | Int64(clx[at + 3]) << 24 }
+        func clx32(_ at: Int) -> Int64 { Int64(le32(clx, at) ?? 0) }
         var at = 0
         // Formatting (Prc) first, each 0x01 and a 16-bit length; then the piece table (Pcdt), 0x02 and a 32-bit length.
         var guardCount = 0
@@ -491,7 +504,11 @@ enum CFBParser: FormatParser {
             if piece.compressed {
                 for scalar in TextParser.windows1252(bytes).unicodeScalars { out.append(scalar) }
             } else {
-                let units = stride(from: 0, to: bytes.count - 1, by: 2).map { UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 }
+                let units = stride(from: 0, to: bytes.count - 1, by: 2).map { (at: Int) -> UInt16 in
+                    let low = UInt16(bytes[at])
+                    let high = UInt16(bytes[at + 1])
+                    return high << 8 | low
+                }
                 for scalar in String(decoding: units, as: UTF16.self).unicodeScalars { out.append(scalar) }
             }
             taken += characters
@@ -506,7 +523,7 @@ enum CFBParser: FormatParser {
         guard let entry = compound.entries.first(where: { $0.path == "\u{2405}SummaryInformation" }), let map = compound.maps[entry.index] else { return [] }
         let bytes = map.read(source, 0..<min(map.length, 65_536))
         func u16(_ at: Int) -> Int? { at >= 0 && at + 2 <= bytes.count ? Int(bytes[at]) | Int(bytes[at + 1]) << 8 : nil }
-        func u32(_ at: Int) -> Int? { at >= 0 && at + 4 <= bytes.count ? Int(bytes[at]) | Int(bytes[at + 1]) << 8 | Int(bytes[at + 2]) << 16 | Int(bytes[at + 3]) << 24 : nil }
+        func u32(_ at: Int) -> Int? { le32(bytes, at).map { Int($0) } }
         guard u16(0) == 0xFFFE, let sections = u32(24), sections >= 1, let section = u32(44), let count = u32(section + 4), count < 1000 else { return [] }
         let names = [2: "Title", 3: "Subject", 4: "Author", 5: "Keywords", 6: "Comments", 8: "Last saved by", 12: "Created", 13: "Saved", 14: "Pages", 15: "Words", 18: "Program"]
         var out: [(String, String)] = []

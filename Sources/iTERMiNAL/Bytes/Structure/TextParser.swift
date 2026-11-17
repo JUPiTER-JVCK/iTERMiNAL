@@ -43,14 +43,16 @@ enum TextParser: FormatParser {
         }
 
         func value(_ bytes: ArraySlice<UInt8>) -> UInt32 {
-            let b = bytes.map { UInt32($0) }
+            // Built a byte at a time: one expression of four shifts takes the type checker too long.
+            let ordered: [UInt8]
             switch self {
-            case .utf8: return b[0]
-            case .utf16LittleEndian: return b[0] | b[1] << 8
-            case .utf16BigEndian: return b[0] << 8 | b[1]
-            case .utf32LittleEndian: return b[0] | b[1] << 8 | b[2] << 16 | b[3] << 24
-            case .utf32BigEndian: return b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]
+            case .utf8: return UInt32(bytes[bytes.startIndex])
+            case .utf16LittleEndian, .utf32LittleEndian: ordered = bytes.reversed()
+            case .utf16BigEndian, .utf32BigEndian: ordered = Array(bytes)
             }
+            var result: UInt32 = 0
+            for byte in ordered { result = result << 8 | UInt32(byte) }
+            return result
         }
     }
 
