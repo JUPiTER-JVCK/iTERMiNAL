@@ -24,7 +24,8 @@ enum ZIPParser: FormatParser {
     /// The most a record after the central directory can reach back: the comment is at most 65535 bytes.
     static let searchLength: Int64 = 22 + 65_535
 
-    /// How many bytes of a stored entry are read to check its CRC when its node is opened.
+    /// The most bytes of an entry's contents, stored or once decompressed, read to check its CRC when its node is
+    /// opened. A larger entry is left unchecked rather than make opening a node take minutes.
     static let checkLimit: Int64 = 64 * 1024 * 1024
 
     // MARK: Words
@@ -132,6 +133,73 @@ enum ZIPParser: FormatParser {
         var uncompressedSize: UInt64 = 0
         var localOffset: UInt64 = 0
         var usesZip64 = false
+        /// False when the CRC and sizes came from a local header that says the real ones follow the data.
+        var sizesKnown = true
+    }
+
+    // MARK: Checking contents
+
+    /// What checking an entry's contents against its CRC found: words for its value and its note.
+    struct DataCheck: Equatable {
+        var value: String
+        var note: String
+    }
+
+    /// Reads (and, if deflated, decompresses) an entry's `dataLength` bytes at `dataStart`, and compares their CRC-32
+    /// and length with what the archive records. Nil when the entry is not one that can be checked: encrypted,
+    /// compressed some other way, larger than `checkLimit`, or not all in the file.
+    static func checkData(_ source: ByteSource, entry: Entry, dataStart: Int64, dataLength: Int64, limit: Int64 = checkLimit,
+                          isCancelled: () -> Bool = { false }) -> DataCheck? {
+        let total = source.count
+        guard entry.flags & 1 == 0, entry.sizesKnown, dataStart >= 0, dataStart + dataLength <= total,
+              entry.uncompressedSize <= UInt64(limit) else { return nil }
+        let expected = Int64(entry.uncompressedSize)
+        let recorded = FieldText.hexNumber(entry.crc, size: 4)
+        func verdict(_ crc: UInt32, how: String) -> DataCheck {
+            if UInt64(crc) == entry.crc {
+                return DataCheck(value: "CRC matches", note: "\(how), and its CRC-32, \(recorded), matches the one the archive records.")
+            }
+            return DataCheck(value: "CRC DIFFERS",
+                             note: "\(how), and its CRC-32 is \(FieldText.hexNumber(UInt64(crc), size: 4)), not the \(recorded) the archive records: the entry is damaged.")
+        }
+        switch entry.method {
+        case 0:
+            guard dataLength == expected else { return nil }
+            var crc = CRC32()
+            var position = dataStart
+            while position < dataStart + dataLength {
+                if isCancelled() { return nil }
+                let piece = source.read(position..<min(position + 1 << 20, dataStart + dataLength))
+                if piece.isEmpty { return nil }
+                crc.update(piece)
+                position += Int64(piece.count)
+            }
+            return verdict(crc.value, how: "Stored as it is, so it was read")
+        case 8:
+            var crc = CRC32()
+            let result = Inflate.inflate(source, range: dataStart..<(dataStart + dataLength), limit: expected, isCancelled: isCancelled) { crc.update($0) }
+            switch result {
+            case .success(let summary):
+                if summary.produced != expected {
+                    return DataCheck(value: "SIZE DIFFERS",
+                                     note: "Decompressed, it is \(FieldText.bytes(summary.produced)), not the \(FieldText.bytes(expected)) the archive records: the entry is damaged.")
+                }
+                var check = verdict(crc.value, how: "Decompressed (\(FieldText.bytes(expected)) from \(FieldText.bytes(summary.consumed)))")
+                if summary.consumed < dataLength {
+                    check.note += " The last \(FieldText.bytes(dataLength - summary.consumed)) are after the end of the compressed stream."
+                }
+                return check
+            case .failure(.cancelled):
+                return nil
+            case .failure(.tooLarge):
+                return DataCheck(value: "SIZE DIFFERS",
+                                 note: "Decompressed, it is longer than the \(FieldText.bytes(expected)) the archive records: the entry is damaged.")
+            case .failure(let failure):
+                return DataCheck(value: "DAMAGED", note: "It cannot be decompressed: \(Inflate.message(failure)).")
+            }
+        default:
+            return nil
+        }
     }
 
     /// Reads the sizes and the offset out of a Zip64 extra field, for the numbers the record had to leave at their maximum.
@@ -263,18 +331,9 @@ enum ZIPParser: FormatParser {
         if dataLength > 0 {
             var note = "The entry's contents, \(methodName(entry.method).components(separatedBy: " · ").last ?? "")."
             var value = FieldText.bytes(dataLength)
-            if entry.method == 0, entry.flags & 1 == 0, dataLength <= checkLimit, dataStart + dataLength <= total, dataLength == Int64(clamping: entry.uncompressedSize) {
-                var crc = CRC32()
-                var position = dataStart
-                while position < dataStart + dataLength {
-                    let piece = source.read(position..<min(position + 1 << 20, dataStart + dataLength))
-                    if piece.isEmpty { break }
-                    crc.update(piece)
-                    position += Int64(piece.count)
-                }
-                let matches = UInt64(crc.value) == entry.crc
-                value += matches ? " · CRC matches" : " · CRC DIFFERS"
-                note += matches ? " Stored as it is, so its CRC-32 was checked: it matches." : " Stored as it is, and its CRC-32 is \(FieldText.hexNumber(UInt64(crc.value), size: 4)), not the \(FieldText.hexNumber(entry.crc, size: 4)) the archive records."
+            if let check = checkData(source, entry: entry, dataStart: dataStart, dataLength: dataLength) {
+                value += " · " + check.value
+                note += " " + check.note
             }
             let held = max(0, min(dataLength, total - dataStart))
             list.add(FieldNode(id: id + "/data", name: "Compressed data", offset: dataStart, length: held, kind: .bytes, value: value, note: note))
@@ -559,6 +618,7 @@ enum ZIPParser: FormatParser {
                 let nameLength = Int64(window.u16(at + 26, .little) ?? 0)
                 let extraLength = Int64(window.u16(at + 28, .little) ?? 0)
                 entry.name = ByteWindow(source: source, at: at + 30, count: Int(nameLength)).bytes
+                entry.sizesKnown = entry.flags & 8 == 0
                 starts.append((entry, at))
                 index += 1
                 // Without the central directory the size is only known if it was written before the data.

@@ -297,6 +297,10 @@ jobs:
             Sources/iTERMiNAL/Bytes/Structure/ZIPParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/ELFParser.swift \
             Sources/iTERMiNAL/Bytes/Structure/MachOParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/Inflate.swift \
+            Sources/iTERMiNAL/Bytes/Structure/TextParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/TableParser.swift \
+            Sources/iTERMiNAL/Bytes/Structure/CFBParser.swift \
             Sources/iTERMiNAL/Bytes/Map/HilbertCurve.swift \
             Sources/iTERMiNAL/Bytes/Map/EntropyAnalysis.swift \
             Sources/iTERMiNAL/Bytes/Map/ByteMapLayout.swift \

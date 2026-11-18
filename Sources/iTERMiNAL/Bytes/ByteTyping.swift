@@ -1,7 +1,7 @@
 import Foundation
 
 /// What typing in the dump does to the bytes: where a hex digit lands, what the second digit of a byte
-/// changes, where the cursor goes, and what Delete is for.
+/// changes, which bit a 0 or 1 typed in the Bits outlook sets, where the cursor goes, and what Delete is for.
 ///
 /// Foundation only, so every rule is checked in CI against a plain array rather than seen. The view passes
 /// keys in, and takes back the selection to show.
@@ -32,10 +32,21 @@ struct ByteTyping {
     /// and the cursor, which cannot be past the last byte, stays on it.
     private(set) var appendingAfter: Int64?
 
+    /// In the Bits outlook, the bit the next 0 or 1 sets: of the byte at `offset`, counted from the left (the highest
+    /// bit), as the outlook draws them.
+    struct BitPosition: Equatable {
+        var offset: Int64
+        var index: Int
+        /// A bit of this byte has been typed already, so the next is part of the same change.
+        var typed: Bool
+    }
+    private(set) var bitCursor: BitPosition?
+
     /// Forgets a digit that was half typed: the cursor moved, or something else was done.
     mutating func forget() {
         pendingDigit = nil
         appendingAfter = nil
+        bitCursor = nil
     }
 
     // MARK: Adding at the end
@@ -60,6 +71,7 @@ struct ByteTyping {
     mutating func hexDigit(_ digit: UInt8, in buffer: inout ByteEditBuffer, at selection: ByteSelection?) throws -> ByteSelection? {
         let digit = digit & 0x0F
         let offset = selection?.lowerBound ?? 0
+        bitCursor = nil
         if mode == .overwrite, buffer.length == 0 { throw Failure.nothing }
         do {
             if let pending = pendingDigit, pending == offset, offset < buffer.length {
@@ -93,6 +105,57 @@ struct ByteTyping {
         }
     }
 
+    // MARK: Bits
+
+    /// Puts the bit cursor on bit `index` (0 the highest, 7 the lowest) of the byte at `offset`: a click on one of
+    /// the eight digits of a cell.
+    mutating func placeBit(_ index: Int, at offset: Int64) {
+        pendingDigit = nil
+        appendingAfter = nil
+        bitCursor = BitPosition(offset: offset, index: min(max(index, 0), 7), typed: false)
+    }
+
+    /// The bit that the cursor at `selection` is on: the one placed or typed up to, or the highest.
+    func bitIndex(at selection: ByteSelection?) -> Int {
+        guard let cursor = bitCursor, cursor.offset == (selection?.lowerBound ?? 0) else { return 0 }
+        return cursor.index
+    }
+
+    /// Types one bit. In overwrite mode it sets the bit under the bit cursor and moves the cursor to the next bit,
+    /// and after the eighth (the lowest) to the next byte. In insert mode the first bit of a byte puts a new byte in,
+    /// all zero, and the bits typed after it fill it from the left. Returns where the cursor goes.
+    mutating func bit(_ value: Bool, in buffer: inout ByteEditBuffer, at selection: ByteSelection?) throws -> ByteSelection? {
+        var offset = selection?.lowerBound ?? 0
+        let current = bitCursor.flatMap { $0.offset == offset ? $0 : nil }
+        var index = current?.index ?? 0
+        let continuing = current?.typed ?? false
+        pendingDigit = nil
+        do {
+            if mode == .insert && !continuing {
+                let at = (appendingAfter == offset && offset == buffer.length - 1) ? buffer.length : min(max(offset, 0), buffer.length)
+                try buffer.insert(at: at, bytes: [value ? 0x80 : 0], coalescing: true)
+                offset = at
+                index = 0
+            } else {
+                guard buffer.length > 0, offset >= 0, offset < buffer.length else { throw Failure.nothing }
+                let byte = try Self.byte(at: offset, in: buffer)
+                let mask = UInt8(0x80) >> UInt8(index)
+                try buffer.overwrite(at: offset, with: [value ? byte | mask : byte & ~mask], coalescing: true, continuingRun: continuing)
+            }
+        } catch let error as ByteEditError {
+            throw Failure.edit(error)
+        }
+        appendingAfter = nil
+        if index + 1 < 8 {
+            bitCursor = BitPosition(offset: offset, index: index + 1, typed: true)
+            return ByteSelection(at: offset)
+        }
+        bitCursor = nil
+        if offset + 1 < buffer.length { return ByteSelection(at: offset + 1) }
+        appendingAfter = mode == .insert ? offset : nil
+        return ByteSelection(at: offset)
+    }
+
     // MARK: Text
 
     /// Types characters into the text column, as UTF-8. Overwrite mode replaces the bytes under the cursor
@@ -102,6 +165,7 @@ struct ByteTyping {
         guard !bytes.isEmpty else { return selection }
         let offset = selection?.lowerBound ?? 0
         pendingDigit = nil
+        bitCursor = nil
         do {
             switch mode {
             case .overwrite:

@@ -52,6 +52,7 @@ enum GIFParser: FormatParser {
             return outcome
         }
         var position: Int64 = 13
+        let globalColours = Int(tableLength / 3)
         if tableLength > 0 {
             let length = min(tableLength, total - position)
             outcome.roots.append(FieldNode(id: "gif/colours", name: "Global colour table", offset: position, length: length, kind: .bytes,
@@ -63,6 +64,7 @@ enum GIFParser: FormatParser {
         var index = 0
         var images = 0
         var frameDelays = 0
+        var duration = 0
         var loops: String?
         var sawTrailer = false
         var stopped = false
@@ -109,6 +111,7 @@ enum GIFParser: FormatParser {
                         let centis = Int(delay[0]) | Int(delay[1]) << 8
                         value = "\(centis * 10) ms"
                         frameDelays += 1
+                        duration += centis
                     }
                 case 0xFE:
                     name = "Comment extension"
@@ -166,7 +169,8 @@ enum GIFParser: FormatParser {
                     value: "\(w) × \(h) at (\(x), \(y)) · \(FieldText.bytes(data.bytes)) compressed",
                     note: "One picture: where it goes on the canvas, its own colours if it has them, and its pixels compressed with LZW.",
                     children: .deferred(DeferredChildren {
-                        imageChildren(id: id, source: source, start: start, localTable: local, minCodeOffset: cursor, end: end, data: data)
+                        imageChildren(id: id, source: source, start: start, localTable: local, minCodeOffset: cursor, end: end, data: data,
+                                      pixels: Int64(w) * Int64(h), colours: local > 0 ? Int(local / 3) : globalColours)
                     })))
                 position = end
                 if !data.complete { stopped = true; problems.append("The data of image \(imageNumber) does not end before the file does."); break }
@@ -185,6 +189,9 @@ enum GIFParser: FormatParser {
         }
         outcome.problems = Array(problems.prefix(20))
         var summary = "GIF\(version), \(width) × \(height), \(images) \(images == 1 ? "image" : "images")"
+        if images > 1, frameDelays > 0 {
+            summary += ", " + (duration % 100 == 0 ? "\(duration / 100)" : String(format: "%.2f", Double(duration) / 100)) + " s a loop"
+        }
         if let loops { summary += ", " + loops }
         outcome.summary = summary
         return outcome
@@ -246,7 +253,8 @@ enum GIFParser: FormatParser {
         return list.nodes
     }
 
-    private static func imageChildren(id: String, source: ByteSource, start: Int64, localTable: Int64, minCodeOffset: Int64, end: Int64, data: SubBlocks) -> [FieldNode] {
+    private static func imageChildren(id: String, source: ByteSource, start: Int64, localTable: Int64, minCodeOffset: Int64, end: Int64, data: SubBlocks,
+                                      pixels: Int64, colours: Int) -> [FieldNode] {
         let window = ByteWindow(source: source, at: start, count: 16)
         var list = FieldList(idPrefix: id, window: window, endianness: .little)
         list.bytes("Separator", at: start, length: 1, kind: .magic, value: "2C")
@@ -264,9 +272,187 @@ enum GIFParser: FormatParser {
         }
         nodes.append(FieldNode(id: id + "/code-size", name: "LZW minimum code size", offset: minCodeOffset, length: 1, kind: .integer,
                                value: ByteWindow(source: source, at: minCodeOffset, count: 1).u8(minCodeOffset).map { "\($0) bits" }))
-        nodes.append(FieldNode(id: id + "/data", name: "Image data", offset: minCodeOffset + 1, length: max(0, end - minCodeOffset - 1), kind: .bytes,
-                               value: "\(data.sizes.count)\(data.sizes.count >= 4096 ? "+" : "") sub-blocks · \(FieldText.bytes(data.bytes))",
-                               note: "The pixels, compressed with LZW, in sub-blocks of up to 255 bytes each, each led by its length and the last followed by a 0."))
+        var value = "\(data.sizes.count)\(data.sizes.count >= 4096 ? "+" : "") sub-blocks · \(FieldText.bytes(data.bytes))"
+        var note = "The pixels, compressed with LZW, in sub-blocks of up to 255 bytes each, each led by its length and the last followed by a 0."
+        var kind = FieldNode.Kind.bytes
+        if let codeSize = ByteWindow(source: source, at: minCodeOffset, count: 1).u8(minCodeOffset), data.bytes <= lzwCheckLimit {
+            let check = decodeLZW(source, codeSize: Int(codeSize), from: minCodeOffset + 1, end: end)
+            let verdict = lzwVerdict(check, codeSize: Int(codeSize), pixels: pixels, colours: colours)
+            value += " · " + verdict.value
+            note += " " + verdict.note
+            if verdict.isProblem { kind = .problem }
+        }
+        nodes.append(FieldNode(id: id + "/data", name: "Image data", offset: minCodeOffset + 1, length: max(0, end - minCodeOffset - 1), kind: kind,
+                               value: value, note: note))
         return nodes
+    }
+
+    // MARK: LZW
+
+    /// The most compressed bytes of one image decoded to check it when its node is opened.
+    static let lzwCheckLimit: Int64 = 64 * 1024 * 1024
+
+    /// What decoding one image's LZW data found.
+    struct LZWCheck: Equatable {
+        /// Pixels the codes make.
+        var pixels: Int64 = 0
+        /// The highest colour index among them; -1 if none.
+        var highestIndex = -1
+        /// The end-of-information code was met.
+        var sawEnd = false
+        /// A code that is not yet in the table, at this many pixels in; nil if there was none.
+        var badCodeAt: Int64?
+        /// Bytes of data after the end code.
+        var bytesAfterEnd: Int64 = 0
+        var clears = 0
+    }
+
+    /// Decodes the LZW data in the sub-blocks from `from` to `end` with `codeSize` as the minimum code size, counting
+    /// pixels rather than keeping them. Each pixel is given to `pixel` if it is passed, in the order the codes make them.
+    static func decodeLZW(_ source: ByteSource, codeSize: Int, from: Int64, end: Int64, pixel: ((UInt8) -> Void)? = nil) -> LZWCheck {
+        var check = LZWCheck()
+        guard (2...8).contains(codeSize) else { check.badCodeAt = 0; return check }
+        let clear = 1 << codeSize
+        let endCode = clear + 1
+        // The table: each code is a shorter code and one more index.
+        var prefix = [Int32](repeating: -1, count: 4096)
+        var suffix = [UInt8](repeating: 0, count: 4096)
+        var first = [UInt8](repeating: 0, count: 4096)
+        var length = [Int32](repeating: 1, count: 4096)
+        var highest = [Int16](repeating: 0, count: 4096)
+        for code in 0..<clear {
+            suffix[code] = UInt8(code)
+            first[code] = UInt8(code)
+            highest[code] = Int16(code)
+        }
+        var next = endCode + 1
+        var width = codeSize + 1
+        var previous: Int?
+        var stack: [UInt8] = []
+
+        var buffer: UInt32 = 0
+        var bits = 0
+        var position = from
+        var block: [UInt8] = []
+        var blockIndex = 0
+        var finished = false
+
+        func nextByte() -> UInt8? {
+            while blockIndex >= block.count {
+                guard position < end, let size = source.read(position..<(position + 1)).first, size > 0 else { return nil }
+                block = source.read((position + 1)..<min(position + 1 + Int64(size), end))
+                blockIndex = 0
+                position += 1 + Int64(size)
+            }
+            defer { blockIndex += 1 }
+            return block[blockIndex]
+        }
+
+        func add(_ prior: Int, then index: UInt8) {
+            prefix[next] = Int32(prior)
+            suffix[next] = index
+            first[next] = first[prior]
+            length[next] = length[prior] + 1
+            highest[next] = max(highest[prior], Int16(index))
+            next += 1
+        }
+
+        func emit(_ code: Int) {
+            check.pixels += Int64(length[code])
+            check.highestIndex = max(check.highestIndex, Int(highest[code]))
+            guard let pixel else { return }
+            stack.removeAll(keepingCapacity: true)
+            var at = code
+            while at >= 0 {
+                stack.append(suffix[at])
+                at = Int(prefix[at])
+            }
+            for value in stack.reversed() { pixel(value) }
+        }
+
+        while !finished {
+            while bits < width {
+                guard let byte = nextByte() else { return check }
+                buffer |= UInt32(byte) << UInt32(bits)
+                bits += 8
+            }
+            let code = Int(buffer & ((1 << UInt32(width)) - 1))
+            buffer >>= UInt32(width)
+            bits -= width
+            if code == clear {
+                next = endCode + 1
+                width = codeSize + 1
+                previous = nil
+                check.clears += 1
+                continue
+            }
+            if code == endCode {
+                check.sawEnd = true
+                finished = true
+                break
+            }
+            guard let prior = previous else {
+                // The first code after a clear is one index.
+                guard code < clear else { check.badCodeAt = check.pixels; return check }
+                emit(code)
+                previous = code
+                continue
+            }
+            if code < next {
+                emit(code)
+                if next < 4096 { add(prior, then: first[code]) }
+            } else if code == next, next < 4096 {
+                // The code being made: the previous string and its own first index.
+                add(prior, then: first[prior])
+                emit(code)
+            } else {
+                check.badCodeAt = check.pixels
+                return check
+            }
+            if next >= 1 << width, width < 12 { width += 1 }
+            previous = code
+        }
+        // What is left of the blocks after the end code.
+        var after = Int64(block.count - blockIndex)
+        while position < end, let size = source.read(position..<(position + 1)).first, size > 0 {
+            after += Int64(size)
+            position += 1 + Int64(size)
+        }
+        check.bytesAfterEnd = after
+        return check
+    }
+
+    /// Words for what decoding found, and whether it is wrong.
+    static func lzwVerdict(_ check: LZWCheck, codeSize: Int, pixels: Int64, colours: Int) -> (value: String, note: String, isProblem: Bool) {
+        guard (2...8).contains(codeSize) else {
+            return ("BAD CODE SIZE", "A minimum code size of \(codeSize) is not one GIF allows (2 to 8), so the data cannot be decoded.", true)
+        }
+        if let at = check.badCodeAt {
+            return ("DAMAGED", "Decoding it, after \(at) pixels there is a code that is not yet in the table: the data is damaged.", true)
+        }
+        var words: [String] = []
+        var problem = false
+        if check.pixels == pixels {
+            words.append("Decoded, it is \(pixels) pixels, as the image's size says.")
+        } else if check.pixels < pixels {
+            words.append("Decoded, it is \(check.pixels) pixels, \(pixels - check.pixels) fewer than the image's \(pixels): readers leave the rest blank.")
+            problem = true
+        } else {
+            words.append("Decoded, it is \(check.pixels) pixels, \(check.pixels - pixels) more than the image's \(pixels): readers drop the rest.")
+            problem = true
+        }
+        if !check.sawEnd {
+            words.append("It has no end-of-information code; most readers do not mind.")
+        } else if check.bytesAfterEnd > 0 {
+            words.append("\(FieldText.bytes(check.bytesAfterEnd)) follow the end code and are ignored.")
+        }
+        if colours > 0, check.highestIndex >= colours {
+            words.append("It uses colour \(check.highestIndex), and its colour table has \(colours).")
+            problem = true
+        } else if colours == 0 {
+            words.append("There is no colour table for it, so readers choose the colours.")
+        }
+        let value = problem ? (check.pixels == pixels ? "COLOURS OUTSIDE THE TABLE" : "PIXEL COUNT DIFFERS") : "decodes to \(pixels) pixels"
+        return (value, words.joined(separator: " "), problem)
     }
 }

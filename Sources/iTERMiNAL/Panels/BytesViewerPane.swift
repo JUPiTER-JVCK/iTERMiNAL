@@ -115,9 +115,13 @@ struct BytesViewerPaneView: View {
             },
             isEditable: model.isWritable,
             takesHexDigits: model.radix == .hex,
+            takesBits: model.radix == .binary,
+            bitColumn: model.bitColumn,
             onEdit: { edit in
                 switch edit {
                 case .hexDigit(let digit): model.typeHexDigit(digit)
+                case .bit(let value): model.typeBit(value)
+                case .placeBit(let index): model.placeBit(index)
                 case .text(let text): model.typeText(text)
                 case .deleteBackward: model.deleteBackward()
                 case .deleteForward: model.deleteForward()
@@ -292,7 +296,7 @@ struct BytesViewerPaneView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Click the dump and type: hex digits in the cells (when they are shown as hex), characters in the text column. The heavier outline shows which takes the typing.")
+            .help("Click the dump and type: hex digits in the cells when they are shown as hex, 0 and 1 when they are shown as bits (click a digit to choose the bit), characters in the text column. The heavier outline shows what takes the typing.")
             Spacer(minLength: 0)
             if let note = model.savedNote {
                 Text(note)
