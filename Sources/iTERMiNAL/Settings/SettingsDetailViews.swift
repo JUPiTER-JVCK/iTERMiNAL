@@ -215,7 +215,7 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("Show listening ports", isOn: $settings.showRemotePorts)
-                Text("Adds a Listening ports tab to the globe menu at the bottom right of the window (which always has the Connect tab). It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — and choosing one forwards it to this Mac and opens it in the browser panel. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. A host that wants a password works once you have signed in to it in a tab (Connections → Authentication shares that sign-in; turning this on shares it too).")
+                Text("Adds a Listening ports tab to the globe menu at the bottom right of the window (which always has the Connect tab). It lists the TCP ports the focused terminal's machine is listening on — this Mac, or a saved host — with what is known of each — the service it usually is, who owns it, since when, who is connected and who can reach it. Choosing one does what fits it: a web page opens in the browser panel (through a forward to this Mac, for a host), ssh opens a terminal tab, VNC and RDP open the system's client, and anything else is forwarded and its address copied. Off by default: nothing is scanned until you open the list, and it rescans every few seconds only while it stays open. A host that wants a password works once you have signed in to it in a tab (Connections → Authentication shares that sign-in; turning this on shares it too).")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

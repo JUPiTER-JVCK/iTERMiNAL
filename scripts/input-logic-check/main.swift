@@ -6739,8 +6739,102 @@ func checkListeningPorts() {
     check(ListeningPort(port: 3000, address: "*", process: nil).isLikelyWeb
             && !ListeningPort(port: 22, address: "*", process: nil).isLikelyWeb, "web ports are told apart")
     check(ListeningPort(port: 22, address: "*", process: nil).forwardHost == "localhost", "a wildcard port is reached as localhost")
+
+    // Who owns a port, since when, and who is connected to it.
+    check(fromSS.last?.pid == 12 && fromSS.last?.backlog == 4096 && fromSS.last?.queued == 0,
+          "ss: the pid and the accept queue are read")
+    check(fromSS.first?.families == ["IPv4", "IPv6"] && fromSS.first?.addresses == ["0.0.0.0", "::"],
+          "ss: both sockets of one server are kept")
+    check(fromLsof.first?.pid == 12345 && fromLsof.first?.user == "me" && fromLsof.first?.families == ["IPv4"],
+          "lsof: the pid, the account and the family are read")
+    check(joined.first?.pid == 12345 && joined.first?.user == "me" && joined.first?.families == ["IPv4", "IPv6"],
+          "two tools' views of one port keep what each knew")
+
+    let scanOutput = """
+    State   Recv-Q  Send-Q   Local Address:Port    Peer Address:Port Process
+    LISTEN  0       128      0.0.0.0:22            0.0.0.0:*     users:(("sshd",pid=900,fd=3))
+    LISTEN  0       511      127.0.0.1:3000        0.0.0.0:*     users:(("node",pid=4242,fd=19))
+    iterminal_ps_section
+      900 root     12-03:04:05 Mon Oct  6 10:00:00 2026 sshd: /usr/sbin/sshd -D
+    4242 sam          05:07 Thu Nov 20 12:34:56 2026 node server.js --token=abc123 --port 3000
+    iterminal_conn_section
+    ESTAB 0 0 10.0.0.5:22 10.0.0.9:51000
+    ESTAB 0 0 10.0.0.5:22 10.0.0.10:51001
+    ESTAB 0 0 10.0.0.5:22 10.0.0.9:51002
+    """
+    let scan = ListeningPorts.parseScan(scanOutput)
+    check(scan.ports.map(\.port) == [22, 3000] && !scan.toolsMissing,
+          "a scan reads the listing, then the processes, then the connections")
+    if scan.ports.count == 2 {
+        let sshd = scan.ports[0]
+        check(sshd.pid == 900 && sshd.user == "root" && sshd.elapsed == "12-03:04:05"
+                && sshd.startedAt == "Mon Oct 6 10:00:00 2026",
+              "a port is joined to its process: who, how long, since when")
+        check(sshd.connectionCount == 3 && sshd.peers == ["10.0.0.9", "10.0.0.10"],
+              "and to who is connected to it, each peer once")
+        check(scan.ports[1].command == "node server.js --token=\u{2022}\u{2022}\u{2022}\u{2022} --port 3000",
+              "a secret on a command line is hidden")
+    }
+    check(ListeningPorts.parseScan("iterminal_none_section\niterminal_ps_section\niterminal_conn_section\n").toolsMissing
+            && !ListeningPorts.parseScan("State Recv-Q\niterminal_ps_section\n").toolsMissing,
+          "a host with none of the tools is told apart from one with nothing listening")
+    check(ListeningPorts.remoteCommand.contains(ListeningPorts.processMarker)
+            && ListeningPorts.remoteCommand.contains(ListeningPorts.connectionMarker),
+          "the remote command asks for the processes and the connections too")
+
+    check(ListeningPorts.describeElapsed("1-02:03:04") == "1d 2h"
+            && ListeningPorts.describeElapsed("03:12:00") == "3h 12m"
+            && ListeningPorts.describeElapsed("05:07") == "5m"
+            && ListeningPorts.describeElapsed("00:42") == "42s"
+            && ListeningPorts.describeElapsed("bad") == nil
+            && ListeningPorts.describeElapsed("1-") == nil,
+          "how long a process has run is said the way a person would")
+    check(ListeningPorts.redact("mysql --password hunter2 -u root") == "mysql --password \u{2022}\u{2022}\u{2022}\u{2022} -u root",
+          "the word after --password is hidden")
+    check(ListeningPorts.parseProcesses("not a process line\n12 me 01:02").isEmpty, "a line that is not ps output is skipped")
+    check(ListeningPorts.parseConnections("tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN").isEmpty,
+          "a listener is not a connection")
+
+    // What a port is, and what choosing it does.
+    check(ListeningPort(port: 22, address: "*", process: nil).action == .ssh
+            && ListeningPort(port: 5900, address: "*", process: nil).action == .vnc
+            && ListeningPort(port: 3389, address: "*", process: nil).action == .rdp
+            && ListeningPort(port: 5432, address: "*", process: nil).action == .forward
+            && ListeningPort(port: 8080, address: "*", process: nil).action == .browser
+            && ListeningPort(port: 41234, address: "*", process: nil).action == .browser,
+          "choosing a port does what fits it, and a web page is the guess for what is not known")
+    check(ListeningPort(port: 2222, address: "*", process: "sshd").service?.name == "SSH",
+          "the program names the service before the number does")
+    check(ListeningPort(port: 41234, address: "*", process: nil).service == nil, "an unknown port is not given a name")
+
+    let detailed = ListeningPort(
+        port: 8080, address: "127.0.0.1", process: "node", pid: 7, user: "me",
+        addresses: ["127.0.0.1"], families: ["IPv4"], connectionCount: 2, peers: ["10.0.0.9"]
+    )
+    let rows = detailed.details(machine: "devbox", onHost: true)
+    func detail(_ label: String) -> String? { rows.first { $0.label == label }?.value }
+    check(detail("Source") == "127.0.0.1:8080" && detail("Process") == "node" && detail("PID") == "7"
+            && detail("User") == "me" && detail("Protocol") == "TCP · IPv4",
+          "the details say what is known")
+    check(detail("Destination") == "Only programs on devbox itself (loopback)"
+            && detail("Connections") == "2 open connections from 10.0.0.9",
+          "and who it can be reached by and who is on it")
+    check(detail("Command") == nil && detail("Running") == nil && detail("Accept queue") == nil,
+          "what is not known is left out, not guessed")
 }
 checkListeningPorts()
+
+// MARK: Matching saved hosts to what the network advertises
+
+func checkServiceNameMatch() {
+    check(ServiceNameMatch.matches("Sam\u{2019}s MacBook Pro", "Sams-MacBook-Pro.local"),
+          "a Bonjour name and the host name it goes by are the same machine")
+    check(ServiceNameMatch.matches("Studio Mac", "studio.local"), "a long enough name inside the other counts")
+    check(!ServiceNameMatch.matches("Studio Mac", "nas"), "a short name inside another does not")
+    check(!ServiceNameMatch.matches("Mac Mini", "Mac Studio") && !ServiceNameMatch.matches("Studio Mac", ""),
+          "different machines, and nothing, do not match")
+}
+checkServiceNameMatch()
 
 // MARK: Tunnels
 
