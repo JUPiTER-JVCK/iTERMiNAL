@@ -95,14 +95,35 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         guard let url = Self.url(fromUserInput: urlText) else { return }
         urlText = url.absoluteString
         hasNavigated = true
-        webView.load(URLRequest(url: url))
+        load(url)
+    }
+
+    /// Local files need `loadFileURL`: a plain request for a `file://` URL
+    /// loads the document but denies it its own stylesheets, scripts and
+    /// images. Read access is the file's folder, no wider.
+    private func load(_ url: URL) {
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        } else {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     /// Bare domains get https:// prefixed; anything that doesn't look like a
-    /// URL becomes a web search.
+    /// URL becomes a web search. `file://` URLs and paths to a file that
+    /// exists (absolute or `~`) open as local files.
     static func url(fromUserInput text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("file://") {
+            return URL(string: trimmed) ?? URL(string: trimmed.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? "")
+        }
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
+            let path = (trimmed as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
         if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
             return URL(string: trimmed)
         }
@@ -212,7 +233,7 @@ final class BrowserModel: NSObject, ObservableObject, Identifiable {
         hasNavigated = true
         navigationCompletions.append(completion)
         isLoading = true
-        webView.load(URLRequest(url: url))
+        load(url)
     }
 
     func evaluate(_ javaScript: String, completion: @escaping (Result<String, Error>) -> Void) {
