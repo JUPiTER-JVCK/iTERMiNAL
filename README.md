@@ -1399,10 +1399,21 @@ address is never sent at all.
 **Settings → Appearance → Status → Show remote ports** (off by default) puts a
 globe at the bottom left of the window, opposite the system monitor. It lists
 the TCP ports the focused terminal's machine is listening on — this Mac, or the
-saved host the tab is connected to — and choosing one opens it in the browser
-panel: directly for this Mac, and through an `ssh` forward on a loopback port for
-a host. Nothing is scanned until the list is open; while it stays open it
-rescans every five seconds.
+saved host the tab is connected to. Each port is listed with what it usually
+is (SSH, PostgreSQL, a dev server…), where it is listening and who can reach
+it, who owns it and how long it has been running, and how many connections are
+open to it and from where; the arrow beside a port opens everything known about
+it, and a field the machine did not report is left out. Choosing a port does
+what fits it: a web page opens in the browser panel (directly for this Mac,
+through an `ssh` forward on a loopback port for a host), ssh opens a terminal
+tab, VNC and RDP open the system's client, and anything else — a database, a
+cache — is forwarded and its address copied. Nothing is scanned until the list
+is open; while it stays open it rescans every five seconds.
+
+The globe's **Connect** list marks in green the saved hosts and services that
+the network is advertising right now, and everything under **On this network**.
+Once you have asked it to look for machines, it looks again each time the list
+opens.
 
 The scan and the forwards run with no keyboard: they sign in with a key or the
 agent, or ride the connection a terminal tab to that host already has open,
@@ -1413,7 +1424,8 @@ is only reachable through one address is forwarded to that address, and the
 list says which ports are reachable from outside the machine (all interfaces)
 and which are not (this machine only). Process names appear only where the
 machine's own tools give them — `ss` and `lsof` show other accounts' sockets
-without a name — so a blank name never means nothing owns the port.
+without a name — so a blank name never means nothing owns the port. A command
+line shown for a port has anything that looks like a password or token hidden.
 
 ### Colors, text and effects
 

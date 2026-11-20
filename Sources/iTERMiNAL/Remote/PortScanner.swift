@@ -134,10 +134,13 @@ enum PortScanner {
     /// for this account's own processes — so both are read and joined.
     private static func scanThisMac() -> Result<[ListeningPort], PortToolError> {
         var entries: [ListeningPort] = []
+        var connections: [Int: [String]] = [:]
         var ran = false
         if let result = ProcessRunner.run("/usr/sbin/netstat", ListeningPorts.localNetstatArguments, timeout: 10),
            !result.timedOut {
             entries.append(contentsOf: ListeningPorts.parse(result.output))
+            // The same listing carries the open connections.
+            connections = ListeningPorts.parseConnections(result.output)
             ran = true
         }
         if let result = ProcessRunner.run("/usr/sbin/lsof", ListeningPorts.localLsofArguments, timeout: 10),
@@ -148,7 +151,18 @@ enum PortScanner {
         guard ran else {
             return .failure(PortToolError("Couldn't run netstat or lsof on this Mac."))
         }
-        return .success(ListeningPorts.merge(entries))
+        // Who owns each port and since when. Best effort: a port is still
+        // listed without it.
+        var processes: [Int: ListeningPorts.ProcessEntry] = [:]
+        if let result = ProcessRunner.run("/bin/ps", ListeningPorts.localPsArguments, timeout: 10),
+           !result.timedOut {
+            processes = ListeningPorts.parseProcesses(result.output)
+        }
+        return .success(ListeningPorts.enrich(
+            ListeningPorts.merge(entries),
+            processes: processes,
+            connections: connections
+        ))
     }
 
     private static func scanHost(_ connection: SSHConnection) -> Result<[ListeningPort], PortToolError> {
@@ -188,9 +202,10 @@ enum PortScanner {
                 needsSignIn: needsSignIn
             ))
         }
-        if result.status != 0 && result.output.isEmpty {
+        let scan = ListeningPorts.parseScan(result.output)
+        if scan.toolsMissing || (result.status != 0 && result.output.isEmpty) {
             return .failure(PortToolError("\(connection.host) has none of ss, netstat or lsof to list its ports with."))
         }
-        return .success(ListeningPorts.parse(result.output))
+        return .success(scan.ports)
     }
 }
