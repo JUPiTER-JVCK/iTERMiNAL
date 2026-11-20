@@ -196,10 +196,56 @@ final class RemotePortsModel: ObservableObject {
     }
 }
 
-/// The globe in the status bar's right corner, and the menu it opens: Connect
-/// (saved hosts, screen sharing, machines on this network) and, when turned on
-/// in Settings, Listening ports.
+/// The status bar's right corner: a globe that opens the Connect list and, when
+/// turned on in Settings, a second icon that opens the Listening ports. Two
+/// buttons with a popover each, rather than one popover with tabs, so each
+/// opens at its own fixed size and always in the same place.
 struct RemotePortsButton: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ConnectButton()
+            if settings.showRemotePorts {
+                PortsButton()
+            }
+        }
+    }
+}
+
+/// The globe: saved hosts, screen sharing and machines on this network.
+private struct ConnectButton: View {
+    @EnvironmentObject private var store: WorkspaceStore
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+    @State private var isOpen = false
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        Button {
+            isOpen.toggle()
+        } label: {
+            Image(systemName: "globe")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isOpen ? theme.textPrimary : theme.textSecondary)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Connect to a host")
+        .accessibilityLabel("Connect to a host")
+        .popover(isPresented: $isOpen, arrowEdge: .top) {
+            ConnectList(dismiss: { isOpen = false })
+                .padding(12)
+                .frame(width: 340)
+                .environmentObject(store)
+        }
+    }
+}
+
+/// The listening ports of the focused terminal's machine, with a count of the
+/// forwards that are open.
+private struct PortsButton: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
@@ -213,7 +259,7 @@ struct RemotePortsButton: View {
             isOpen.toggle()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "globe")
+                Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 11, weight: .medium))
                 if !tunnels.tunnels.isEmpty {
                     Text("\(tunnels.tunnels.count)")
@@ -222,11 +268,12 @@ struct RemotePortsButton: View {
                 }
             }
             .foregroundStyle(isOpen ? theme.textPrimary : theme.textSecondary)
+            .frame(minWidth: 22, minHeight: 20)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Connect to a host, and see listening ports")
-        .accessibilityLabel("Connect and listening ports")
+        .help("See listening ports")
+        .accessibilityLabel("Listening ports")
         .popover(isPresented: $isOpen, arrowEdge: .top) {
             RemotePortsPopover(model: model, dismiss: { isOpen = false })
                 .environmentObject(store)
@@ -235,59 +282,21 @@ struct RemotePortsButton: View {
 }
 
 private struct RemotePortsPopover: View {
-    enum Tab: String {
-        case connect, ports
-    }
-
     @ObservedObject var model: RemotePortsModel
     let dismiss: () -> Void
     @ObservedObject private var tunnels = TunnelManager.shared
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
-    @AppStorage("globeMenuTab") private var tabTag = Tab.connect.rawValue
     /// Ports it has been asked to show every fact about.
     @State private var expanded: Set<Int> = []
 
-    /// Ports are only offered when turned on in Settings; without them there is
-    /// one list and no tabs.
-    private var tab: Tab {
-        settings.showRemotePorts ? (Tab(rawValue: tabTag) ?? .connect) : .connect
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if settings.showRemotePorts {
-                Picker("", selection: $tabTag) {
-                    Text("Connect").tag(Tab.connect.rawValue)
-                    Text("Listening ports").tag(Tab.ports.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            if tab == .connect {
-                ConnectList(dismiss: dismiss)
-            } else {
-                portsContent
-            }
-        }
-        .padding(12)
-        // Ports carry a description and a handful of facts each, so they get
-        // more room than the list of hosts.
-        .frame(width: tab == .ports ? 460 : 340)
-        // Scanning runs only while the ports list is what is showing.
-        .onAppear { updateScanning() }
-        .onDisappear { model.stop() }
-        .onChange(of: tabTag) { _, _ in updateScanning() }
-        .onChange(of: settings.showRemotePorts) { _, _ in updateScanning() }
-    }
-
-    private func updateScanning() {
-        if tab == .ports {
-            model.start(store: store)
-        } else {
-            model.stop()
-        }
+        portsContent
+            .padding(12)
+            .frame(width: 460)
+            // Scanning runs only while the list is open.
+            .onAppear { model.start(store: store) }
+            .onDisappear { model.stop() }
     }
 
     private var portsContent: some View {
@@ -326,13 +335,15 @@ private struct RemotePortsPopover: View {
                     .foregroundStyle(.secondary)
             }
 
-            if model.ports.isEmpty {
-                Text(model.isScanning ? "Scanning…" : "No listening TCP ports found.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 6)
-            } else {
-                FittingScroll(maxHeight: 440, estimatedHeight: CGFloat(model.ports.count) * 64) {
+            // A fixed height, so the popover is the same size whatever is in it.
+            ScrollView {
+                if model.ports.isEmpty {
+                    Text(model.isScanning ? "Scanning…" : "No listening TCP ports found.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                } else {
                     VStack(spacing: 2) {
                         ForEach(model.ports) { port in
                             row(port)
@@ -340,6 +351,7 @@ private struct RemotePortsPopover: View {
                     }
                 }
             }
+            .frame(height: 340)
 
             if !tunnels.tunnels.isEmpty {
                 Divider()
@@ -503,19 +515,10 @@ private struct ConnectList: View {
     /// twice. Never set by anything but pressing the button.
     @AppStorage("globeNetworkScan") private var scanOptIn = false
 
-    /// A first guess at the list's height, used until it has been measured, so
-    /// the popover opens the size of its content rather than cut off.
-    private var estimatedHeight: CGFloat {
-        let saved = max(settings.sshConnections.count, 1)
-        let sharing = settings.remoteServices.count
-        let network = discovery.services.count
-        let groups = 1 + (sharing > 0 ? 1 : 0) + (network > 0 ? 1 : 0)
-        return CGFloat(saved + sharing + network) * 36 + CGFloat(groups) * 32
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            FittingScroll(maxHeight: 460, estimatedHeight: estimatedHeight) {
+            // A fixed height, so the popover is the same size whatever is in it.
+            ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     group("Saved hosts") {
                         if settings.sshConnections.isEmpty {
@@ -571,6 +574,7 @@ private struct ConnectList: View {
                     }
                 }
             }
+            .frame(height: 300)
 
             Divider()
             if discovery.isBrowsing {
@@ -680,47 +684,5 @@ private struct ConnectList: View {
                 settings: settings
             )
         }
-    }
-}
-
-/// A scroll view as tall as what is in it, up to `maxHeight`.
-///
-/// A bare `ScrollView` reports almost no height of its own, so a popover built
-/// around one opens small and cuts its list off until something forces it to
-/// lay out again. This measures the content and sizes to it; `estimatedHeight`
-/// stands in for the first frame, before there is anything to measure.
-private struct FittingScroll<Content: View>: View {
-    let maxHeight: CGFloat
-    let estimatedHeight: CGFloat
-    private let content: Content
-    @State private var measured: CGFloat?
-
-    init(maxHeight: CGFloat, estimatedHeight: CGFloat, @ViewBuilder content: () -> Content) {
-        self.maxHeight = maxHeight
-        self.estimatedHeight = estimatedHeight
-        self.content = content()
-    }
-
-    var body: some View {
-        ScrollView {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)
-                    }
-                )
-        }
-        .frame(height: min(max(measured ?? estimatedHeight, 40), maxHeight))
-        .onPreferenceChange(ContentHeightKey.self) { height in
-            if height > 0 { measured = height }
-        }
-    }
-}
-
-private struct ContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }

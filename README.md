@@ -1396,9 +1396,9 @@ address is never sent at all.
 
 ### Remote ports
 
-**Settings → Appearance → Status → Show remote ports** (off by default) puts a
-globe at the bottom left of the window, opposite the system monitor. It lists
-the TCP ports the focused terminal's machine is listening on — this Mac, or the
+**Settings → Appearance → Status → Show remote ports** (off by default) adds a
+second icon beside the globe in the bottom-right corner. It opens its own list
+of the TCP ports the focused terminal's machine is listening on — this Mac, or the
 saved host the tab is connected to. Each port is listed with what it usually
 is (SSH, PostgreSQL, a dev server…), where it is listening and who can reach
 it, who owns it and how long it has been running, and how many connections are
@@ -1410,7 +1410,7 @@ tab, VNC and RDP open the system's client, and anything else — a database, a
 cache — is forwarded and its address copied. Nothing is scanned until the list
 is open; while it stays open it rescans every five seconds.
 
-The globe's **Connect** list marks in green the saved hosts and services that
+The globe, which is always there, opens the **Connect** list. It marks in green the saved hosts and services that
 the network is advertising right now, and everything under **On this network**.
 Once you have asked it to look for machines, it looks again each time the list
 opens.
