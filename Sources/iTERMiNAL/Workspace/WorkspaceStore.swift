@@ -811,6 +811,55 @@ final class WorkspaceStore: ObservableObject {
         ]))
     }
 
+    /// Puts a terminal beside another one, in the other's tab, as a split.
+    ///
+    /// The shell is carried across, not restarted. When it was the whole of its
+    /// tab, that tab goes: its panes are now somewhere else, and the name and pin
+    /// it had stay with nothing. A terminal dropped on one of its own tab's does
+    /// nothing.
+    func splitTerminal(
+        _ sessionID: UUID,
+        beside targetID: UUID,
+        direction: SplitDirection = .horizontal
+    ) {
+        guard sessionID != targetID,
+              let source = paneLocation(ofSessionID: sessionID),
+              let destination = paneLocation(ofSessionID: targetID),
+              source.tab !== destination.tab else { return }
+        let leaf = source.leaf
+
+        if leaf === source.tab.root {
+            source.workspace.tabs.removeAll { $0 === source.tab }
+            EventBus.shared.publish(APIEvent("tab.closed", ["tab": source.tab.id.uuidString]))
+            removeIfEmpty(source.workspace)
+        } else if let parent = source.tab.root.parent(of: leaf),
+                  case .split(let axis, var children) = parent.content {
+            children.removeAll { $0 === leaf }
+            if children.count == 1 {
+                parent.content = children[0].content
+            } else {
+                parent.content = .split(axis, children)
+            }
+        } else {
+            // A leaf that is neither the root nor a child of a split is not a
+            // shape the tree can produce; bailing out beats detaching a
+            // session with nowhere to put it back.
+            return
+        }
+
+        let target = destination.leaf
+        target.content = .split(direction, [PaneNode(content: target.content), leaf])
+        // Focus first: selecting the tab keeps a focus that is already inside it.
+        focusedSessionID = sessionID
+        selectedTabID = destination.tab.id
+        scheduleSave()
+        objectWillChange.send()
+        EventBus.shared.publish(APIEvent("pane.split", [
+            "tab": destination.tab.id.uuidString,
+            "direction": direction.rawValue,
+        ]))
+    }
+
     /// What a sidebar drag carries: a terminal's id, or — for a tab with no
     /// terminal left in it — the tab's own. An id that names neither does
     /// nothing.

@@ -387,7 +387,9 @@ A tour of the app in thirty-four pictures, in five groups.
   pane it was split from, and every terminal of a split is listed under that
   Space in the sidebar. Drag any listed terminal onto another Space to move it
   there — a pane of a split leaves it and arrives as a tab, its shell still
-  running. A Space left with nothing in it goes away (the last one stays). To
+  running. Drop it on the middle of another terminal's row instead (the top edge
+  of a row still means "put it here in the list") and it joins that terminal's
+  tab as a split. A Space left with nothing in it goes away (the last one stays). To
   put a new tab in an existing Space, use **New Tab Here** on its folder row,
   or `iterminalctl tab.create workspace=<name>`.
 - **Scriptable browser** — an embedded WKWebView usable as a tabbed right

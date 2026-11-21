@@ -808,14 +808,21 @@ private struct SidebarTabRow: View {
         // Drag a terminal to reorder it, or onto a row in another space to move
         // it there; let go over a row and it lands just above it. The tab's own
         // id stands in for a tab with no terminal.
-        .reportsDropSlot(store.workspace(containingTab: tab.id).map {
-            SidebarDropSlot(space: $0.id, before: tab.id, mark: .lineAbove)
-        })
+        // The top of the row means that; the rest of it, a split with this
+        // tab's terminal.
+        .reportsDropSlot(
+            store.workspace(containingTab: tab.id).map {
+                SidebarDropSlot(space: $0.id, before: tab.id, mark: .lineAbove)
+            },
+            join: tab.primarySession.map { SidebarJoin(session: $0.id, tab: tab.id) },
+            edgeAtTop: true
+        )
         .simultaneousGesture(
             DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
                 .onChanged {
                     drag.changed(
                         terminal: tab.primarySession?.id ?? tab.id,
+                        from: tab.id,
                         title: tab.displayName,
                         at: $0.location
                     )
@@ -1009,13 +1016,23 @@ private struct SidebarPaneRow: View {
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
-        // Let go over this row and a terminal goes after this pane's tab: the
-        // pane is part of that tab, so "before" this row has no place to be.
-        .reportsDropSlot(followingSlot)
+        // The bottom of the row means a place after this pane's tab — the pane
+        // is part of that tab, so "before" this row has no place to be — and
+        // the rest of it, a split with this pane.
+        .reportsDropSlot(
+            followingSlot,
+            join: SidebarJoin(session: session.id, tab: tab.id),
+            edgeAtTop: false
+        )
         .simultaneousGesture(
             DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
                 .onChanged {
-                    drag.changed(terminal: session.id, title: session.displayTitle, at: $0.location)
+                    drag.changed(
+                        terminal: session.id,
+                        from: tab.id,
+                        title: session.displayTitle,
+                        at: $0.location
+                    )
                 }
                 .onEnded { _ in drag.ended(store: store) }
         )
