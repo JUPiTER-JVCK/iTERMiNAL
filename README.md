@@ -629,6 +629,34 @@ A tour of the app in thirty-four pictures, in five groups.
   drag to put the cursor there, and the dump follows. A file up to 1 GiB is read
   whole; a bigger one is sampled, 64 KiB from each of 16,384 places, and the
   panel says so.
+- **Byte Tools panel** — thirty-one small converters in one panel (⌥⌘K), each live as you type:
+  the **Universal Converter** takes anything (text, hex, binary, octal, decimal bytes or a
+  big decimal number, Base64, Base64 URL-safe, Base32, Base58, Ascii85, URL-encoded text,
+  HTML entities, `\u` escapes, Punycode, a hexdump) — it guesses which, and you can say —
+  and writes it every other way at once. Beside it: the Binary, Decimal, Hex, Octal and
+  **Base** (2 to 36, any size of number) converters; **Bits & Bytes** and **Two's Complement**
+  as rows of switches you click, with the weight of each bit and how negation works;
+  a **Bitwise calculator** (AND, OR, XOR, NAND, NOR, XNOR, NOT, shifts and rotates, at 8
+  to 64 bits, bit by bit); **IEEE 754** at 16, 32 and 64 bits with the sign, exponent and
+  mantissa coloured and every bit clickable, and what is really stored (0.1 is
+  0.10000000149011612 as a 32-bit float); **Varint / ZigZag** (LEB128, as Protocol Buffers writes it);
+  a **Text Converter** with a From and a To; **Text → UTF-8**, a card per code point with
+  its bytes; an **ASCII table** you can search by character, number or name; **Base64** step by step, three bytes to four
+  characters; Base32 / Base58 / Ascii85; **URL encoding** (strict, `encodeURIComponent`,
+  `encodeURI`, form) and **URL anatomy** (RFC 3986, each part coloured, the query as a table,
+  with a warning for credentials in a URL and look-alike hosts); **Punycode (IDN)**; HTML entities;
+  **Hexdump** (writes `hexdump -C` and `xxd` layouts, and reads them back); **ASN.1 / DER**
+  (reads hex, Base64 or PEM into a tree with offsets, names well-known OIDs and opens
+  OCTET and BIT STRINGs that hold more DER, and builds elements); hashes and checksums
+  (MD5, SHA-1, SHA-224/256/384/512, HMAC, the common CRCs, Adler-32, FNV-1a, with a box to paste an expected
+  hash into); Unix **timestamps** (seconds to nanoseconds, ISO 8601, FILETIME and more), **UUIDs**
+  (any spelling, version, variant and the time in a v1, v6 or v7 one), a **JWT decoder** that can
+  check an HS256, HS384 or HS512 signature, XOR and the classic ciphers (with a one-byte-XOR breaker),
+  Morse code, byte order (endianness), data sizes (KB against KiB), and **IP & CIDR** (IPv4 and
+  IPv6 in every form, what kind of address it is, subnet masks, ranges and reverse-DNS names).
+  Every tool has **Send to…**: it hands its result to any other tool, which opens with those bytes
+  as its input, so any format reaches any other. Everything is computed here, on this Mac, and
+  what you type is kept only while the app runs, never written to disk.
 - **superfile and btop, built in** — two icons at the top right, left of the
   panel toggles, open [superfile](https://github.com/yorukot/superfile) (a
   terminal file manager, ⌥⌘S) and [btop](https://github.com/aristocratos/btop)
@@ -1685,6 +1713,7 @@ bind:
 | Browser / Files / Notes panel | ⌥⌘B / ⌥⌘F / ⌥⌘N |
 | HTTP Client panel | ⌥⌘R |
 | Bytes panel | ⌥⌘Y |
+| Byte Tools panel | ⌥⌘K |
 | superfile / btop | ⌥⌘S / ⌥⌘P |
 | superfile / btop in full view | ⌥⇧⌘S / ⌥⇧⌘P |
 | Bigger / smaller text, actual size | ⌘+ / ⌘- / ⌘0 |
@@ -1732,6 +1761,10 @@ Sources/
 │   ├── Panels/      scriptable browser pane, file pane, notes, HTTP client pane
 │   │                with the site explorer and the Extract tab (previews, crawler,
 │   │                assistant), the Bytes panel and its hex grid
+│   ├── ByteTools/   the Byte Tools panel's engines: every format as bytes, big numbers, bit
+│   │                patterns, IEEE 754, varints, URLs, Punycode, ASN.1, the hashes, dates, UUIDs
+│   │                and tokens, and the registry that lets one tool hand bytes to another —
+│   │                Foundation-only, checked against published test vectors
 │   ├── Bytes/       the Bytes panel's reading and layout: byte sources over a
 │   │                file, rows and columns, what a selection reads as, go-to,
 │   │                search, the copy formats, editing and its safe save; Structure/ holds the parsers (PNG, JPEG, GIF, BMP,

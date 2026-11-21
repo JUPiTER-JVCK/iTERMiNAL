@@ -417,6 +417,8 @@ enum ShortcutCatalog {
         ShortcutEntry("panel.notes", "Notes panel", [ShortcutChord("n", [option, cmd])], in: .panels),
         ShortcutEntry("panel.http", "HTTP client panel", [ShortcutChord("r", [option, cmd])], in: .panels),
         ShortcutEntry("panel.bytes", "Bytes panel", [ShortcutChord("y", [option, cmd])], in: .panels),
+        ShortcutEntry("panel.byteTools", "Byte Tools panel", [ShortcutChord("k", [option, cmd])], in: .panels,
+                      detail: "Converters for bases, encodings, floats, URLs, hashes and more"),
         // The Bytes panel's own keys, which its dump takes while it has the keys. They are not in a menu:
         // the dump is asked first, so they reach it and nothing else, and only there.
         ShortcutEntry("bytes.find", "Find bytes or text in the Bytes panel", [ShortcutChord("f", cmd)], in: .panels, .view,

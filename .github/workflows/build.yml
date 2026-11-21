@@ -291,6 +291,21 @@ jobs:
             Sources/iTERMiNAL/Bytes/Map/ByteMapAnalyzer.swift \
             Sources/iTERMiNAL/Bytes/Map/ByteMapText.swift \
             Sources/iTERMiNAL/Bytes/Map/ByteMapRaster.swift \
+            Sources/iTERMiNAL/ByteTools/BigNumber.swift \
+            Sources/iTERMiNAL/ByteTools/ByteFormats.swift \
+            Sources/iTERMiNAL/ByteTools/Punycode.swift \
+            Sources/iTERMiNAL/ByteTools/HexDump.swift \
+            Sources/iTERMiNAL/ByteTools/NumberTools.swift \
+            Sources/iTERMiNAL/ByteTools/FloatBits.swift \
+            Sources/iTERMiNAL/ByteTools/Varint.swift \
+            Sources/iTERMiNAL/ByteTools/URLAnatomy.swift \
+            Sources/iTERMiNAL/ByteTools/DER.swift \
+            Sources/iTERMiNAL/ByteTools/SHA2Constants.swift \
+            Sources/iTERMiNAL/ByteTools/Digests.swift \
+            Sources/iTERMiNAL/ByteTools/TextTools.swift \
+            Sources/iTERMiNAL/ByteTools/DataTools.swift \
+            Sources/iTERMiNAL/ByteTools/IPTools.swift \
+            Sources/iTERMiNAL/ByteTools/ByteToolRegistry.swift \
             scripts/input-logic-check/main.swift
           "$RUNNER_TEMP/input-logic-check"
 
