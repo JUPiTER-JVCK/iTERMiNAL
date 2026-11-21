@@ -85,12 +85,12 @@ struct TopBar: View {
     }
 
     /// Where you are, from the outside in: the space, the tab, and — for a
-    /// terminal — the folder and branch its shell is in. On any other page,
-    /// just the page's name.
+    /// terminal — the folder and branch its shell is in. On Home, just the
+    /// app's name.
     @ViewBuilder
     private func breadcrumb(_ theme: Theme) -> some View {
         HStack(spacing: 6) {
-            if store.detailMode == .terminal, store.selectedTab != nil,
+            if store.selectedTab != nil,
                let space = store.currentWorkspace?.name, !space.isEmpty {
                 Text(space)
                     .font(.system(size: 13))
@@ -107,7 +107,7 @@ struct TopBar: View {
                 // is narrow.
                 .layoutPriority(1)
 
-            if store.detailMode == .terminal, store.selectedTab != nil,
+            if store.selectedTab != nil,
                let session = store.focusedSession, !session.kind.isTool {
                 TopBarSessionCrumbs(session: session, theme: theme)
                     .id(session.id)
@@ -124,13 +124,7 @@ struct TopBar: View {
     }
 
     private var title: String {
-        switch store.detailMode {
-        case .terminal: return store.selectedTab?.displayName ?? "iTERMiNAL"
-        case .tasks: return RailItem.tasks.title
-        case .automations: return RailItem.automations.title
-        case .skills: return RailItem.skills.title
-        case .cheatsheet: return RailItem.cheatsheet.title
-        }
+        store.selectedTab?.displayName ?? "iTERMiNAL"
     }
 }
 
@@ -204,24 +198,37 @@ private struct BarIconButton: View {
 
 // MARK: - Rail
 
+extension RailItem {
+    /// The panel on the right this button shows and hides, for every button
+    /// but Home and Spaces.
+    var sidePanel: SidePanel? {
+        opensPanel ? SidePanel(rawValue: rawValue) : nil
+    }
+}
+
 /// Where an item on the rail takes you. Shared by the rail's own buttons and
 /// the rows of its "···" menu, so both do the same thing.
 enum RailNavigation {
     static func open(_ item: RailItem, store: WorkspaceStore, settings: AppSettings) {
+        if let panel = item.sidePanel {
+            // The same toggle as the panel's shortcut and its row in the
+            // panels menu: a second click puts it away.
+            store.togglePanel(panel)
+            return
+        }
         switch item {
         case .terminal: store.goHome()
         case .workspaces: withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
-        case .tasks: store.detailMode = .tasks
-        case .automations: store.detailMode = .automations
-        case .skills: store.detailMode = .skills
-        case .cheatsheet: store.detailMode = .cheatsheet
+        // Every other item opens a panel, above.
+        default: break
         }
     }
 }
 
 /// The icon rail down the left edge: the two destinations that are always
-/// there, whichever of the rest you've pinned under a rule, and at the bottom a
-/// "···" menu for the rest and the terminal dock.
+/// there, whichever of the rest you've pinned under a rule — each a button for
+/// a panel on the right — and at the bottom a "···" menu for the rest and the
+/// terminal dock.
 struct SidebarRail: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -247,9 +254,22 @@ struct SidebarRail: View {
                     .fill(theme.surfaceBorder)
                     .frame(width: 24, height: 1)
                     .padding(.vertical, 2)
-                ForEach(pinned) { item in
-                    railButton(item)
+                // As tall as its buttons when there is room, which leaves the
+                // empty rail below it to drag the window by; when the window is
+                // too short for them all it gives up the difference and scrolls,
+                // rather than pushing "···" and the dock off the bottom.
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 6) {
+                        ForEach(pinned) { item in
+                            railButton(item)
+                        }
+                    }
+                    // Room for a badge, which hangs a little outside its icon.
+                    .padding(.vertical, 3)
                 }
+                // Each button's 40, a gap of 6 after it, and the 3 above and
+                // below the lot come to 46 a button.
+                .frame(maxHeight: CGFloat(pinned.count) * 46)
             }
 
             Spacer(minLength: 0)
@@ -290,8 +310,9 @@ struct SidebarRail: View {
             icon: item.icon,
             title: item.title,
             isActive: isActive(item),
-            // Workspaces shows and hides a panel; it is not somewhere you are.
-            isToggle: item == .workspaces,
+            // Every button but Home shows and hides a panel — the workspaces
+            // panel here, or one on the right; none is somewhere you are.
+            isToggle: item != .terminal,
             badge: item == .tasks ? runningTaskCount : nil
         ) {
             RailNavigation.open(item, store: store, settings: settings)
@@ -299,13 +320,13 @@ struct SidebarRail: View {
     }
 
     private func isActive(_ item: RailItem) -> Bool {
+        if let panel = item.sidePanel {
+            return store.rightRegionOpen && store.openPanels.contains(panel)
+        }
         switch item {
         case .terminal: return store.isHome
         case .workspaces: return settings.railPanelOpen
-        case .tasks: return store.detailMode == .tasks
-        case .automations: return store.detailMode == .automations
-        case .skills: return store.detailMode == .skills
-        case .cheatsheet: return store.detailMode == .cheatsheet
+        default: return false
         }
     }
 }
