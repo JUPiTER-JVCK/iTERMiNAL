@@ -22,6 +22,10 @@ struct SidebarView: View {
     @State private var renamingTab: WorkspaceTab?
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
+    /// The terminal being dragged to another space, if one is. Held in `@State`
+    /// — which keeps it alive without watching it — so that moving the pointer
+    /// redraws the ghost and its mark and not the whole list.
+    @State private var drag = SidebarDragModel()
 
     /// How many tabs a project shows before "Show more".
     private let collapsedTabLimit = 5
@@ -47,6 +51,11 @@ struct SidebarView: View {
                     notesSection(theme: theme)
                     recentsSection(theme: theme)
                 }
+                // Rows report where they are, and the drag where the pointer
+                // is, in this one space — see `SidebarDragModel`.
+                .coordinateSpace(name: SidebarDrag.space)
+                .onPreferenceChange(SidebarSlotFramesKey.self) { drag.frames = $0 }
+                .overlay(alignment: .topLeading) { SidebarDragOverlay(model: drag) }
                 .padding(.top, 4)
                 .padding(.bottom, 8)
             }
@@ -265,15 +274,12 @@ struct SidebarView: View {
             },
             onDelete: { store.deleteWorkspace(workspace) }
         )
-        // A tab dropped on a project's own row goes last in it.
-        .dropDestination(for: String.self) { items, _ in
-            guard let id = items.compactMap(UUID.init(uuidString:)).first else { return false }
-            store.moveTab(id, before: nil, in: workspace)
-            return true
-        }
+        // A terminal dropped on a space's own row goes last in it.
+        .reportsDropSlot(SidebarDropSlot(space: workspace.id, before: nil, mark: .outline))
 
         ForEach(visible) { tab in
             tabRow(tab, indented: true)
+            paneRows(for: tab, in: workspace)
         }
 
         if isExpanded, tabs.count > visible.count {
@@ -290,6 +296,56 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// The terminals of a split other than the first, which the tab's own row
+    /// stands for. Each is listed under the same space as the pane it was split
+    /// from.
+    ///
+    /// Read here, in the parent, rather than inside a row: the layout tree is
+    /// nested objects the row would not be told about, and the store announces
+    /// every split and close (see `WorkspaceStore.splitFocusedPane`).
+    @ViewBuilder
+    private func paneRows(for tab: WorkspaceTab, in workspace: Workspace) -> some View {
+        let extra: [TerminalSession] = Array(tab.root.allSessions().dropFirst())
+        let lastID: UUID? = extra.last?.id
+        let focusedID: UUID? = store.focusedSessionID
+        let tabIsOpen: Bool = store.selectedTabID == tab.id
+        ForEach(extra) { session in
+            paneRow(
+                session,
+                in: tab,
+                workspace: workspace,
+                isSelected: tabIsOpen && focusedID == session.id,
+                isLast: lastID == session.id
+            )
+        }
+    }
+
+    // Kept apart from `paneRows`: folding this initializer, its closure and the
+    // comparisons into that view builder was more than the compiler would
+    // type-check in reasonable time.
+    private func paneRow(
+        _ session: TerminalSession,
+        in tab: WorkspaceTab,
+        workspace: Workspace,
+        isSelected: Bool,
+        isLast: Bool
+    ) -> some View {
+        SidebarPaneRow(
+            session: session,
+            drag: drag,
+            tab: tab,
+            workspace: workspace,
+            isSelected: isSelected,
+            isLast: isLast,
+            onSelect: { selectPane(session, in: tab) }
+        )
+    }
+
+    private func selectPane(_ session: TerminalSession, in tab: WorkspaceTab) {
+        store.showPane(session, in: tab)
+        dismissIfFloating()
     }
 
     /// Notes that have something in them (saved) or are showing as a tab
@@ -339,14 +395,18 @@ struct SidebarView: View {
     }
 
     private func tabRow(_ tab: WorkspaceTab, indented: Bool) -> some View {
-        SidebarTabRow(
+        // A pinned tab is listed twice, under Pinned and in its space. While the
+        // Pinned row is on screen it carries the selection, so one tab is not
+        // lit in two places. Nor is a split lit twice: when focus is in one of
+        // the terminals listed below, that row is the lit one.
+        let isOpen: Bool = store.selectedTabID == tab.id
+        let pinnedRowCarriesIt: Bool = indented && tab.isPinned && settings.pinnedExpanded
+        let isSelected: Bool = isOpen && !focusIsInLaterPane(of: tab) && !pinnedRowCarriesIt
+        return SidebarTabRow(
             tab: tab,
+            drag: drag,
             indented: indented,
-            // A pinned tab is listed twice, under Pinned and in its space.
-            // While the Pinned row is on screen it carries the selection, so
-            // one tab is not lit in two places.
-            isSelected: store.selectedTabID == tab.id
-                && !(indented && tab.isPinned && settings.pinnedExpanded),
+            isSelected: isSelected,
             onSelect: {
                 store.showTerminalSurface()
                 store.selectedTabID = tab.id
@@ -357,6 +417,13 @@ struct SidebarView: View {
                 renamingTab = tab
             }
         )
+    }
+
+    /// Focus is in one of the terminals listed below the tab's own row, which
+    /// is lit instead — so a split is not lit in two places.
+    private func focusIsInLaterPane(of tab: WorkspaceTab) -> Bool {
+        guard let focused = store.focusedSessionID else { return false }
+        return tab.root.allSessions().dropFirst().contains { $0.id == focused }
     }
 
     private func matching(_ tabs: [WorkspaceTab]) -> [WorkspaceTab] {
@@ -686,6 +753,7 @@ private struct WorkspaceFolderRow: View {
 /// One tab: activity dot, title, relative timestamp.
 private struct SidebarTabRow: View {
     @ObservedObject var tab: WorkspaceTab
+    let drag: SidebarDragModel
     let indented: Bool
     let isSelected: Bool
     let onSelect: () -> Void
@@ -696,8 +764,6 @@ private struct SidebarTabRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
-    /// A tab is being dragged over this row: it would land just above it.
-    @State private var dropTargeted = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
@@ -759,24 +825,30 @@ private struct SidebarTabRow: View {
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
-        // Drag a tab to reorder it, or onto a row in another project to move it
-        // there. The payload is the tab's id as text, which another app could
-        // also offer, so a drop is only acted on when it names a tab that exists.
-        .draggable(tab.id.uuidString)
-        .dropDestination(for: String.self) { items, _ in
-            guard let id = items.compactMap(UUID.init(uuidString:)).first,
-                  let workspace = store.workspace(containingTab: tab.id) else { return false }
-            store.moveTab(id, before: tab, in: workspace)
-            return true
-        } isTargeted: { dropTargeted = $0 }
-        .overlay(alignment: .top) {
-            if dropTargeted {
-                Rectangle()
-                    .fill(settings.accentColor)
-                    .frame(height: 2)
-                    .padding(.horizontal, 8)
-            }
-        }
+        // Drag a terminal to reorder it, or onto a row in another space to move
+        // it there; let go over a row and it lands just above it. The tab's own
+        // id stands in for a tab with no terminal.
+        // The top of the row means that; the rest of it, a split with this
+        // tab's terminal.
+        .reportsDropSlot(
+            store.workspace(containingTab: tab.id).map {
+                SidebarDropSlot(space: $0.id, before: tab.id, mark: .lineAbove)
+            },
+            join: tab.primarySession.map { SidebarJoin(session: $0.id, tab: tab.id) },
+            edgeAtTop: true
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
+                .onChanged {
+                    drag.changed(
+                        terminal: tab.primarySession?.id ?? tab.id,
+                        from: tab.id,
+                        title: tab.displayName,
+                        at: $0.location
+                    )
+                }
+                .onEnded { _ in drag.ended(store: store) }
+        )
         .contextMenu {
             Button(tab.isPinned ? "Unpin" : "Pin") { store.togglePin(tab) }
             Button("Rename…", action: onRename)
@@ -890,6 +962,119 @@ private struct SessionRowContent: View {
         var parts = [session.abbreviatedDirectory]
         if let branch = session.gitBranch { parts.append("⎇ " + branch) }
         return parts.joined(separator: "  ")
+    }
+}
+
+/// A further terminal of a split, listed under its space just below the tab it
+/// shares a window with. Drag it to another space to take it out of the split
+/// and make it a tab there; the shell keeps running.
+private struct SidebarPaneRow: View {
+    @ObservedObject var session: TerminalSession
+    let drag: SidebarDragModel
+    let tab: WorkspaceTab
+    let workspace: Workspace
+    let isSelected: Bool
+    /// The last pane listed for its tab, where a drop lands just below.
+    let isLast: Bool
+    let onSelect: () -> Void
+
+    @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+    @State private var hovering = false
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        ZStack(alignment: .trailing) {
+            Button(action: onSelect) {
+                HStack(spacing: 6) {
+                    ZStack {
+                        if let color = dotColor {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .frame(width: 8)
+
+                    Image(systemName: session.isRemote ? "network" : "terminal")
+                        .font(.system(size: 10))
+                        .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+                        .frame(width: 14)
+
+                    Text(session.displayTitle)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 6)
+                }
+                // Further in than a tab's row: it belongs to the tab above it.
+                .padding(.leading, 34)
+                .padding(.trailing, 9)
+                .frame(height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isSelected
+                              ? settings.accentColor.opacity(colorScheme == .dark ? 0.2 : 0.14)
+                              : theme.surface.opacity(hovering ? 0.5 : 0))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if hovering {
+                RowIconButton(icon: "xmark", help: "Close pane", theme: theme) {
+                    store.stopTask(RunningTask(session: session, origin: .tab(tab, workspace)))
+                }
+                .padding(.trailing, 7)
+                .transition(.opacity)
+            }
+        }
+        .animation(Motion.hover, value: hovering)
+        .animation(Motion.hover, value: isSelected)
+        .foregroundStyle(theme.textPrimary)
+        .onHover { hovering = $0 }
+        .padding(.horizontal, 8)
+        // The bottom of the row means a place after this pane's tab — the pane
+        // is part of that tab, so "before" this row has no place to be — and
+        // the rest of it, a split with this pane.
+        .reportsDropSlot(
+            followingSlot,
+            join: SidebarJoin(session: session.id, tab: tab.id),
+            edgeAtTop: false
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
+                .onChanged {
+                    drag.changed(
+                        terminal: session.id,
+                        from: tab.id,
+                        title: session.displayTitle,
+                        at: $0.location
+                    )
+                }
+                .onEnded { _ in drag.ended(store: store) }
+        )
+        .help(session.abbreviatedDirectory)
+    }
+
+    /// The slot just after this pane's tab, marked only on the last pane so the
+    /// line sits where the drop will land.
+    private var followingSlot: SidebarDropSlot {
+        var following: UUID?
+        if let index = workspace.tabs.firstIndex(where: { $0 === tab }), index + 1 < workspace.tabs.count {
+            following = workspace.tabs[index + 1].id
+        }
+        return SidebarDropSlot(space: workspace.id, before: following, mark: isLast ? .lineBelow : .none)
+    }
+
+    /// Amber when this pane asked for you, blue when it is busy in a tab you are
+    /// not looking at — the same two signals a tab's row gives.
+    private var dotColor: Color? {
+        if session.needsAttention { return Color(hex: 0xF59E0B) }
+        if session.isRunning && store.selectedTabID != tab.id { return Color(hex: 0x3B82F6) }
+        return nil
     }
 }
 

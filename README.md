@@ -385,6 +385,15 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Workspaces → tabs → splits** — arbitrary horizontal/vertical split trees
   per tab, snapshotted to Application Support and restored on launch. A tab
   with one pane renders flush; focus rings appear only once it is split.
+  A new terminal opens in a Space of its own; a split stays in the Space of the
+  pane it was split from, and every terminal of a split is listed under that
+  Space in the sidebar. Drag any listed terminal onto another Space to move it
+  there — a pane of a split leaves it and arrives as a tab, its shell still
+  running. Drop it on the middle of another terminal's row instead (the top edge
+  of a row still means "put it here in the list") and it joins that terminal's
+  tab as a split. A Space left with nothing in it goes away (the last one stays). To
+  put a new tab in an existing Space, use **New Tab Here** on its folder row,
+  or `iterminalctl tab.create workspace=<name>`.
 - **Scriptable browser** — an embedded WKWebView usable as a tabbed right
   panel or a split pane, with page zoom, print and a scoped "clear browsing
   data", and drivable from the API (navigate, click, fill, read text, wait for
