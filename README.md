@@ -341,9 +341,11 @@ A tour of the app in thirty-four pictures, in five groups.
   beat it, and a line with no note is not thereby safe.
 - **Framed window with an icon rail** — one top bar and an icon rail down the
   left edge frame the content, which sits in a rounded card. The rail holds
-  Home, Workspaces and Connect, with a `···` menu for the rest (Tasks,
-  Automations, Skills, Cheatsheet): each has a pin that puts its icon on the rail. The
-  Workspaces panel opens beside the content and can be pinned there, or left
+  Home and Workspaces, and a button for each of the panels that open on the
+  right: Tasks, the Browser, Files, Notes, the HTTP client and Bytes. A `···`
+  menu lists those and Automations, Skills and the Cheatsheet, each with a pin
+  that puts its icon on the rail or takes it off. Every one of them is also in
+  the panels menu at the top right. The Workspaces panel opens beside the content and can be pinned there, or left
   unpinned to float over it until you pick something or click away (⌃⌘S shows
   or hides it). A button at the bottom left of the frame toggles the terminal
   dock. Settings → Appearance sets the frame's tint, corner radius and edge
@@ -374,7 +376,7 @@ A tour of the app in thirty-four pictures, in five groups.
   in one column. A dock tab can be a local shell, a
   saved connection, or a running shell moved down from a pane, and it reopens
   as whatever it was.
-- **Task manager** — every shell the app is running, wherever it lives: tab
+- **Task manager** — a panel on the right (⌥⌘T): every shell the app is running, wherever it lives: tab
   panes, the terminal dock, and the composer. Uptime while alive, exit code
   once it isn't, and one click to jump to it or stop it.
 - **System monitor** — live CPU, memory, GPU and network for the machine along
@@ -456,9 +458,9 @@ A tour of the app in thirty-four pictures, in five groups.
   over it — and nothing more: it is not sent, and Return is still what runs it,
   with the warnings about risky commands applying as they do to anything typed.
   Text with a control character in it (an escape, say) is refused. Skills stay
-  on this Mac. Automations, on the page next to it, is still to come.
-- **Cheatsheet** — a page under the rail's `···` menu (pin it to the rail, or
-  open it from the command palette): programs on the left and, for the one you
+  on this Mac. Automations, the panel next to it, is still to come.
+- **Cheatsheet** — a panel on the right, from the rail's `···` menu (pin it to
+  the rail, or open it from the panels menu or the command palette): programs on the left and, for the one you
   pick, its flags and the commands people reach for, each with a line on what it
   does. 48 programs have pages written for this app, for the BSD versions of the
   tools macOS ships; about 3,500 more come from [tldr-pages](#bundled-tools),
