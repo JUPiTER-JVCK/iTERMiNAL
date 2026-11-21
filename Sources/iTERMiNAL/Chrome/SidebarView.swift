@@ -307,26 +307,49 @@ struct SidebarView: View {
     /// every split and close (see `WorkspaceStore.splitFocusedPane`).
     @ViewBuilder
     private func paneRows(for tab: WorkspaceTab, in workspace: Workspace) -> some View {
-        let extra = Array(tab.root.allSessions().dropFirst())
+        let extra: [TerminalSession] = Array(tab.root.allSessions().dropFirst())
+        let lastID: UUID? = extra.last?.id
+        let focusedID: UUID? = store.focusedSessionID
+        let tabIsOpen: Bool = store.selectedTabID == tab.id
         ForEach(extra) { session in
-            SidebarPaneRow(
-                session: session,
-                drag: drag,
-                tab: tab,
+            paneRow(
+                session,
+                in: tab,
                 workspace: workspace,
-                isSelected: store.selectedTabID == tab.id && store.focusedSessionID == session.id,
-                isLast: session.id == extra.last?.id,
-                onSelect: {
-                    // Focus first: selecting the tab keeps a focus that is
-                    // already inside it, and otherwise falls back to its first
-                    // terminal.
-                    store.focusedSessionID = session.id
-                    store.selectedTabID = tab.id
-                    store.detailMode = .terminal
-                    dismissIfFloating()
-                }
+                isSelected: tabIsOpen && focusedID == session.id,
+                isLast: lastID == session.id
             )
         }
+    }
+
+    // Kept apart from `paneRows`: folding this initializer, its closure and the
+    // comparisons into that view builder was more than the compiler would
+    // type-check in reasonable time.
+    private func paneRow(
+        _ session: TerminalSession,
+        in tab: WorkspaceTab,
+        workspace: Workspace,
+        isSelected: Bool,
+        isLast: Bool
+    ) -> some View {
+        SidebarPaneRow(
+            session: session,
+            drag: drag,
+            tab: tab,
+            workspace: workspace,
+            isSelected: isSelected,
+            isLast: isLast,
+            onSelect: { selectPane(session, in: tab) }
+        )
+    }
+
+    private func selectPane(_ session: TerminalSession, in tab: WorkspaceTab) {
+        // Focus first: selecting the tab keeps a focus that is already inside
+        // it, and otherwise falls back to its first terminal.
+        store.focusedSessionID = session.id
+        store.selectedTabID = tab.id
+        store.detailMode = .terminal
+        dismissIfFloating()
     }
 
     /// Notes that have something in them (saved) or are showing as a tab
@@ -377,16 +400,18 @@ struct SidebarView: View {
     }
 
     private func tabRow(_ tab: WorkspaceTab, indented: Bool) -> some View {
-        SidebarTabRow(
+        // A pinned tab is listed twice, under Pinned and in its space. While the
+        // Pinned row is on screen it carries the selection, so one tab is not
+        // lit in two places. Nor is a split lit twice: when focus is in one of
+        // the terminals listed below, that row is the lit one.
+        let isOpen: Bool = store.selectedTabID == tab.id
+        let pinnedRowCarriesIt: Bool = indented && tab.isPinned && settings.pinnedExpanded
+        let isSelected: Bool = isOpen && !focusIsInLaterPane(of: tab) && !pinnedRowCarriesIt
+        return SidebarTabRow(
             tab: tab,
             drag: drag,
             indented: indented,
-            // A pinned tab is listed twice, under Pinned and in its space.
-            // While the Pinned row is on screen it carries the selection, so
-            // one tab is not lit in two places.
-            isSelected: store.selectedTabID == tab.id
-                && !focusIsInLaterPane(of: tab)
-                && !(indented && tab.isPinned && settings.pinnedExpanded),
+            isSelected: isSelected,
             onSelect: {
                 store.selectedTabID = tab.id
                 store.detailMode = .terminal
