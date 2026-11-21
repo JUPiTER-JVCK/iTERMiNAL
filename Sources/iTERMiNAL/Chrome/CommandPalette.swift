@@ -368,6 +368,9 @@ struct CommandPaletteView: View {
             PaletteAction(id: "panel.bytes", title: "Toggle Bytes Panel", subtitle: "Every byte of any file, in hex or bits", systemImage: "sidebar.right", shortcut: "⌥⌘Y") {
                 store.togglePanel(.bytes)
             },
+            PaletteAction(id: "panel.byteTools", title: "Toggle Byte Tools Panel", subtitle: "Convert between bases, encodings and formats; hashes, floats, URLs, ASN.1", systemImage: "sidebar.right", shortcut: "⌥⌘K") {
+                store.togglePanel(.byteTools)
+            },
             PaletteAction(id: "dock.toggle", title: "Toggle Terminal Dock", systemImage: "rectangle.bottomthird.inset.filled", shortcut: "⌘J") {
                 store.toggleBottomDock()
             },

@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files, notes, superfile, btop, http, bytes
+    case browser, files, notes, superfile, btop, http, bytes, byteTools
     /// The pages the rail used to switch the main window to, now panels like
     /// the rest. Saved by raw value, so a layout saved with one open restores
     /// with it — and an older build, which has no such case, drops it.
@@ -18,7 +18,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         switch self {
         case .superfile: return .superfile
         case .btop: return .btop
-        case .browser, .files, .notes, .http, .bytes,
+        case .browser, .files, .notes, .http, .bytes, .byteTools,
              .tasks, .automations, .skills, .cheatsheet: return nil
         }
     }
@@ -34,6 +34,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return TerminalTool.btop.title
         case .http: return RailItem.http.title
         case .bytes: return RailItem.bytes.title
+        case .byteTools: return "Byte Tools"
         case .tasks: return RailItem.tasks.title
         case .automations: return RailItem.automations.title
         case .skills: return RailItem.skills.title
@@ -49,6 +50,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return TerminalTool.btop.icon
         case .http: return RailItem.http.icon
         case .bytes: return RailItem.bytes.icon
+        case .byteTools: return "wrench.and.screwdriver"
         case .tasks: return RailItem.tasks.icon
         case .automations: return RailItem.automations.icon
         case .skills: return RailItem.skills.icon
@@ -68,6 +70,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return "⌥⌘P"
         case .http: return "⌥⌘R"
         case .bytes: return "⌥⌘Y"
+        case .byteTools: return "⌥⌘K"
         case .tasks: return "⌥⌘T"
         case .automations, .skills, .cheatsheet: return nil
         }
@@ -96,7 +99,8 @@ enum SidePanel: String, CaseIterable, Identifiable {
     /// its scroller, and for enough height that the grid still has a few rows
     /// with the inspector open. The Cheatsheet keeps a list of programs, 250
     /// wide, beside what it shows for the one chosen, so it is asked for room
-    /// for both.
+    /// for both. Byte Tools is asked for the width of a row of eight bit
+    /// switches and the two tiles of its home screen.
     var dockMinimum: DockSize {
         switch self {
         case .browser: return DockSize(width: 280, height: 220)
@@ -104,6 +108,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return DockSize(width: 280, height: 160)
         case .http: return DockSize(width: 360, height: 340)
         case .bytes: return DockSize(width: 380, height: 340)
+        case .byteTools: return DockSize(width: 360, height: 320)
         case .tasks: return DockSize(width: 340, height: 220)
         case .automations: return DockSize(width: 300, height: 220)
         case .skills: return DockSize(width: 340, height: 220)
@@ -331,6 +336,9 @@ final class WorkspaceStore: ObservableObject {
     /// Kept for as long as the app runs, so closing the panel puts the file away
     /// without letting go of it or what was selected in it.
     lazy var panelBytes = BytesViewerModel()
+    /// What is typed in each Byte Tools tool, kept while the app runs (and not
+    /// written to disk: people paste keys and tokens into tools like these).
+    lazy var panelByteTools = ByteToolsModel()
 
     /// The notes, kept together and not tied to a space.
     let panelNotes = NotesModel()

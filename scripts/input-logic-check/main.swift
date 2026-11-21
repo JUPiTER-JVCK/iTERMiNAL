@@ -17244,5 +17244,340 @@ func checkTypingBits() {
 }
 checkTypingBits()
 
+// MARK: - Byte Tools
+
+// The Byte Tools panel's engines: every format converts to every other through bytes, and each tool's own arithmetic
+// (numbers of any size, bit patterns, IEEE 754 at three widths, varints, URLs, ASN.1, hashes, dates, UUIDs, tokens)
+// is checked against published test vectors and values worked out by hand.
+func checkByteTools() {
+    func hex(_ bytes: [UInt8]) -> String { ByteFormat.hex.encode(bytes, style: ByteStyle(delimiter: "", prefix: "", uppercase: false)) }
+    func ok<T>(_ result: Result<T, ByteFormatProblem>) -> T? { if case .success(let value) = result { return value }; return nil }
+    func problem<T>(_ result: Result<T, ByteFormatProblem>) -> String? { if case .failure(let p) = result { return p.message }; return nil }
+    let utc = TimeZone(identifier: "UTC")!
+
+    // Big numbers.
+    let big = BigNumber(digits: "340282366920938463463374607431768211455", base: 10)!
+    check(big.toString(base: 16) == "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF" && big.bitLength == 128 && big.toBytes().count == 16, "2^128 - 1 is sixteen 0xFF bytes: \(big.toString(base: 16))")
+    check(BigNumber(digits: "zz", base: 36)!.toString(base: 10) == "1295" && BigNumber(digits: "0", base: 2)!.toString(base: 2) == "0", "base 36 and zero")
+    check(BigNumber(UInt64(256)).toBytes() == [1, 0] && BigNumber(bytes: [0, 0, 1, 0]) == BigNumber(UInt64(256)), "256 is 01 00, and leading zero bytes are not part of a number")
+    check(BigNumber(digits: "100000000", base: 16)!.toString(base: 2) == "1" + String(repeating: "0", count: 32), "2^32 in binary")
+    check(BigNumber(digits: "12", base: 2) == nil && BigNumber(digits: "", base: 10) == nil, "a digit the base does not have, or none, is refused")
+    check(BigNumber(UInt64.max).asUInt64 == UInt64.max && big.asUInt64 == nil, "a number that fits 64 bits says so, and one that does not, does not")
+    check(DigitGrouping.group("1234567", size: 3, separator: ",") == "1,234,567" && DigitGrouping.group("12", size: 3, separator: ",") == "12", "digits group from the right")
+
+    // Every format, both ways, through bytes.
+    let hello = Array("Hello".utf8)
+    let want: [(ByteFormat, String)] = [
+        (.hex, "48 65 6c 6c 6f"), (.binary, "01001000 01100101 01101100 01101100 01101111"), (.octal, "110 145 154 154 157"),
+        (.decimalBytes, "72 101 108 108 111"), (.decimalNumber, "310939249775"), (.base64, "SGVsbG8="), (.base64url, "SGVsbG8"),
+        (.base32, "JBSWY3DP"), (.base58, "9Ajdvzr"), (.ascii85, "87cURDZ"),
+    ]
+    for (format, text) in want {
+        check(format.encode(hello) == text, "\(format.title) writes Hello as \(text): \(format.encode(hello))")
+        check(ok(format.decode(text)) == hello, "\(format.title) reads \(text) back as Hello")
+    }
+    let rough = Array("Hello wörld 🎉 <a&b> 100% \"q\" \\ \n".utf8)
+    for format in ByteFormat.allCases where format != .punycode {
+        check(ok(format.decode(format.encode(rough))) == rough, "\(format.title) round-trips text with accents, an emoji, markup, a percent, quotes, a backslash and a newline")
+    }
+    check(ok(ByteFormat.punycode.decode(ByteFormat.punycode.encode(Array("münchen.de".utf8)))) == Array("münchen.de".utf8), "Punycode round-trips a lower-case domain")
+    check(ok(ByteFormat.base64.decode("SGVsbG8")) == hello && ok(ByteFormat.base64.decode("SGVs\nbG8=")) == hello, "Base64 reads missing padding and line breaks")
+    check(ok(ByteFormat.base64.decode("a-_b")) == ok(ByteFormat.base64url.decode("a-_b")), "the URL-safe alphabet is read by either")
+    check(ByteFormat.base58.encode([0, 0, 1]) == "112" && ok(ByteFormat.base58.decode("112")) == [0, 0, 1], "Base58 keeps leading zero bytes as 1s")
+    check(ByteFormat.ascii85.encode([0, 0, 0, 0]) == "z" && ok(ByteFormat.ascii85.decode("<~87cURDZ~>")) == hello, "Ascii85 writes four zero bytes as z and reads its <~ ~> frame")
+    check(ok(ByteFormat.hex.decode("0x48, 0x65 \\x6c:6c-6f")) == hello && ok(ByteFormat.hex.decode("f 1 2")) == [15, 1, 2], "hex reads 0x, \\x, commas, colons, dashes, and single digits between spaces")
+    check(problem(ByteFormat.hex.decode("abc")) != nil && problem(ByteFormat.hex.decode("zz")) != nil, "an odd count, or a non-digit, is refused with a message")
+    check(ok(ByteFormat.binary.decode("101")) == [5] && ok(ByteFormat.binary.decode("0b0100_1000")) == [0x48], "binary that is not whole bytes is read as a number; 0b and underscores are fine")
+    check(problem(ByteFormat.binary.decode("102")) != nil && problem(ByteFormat.decimalBytes.decode("256")) != nil && problem(ByteFormat.octal.decode("400")) != nil, "a bad digit, 256, and 0o400 are each refused")
+    check(ok(ByteFormat.octal.decode("110145154154157")) == hello, "octal run together is read in threes")
+    check(ok(ByteFormat.decimalNumber.decode("1,000")) == [0x03, 0xE8] && ok(ByteFormat.decimalNumber.decode("0")) == [0], "a decimal number is bytes, big-endian, without leading zeros")
+    check(ByteFormat.hex.encode([0xAB, 0x01], style: ByteStyle(delimiter: ":", prefix: "0x", uppercase: true)) == "0xAB:0x01", "hex style: delimiter, prefix and case")
+    check(ByteFormat.percent.encode(Array("a b/é".utf8)) == "a%20b%2F%C3%A9" && ByteFormat.htmlEntities.encode(Array("<é&>".utf8)) == "&lt;&#xE9;&amp;&gt;", "percent and entity encodings")
+    check(ByteFormat.unicodeEscapes.encode(Array("é😀".utf8)) == "\\u00e9\\ud83d\\ude00" && ok(ByteFormat.unicodeEscapes.decode("\\u00e9\\ud83d\\ude00 \\u{1F600} \\x41")) == Array("é😀 😀 A".utf8), "escapes write surrogate pairs and read both forms")
+    check(problem(ByteFormat.percent.decode("100%")) != nil && problem(ByteFormat.unicodeEscapes.decode("\\u12")) != nil, "a truncated escape is refused")
+    check(ByteFormat.detect("48 65 6c 6c 6f").first == .hex && ByteFormat.detect("SGVsbG8=").first == .base64 && ByteFormat.detect("01001000 01100101").first == .binary
+          && ByteFormat.detect("Hello%20world").first == .percent && ByteFormat.detect("72 101 108").first == .decimalBytes && ByteFormat.detect("12345").first == .decimalNumber
+          && ByteFormat.detect("hello world") == [.text] && ByteFormat.detect("xn--mnchen-3ya.de").first == .punycode && ByteFormat.detect("test").first == .text
+          && ByteFormat.detect("\\u0048\\u0065").first == .unicodeEscapes && ByteFormat.detect("a&amp;b").first == .htmlEntities && ByteFormat.detect("").first == .text,
+          "the guesser: \(ByteFormat.detect("48 65 6c 6c 6f")) \(ByteFormat.detect("SGVsbG8=")) \(ByteFormat.detect("test"))")
+    check(ByteFormat.hex.convert("48 65 6c 6c 6f", to: .base64) == .success("SGVsbG8="), "any format converts to any other")
+
+    // Punycode and domains.
+    check(Punycode.toASCII("münchen.de") == "xn--mnchen-3ya.de" && Punycode.toASCII("日本語.jp") == "xn--wgv71a119e.jp" && Punycode.toASCII("bücher") == "xn--bcher-kva", "Punycode of known names")
+    check(Punycode.toUnicode("xn--bcher-kva.example") == "bücher.example" && Punycode.toUnicode("plain.example") == "plain.example", "and back; plain labels are untouched")
+    let arabic = "\u{0644}\u{064A}\u{0647}\u{0645}\u{0627}\u{0628}\u{062A}\u{0643}\u{0644}\u{0645}\u{0648}\u{0634}\u{0639}\u{0631}\u{0628}\u{064A}\u{061F}"
+    check(Punycode.encode(arabic) == "egbpdaj6bu4bxfgehfvwxn" && Punycode.decode("egbpdaj6bu4bxfgehfvwxn") == arabic, "RFC 3492's Arabic test vector")
+    check(Punycode.decode("!!") == nil && Punycode.toUnicode("xn--!!.com") == "xn--!!.com" && Punycode.decode("") == "", "a malformed label is left as it was")
+    check(Punycode.mixesScripts("p\u{0430}ypal") && !Punycode.mixesScripts("paypal") && !Punycode.mixesScripts("日本語"), "a Cyrillic а among Latin letters is flagged")
+
+    // Hexdump.
+    let apex = Array("Apex: the bytes are real.".utf8)
+    let canonical = HexDump.format(apex)
+    check(canonical == "00000000  41 70 65 78 3a 20 74 68  65 20 62 79 74 65 73 20  |Apex: the bytes |\n00000010  61 72 65 20 72 65 61 6c  2e                       |are real.|", "hexdump -C layout: \(canonical)")
+    check(HexDump.parse(canonical) == apex, "a canonical dump reads back")
+    check(HexDump.parse(HexDump.format(apex, layout: .xxd)) == apex && HexDump.format(apex, layout: .xxd).hasPrefix("00000000: 4170 6578 3a20 7468 6520 6279 7465 7320  Apex: the bytes "), "an xxd dump reads back")
+    check(HexDump.parse("de ad be ef") == [0xDE, 0xAD, 0xBE, 0xEF] && HexDump.parse("0xDE 0xAD\n0xBE 0xEF") == [0xDE, 0xAD, 0xBE, 0xEF] && HexDump.parse("dead beef") == [0xDE, 0xAD, 0xBE, 0xEF], "plain hex is a dump too, and four-digit groups are not taken for offsets")
+    check(HexDump.parse(canonical + "\n00000019") == apex, "the closing offset hexdump -C prints is ignored")
+    check(HexDump.format([UInt8](repeating: 0x41, count: 40), layout: .canonical, perLine: 32).split(separator: "\n").count == 2 && HexDump.rows([1, 2, 3], perLine: 2).count == 2, "wider lines, and rows")
+    check(HexDump.asciiText([0x41, 0x00, 0x7F, 0x7E]) == "A..~", "non-printable bytes are shown as dots")
+
+    // Whole numbers typed in any base.
+    func int(_ text: String, _ base: Int = 10) -> ParsedInteger? { ok(IntegerInput.parse(text, defaultBase: base)) }
+    check(int("0b1010_0101")?.magnitude.asUInt64 == 165 && int("0xFF")?.base == 16 && int("-0o17")?.isNegative == true && int("1,000")?.magnitude.asUInt64 == 1000, "prefixes, signs and separators")
+    check(int("ff", 16)?.magnitude.asUInt64 == 255 && int("#ff")?.magnitude.asUInt64 == 255 && int("-0")?.isNegative == false, "bare hex, #ff, and minus zero")
+    check(ok(IntegerInput.parse("0b1", defaultBase: 12, allowPrefixes: false))?.magnitude.asUInt64 == 11 * 12 + 1 && ok(IntegerInput.parse("0x1F", defaultBase: 10, allowPrefixes: false)) == nil && ok(IntegerInput.parse("zz", defaultBase: 36, allowPrefixes: false))?.magnitude.asUInt64 == 1295, "with prefixes off, 0b in base 12 is two digits, and 0x is not a prefix")
+    check(problem(IntegerInput.parse("12", defaultBase: 2)) == "“2” is not a digit in base 2." && problem(IntegerInput.parse("")) != nil && problem(IntegerInput.parse("0x")) != nil, "a wrong digit names itself: \(String(describing: problem(IntegerInput.parse("12", defaultBase: 2))))")
+    check(NumberText.text(int("1234567")!, base: 10, grouped: true) == "1,234,567" && NumberText.text(int("255")!, base: 2, grouped: true) == "1111 1111" && NumberText.text(int("-255")!, base: 16, grouped: false, uppercase: false) == "-ff", "number text")
+
+    // Bit patterns and two's complement.
+    let negFive = BitPattern(width: 8, value: 0xFB)
+    check(negFive.signed == -5 && negFive.unsigned == 251 && negFive.isNegative && BitPattern(width: 8, value: 5).negated == negFive && negFive.inverted.unsigned == 4, "0xFB is -5 and 251; negation is invert and add one")
+    check(BitPattern(width: 64, value: UInt64.max).signed == -1 && BitPattern(width: 16, value: 0x8000).signed == -32768 && BitPattern(width: 32, value: 0x7FFFFFFF).signed == Int64(Int32.max), "signed readings at 16, 32, 64 bits")
+    check(BitPattern(width: 8, value: 0x80).flipping(7).unsigned == 0 && BitPattern(width: 8, value: 0).flipping(0).unsigned == 1 && BitPattern(width: 8, value: 0).flipping(8).unsigned == 0, "flipping a bit")
+    check(BitPattern.signedRange(width: 8).min == -128 && BitPattern.signedRange(width: 8).max == 127 && BitPattern.signedRange(width: 64).min == Int64.min && BitPattern.signedRange(width: 64).max == Int64.max && BitPattern.unsignedMax(width: 16) == 65535, "ranges")
+    func pattern(_ text: String, _ width: Int) -> BitPattern? { int(text).flatMap { ok(BitPattern.from($0, width: width)) } }
+    check(pattern("-128", 8)?.unsigned == 0x80 && pattern("200", 8)?.signed == -56 && pattern("-1", 64)?.unsigned == UInt64.max && pattern("-9223372036854775808", 64)?.signed == Int64.min && pattern("18446744073709551615", 64)?.unsigned == UInt64.max, "typed numbers become bits")
+    check(pattern("-129", 8) == nil && pattern("256", 8) == nil && pattern("18446744073709551616", 64) == nil && problem(BitPattern.from(int("-129")!, width: 8)) == "−129 does not fit in 8 bits (-128 to 127).", "numbers too big for the width are refused, saying the range")
+    check(BitPattern(bytes: [0x12, 0x34])?.width == 16 && BitPattern(bytes: [1, 2, 3])?.width == 32 && BitPattern(bytes: [UInt8](repeating: 1, count: 9)) == nil && BitPattern(width: 16, value: 0x1234).bytes == [0x12, 0x34], "bytes to a pattern and back")
+
+    // Bitwise.
+    let a = BitPattern(width: 8, value: 0b1100_1010), b = BitPattern(width: 8, value: 0b1010_0110)
+    func op(_ o: BitwiseOperation, _ x: BitPattern = a, _ y: BitPattern = b) -> UInt64 { o.apply(x, y).unsigned }
+    check(op(.and) == 0b1000_0010 && op(.or) == 0b1110_1110 && op(.xor) == 0b0110_1100 && op(.nand) == 0b0111_1101 && op(.nor) == 0b0001_0001 && op(.xnor) == 0b1001_0011 && op(.not) == 0b0011_0101, "AND OR XOR NAND NOR XNOR NOT")
+    let three = BitPattern(width: 8, value: 3)
+    check(op(.shiftLeft, a, three) == 0b0101_0000 && op(.shiftRight, a, three) == 0b0001_1001 && op(.arithmeticShiftRight, a, three) == 0b1111_1001 && op(.rotateLeft, a, three) == 0b0101_0110 && op(.rotateRight, a, three) == 0b0101_1001, "shifts and rotates")
+    check(op(.shiftLeft, a, BitPattern(width: 8, value: 9)) == 0 && op(.arithmeticShiftRight, a, BitPattern(width: 8, value: 9)) == 0xFF && op(.rotateLeft, a, BitPattern(width: 8, value: 8)) == 0b1100_1010, "a shift past the width, and a full rotation")
+    check(BitwiseOperation.allCases.count == 12 && BitwiseOperation.not.isUnary && BitwiseOperation.rotateLeft.secondIsCount && !BitwiseOperation.and.secondIsCount, "operation metadata")
+
+    // IEEE 754.
+    let tenth = FloatBits(format: .single, value: 0.1)
+    check(tenth.hex == "0x3DCCCCCD" && tenth.storedText == "0.10000000149011612" && tenth.exponentField == 123 && tenth.unbiasedExponent == -4 && !tenth.isNegative && tenth.mantissaField == 0x4CCCCD, "0.1 as a 32-bit float: \(tenth.hex) \(tenth.storedText)")
+    check(FloatBits(format: .double, value: 0.1).hex == "0x3FB999999999999A" && FloatBits(format: .double, value: -2).hex == "0xC000000000000000", "doubles")
+    check(FloatBits(format: .half, value: 1).hex == "0x3C00" && FloatBits(format: .half, value: -2).hex == "0xC000" && FloatBits(format: .half, value: 65504).hex == "0x7BFF" && FloatBits(format: .half, value: 65520).hex == "0x7C00" && FloatBits(format: .half, value: 0.1).hex == "0x2E66", "half precision encodes, and overflows to infinity at 65520")
+    check(FloatBits(format: .half, value: 1.0 / 3).hex == "0x3555" && FloatBits(format: .half, bits: 0x3555).value == 0.333251953125 && FloatBits(format: .half, bits: 1).value == 0x1p-24 && FloatBits(format: .half, value: 0x1p-25).hex == "0x0000", "half precision rounds to nearest even and has subnormals")
+    var halfBad = 0
+    for bits in 0..<65536 {
+        let half = FloatBits(format: .half, bits: UInt64(bits))
+        if half.category != .nan, FloatBits(format: .half, value: half.value).bits != half.bits { halfBad += 1 }
+    }
+    check(halfBad == 0, "every one of the 65,536 half-precision bit patterns survives a trip through Double: \(halfBad) did not")
+    check(FloatBits(format: .single, bits: 0x7F800000).category == .infinity && FloatBits(format: .single, bits: 0x7FC00000).isQuietNaN && FloatBits(format: .single, bits: 0x7F800001).category == .nan && !FloatBits(format: .single, bits: 0x7F800001).isQuietNaN
+          && FloatBits(format: .single, bits: 1).category == .subnormal && FloatBits(format: .single, bits: 0x80000000).category == .zero && FloatBits(format: .single, bits: 0x80000000).isNegative, "float categories")
+    check(FloatBits(format: .single, bits: 0x7F800000).storedText == "∞" && FloatBits(format: .single, bits: 0xFF800000).storedText == "−∞" && FloatBits(format: .single, bits: 0x7FC00000).storedText == "NaN", "special values read as words")
+    check(FloatBits.limits(.half).maxFinite == 65504 && FloatBits.limits(.single).maxFinite == Double(Float.greatestFiniteMagnitude) && FloatBits.limits(.double).minNormal == Double.leastNormalMagnitude, "limits")
+    check(ok(FloatBits.parse("0x3F800000", format: .single))?.value == 1 && ok(FloatBits.parse("-inf", format: .double))?.value == -Double.infinity && ok(FloatBits.parse("1_000.5", format: .double))?.value == 1000.5 && problem(FloatBits.parse("0x123456789", format: .single)) != nil && problem(FloatBits.parse("banana", format: .double)) != nil, "typing a float, or its bits")
+    check(tenth.flipping(31).isNegative && tenth.flipping(31).flipping(31) == tenth && tenth.bitList.count == 32, "flipping the sign bit")
+
+    // Varints and ZigZag.
+    check(Varint.encode(300) == [0xAC, 0x02] && Varint.encode(0) == [0] && Varint.encode(127) == [0x7F] && Varint.encode(128) == [0x80, 0x01] && Varint.encode(UInt64.max).count == 10, "varint encodings")
+    check(Varint.decode([0xAC, 0x02])?.value == 300 && Varint.decode([0xAC, 0x02])?.length == 2 && Varint.decode(Varint.encode(UInt64.max))?.value == UInt64.max && Varint.decode([0x80]) == nil && Varint.decode([UInt8](repeating: 0xFF, count: 11)) == nil, "varint decoding refuses a cut-off or overlong one")
+    check(Varint.decode([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02]) == nil, "a tenth byte that overflows 64 bits is refused")
+    check(Varint.decodeAll([0x01, 0xAC, 0x02, 0x80]).values == [1, 300] && Varint.decodeAll([0x01, 0xAC, 0x02, 0x80]).leftover == 1 && Varint.groups([0xAC, 0x02]).map(\.payload) == [0x2C, 0x02] && Varint.groups([0xAC, 0x02]).map(\.continues) == [true, false], "a run of varints, the leftover, and the groups")
+    check(Varint.zigzag(0) == 0 && Varint.zigzag(-1) == 1 && Varint.zigzag(1) == 2 && Varint.zigzag(-2) == 3 && Varint.zigzag(Int64.max) == UInt64.max - 1 && Varint.zigzag(Int64.min) == UInt64.max && Varint.unzigzag(Varint.zigzag(-123456)) == -123456, "ZigZag")
+
+    // URLs.
+    let url = URLAnatomy.parse("https://user:p%40ss@example.com:8443/docs/intro?q=two%20words&lang=en&flag#section-3")
+    check(url.scheme == "https" && url.user == "user" && url.password == "p%40ss" && url.host == "example.com" && url.port == "8443" && url.path == "/docs/intro" && url.query == "q=two%20words&lang=en&flag" && url.fragment == "section-3", "URL parts: \(url)")
+    check(url.queryItems.count == 3 && url.queryItems[0].value == "two words" && url.queryItems[0].rawValue == "two%20words" && url.queryItems[2].value == nil && url.effectivePort == 8443, "query items")
+    check(url.segments.map(\.text).joined() == "https://user:p%40ss@example.com:8443/docs/intro?q=two%20words&lang=en&flag#section-3", "the coloured pieces spell the URL")
+    check(URLAnatomy.parse("http://[::1]:3000/x").host == "[::1]" && URLAnatomy.parse("http://[::1]:3000/x").port == "3000" && URLAnatomy.parse("http://[::1]/x").port == nil, "an IPv6 host")
+    check(URLAnatomy.parse("mailto:a@b.c").scheme == "mailto" && URLAnatomy.parse("mailto:a@b.c").host == nil && URLAnatomy.parse("mailto:a@b.c").path == "a@b.c", "a URL with no authority")
+    check(URLAnatomy.parse("/a/b?x=1").scheme == nil && URLAnatomy.parse("/a/b?x=1").path == "/a/b" && URLAnatomy.parse("//example.com/p").host == "example.com" && URLAnatomy.parse("https://example.com").effectivePort == 443, "relative and scheme-relative references, and a default port")
+    check(URLAnatomy.parse("https://xn--80ak6aa92e.com/").notes.contains(where: { $0.contains("Punycode") }) && URLAnatomy.parse("https://u@x.com/").notes.contains(where: { $0.contains("deprecated") }) && URLAnatomy.parse("https://x.com:99999/").notes.contains(where: { $0.contains("99999") }), "the reader's warnings")
+    check(URLAnatomy.parse("https://\u{0430}pple.com/").notes.contains(where: { $0.contains("Punycode") }), "a non-ASCII host is flagged")
+    check(PercentEncoding.encode(Array("a b/é~".utf8), allowed: .unreserved) == "a%20b%2F%C3%A9~" && PercentEncoding.encode(Array("a b!".utf8), allowed: .uriComponent) == "a%20b!" && PercentEncoding.encode(Array("a b/?".utf8), allowed: .uri) == "a%20b/?" && PercentEncoding.encode(Array("a b".utf8), allowed: .unreserved, spaceAsPlus: true) == "a+b", "the three sets that stay, and + for space")
+    check(ok(PercentEncoding.decode("a+b%20c", plusIsSpace: true)) == Array("a b c".utf8) && ok(PercentEncoding.decode("a+b", plusIsSpace: false)) == Array("a+b".utf8) && problem(PercentEncoding.decode("%4", plusIsSpace: false)) != nil && problem(PercentEncoding.decode("%zz", plusIsSpace: false)) != nil, "decoding, and refusing a broken escape")
+    let pieces = PercentBreakdown.pieces(of: "a é", allowed: .unreserved, spaceAsPlus: false)
+    check(pieces.map(\.encoded) == ["a", "%20", "%C3%A9"] && pieces.map(\.changed) == [false, true, true] && pieces[2].bytes == [0xC3, 0xA9], "each character and what it became")
+
+    // ASN.1 / DER.
+    let der = ok(ByteFormat.hex.decode("30 14 02 03 01 00 01 06 09 2A 86 48 86 F7 0D 01 01 01 0C 02 68 69"))!
+    let tree = ok(ASN1.parse(der))
+    check(tree?.count == 1 && tree?[0].children.map(\.tagNumber) == [2, 6, 12] && tree?[0].length == 20 && tree?[0].offset == 0 && tree?[0].children[1].offset == 7, "a DER SEQUENCE and its three elements")
+    let lines = tree.map { ASN1.lines($0) } ?? []
+    check(lines.map(\.name) == ["SEQUENCE", "INTEGER", "OBJECT IDENTIFIER", "UTF8String"] && lines[1].summary == "65537 (0x010001)" && lines[2].summary == "1.2.840.113549.1.1.1 (rsaEncryption)" && lines[3].summary == "“hi”", "described: \(lines.map(\.summary))")
+    check(ASN1.oidString([0x55, 0x04, 0x03]) == "2.5.4.3" && ASN1.oidString([0x2B, 0x65, 0x70]) == "1.3.101.112" && ASN1.oidString([0x88, 0x37, 0x01]) == "2.999.1", "OID arcs, including a first byte that folds 2.x and a multi-byte arc")
+    func integer(_ text: String) -> String { hex(ASN1.integer(int(text)!)) }
+    check(integer("65537") == "0203010001" && integer("0") == "020100" && integer("127") == "02017f" && integer("128") == "02020080" && integer("-1") == "0201ff" && integer("-128") == "020180" && integer("-129") == "0202ff7f" && integer("256") == "02020100", "INTEGER in the shortest two's complement")
+    check(hex(ASN1.objectIdentifier("1.2.840.113549")!) == "06062a864886f70d" && ASN1.objectIdentifier("3.1") == nil && ASN1.objectIdentifier("1.40") == nil && ASN1.objectIdentifier("1") == nil, "building an OID, and refusing impossible ones")
+    check(Array(ASN1.tlv(tag: 0x04, [UInt8](repeating: 7, count: 200)).prefix(4)) == [0x04, 0x81, 0xC8, 0x07] && ASN1.tlv(tag: 0x04, []) == [0x04, 0x00] && Array(ASN1.tlv(tag: 0x04, [UInt8](repeating: 0, count: 300)).prefix(4)) == [0x04, 0x82, 0x01, 0x2C], "long-form lengths")
+    check(ASN1.integerText([0xFF]) == "-1" && ASN1.integerText([0x00, 0x80]) == "128" && ASN1.integerText([UInt8](repeating: 0xFF, count: 9)).hasPrefix("-1 ") && ASN1.time("231114221320Z", generalized: false) == "2023-11-14 22:13:20 UTC" && ASN1.time("20231114221320Z", generalized: true) == "2023-11-14 22:13:20 UTC" && ASN1.time("500101000000Z", generalized: false) == "1950-01-01 00:00:00 UTC", "integers and times")
+    check(problem(ASN1.parse([0x30, 0x05, 0x02])) != nil && problem(ASN1.parse([0x30])) != nil && problem(ASN1.parse([0x04, 0x05, 0x01])) != nil && problem(ASN1.parse([])) != nil, "truncated DER is refused, saying where")
+    check(problem(ASN1.parse([0x04, 0x80, 0x00])) != nil, "an indefinite length on a primitive is refused")
+    let indefinite = ok(ASN1.parse([0x30, 0x80, 0x02, 0x01, 0x05, 0x00, 0x00]))
+    check(indefinite?[0].isIndefinite == true && indefinite?[0].children.count == 1 && indefinite?[0].totalLength == 7, "BER's indefinite length ends at 00 00")
+    let wrapped = ok(ASN1.parse([0x04, 0x05, 0x02, 0x03, 0x01, 0x00, 0x01]))!
+    check(ASN1.nested(in: wrapped[0])?.first?.tagNumber == 2 && ASN1.nested(in: ok(ASN1.parse([0x04, 0x02, 0x68, 0x69]))![0]) == nil, "an OCTET STRING that holds DER is opened, and one that does not is left alone")
+    check(ok(ASN1.bytes(fromText: "30 03 02 01 05")) == [0x30, 0x03, 0x02, 0x01, 0x05] && ok(ASN1.bytes(fromText: "MAMCAQU=")) == [0x30, 0x03, 0x02, 0x01, 0x05] && ok(ASN1.bytes(fromText: "-----BEGIN TEST-----\nMAMCAQU=\n-----END TEST-----")) == [0x30, 0x03, 0x02, 0x01, 0x05], "DER from hex, Base64 or PEM")
+    check(ASN1.name(of: ok(ASN1.parse([0xA0, 0x03, 0x02, 0x01, 0x02]))![0]) == "[0]" && ok(ASN1.parse([0xA0, 0x03, 0x02, 0x01, 0x02]))![0].children.count == 1, "context tags")
+    check(ok(ASN1.parse([0x9F, 0x81, 0x00, 0x01, 0x07]))?[0].tagNumber == 128, "a tag number in the long form")
+
+    func built(_ type: String, _ value: String, wrap: String = "none") -> String? { ok(ASN1.build(type: type, value: value)).map { hex(ASN1.wrap($0, as: wrap)) } }
+    check(built("integer", "65537") == "0203010001" && built("oid", "1.2.840.113549.1.1.1") == "06092a864886f70d010101" && built("oid", "rsaEncryption") == "06092a864886f70d010101" && built("oid", "sha256") == "0609608648016503040201", "building INTEGER and OID, an OID by name")
+    check(built("utf8", "hi") == "0c026869" && built("printable", "Acme Inc.") == "130941636d6520496e632e" && built("ia5", "a@b") == "1603614062" && built("boolean", "true") == "0101ff" && built("boolean", "no") == "010100" && built("null", "") == "0500", "strings, BOOLEAN and NULL")
+    check(built("octets", "01 02") == "04020102" && built("bits", "ff") == "030200ff" && built("integer", "1", wrap: "sequence") == "3003020101" && built("integer", "1", wrap: "set") == "3103020101" && built("integer", "x") == nil && built("oid", "1.40") == nil && built("printable", "a@b") == nil && built("ia5", "é") == nil && built("boolean", "maybe") == nil, "byte strings, wrapping, and refusals")
+    check(ok(ASN1.parse(ok(ASN1.build(type: "integer", value: "-129"))!))?[0].value == [0xFF, 0x7F], "what is built parses back")
+
+    // Hashes and checksums, against published vectors.
+    func digest(_ algorithm: DigestAlgorithm, _ text: String) -> String { hex(algorithm.digest(Array(text.utf8))) }
+    check(digest(.md5, "") == "d41d8cd98f00b204e9800998ecf8427e" && digest(.md5, "abc") == "900150983cd24fb0d6963f7d28e17f72", "MD5")
+    check(digest(.sha1, "abc") == "a9993e364706816aba3e25717850c26c9cd0d89d" && digest(.sha1, "") == "da39a3ee5e6b4b0d3255bfef95601890afd80709", "SHA-1")
+    check(digest(.sha224, "abc") == "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7", "SHA-224")
+    check(digest(.sha256, "abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" && digest(.sha256, "") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "SHA-256")
+    check(digest(.sha384, "abc") == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7", "SHA-384")
+    check(digest(.sha512, "abc") == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f", "SHA-512")
+    let padding: [(Int, String, String, String)] = [
+        (55, "9f4390f8d30c2dd92ec9f095", "b0220c772cbf6c1822e2cb38", "ef1772b6dff9a12235855295"), (56, "b35439a4ac6f0948b6d6f9e3", "962b64aae357d2a4fee3ded8", "3b0c8ac703f828b04c6c1970"),
+        (64, "ffe054fe7ae0cb6dc65c3af9", "01d35c10c6c38c2dcf48f7ee", "014842d480b571495a4a0363"), (111, "6374f73208854473827f6f6a", "fa9121c7b32b9e01733d034c", "089f243d1e831c5879aa375e"),
+        (112, "f54353008a2553262ecdc4a3", "c01d080efd492776a1c43bd2", "9146ef3527c7cfcc66dc615c"), (128, "6836cf13bac400e9105071cd", "b73d1929aa615934e61a8715", "e510683b3f5ffe4093d02180"),
+    ]
+    for (count, sha256, sha512, md5) in padding {
+        let text = String(repeating: "a", count: count)
+        check(digest(.sha256, text).hasPrefix(sha256) && digest(.sha512, text).hasPrefix(sha512) && digest(.md5, text).hasPrefix(md5), "hashes of \(count) bytes, either side of each block's padding boundary")
+    }
+    let nine = Array("123456789".utf8)
+    check(hex(DigestAlgorithm.crc32.digest(nine)) == "cbf43926" && hex(DigestAlgorithm.crc32c.digest(nine)) == "e3069283" && hex(DigestAlgorithm.crc16arc.digest(nine)) == "bb3d" && hex(DigestAlgorithm.crc16ccitt.digest(nine)) == "29b1"
+          && hex(DigestAlgorithm.crc16xmodem.digest(nine)) == "31c3" && hex(DigestAlgorithm.crc16modbus.digest(nine)) == "4b37" && hex(DigestAlgorithm.crc8.digest(nine)) == "f4", "the CRC catalogue's check values for 123456789")
+    check(digest(.adler32, "Wikipedia") == "11e60398" && digest(.fnv1a32, "hello") == "4f9f2cab" && digest(.fnv1a64, "hello") == "a430d84680aabd0b", "Adler-32 and FNV-1a")
+    let jefe = Array("Jefe".utf8), question = Array("what do ya want for nothing?".utf8)
+    check(hex(DigestAlgorithm.sha256.hmac(key: jefe, message: question)!) == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843" && hex(DigestAlgorithm.md5.hmac(key: jefe, message: question)!) == "750c783e6ab0b503eaa86e310a5db738"
+          && hex(DigestAlgorithm.sha512.hmac(key: jefe, message: question)!).hasPrefix("164b7a7bfcf819e2e395fbe73b56e0a3") && DigestAlgorithm.crc32.hmac(key: jefe, message: question) == nil, "HMAC (RFC 4231 and 2202), and none for a checksum")
+    check(hex(DigestAlgorithm.sha256.hmac(key: [UInt8](repeating: 0xAA, count: 131), message: Array("Test Using Larger Than Block-Size Key - Hash Key First".utf8))!) == "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54", "HMAC with a key longer than the block (RFC 4231 case 6)")
+    check(DigestAlgorithm.allCases.count == 16 && DigestAlgorithm.md5.caution != nil && DigestAlgorithm.sha256.caution == nil && DigestAlgorithm.crc32.caution != nil, "algorithm metadata")
+
+    // Timestamps.
+    func rows(_ instant: Instant) -> [String: String] { Dictionary(Timestamps.rows(for: instant, timeZone: utc, now: Date(timeIntervalSince1970: 1_700_000_000 + 3 * 86_400)).map { ($0.label, $0.value) }, uniquingKeysWith: { first, _ in first }) }
+    let t0 = ok(Timestamps.parse("1700000000", unit: nil))
+    let r0 = rows(t0!.instant)
+    check(t0?.unit == .seconds && t0?.instant == Instant(seconds: 1_700_000_000, nanos: 0) && r0["ISO 8601 (UTC)"] == "2023-11-14T22:13:20Z" && r0["Unix milliseconds"] == "1700000000000" && r0["Relative"] == "3 days ago" && r0["Day of week"] == "Tuesday", "1700000000: \(r0)")
+    check(r0["Windows FILETIME"] == "133444736000000000" && r0["Apple absolute (2001)"] == "721692800.0" && r0["32-bit hex"] == "0x6553F100" && r0[".NET ticks"] == "638355968000000000", "other epochs")
+    check(ok(Timestamps.parse("1700000000123", unit: nil))?.instant == Instant(seconds: 1_700_000_000, nanos: 123_000_000) && ok(Timestamps.parse("1700000000123", unit: nil))?.unit == .milliseconds
+          && ok(Timestamps.parse("1700000000123456", unit: nil))?.unit == .microseconds && ok(Timestamps.parse("1700000000123456789", unit: nil))?.instant == Instant(seconds: 1_700_000_000, nanos: 123_456_789), "the unit is guessed from the length")
+    check(rows(Instant(seconds: 1_700_000_000, nanos: 123_000_000))["ISO 8601 (UTC)"] == "2023-11-14T22:13:20.123Z" && rows(Instant(seconds: 1_700_000_000, nanos: 123_456_789))["Unix nanoseconds"] == "1700000000123456789", "fractions, to the nanosecond")
+    check(ok(Timestamps.parse("1700000000.5", unit: nil))?.instant == Instant(seconds: 1_700_000_000, nanos: 500_000_000) && ok(Timestamps.parse("1700000000.5", unit: .milliseconds))?.instant == Instant(seconds: 1_700_000, nanos: 500_000), "a fraction is of the unit")
+    check(ok(Timestamps.parse("-1", unit: nil))?.instant == Instant(seconds: -1, nanos: 0) && ok(Timestamps.parse("-1.5", unit: nil))?.instant == Instant(seconds: -2, nanos: 500_000_000) && Instant(seconds: 1, nanos: -1) == Instant(seconds: 0, nanos: 999_999_999), "before 1970, and carrying nanoseconds")
+    check(ok(Timestamps.parse("2023-11-14T22:13:20Z", unit: nil))?.instant.seconds == 1_700_000_000 && ok(Timestamps.parse("2023-11-14 22:13:20", unit: nil))?.instant.seconds == 1_700_000_000 && ok(Timestamps.parse("2023-11-14", unit: nil))?.instant.seconds == 1_699_920_000
+          && ok(Timestamps.parse("2023-11-14T23:43:20.5+01:30", unit: nil))?.instant == Instant(seconds: 1_700_000_000, nanos: 500_000_000) && ok(Timestamps.parse("2023/11/14 22:13:20 UTC", unit: nil))?.instant.seconds == 1_700_000_000, "dates, with and without a zone")
+    check(ok(Timestamps.parse("2024-02-29", unit: nil))?.instant.seconds == 1_709_164_800 && problem(Timestamps.parse("2023-02-30", unit: nil)) != nil && problem(Timestamps.parse("2023-13-01", unit: nil)) != nil && ok(Timestamps.parse("1969-12-31 23:59:59", unit: nil))?.instant.seconds == -1 && problem(Timestamps.parse("banana", unit: nil)) != nil && problem(Timestamps.parse("", unit: nil)) != nil, "leap days, impossible dates and words")
+    check(ok(Timestamps.parse("Tue, 14 Nov 2023 22:13:20 +0000", unit: nil))?.instant.seconds == 1_700_000_000, "RFC 2822")
+    check(Timestamps.relative(from: Date(timeIntervalSince1970: 100), to: Date(timeIntervalSince1970: 100)) == "now" && Timestamps.relative(from: Date(timeIntervalSince1970: 7200), to: Date(timeIntervalSince1970: 0)) == "in 2 hours" && Timestamps.relative(from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 60)) == "1 minute ago", "relative times")
+    check(Instant(seconds: 1_700_000_000, nanos: 0).total(in: .nanoseconds) == 1_700_000_000_000_000_000 && Instant(seconds: Int64.max / 2, nanos: 0).total(in: .nanoseconds) == nil, "a nanosecond total that does not fit says so")
+
+    // UUIDs.
+    let uuidText = "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"
+    let v1 = ok(UUIDInfo.parse("{" + uuidText.uppercased() + "}"))
+    check(v1?.canonical == uuidText && v1?.version == 1 && v1?.node == "00:a0:c9:1e:6b:f6" && v1?.isStandardVariant == true && v1?.timestamp?.seconds == 854_991_792 && ok(UUIDInfo.parse("urn:uuid:" + uuidText))?.canonical == uuidText && ok(UUIDInfo.parse(uuidText.replacingOccurrences(of: "-", with: "")))?.canonical == uuidText, "a version 1 UUID, in four spellings: \(String(describing: v1?.timestamp))")
+    check(ok(UUIDInfo.parse("017F22E2-79B0-7CC3-98C4-DC0C0C07398F"))?.version == 7 && ok(UUIDInfo.parse("017F22E2-79B0-7CC3-98C4-DC0C0C07398F"))?.timestamp?.seconds == 1_645_557_742 && ok(UUIDInfo.parse("1EC9414C-232A-6B00-B3C8-9F6BDECED846"))?.version == 6 && ok(UUIDInfo.parse("1EC9414C-232A-6B00-B3C8-9F6BDECED846"))?.timestamp?.seconds == 1_645_557_742, "version 7 and 6 timestamps")
+    check(ok(UUIDInfo.parse("00000000-0000-0000-0000-000000000000"))?.isNil == true && ok(UUIDInfo.parse("ffffffff-ffff-ffff-ffff-ffffffffffff"))?.isMax == true && problem(UUIDInfo.parse("1234")) != nil && problem(UUIDInfo.parse(String(repeating: "g", count: 32))) != nil, "nil, max, and not UUIDs")
+    let random = UUIDInfo.random(), ordered = UUIDInfo.timeOrdered(at: Date(timeIntervalSince1970: 1_700_000_000))
+    check(random.version == 4 && random.isStandardVariant && ok(UUIDInfo.parse(random.canonical)) == random && ordered.version == 7 && ordered.timestamp?.seconds == 1_700_000_000 && UUIDInfo.random() != random, "made UUIDs read back as what they are")
+    check(UUIDInfo(bytes: [1, 2, 3]) == nil, "a UUID is sixteen bytes")
+
+    // JSON Web Tokens.
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    if let jwt = ok(JWT.decode(ByteTool.sampleJWT, now: now)) {
+        check(jwt.algorithm == "HS256" && jwt.claims.map(\.name) == ["sub", "iat", "name"] && jwt.claims[0].value == "1234567890" && jwt.claims[1].note?.hasPrefix("2018-01-18T01:30:22Z") == true && jwt.headerJSON.contains("\"JWT\"") && jwt.headerJSON.contains("\"HS256\""), "the jwt.io token decodes: \(jwt.claims)")
+        check(JWT.verify(jwt, secret: Array("your-256-bit-secret".utf8)) == true && JWT.verify(jwt, secret: Array("wrong".utf8)) == false, "and its HS256 signature verifies against the right secret only")
+    } else {
+        check(false, "the sample token decodes")
+    }
+    check(problem(JWT.decode("a.b", now: now)) != nil && problem(JWT.decode("!!.e30.", now: now)) != nil && ok(JWT.decode("Bearer eyJhbGciOiJub25lIn0.e30.", now: now))?.algorithm == "none" && ok(JWT.decode("eyJhbGciOiJub25lIn0.e30.", now: now)).flatMap { JWT.verify($0, secret: []) } == nil, "bad tokens are refused, a Bearer prefix is fine, and alg none has nothing to verify")
+
+    // ASCII, code points, Base64 steps.
+    let table = ASCIITable.entries(extended: true)
+    check(table.count == 256 && ASCIITable.entries(extended: false).count == 128 && ASCIITable.entry(10).abbreviation == "LF" && ASCIITable.entry(10).escape == "\\n" && ASCIITable.entry(10).caret == "^J" && ASCIITable.entry(127).abbreviation == "DEL" && ASCIITable.entry(127).caret == "^?", "the table and its control characters")
+    check(ASCIITable.entry(65).hex == "41" && ASCIITable.entry(5).hex == "05" && ASCIITable.entry(65).binary == "01000001" && ASCIITable.entry(65).octal == "101" && ASCIITable.entry(65).character == "A" && ASCIITable.entry(0).character == nil && ASCIITable.entry(65).description == "Latin Capital Letter A", "an entry's forms")
+    check(ASCIITable.filter(table, query: "0x41").map(\.code) == [65] && ASCIITable.filter(table, query: "lf").map(\.code) == [10] && ASCIITable.filter(table, query: "A").map(\.code) == [65] && ASCIITable.filter(table, query: "41h").map(\.code) == [65]
+          && ASCIITable.filter(table, query: "65").map(\.code) == [65] && ASCIITable.filter(table, query: "01000001").map(\.code) == [65] && ASCIITable.filter(table, query: "newline").map(\.code) == [10] && ASCIITable.filter(table, query: "vulgar half").map(\.code) == [189] && ASCIITable.filter(table, query: "").count == 256, "finding an entry by character, number, name or words")
+    let cards = UTF8Breakdown.cards("é😀 a")
+    check(cards.map(\.codePoint) == ["U+00E9", "U+1F600", "U+0020", "U+0061"] && cards[0].utf8Hex == "C3 A9" && cards[1].utf8Hex == "F0 9F 98 80" && cards[1].utf16Hex == "D83D DE00" && cards[2].glyph == "␣" && cards[1].name == "GRINNING FACE", "code point cards")
+    let family = UTF8Breakdown.counts("👨‍👩‍👧")
+    check(family == TextCounts(characters: 1, scalars: 5, utf8Bytes: 18, utf16Units: 8) && UTF8Breakdown.counts("Hello world").characters == 11, "one family emoji is one character, five code points, eighteen bytes")
+    let groups = Base64Steps.groups(Array("Hello world".utf8), urlSafe: false, padded: true)
+    check(groups.count == 4 && groups[0].characters == ["S", "G", "V", "s"] && groups[0].indices.compactMap { $0 } == [18, 6, 21, 44] && groups[0].bitGroups == ["010010", "000110", "010101", "101100"], "Base64 step by step: first group")
+    check(groups[3].bytes == [0x6C, 0x64] && groups[3].bitGroups == ["011011", "000110", "0100"] && groups[3].characters == ["b", "G", "Q", "="] && groups[3].indices[2] == 16 && groups[3].indices[3] == nil && groups.flatMap(\.characters).joined() == "SGVsbG8gd29ybGQ=", "and the padded last one")
+    check(Base64Steps.groups([0xFB], urlSafe: true, padded: false).first?.characters == ["-", "w"], "URL-safe, unpadded")
+
+    // XOR, ciphers, Morse.
+    check(Ciphers.xor([1, 2, 3, 4], key: [0xFF, 0x00]) == [0xFE, 2, 0xFC, 4] && Ciphers.xor([1, 2], key: []) == [1, 2], "XOR with a repeating key")
+    check(Ciphers.caesar("Hello, World!", shift: 13) == "Uryyb, Jbeyq!" && Ciphers.caesar("Uryyb", shift: -13) == "Hello" && Ciphers.caesar("xyz", shift: 3) == "abc" && Ciphers.caesar("abc", shift: -29) == "xyz", "Caesar and ROT13")
+    check(Ciphers.rot47("Hello") == "w6==@" && Ciphers.rot47("w6==@") == "Hello" && Ciphers.atbash("Hello") == "Svool", "ROT47 and Atbash")
+    check(Ciphers.vigenere("ATTACKATDAWN", key: "LEMON", decrypt: false) == "LXFOPVEFRNHR" && Ciphers.vigenere("LXFOPVEFRNHR", key: "LEMON", decrypt: true) == "ATTACKATDAWN" && Ciphers.vigenere("abc", key: "", decrypt: false) == "abc", "Vigenère")
+    let secret = Ciphers.xor(Array("Cooking MC's like a pound of bacon".utf8), key: [0x58])
+    check(Ciphers.singleByteXORGuesses(secret).first?.key == 0x58 && Ciphers.singleByteXORGuesses(secret).first?.text == "Cooking MC's like a pound of bacon" && Ciphers.singleByteXORGuesses([]).isEmpty, "the single-byte XOR break finds the key")
+    check(Morse.encode("SOS hello") == "... --- ... / .... . .-.. .-.. ---" && Morse.decode("... --- ... / .... . .-.. .-.. ---") == "SOS HELLO" && Morse.decode("··· −−− ···") == "SOS" && Morse.decode(".-.-.-.-.-.-.-") == "?", "Morse")
+
+    // Byte order and sizes.
+    let readings = ByteOrderTool.readings([0x12, 0x34, 0x56, 0x78])
+    check(readings.count == 6 && readings[0].value == "305419896" && readings[2].value == "2018915346" && ByteOrderTool.swapped([1, 2, 3]) == [3, 2, 1], "endianness: \(readings.map(\.value))")
+    check(ByteOrderTool.readings([0xFF, 0xFE]).map(\.value) == ["65534", "-2", "65279", "-257"] && ByteOrderTool.readings([0x3F, 0x80, 0, 0])[4].value == "1.0" && ByteOrderTool.readings([1, 2, 3]).isEmpty, "signed readings, a float, and a width that has none")
+    let mebi = Dictionary(uniqueKeysWithValues: SizeUnits.convert(1, from: SizeUnits.units.first { $0.symbol == "MiB" }!).map { ($0.unit.symbol, $0.text) })
+    check(mebi["B"] == "1048576" && mebi["KiB"] == "1024" && mebi["MB"] == "1.048576" && mebi["bit"] == "8388608" && SizeUnits.format(0) == "0" && SizeUnits.format(1.5) == "1.5", "1 MiB in every unit: \(mebi)")
+
+    // IP addresses and subnets.
+    func ip(_ text: String) -> IPAddressInfo? { ok(IPTools.parse(text)) }
+    func subnet(_ text: String) -> IPTools.Subnet? { ok(IPTools.parseSubnet(text)) }
+    let home = ip("192.168.1.1")!
+    check(home.bytes == [192, 168, 1, 1] && home.integer == "3232235777" && home.hex == "0xC0A80101" && home.binary == "11000000.10101000.00000001.00000001" && home.reverseName == "1.1.168.192.in-addr.arpa"
+          && home.kind == "private (192.168.0.0/16)" && home.asMappedIPv6 == "::ffff:192.168.1.1", "an IPv4 address, written every way")
+    check(ip("3232235777") == home && ip("0xC0A80101") == home && ip("0b11000000101010000000000100000001") == home, "from a whole number, hex or binary")
+    check(ip("8.8.8.8")!.kind == "public (globally routable)" && ip("127.0.0.1")!.kind == "loopback (127.0.0.0/8)" && ip("100.64.1.1")!.kind.hasPrefix("shared") && ip("172.31.255.255")!.kind == "private (172.16.0.0/12)"
+          && ip("172.32.0.1")!.kind.hasPrefix("public") && ip("169.254.1.1")!.kind.hasPrefix("link-local") && ip("224.0.0.1")!.kind.hasPrefix("multicast") && ip("255.255.255.255")!.kind.hasPrefix("limited broadcast")
+          && ip("0.0.0.0")!.kind.hasPrefix("unspecified") && ip("198.51.100.7")!.kind.hasPrefix("documentation") && ip("198.19.0.1")!.kind.hasPrefix("benchmarking"), "what kind of IPv4 address")
+    let v6 = ip("2001:db8::567:89ab")!
+    check(v6.expanded == "2001:0db8:0000:0000:0000:0000:0567:89ab" && v6.compressed == "2001:db8::567:89ab" && v6.kind.hasPrefix("documentation")
+          && v6.reverseName == "b.a.9.8.7.6.5.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa", "an IPv6 address, and its ip6.arpa name")
+    check(ip("2001:0db8:0000:0000:0001:0000:0000:0001")!.compressed == "2001:db8::1:0:0:1" && ip("2001:db8:0:1:1:1:1:1")!.compressed == "2001:db8:0:1:1:1:1:1" && ip("::")!.compressed == "::" && ip("::1")!.compressed == "::1"
+          && ip("1::")!.compressed == "1::" && ip("1:0:0:2:0:0:0:3")!.compressed == "1:0:0:2::3", "RFC 5952: the longest run of zeros, the first on a tie, never a single group")
+    check(ip("::1")!.kind == "loopback (::1)" && ip("::")!.kind == "unspecified (::)" && ip("fe80::1%en0")!.kind.hasPrefix("link-local") && ip("fd12:3456::1")!.kind.hasPrefix("unique local") && ip("ff02::1")!.kind.hasPrefix("multicast")
+          && ip("2606:4700::1111")!.kind.hasPrefix("global unicast") && ip("[::1]") == ip("::1"), "what kind of IPv6 address, with a zone or brackets")
+    check(ip("::ffff:192.0.2.1")?.mappedIPv4?.dotted == "192.0.2.1" && ip("::ffff:192.0.2.1")!.kind.hasPrefix("IPv4-mapped") && ip("64:ff9b::1.2.3.4")?.bytes.suffix(4) == [1, 2, 3, 4] && ip("1:2:3:4:5:6:1.2.3.4") != nil, "IPv4 inside IPv6")
+    check(["1.2.3", "256.1.1.1", "1.2.3.4.5", "1::2::3", ":::", "12345::", "1:2:3:4:5:6:7:8:9", "", "banana", "1.2.3.-4", "1:2:3:4:5:6:7", "-5"].allSatisfy { ip($0) == nil }, "addresses that are not")
+    check(ip("340282366920938463463374607431768211455")?.isV4 == false && ip("5")?.dotted == "0.0.0.5", "a whole number is IPv4 if it fits 32 bits, and IPv6 if not")
+    let net = subnet("192.168.1.10/24")!
+    check(net.prefix == 24 && net.mask.dotted == "255.255.255.0" && net.wildcard.dotted == "0.0.0.255" && net.network.dotted == "192.168.1.0" && net.last.dotted == "192.168.1.255" && net.total.toString(base: 10) == "256"
+          && net.usableHosts == "254" && net.hostRange.first.dotted == "192.168.1.1" && net.hostRange.last.dotted == "192.168.1.254", "a /24")
+    check(subnet("10.0.0.0/8")!.usableHosts == "16777214" && subnet("10.1.2.3/8")!.network.dotted == "10.0.0.0" && subnet("172.16.5.4/20")!.network.dotted == "172.16.0.0" && subnet("172.16.5.4/20")!.last.dotted == "172.16.15.255"
+          && subnet("172.16.5.4/20")!.mask.dotted == "255.255.240.0", "/8 and /20")
+    check(subnet("10.0.0.0/31")!.usableHosts == "2" && subnet("10.0.0.0/31")!.hostRange.last.dotted == "10.0.0.1" && subnet("10.0.0.5/32")!.usableHosts == "1" && subnet("0.0.0.0/0")!.total.toString(base: 10) == "4294967296"
+          && subnet("0.0.0.0/0")!.usableHosts == "4294967294" && subnet("1.2.3.4/30")!.usableHosts == "2", "/31, /32, /0 and /30")
+    let net6 = subnet("2001:db8::/32")!
+    check(net6.mask.compressed == "ffff:ffff::" && net6.total.toString(base: 10) == "79228162514264337593543950336" && net6.last.compressed == "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff" && net6.usableHosts == net6.total.toString(base: 10)
+          && subnet("2001:db8::1/128")!.total.toString(base: 10) == "1" && subnet("fe80::1/10")!.network.compressed == "fe80::", "IPv6 networks")
+    check(subnet("192.168.1.10 255.255.255.0")?.prefix == 24 && subnet("10.0.0.1 255.255.255.252")?.prefix == 30 && subnet("1.2.3.4 0.0.0.0")?.prefix == 0 && subnet("192.168.1.10")?.prefix == 32 && subnet("::1")?.prefix == 128, "a netmask in place of a prefix, or neither")
+    check(["192.168.1.10 255.0.255.0", "1.2.3.4/33", "1.2.3.4/x", "::1/129", "1.2.3.4 banana"].allSatisfy { subnet($0) == nil }, "a gap in a netmask, and a prefix too long, are refused")
+    check(subnet("192.168.1.0/24")!.contains(ip("192.168.1.77")!) && !subnet("192.168.1.0/24")!.contains(ip("192.168.2.1")!) && !subnet("192.168.1.0/24")!.contains(ip("::1")!) && subnet("2001:db8::/32")!.contains(ip("2001:db8:1::5")!), "which addresses are in a network")
+
+    // The registry.
+    let titles = ByteTool.allCases.map(\.title)
+    for needed in ["Binary Converter", "Decimal Converter", "Hex Converter", "Octal Converter", "Text Converter", "Bitwise Calculator", "Base Converter", "ASCII Table", "IEEE 754 Float", "Two's Complement",
+                   "Bits & Bytes", "Text → UTF-8", "Base64", "Varint / ZigZag", "ASN.1 / DER", "Punycode (IDN)", "URL Encoding", "URL Anatomy", "Hexdump"] {
+        check(titles.contains(needed), "the tool \(needed) is in the panel")
+    }
+    check(Set(titles).count == titles.count && Set(ByteTool.allCases.map(\.rawValue)).count == ByteTool.allCases.count, "titles and ids are unique")
+    check(ByteToolGroup.allCases.allSatisfy { !ByteTool.tools(in: $0).isEmpty } && ByteToolGroup.allCases.flatMap { ByteTool.tools(in: $0) }.count == ByteTool.allCases.count, "every tool is in exactly one group, and no group is empty")
+    check(ByteTool.allDefaults.count == ByteTool.allCases.reduce(0) { $0 + $1.defaults.count } && ByteTool.allCases.allSatisfy { !$0.defaults.isEmpty } && ByteTool.universal.key("input") == "universal.input", "every tool has example fields under distinct keys")
+    check(ByteTool.matching("sha").contains(.hashes) && ByteTool.matching("endian").contains(.byteOrder) && ByteTool.matching("").count == ByteTool.allCases.count && ByteTool.matching("zzzz").isEmpty && ByteTool.matching("base 64 b64").isEmpty == false && ByteTool.matching("xn--").contains(.punycode), "searching the tools")
+    check(ok(ByteFormat.hex.decode(ByteTool.asn1.defaults["input"] ?? "")).flatMap { ok(ASN1.parse($0)) } != nil, "the ASN.1 example parses")
+    check(ok(JWT.decode(ByteTool.jwt.defaults["input"] ?? "", now: now)) != nil, "the JWT example decodes")
+    let sample: [UInt8] = [0x12, 0x34, 0x56, 0x78]
+    let seedable = ByteTool.allCases.filter { $0.accepts(sample) }
+    check(!ByteTool.asciiTable.accepts(sample) && !ByteTool.uuid.accepts(sample) && ByteTool.uuid.accepts([UInt8](repeating: 1, count: 16)) && seedable.count == ByteTool.allCases.count - 3, "which tools can take four bytes: \(ByteTool.allCases.filter { !$0.accepts(sample) }.map(\.rawValue))")
+    check(ByteTool.hex.seed(from: sample) == ["input": "12345678"] && ByteTool.decimal.seed(from: sample) == ["input": "305419896"] && ByteTool.binary.seed(from: [5]) == ["input": "101"] && ByteTool.twosComplement.seed(from: sample) == ["input": "0x12345678", "width": "32"] && ByteTool.float.seed(from: sample) == ["input": "0x12345678", "format": "32"], "bytes become each tool's own kind of input")
+    check(ByteTool.ipAddress.seed(from: [192, 168, 1, 1]) == ["input": "192.168.1.1"] && ByteTool.ipAddress.seed(from: [UInt8](repeating: 0, count: 15) + [1]) == ["input": "::1"] && ByteTool.ipAddress.seed(from: [1, 2, 3]) == nil, "bytes become an address")
+    check(ByteTool.float.seed(from: [1, 2, 3]) == nil && ByteTool.byteOrder.seed(from: [1, 2, 3]) == nil && ByteTool.twosComplement.seed(from: [UInt8](repeating: 1, count: 9)) == nil && ByteTool.hex.seed(from: [UInt8](repeating: 1, count: ByteTool.carryLimit + 1)) == nil, "a tool that cannot hold the bytes refuses them")
+    check(ByteTool.universal.seed(from: Array("Hi".utf8)) == ["input": "Hi", "from": "text"] && ByteTool.universal.seed(from: [0, 255]) == ["input": "00 FF", "from": "hex"] && ByteTool.base64.seed(from: [0, 255]) == ["input": "00 FF", "kind": "hex", "mode": "encode"], "text goes across as text, other bytes as hex")
+    check(ByteTool.allCases.filter({ $0.accepts(Array("Hello".utf8)) }).count >= ByteTool.allCases.count - 5, "most tools take a word")
+    // Every seed that the registry makes must be fields the tool really has.
+    var strayFields: [String] = []
+    for tool in ByteTool.allCases {
+        for bytes in [sample, Array("Hello".utf8), [UInt8](repeating: 7, count: 16), [0xFF], [0, 255]] {
+            for field in (tool.seed(from: bytes) ?? [:]).keys where tool.defaults[field] == nil { strayFields.append(tool.rawValue + "." + field) }
+        }
+    }
+    check(strayFields.isEmpty, "a seed names only fields the tool has: \(strayFields)")
+}
+checkByteTools()
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
