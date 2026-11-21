@@ -811,6 +811,15 @@ final class WorkspaceStore: ObservableObject {
         ]))
     }
 
+    /// Brings `tab` to the front with `session`, one of its panes, focused.
+    func showPane(_ session: TerminalSession, in tab: WorkspaceTab) {
+        // Focus first: selecting the tab keeps a focus that is already inside
+        // it, and otherwise falls back to its first terminal.
+        focusedSessionID = session.id
+        selectedTabID = tab.id
+        detailMode = .terminal
+    }
+
     /// Puts a terminal beside another one, in the other's tab, as a split.
     ///
     /// The shell is carried across, not restarted. When it was the whole of its

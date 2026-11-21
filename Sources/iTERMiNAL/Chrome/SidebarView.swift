@@ -344,11 +344,7 @@ struct SidebarView: View {
     }
 
     private func selectPane(_ session: TerminalSession, in tab: WorkspaceTab) {
-        // Focus first: selecting the tab keeps a focus that is already inside
-        // it, and otherwise falls back to its first terminal.
-        store.focusedSessionID = session.id
-        store.selectedTabID = tab.id
-        store.detailMode = .terminal
+        store.showPane(session, in: tab)
         dismissIfFloating()
     }
 
