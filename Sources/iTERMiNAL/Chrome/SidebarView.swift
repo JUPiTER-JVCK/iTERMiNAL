@@ -22,6 +22,10 @@ struct SidebarView: View {
     @State private var renamingTab: WorkspaceTab?
     @State private var renamingWorkspace: Workspace?
     @State private var renameText = ""
+    /// The terminal being dragged to another space, if one is. Held in `@State`
+    /// — which keeps it alive without watching it — so that moving the pointer
+    /// redraws the ghost and its mark and not the whole list.
+    @State private var drag = SidebarDragModel()
 
     /// How many tabs a project shows before "Show more".
     private let collapsedTabLimit = 5
@@ -47,6 +51,11 @@ struct SidebarView: View {
                     notesSection(theme: theme)
                     recentsSection(theme: theme)
                 }
+                // Rows report where they are, and the drag where the pointer
+                // is, in this one space — see `SidebarDragModel`.
+                .coordinateSpace(name: SidebarDrag.space)
+                .onPreferenceChange(SidebarSlotFramesKey.self) { drag.frames = $0 }
+                .overlay(alignment: .topLeading) { SidebarDragOverlay(model: drag) }
                 .padding(.top, 4)
                 .padding(.bottom, 8)
             }
@@ -266,11 +275,7 @@ struct SidebarView: View {
             onDelete: { store.deleteWorkspace(workspace) }
         )
         // A terminal dropped on a space's own row goes last in it.
-        .dropDestination(for: String.self) { items, _ in
-            guard let id = items.compactMap(UUID.init(uuidString:)).first else { return false }
-            store.moveDragged(id, before: nil, in: workspace)
-            return true
-        }
+        .reportsDropSlot(SidebarDropSlot(space: workspace.id, before: nil, mark: .outline))
 
         ForEach(visible) { tab in
             tabRow(tab, indented: true)
@@ -306,6 +311,7 @@ struct SidebarView: View {
         ForEach(extra) { session in
             SidebarPaneRow(
                 session: session,
+                drag: drag,
                 tab: tab,
                 workspace: workspace,
                 isSelected: store.selectedTabID == tab.id && store.focusedSessionID == session.id,
@@ -373,6 +379,7 @@ struct SidebarView: View {
     private func tabRow(_ tab: WorkspaceTab, indented: Bool) -> some View {
         SidebarTabRow(
             tab: tab,
+            drag: drag,
             indented: indented,
             // A pinned tab is listed twice, under Pinned and in its space.
             // While the Pinned row is on screen it carries the selection, so
@@ -726,6 +733,7 @@ private struct WorkspaceFolderRow: View {
 /// One tab: activity dot, title, relative timestamp.
 private struct SidebarTabRow: View {
     @ObservedObject var tab: WorkspaceTab
+    let drag: SidebarDragModel
     let indented: Bool
     let isSelected: Bool
     let onSelect: () -> Void
@@ -736,8 +744,6 @@ private struct SidebarTabRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
-    /// A tab is being dragged over this row: it would land just above it.
-    @State private var dropTargeted = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
@@ -800,24 +806,22 @@ private struct SidebarTabRow: View {
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
         // Drag a terminal to reorder it, or onto a row in another space to move
-        // it there. The payload is the terminal's id as text — the tab's own for
-        // a tab with no terminal — which another app could also offer, so a drop
-        // is only acted on when it names something that exists.
-        .draggable((tab.primarySession?.id ?? tab.id).uuidString)
-        .dropDestination(for: String.self) { items, _ in
-            guard let id = items.compactMap(UUID.init(uuidString:)).first,
-                  let workspace = store.workspace(containingTab: tab.id) else { return false }
-            store.moveDragged(id, before: tab, in: workspace)
-            return true
-        } isTargeted: { dropTargeted = $0 }
-        .overlay(alignment: .top) {
-            if dropTargeted {
-                Rectangle()
-                    .fill(settings.accentColor)
-                    .frame(height: 2)
-                    .padding(.horizontal, 8)
-            }
-        }
+        // it there; let go over a row and it lands just above it. The tab's own
+        // id stands in for a tab with no terminal.
+        .reportsDropSlot(store.workspace(containingTab: tab.id).map {
+            SidebarDropSlot(space: $0.id, before: tab.id, mark: .lineAbove)
+        })
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
+                .onChanged {
+                    drag.changed(
+                        terminal: tab.primarySession?.id ?? tab.id,
+                        title: tab.displayName,
+                        at: $0.location
+                    )
+                }
+                .onEnded { _ in drag.ended(store: store) }
+        )
         .contextMenu {
             Button(tab.isPinned ? "Unpin" : "Pin") { store.togglePin(tab) }
             Button("Rename…", action: onRename)
@@ -939,6 +943,7 @@ private struct SessionRowContent: View {
 /// and make it a tab there; the shell keeps running.
 private struct SidebarPaneRow: View {
     @ObservedObject var session: TerminalSession
+    let drag: SidebarDragModel
     let tab: WorkspaceTab
     let workspace: Workspace
     let isSelected: Bool
@@ -951,7 +956,6 @@ private struct SidebarPaneRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var hovering = false
-    @State private var dropTargeted = false
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
@@ -1005,28 +1009,27 @@ private struct SidebarPaneRow: View {
         .foregroundStyle(theme.textPrimary)
         .onHover { hovering = $0 }
         .padding(.horizontal, 8)
-        .draggable(session.id.uuidString)
-        // Dropped here, a terminal goes after this pane's tab: the pane is part
-        // of that tab, so "before" this row has no place to be.
-        .dropDestination(for: String.self) { items, _ in
-            guard let id = items.compactMap(UUID.init(uuidString:)).first,
-                  let home = store.workspace(containingTab: tab.id) else { return false }
-            var following: WorkspaceTab?
-            if let index = home.tabs.firstIndex(where: { $0 === tab }), index + 1 < home.tabs.count {
-                following = home.tabs[index + 1]
-            }
-            store.moveDragged(id, before: following, in: home)
-            return true
-        } isTargeted: { dropTargeted = $0 }
-        .overlay(alignment: .bottom) {
-            if dropTargeted && isLast {
-                Rectangle()
-                    .fill(settings.accentColor)
-                    .frame(height: 2)
-                    .padding(.horizontal, 8)
-            }
-        }
+        // Let go over this row and a terminal goes after this pane's tab: the
+        // pane is part of that tab, so "before" this row has no place to be.
+        .reportsDropSlot(followingSlot)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .named(SidebarDrag.space))
+                .onChanged {
+                    drag.changed(terminal: session.id, title: session.displayTitle, at: $0.location)
+                }
+                .onEnded { _ in drag.ended(store: store) }
+        )
         .help(session.abbreviatedDirectory)
+    }
+
+    /// The slot just after this pane's tab, marked only on the last pane so the
+    /// line sits where the drop will land.
+    private var followingSlot: SidebarDropSlot {
+        var following: UUID?
+        if let index = workspace.tabs.firstIndex(where: { $0 === tab }), index + 1 < workspace.tabs.count {
+            following = workspace.tabs[index + 1].id
+        }
+        return SidebarDropSlot(space: workspace.id, before: following, mark: isLast ? .lineBelow : .none)
     }
 
     /// Amber when this pane asked for you, blue when it is busy in a tab you are

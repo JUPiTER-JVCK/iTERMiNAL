@@ -812,8 +812,8 @@ final class WorkspaceStore: ObservableObject {
     }
 
     /// What a sidebar drag carries: a terminal's id, or — for a tab with no
-    /// terminal left in it — the tab's own. Dropped on the sidebar from another
-    /// app it is just text, so an id that names neither does nothing.
+    /// terminal left in it — the tab's own. An id that names neither does
+    /// nothing.
     func moveDragged(_ id: UUID, before target: WorkspaceTab?, in destination: Workspace) {
         if paneLocation(ofSessionID: id) != nil {
             moveTerminal(id, before: target, in: destination)
