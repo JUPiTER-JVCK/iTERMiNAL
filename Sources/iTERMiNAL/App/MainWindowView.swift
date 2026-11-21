@@ -167,9 +167,8 @@ struct DetailView: View {
             // actually available.
             HStack(spacing: 0) {
                 if !store.rightPanelExpanded {
-                    mainSurface
+                    terminalSurface
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .animation(Motion.page, value: store.detailMode)
                 }
 
                 if store.rightRegionOpen {
@@ -268,38 +267,6 @@ struct DetailView: View {
         // there is and leave the larger share to the main surface — it
         // holds the terminal, which is what the window is for.
         return max(0, available * 0.4)
-    }
-
-    /// The page the rail has open. Each case is its own view, so changing
-    /// page swaps one for the next, and the transition on the group — which a
-    /// `Group` hands to each of its children — fades the new one in.
-    private var mainSurface: some View {
-        Group {
-            pageContent
-        }
-        .transition(Motion.pageTransition(reduceMotion: reduceMotion))
-    }
-
-    @ViewBuilder
-    private var pageContent: some View {
-        switch store.detailMode {
-        case .automations:
-            SectionPageView(
-                title: "Automations",
-                subtitle: "Run commands on a schedule, or when something in a session changes.",
-                icon: "clock",
-                emptyTitle: "No automations yet",
-                emptyCaption: "Scheduled commands and triggers are coming soon."
-            )
-        case .tasks:
-            TaskManagerView()
-        case .skills:
-            SkillsView()
-        case .cheatsheet:
-            CheatsheetView()
-        case .terminal:
-            terminalSurface
-        }
     }
 
     /// The terminal — or the landing screen — with the composer floating over
@@ -995,7 +962,7 @@ private struct LandingHint: View {
 
 /// Every shell the app owns, wherever it lives, with what it is doing and
 /// the two things worth doing to it: go to it, or stop it.
-private struct TaskManagerView: View {
+struct TaskManagerView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
@@ -1242,7 +1209,7 @@ private struct TaskRow: View {
 /// A sidebar section rendered as a real page: left-aligned title and
 /// subtitle at the top, content below — the shape the reference app uses for
 /// its own sections rather than a centred placeholder.
-private struct SectionPageView: View {
+struct SectionPageView: View {
     let title: String
     let subtitle: String
     let icon: String
@@ -1441,7 +1408,7 @@ struct PanelPicker: View {
 private struct PickerRow: View {
     let icon: String
     let title: String
-    let shortcut: String
+    let shortcut: String?
     let theme: Theme
     let action: () -> Void
 
@@ -1458,9 +1425,11 @@ private struct PickerRow: View {
                     .font(.system(size: 13))
                     .foregroundStyle(theme.textPrimary)
                 Spacer()
-                Text(shortcut)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary)
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: 34)

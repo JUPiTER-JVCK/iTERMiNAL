@@ -188,7 +188,6 @@ final class ScreenshotRun {
     private func baseline() async {
         closePanels()
         store.closeBottomDock()
-        store.detailMode = .terminal
         store.showCommandPalette = false
         store.showKeyboardShortcuts = false
         settings.railPanelOpen = true
@@ -1605,10 +1604,11 @@ final class ScreenshotRun {
 
     private func tasks() async -> Bool {
         await baseline()
-        store.detailMode = .tasks
+        store.openPanelExpanded(.tasks)
         await pause(1.8)
         let taken = capture("tasks")
-        store.detailMode = .terminal
+        store.closePanel(.tasks)
+        store.closeRightRegion()
         return taken
     }
 
@@ -1641,7 +1641,7 @@ final class ScreenshotRun {
             await pause(1.5)
         }
 
-        store.detailMode = .cheatsheet
+        store.openPanelExpanded(.cheatsheet)
         // The page reads tldr-pages' examples in the background when it opens.
         var waited = 0.0
         while waited < 20, cheats.tldr == .notLoaded || cheats.tldr == .loading {
@@ -1716,7 +1716,7 @@ final class ScreenshotRun {
             await pause(1.5)
             let typed = ScreenshotMode.composerField(in: window)?.string
             say("cheatsheet: Insert: \(example.command.debugDescription) went to the composer as \(String(describing: typed))")
-            expect(store.detailMode == .terminal, "Insert goes back to the terminal")
+            expect(!store.rightPanelExpanded, "Insert goes back to the terminal")
             expect(typed == example.command, "Insert puts the command in the composer exactly as it is, placeholders and all")
         } else {
             expect(false, "there is a command with a {{placeholder}} to insert: \(String(describing: cheats.bestExampleInSelection?.command))")
@@ -1725,7 +1725,8 @@ final class ScreenshotRun {
         say("cheatsheet: \(held) of \(total) claims held")
         await search("")
         compose("")
-        store.detailMode = .terminal
+        store.closePanel(.cheatsheet)
+        store.closeRightRegion()
         return found
     }
 

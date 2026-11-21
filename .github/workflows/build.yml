@@ -24,6 +24,14 @@ on:
         required: true
         type: string
 
+# A newer push to a pull request makes the run before it pointless, and macOS
+# runners are the scarce part, so those are cancelled. Anything else gets a
+# group of its own: every push to main publishes a per-build release, and a
+# shared group would throw away the queued ones.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Read-only by default; only the release job gets write, and only to contents.
 permissions:
   contents: read
@@ -95,44 +103,17 @@ jobs:
           path: btop-out/
           if-no-files-found: error
 
-  build:
-    name: Build (macOS)
-    needs: btop
+  # The checks that need no app build, run beside it instead of in front of
+  # it. "Check input logic" alone is about six minutes of swiftc, and nothing
+  # in the app build depends on it, so as steps of the build job it simply
+  # added its six minutes to every run. Everything here shares the harness it
+  # compiles, which is why they live together. The release job needs this job
+  # as well as the build, so a failure here still stops a release.
+  checks:
+    name: Checks (macOS)
     runs-on: macos-15
     steps:
-      # fetch-depth: 0 because CFBundleVersion below is the commit count, and
-      # the default depth-1 checkout would make that 1 — every build claiming
-      # to be the first. The repository is small enough that the cost is noise.
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      # Check this before spending three minutes on a build. Immutable
-      # releases reserve a tag name permanently once it has backed a published
-      # release, so a name that is already taken cannot be recovered by
-      # deleting anything — the run has to stop before it creates one.
-      - name: Check the version is free
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          tag="v${RELEASE_VERSION#v}"
-          # A malformed tag is as permanent as a duplicate one.
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*$'; then
-            echo "::error::'$tag' is not a version tag (expected v1, v0.112, v1.2.3)."
-            exit 1
-          fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::Release $tag already exists. Immutable releases reserve a tag name for good, so pick the next version."
-            exit 1
-          fi
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
-            echo "::error::Tag $tag already exists without a release. Delete it by hand, or pick the next version."
-            exit 1
-          fi
-          echo "$tag is free."
 
       # The app's pure logic — the composer, the Cheatsheet, the assistant's
       # helpers, the HTTP parsers, SSH and terminal rules and more (the header
@@ -355,6 +336,57 @@ jobs:
       - name: Check API lists
         run: python3 scripts/api-lists-check.py
 
+      # The Cheatsheet data is not in the repo, so it is fetched here, the same
+      # way the build job fetches it, to be checked with the harness above.
+      - name: Fetch cheatsheet data
+        run: scripts/fetch-tldr.sh Vendor/Cheatsheets
+
+
+      # The data is not in the repo, so what it holds is checked here, with the
+      # harness built above: a conversion that quietly lost half of it would
+      # otherwise ship with the page looking fine.
+      - name: Check cheatsheet data
+        run: '"$RUNNER_TEMP/input-logic-check" --check-cheatsheets Vendor/Cheatsheets'
+
+  build:
+    name: Build (macOS)
+    needs: btop
+    runs-on: macos-15
+    steps:
+      # fetch-depth: 0 because CFBundleVersion below is the commit count, and
+      # the default depth-1 checkout would make that 1 — every build claiming
+      # to be the first. The repository is small enough that the cost is noise.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Check this before spending three minutes on a build. Immutable
+      # releases reserve a tag name permanently once it has backed a published
+      # release, so a name that is already taken cannot be recovered by
+      # deleting anything — the run has to stop before it creates one.
+      - name: Check the version is free
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION#v}"
+          # A malformed tag is as permanent as a duplicate one.
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*$'; then
+            echo "::error::'$tag' is not a version tag (expected v1, v0.112, v1.2.3)."
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists. Immutable releases reserve a tag name for good, so pick the next version."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists without a release. Delete it by hand, or pick the next version."
+            exit 1
+          fi
+          echo "$tag is free."
+
       # Not `brew install xcodegen`. The runner image ships an untrusted
       # `aws/tap`, so every brew invocation printed a tap-trust warning that
       # had nothing to do with this project. Taking the tool straight from its
@@ -429,12 +461,6 @@ jobs:
           # Contents/Resources/Cheatsheets by project.yml's copy phase.
           scripts/fetch-tldr.sh Vendor/Cheatsheets
           ls -la Vendor/Cheatsheets Vendor/Cheatsheets/licenses
-
-      # The data is not in the repo, so what it holds is checked here, with the
-      # harness built above: a conversion that quietly lost half of it would
-      # otherwise ship with the page looking fine.
-      - name: Check cheatsheet data
-        run: '"$RUNNER_TEMP/input-logic-check" --check-cheatsheets Vendor/Cheatsheets'
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -769,7 +795,7 @@ jobs:
   # than the green Code button, which hands over source.
   release:
     name: Publish release
-    needs: build
+    needs: [build, checks]
     # Never from a pull request: a PR branch is not something to publish.
     # Everything else — a push to main, a v* tag, a manual version run — does.
     if: github.event_name != 'pull_request'

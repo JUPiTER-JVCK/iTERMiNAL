@@ -8236,6 +8236,40 @@ func checkRailItemForTheCheatsheet() {
 }
 checkRailItemForTheCheatsheet()
 
+// MARK: Rail buttons for the panels
+
+func checkRailPanelButtons() {
+    let panels: [RailItem] = [.browser, .files, .notes, .http, .bytes, .tasks, .automations, .skills, .cheatsheet]
+    check(panels.allSatisfy { $0.isPinnable && $0.opensPanel },
+          "every button that opens a panel can be pinned and unpinned")
+    check(!RailItem.terminal.opensPanel && !RailItem.workspaces.opensPanel,
+          "Home and Spaces are not panels")
+    check(Set(RailItem.pinnable) == Set(panels), "the \"···\" menu lists the five panels and the four pages")
+    check(RailItem.panelButtons.allSatisfy(\.isPinnable) && RailItem.panelButtons.count == 5,
+          "there are five panel buttons to add to an older rail")
+    check(RailItem.defaultPinned.first == .tasks, "Tasks keeps its place at the top of the pinned buttons")
+    check(Set(RailItem.panelButtons).isSubset(of: Set(RailItem.defaultPinned)), "a new rail has the panel buttons")
+
+    check(RailPins.decode(["browser", "files", "notes", "http", "bytes"]) == [.browser, .files, .notes, .http, .bytes],
+          "the panel buttons are kept when pins are read back")
+    check(RailPins.toggled(.http, in: [.tasks]) == [.tasks, .http], "a panel button pins after the others")
+    check(RailPins.toggled(.http, in: [.tasks, .http, .bytes]) == [.tasks, .bytes], "and unpins from the middle")
+
+    // A rail saved before the buttons existed keeps what it had, in order, and
+    // gets the five after it.
+    check(RailPins.addingPanelButtons(to: ["tasks"]) == ["tasks", "browser", "files", "notes", "http", "bytes"],
+          "an older rail gets the panel buttons after its own")
+    check(RailPins.addingPanelButtons(to: ["skills", "tasks"]) == ["skills", "tasks", "browser", "files", "notes", "http", "bytes"],
+          "and keeps its order")
+    check(RailPins.addingPanelButtons(to: []) == ["browser", "files", "notes", "http", "bytes"],
+          "a rail with nothing pinned gets just them")
+    check(RailPins.addingPanelButtons(to: ["notes", "bogus", "tasks", "notes"]) == ["notes", "tasks", "browser", "files", "http", "bytes"],
+          "one already there is not added twice, and a stale entry is dropped")
+    check(RailPins.addingPanelButtons(to: RailPins.addingPanelButtons(to: ["tasks"]))
+          == RailPins.addingPanelButtons(to: ["tasks"]), "adding them again changes nothing")
+}
+checkRailPanelButtons()
+
 // MARK: Dock layout
 
 // The right-hand region's arrangement: a tree of splits whose leaves are panels

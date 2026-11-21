@@ -301,7 +301,6 @@ struct SidebarView: View {
             isExpanded: $settings.notesExpanded
         ) { id in
             store.panelNotes.open(id)
-            store.detailMode = .terminal
             store.openPanel(.notes)
             dismissIfFloating()
         }
@@ -349,8 +348,8 @@ struct SidebarView: View {
             isSelected: store.selectedTabID == tab.id
                 && !(indented && tab.isPinned && settings.pinnedExpanded),
             onSelect: {
+                store.showTerminalSurface()
                 store.selectedTabID = tab.id
-                store.detailMode = .terminal
                 dismissIfFloating()
             },
             onRename: {

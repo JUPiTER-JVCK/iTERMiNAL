@@ -387,7 +387,7 @@ struct CommandPaletteView: View {
                 store.focusComposer()
             },
             PaletteAction(id: "tasks.open", title: "Task Manager", subtitle: "Every shell this app is running", systemImage: "list.bullet.rectangle", shortcut: "⌥⌘T") {
-                store.detailMode = .tasks
+                store.togglePanel(.tasks)
             },
             PaletteAction(id: "shortcuts.open", title: "Keyboard Shortcuts", subtitle: "Every shortcut in the app", systemImage: "keyboard", shortcut: "⌘/") {
                 // The palette is still closing as this runs.
@@ -426,7 +426,7 @@ struct CommandPaletteView: View {
             subtitle: "Saved commands and snippets",
             systemImage: "book"
         ) {
-            store.detailMode = .skills
+            store.openPanel(.skills)
         })
         actions.append(PaletteAction(
             id: "cheatsheet.open",
@@ -434,7 +434,7 @@ struct CommandPaletteView: View {
             subtitle: "Flags and examples for common commands",
             systemImage: "text.book.closed"
         ) {
-            store.detailMode = .cheatsheet
+            store.openPanel(.cheatsheet)
         })
         // A skill's text goes into the composer's input and no further: Return
         // is still what sends it.

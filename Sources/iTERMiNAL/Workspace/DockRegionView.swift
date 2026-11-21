@@ -242,6 +242,20 @@ private struct DockLeaf: View {
             BytesViewerPaneView(model: store.panelBytes)
         case .byteTools:
             ByteToolsPaneView(model: store.panelByteTools)
+        case .tasks:
+            TaskManagerView()
+        case .automations:
+            SectionPageView(
+                title: "Automations",
+                subtitle: "Run commands on a schedule, or when something in a session changes.",
+                icon: "clock",
+                emptyTitle: "No automations yet",
+                emptyCaption: "Scheduled commands and triggers are coming soon."
+            )
+        case .skills:
+            SkillsView()
+        case .cheatsheet:
+            CheatsheetView()
         }
     }
 

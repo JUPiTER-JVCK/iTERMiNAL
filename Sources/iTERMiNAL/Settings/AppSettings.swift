@@ -541,7 +541,16 @@ final class AppSettings: ObservableObject {
         recentsExpanded = defaults.object(forKey: "recentsExpanded") as? Bool ?? false
         notesExpanded = defaults.object(forKey: "notesExpanded") as? Bool ?? true
 
-        railPinnedItems = defaults.stringArray(forKey: "railPinnedItems") ?? RailPins.encode(RailItem.defaultPinned)
+        // A rail saved before it had buttons for the panels gets them once —
+        // otherwise someone who already had a rail would never see them — and
+        // can unpin them afterwards. A first launch has them from the defaults.
+        let storedPins = defaults.stringArray(forKey: "railPinnedItems")
+        var pins = storedPins ?? RailPins.encode(RailItem.defaultPinned)
+        if !defaults.bool(forKey: "railPanelButtonsAdded") {
+            if storedPins != nil { pins = RailPins.addingPanelButtons(to: pins) }
+            defaults.set(true, forKey: "railPanelButtonsAdded")
+        }
+        railPinnedItems = pins
         // Open and docked by default, so a first launch looks like the sidebar
         // it replaced rather than hiding the tab list.
         railPanelOpen = defaults.object(forKey: "railPanelOpen") as? Bool ?? true
