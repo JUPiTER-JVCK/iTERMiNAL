@@ -340,7 +340,7 @@ struct AppCommands: Commands {
 
             Divider()
 
-            Button("Toggle Task Manager Panel") {
+            Button("Task Manager") {
                 WorkspaceStore.shared.togglePanel(.tasks)
             }
             .keyboardShortcut("t", modifiers: [.command, .option])
