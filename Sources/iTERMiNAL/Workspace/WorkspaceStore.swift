@@ -838,9 +838,9 @@ final class WorkspaceStore: ObservableObject {
     func showPane(_ session: TerminalSession, in tab: WorkspaceTab) {
         // Focus first: selecting the tab keeps a focus that is already inside
         // it, and otherwise falls back to its first terminal.
+        showTerminalSurface()
         focusedSessionID = session.id
         selectedTabID = tab.id
-        detailMode = .terminal
     }
 
     /// Puts a terminal beside another one, in the other's tab, as a split.
