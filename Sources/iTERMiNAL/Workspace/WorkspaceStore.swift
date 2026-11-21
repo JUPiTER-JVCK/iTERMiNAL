@@ -4,6 +4,10 @@ import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
     case browser, files, notes, superfile, btop, http, bytes
+    /// The pages the rail used to switch the main window to, now panels like
+    /// the rest. Saved by raw value, so a layout saved with one open restores
+    /// with it — and an older build, which has no such case, drops it.
+    case tasks, automations, skills, cheatsheet
     var id: String { rawValue }
 
     /// The bundled program this panel runs, for the two that are one.
@@ -14,7 +18,8 @@ enum SidePanel: String, CaseIterable, Identifiable {
         switch self {
         case .superfile: return .superfile
         case .btop: return .btop
-        case .browser, .files, .notes, .http, .bytes: return nil
+        case .browser, .files, .notes, .http, .bytes,
+             .tasks, .automations, .skills, .cheatsheet: return nil
         }
     }
 
@@ -22,31 +27,39 @@ enum SidePanel: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .browser: return "Browser"
-        case .files: return "Files"
-        case .notes: return "Notes"
+        case .browser: return RailItem.browser.title
+        case .files: return RailItem.files.title
+        case .notes: return RailItem.notes.title
         case .superfile: return TerminalTool.superfile.title
         case .btop: return TerminalTool.btop.title
-        case .http: return "HTTP Client"
-        case .bytes: return "Bytes"
+        case .http: return RailItem.http.title
+        case .bytes: return RailItem.bytes.title
+        case .tasks: return RailItem.tasks.title
+        case .automations: return RailItem.automations.title
+        case .skills: return RailItem.skills.title
+        case .cheatsheet: return RailItem.cheatsheet.title
         }
     }
     var icon: String {
         switch self {
-        case .browser: return "globe"
-        case .files: return "folder"
-        case .notes: return "note.text"
+        case .browser: return RailItem.browser.icon
+        case .files: return RailItem.files.icon
+        case .notes: return RailItem.notes.icon
         case .superfile: return TerminalTool.superfile.icon
         case .btop: return TerminalTool.btop.icon
-        case .http: return "arrow.up.arrow.down"
-        case .bytes: return "number.square"
+        case .http: return RailItem.http.icon
+        case .bytes: return RailItem.bytes.icon
+        case .tasks: return RailItem.tasks.icon
+        case .automations: return RailItem.automations.icon
+        case .skills: return RailItem.skills.icon
+        case .cheatsheet: return RailItem.cheatsheet.icon
         }
     }
 
     /// Kept beside the case rather than worked out at the call site. The panel
     /// picker used a two-way ternary, which silently labelled any third panel
-    /// with the Files shortcut.
-    var shortcutHint: String {
+    /// with the Files shortcut. Nil for a panel with no shortcut of its own.
+    var shortcutHint: String? {
         switch self {
         case .browser: return "⌥⌘B"
         case .files: return "⌥⌘F"
@@ -55,6 +68,8 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return "⌥⌘P"
         case .http: return "⌥⌘R"
         case .bytes: return "⌥⌘Y"
+        case .tasks: return "⌥⌘T"
+        case .automations, .skills, .cheatsheet: return nil
         }
     }
 
@@ -79,7 +94,9 @@ enum SidePanel: String, CaseIterable, Identifiable {
     /// inside it, which is why it is asked for a little more width than the
     /// rest. The Bytes panel is asked for room for a row of eight bytes beside
     /// its scroller, and for enough height that the grid still has a few rows
-    /// with the inspector open.
+    /// with the inspector open. The Cheatsheet keeps a list of programs, 250
+    /// wide, beside what it shows for the one chosen, so it is asked for room
+    /// for both.
     var dockMinimum: DockSize {
         switch self {
         case .browser: return DockSize(width: 280, height: 220)
@@ -87,6 +104,10 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return DockSize(width: 280, height: 160)
         case .http: return DockSize(width: 360, height: 340)
         case .bytes: return DockSize(width: 380, height: 340)
+        case .tasks: return DockSize(width: 340, height: 220)
+        case .automations: return DockSize(width: 300, height: 220)
+        case .skills: return DockSize(width: 340, height: 220)
+        case .cheatsheet: return DockSize(width: 560, height: 360)
         case .superfile, .btop: return DockSize(width: minimumWidth ?? 640, height: 360)
         }
     }
@@ -102,12 +123,6 @@ enum SidePanel: String, CaseIterable, Identifiable {
 /// it: arranged with the others, filling the region, or filling the window.
 enum DockArrangement: Equatable {
     case tiled, fillRegion, fillWindow
-}
-
-/// What the detail column is showing: the terminal surface, or one of the
-/// placeholder sections mirrored from the sidebar's action rows.
-enum DetailMode {
-    case terminal, automations, skills, tasks, cheatsheet
 }
 
 /// A running shell plus where it lives, for the task manager.
@@ -142,11 +157,9 @@ final class WorkspaceStore: ObservableObject {
     static let shared = WorkspaceStore()
 
     @Published var workspaces: [Workspace] = []
-    @Published var detailMode: DetailMode = .terminal
     @Published var selectedTabID: UUID? {
         didSet {
             guard oldValue != selectedTabID else { return }
-            if selectedTabID != nil { detailMode = .terminal }
             if let selectedTabID, let space = workspace(containingTab: selectedTabID) {
                 lastWorkspaceID = space.id
             }
@@ -440,13 +453,23 @@ final class WorkspaceStore: ObservableObject {
     }
 
     /// True when the detail column is showing the landing page.
-    var isHome: Bool { detailMode == .terminal && selectedTab == nil }
+    var isHome: Bool { selectedTab == nil }
 
     /// Shows the landing page. Tabs stay open and their shells keep running;
     /// none of them is selected.
     func goHome() {
-        detailMode = .terminal
+        showTerminalSurface()
         selectedTabID = nil
+    }
+
+    /// Brings the terminal — or the landing page — back into view, for
+    /// whatever is about to put something on it. The panels on the right sit
+    /// beside it and leave it where it is, except one expanded over the whole
+    /// window, which is brought back beside it.
+    func showTerminalSurface() {
+        guard rightPanelExpanded else { return }
+        withAnimation(Motion.panel) { rightPanelExpanded = false }
+        scheduleSave()
     }
 
     func workspace(containingTab tabID: UUID) -> Workspace? {
@@ -991,17 +1014,16 @@ final class WorkspaceStore: ObservableObject {
     func reveal(_ task: RunningTask) {
         switch task.origin {
         case .tab(let tab, _):
-            detailMode = .terminal
+            showTerminalSurface()
             selectedTabID = tab.id
             focusedSessionID = task.session.id
         case .dock:
-            detailMode = .terminal
+            showTerminalSurface()
             if !bottomDockOpen { toggleBottomDock() }
             selectedDockSessionID = task.session.id
         case .composer:
             focusComposer()
         case .panel(let panel):
-            detailMode = .terminal
             openPanel(panel)
             focusedSessionID = task.session.id
         }
@@ -1114,7 +1136,7 @@ final class WorkspaceStore: ObservableObject {
     /// un-collapsing first, since either would otherwise make this silently
     /// do nothing.
     func focusComposer() {
-        detailMode = .terminal
+        showTerminalSurface()
         AppSettings.shared.composerEnabled = true
         AppSettings.shared.composerCollapsed = false
         composerFocusRequest += 1
@@ -1132,7 +1154,7 @@ final class WorkspaceStore: ObservableObject {
     /// composer's terminal last printed — un-hiding the composer first, since
     /// the answer appears there.
     func requestComposerHelp(_ kind: ErrorHelpKind, selection: String? = nil) {
-        detailMode = .terminal
+        showTerminalSurface()
         AppSettings.shared.composerEnabled = true
         AppSettings.shared.composerCollapsed = false
         composerHelpCounter += 1
