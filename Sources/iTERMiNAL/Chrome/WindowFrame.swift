@@ -264,12 +264,17 @@ struct SidebarRail: View {
                             railButton(item)
                         }
                     }
-                    // Room for a badge, which hangs a little outside its icon.
-                    .padding(.vertical, 3)
+                    // Room for a badge, which hangs a little outside its icon:
+                    // a scroll view clips what overflows it.
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
                 }
-                // Each button's 40, a gap of 6 after it, and the 3 above and
-                // below the lot come to 46 a button.
-                .frame(maxHeight: CGFloat(pinned.count) * 46)
+                // The rail's whole width, not just the buttons', or the badge
+                // is cut off at the buttons' edge.
+                .frame(maxWidth: .infinity)
+                // Each button's 40 and a gap of 6 after it, less the last gap,
+                // and the 4 above and below the lot.
+                .frame(maxHeight: CGFloat(pinned.count) * 46 + 2)
             }
 
             Spacer(minLength: 0)
