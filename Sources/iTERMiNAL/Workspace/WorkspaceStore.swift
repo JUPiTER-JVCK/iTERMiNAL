@@ -627,7 +627,13 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func newWorkspace(named name: String? = nil) {
-        let resolved = (name?.isEmpty == false) ? name! : "Space \(workspaces.count + 1)"
+        newTab(in: addWorkspace(named: name))
+    }
+
+    /// An empty Space at the end of the list. Callers put a tab in it.
+    @discardableResult
+    private func addWorkspace(named name: String? = nil) -> Workspace {
+        let resolved = (name?.isEmpty == false) ? name! : SpaceName.next(avoiding: workspaces.map(\.name))
         let workspace = Workspace(name: resolved)
         workspaces.append(workspace)
         scheduleSave()
@@ -635,7 +641,23 @@ final class WorkspaceStore: ObservableObject {
             "workspace": workspace.id.uuidString,
             "name": workspace.name,
         ]))
-        newTab(in: workspace)
+        return workspace
+    }
+
+    /// Takes a Space off the list once nothing is left in it.
+    ///
+    /// Every terminal that is not a split opens a Space of its own, so without
+    /// this each closed terminal, and each one dragged away, would leave an
+    /// empty folder behind. The last Space stays, so there is always somewhere
+    /// for the next terminal to go.
+    private func removeIfEmpty(_ workspace: Workspace) {
+        guard workspace.tabs.isEmpty, workspaces.count > 1,
+              let index = workspaces.firstIndex(where: { $0 === workspace }) else { return }
+        workspaces.remove(at: index)
+        chatModels[workspace.id]?.cancel()
+        chatModels[workspace.id] = nil
+        ComposerChatModel.deleteFile(for: workspace.id)
+        scheduleSave()
     }
 
     /// A terminal tab the person asked for — ⌘T, the New Tab button, the palette,
@@ -662,6 +684,10 @@ final class WorkspaceStore: ObservableObject {
         return tab
     }
 
+    /// A new terminal. Given a `workspace` it joins that Space; given none it is
+    /// not sharing one, so it gets a Space of its own — a split is the way to
+    /// share, and goes through `splitFocusedPane`. An empty Space, which only
+    /// the last one left behind can be, is used rather than adding another.
     @discardableResult
     func newTab(
         in workspace: Workspace? = nil,
@@ -673,12 +699,10 @@ final class WorkspaceStore: ObservableObject {
         let target: Workspace
         if let workspace {
             target = workspace
-        } else if let current = currentWorkspace {
-            target = current
+        } else if let empty = workspaces.first(where: { $0.tabs.isEmpty }) {
+            target = empty
         } else {
-            let created = Workspace(name: "Space 1")
-            workspaces = [created]
-            target = created
+            target = addWorkspace()
         }
 
         // A local shell opens with the profile asked for, else the default one.
@@ -732,6 +756,69 @@ final class WorkspaceStore: ObservableObject {
         if arranged.map(\.id) != destination.tabs.map(\.id) {
             destination.tabs = arranged
             scheduleSave()
+        }
+        if source !== destination {
+            removeIfEmpty(source)
+        }
+        objectWillChange.send()
+    }
+
+    /// Moves one terminal to a Space — a tab's only pane, or a single pane of a
+    /// split — placing it before `target`, or last when `target` is nil.
+    ///
+    /// A tab's only pane moves as the tab, so its name and pin go with it. A
+    /// pane of a split leaves the others where they are and arrives as a tab of
+    /// its own. Either way the shell is carried across, not restarted.
+    func moveTerminal(_ sessionID: UUID, before target: WorkspaceTab?, in destination: Workspace) {
+        guard let location = paneLocation(ofSessionID: sessionID) else { return }
+        let tab = location.tab
+        let leaf = location.leaf
+        if leaf === tab.root {
+            moveTab(tab.id, before: target, in: destination)
+            return
+        }
+        guard let parent = tab.root.parent(of: leaf),
+              case .split(let direction, var children) = parent.content else { return }
+
+        children.removeAll { $0 === leaf }
+        if children.count == 1 {
+            parent.content = children[0].content
+        } else {
+            parent.content = .split(direction, children)
+        }
+
+        let moved = WorkspaceTab(root: leaf)
+        if let target, let index = destination.tabs.firstIndex(where: { $0 === target }) {
+            destination.tabs.insert(moved, at: index)
+        } else {
+            destination.tabs.append(moved)
+        }
+
+        if focusedSessionID == sessionID {
+            // The pane being worked in goes with the person, so it stays on
+            // screen. One that was not focused leaves quietly, and focus
+            // stays where it was.
+            selectedTabID = moved.id
+        }
+        scheduleSave()
+        objectWillChange.send()
+        EventBus.shared.publish(APIEvent("tab.created", [
+            "tab": moved.id.uuidString,
+            "workspace": destination.id.uuidString,
+            "workspaceName": destination.name,
+            "session": sessionID.uuidString,
+            "remote": leaf.firstTerminal()?.isRemote ?? false,
+        ]))
+    }
+
+    /// What a sidebar drag carries: a terminal's id, or — for a tab with no
+    /// terminal left in it — the tab's own. Dropped on the sidebar from another
+    /// app it is just text, so an id that names neither does nothing.
+    func moveDragged(_ id: UUID, before target: WorkspaceTab?, in destination: Workspace) {
+        if paneLocation(ofSessionID: id) != nil {
+            moveTerminal(id, before: target, in: destination)
+        } else {
+            moveTab(id, before: target, in: destination)
         }
     }
 
@@ -836,6 +923,7 @@ final class WorkspaceStore: ObservableObject {
         if selectedTabID == tab.id {
             selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
         }
+        removeIfEmpty(workspace)
         scheduleSave()
     }
 
@@ -906,6 +994,8 @@ final class WorkspaceStore: ObservableObject {
         let added = PaneNode(content: newContent)
         target.content = .split(direction, [existing, added])
         scheduleSave()
+        // The sidebar lists each terminal of the split under its Space.
+        objectWillChange.send()
         EventBus.shared.publish(APIEvent("pane.split", [
             "tab": tab.id.uuidString,
             "direction": direction.rawValue,
@@ -952,6 +1042,7 @@ final class WorkspaceStore: ObservableObject {
         }
         self.focusedSessionID = tab.root.firstTerminal()?.id
         scheduleSave()
+        objectWillChange.send()
         EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
@@ -1052,6 +1143,7 @@ final class WorkspaceStore: ObservableObject {
             if selectedTabID == tab.id {
                 selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
             }
+            removeIfEmpty(workspace)
             return
         }
         guard let parent = tab.root.parent(of: leaf),
@@ -1069,6 +1161,7 @@ final class WorkspaceStore: ObservableObject {
         if focusedSessionID == session.id {
             focusedSessionID = tab.root.firstTerminal()?.id
         }
+        objectWillChange.send()
         EventBus.shared.publish(APIEvent("pane.closed", ["tab": tab.id.uuidString]))
     }
 
@@ -1666,6 +1759,7 @@ final class WorkspaceStore: ObservableObject {
             if selectedTabID == tab.id {
                 selectedTabID = workspace.tabs.last?.id ?? workspaces.flatMap(\.tabs).last?.id
             }
+            removeIfEmpty(workspace)
         } else if let parent = tab.root.parent(of: leaf),
                   case .split(let direction, var children) = parent.content {
             children.removeAll { $0 === leaf }
@@ -1674,6 +1768,7 @@ final class WorkspaceStore: ObservableObject {
             } else {
                 parent.content = .split(direction, children)
             }
+            objectWillChange.send()
         } else {
             // A leaf that is neither the root nor a child of a split is not a
             // shape the tree can produce; bailing out beats detaching a

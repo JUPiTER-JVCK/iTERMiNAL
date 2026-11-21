@@ -6158,6 +6158,20 @@ func checkTabOrder() {
 }
 checkTabOrder()
 
+// MARK: Space names
+
+func checkSpaceName() {
+    check(SpaceName.next(avoiding: []) == "Space 1", "the first space is Space 1")
+    check(SpaceName.next(avoiding: ["Space 1"]) == "Space 2", "the next one follows")
+    check(SpaceName.next(avoiding: ["Space 2"]) == "Space 1", "a name that has been freed is reused")
+    check(SpaceName.next(avoiding: ["Space 1", "Space 2"]) == "Space 3", "no gap, no reuse")
+    check(SpaceName.next(avoiding: ["Space 1", "Space 3"]) == "Space 2", "the lowest gap is filled first")
+    check(SpaceName.next(avoiding: ["infra", "docs"]) == "Space 1", "names the person chose do not count")
+    check(SpaceName.next(avoiding: ["Space 2", "Space 3"]) != "Space 2",
+          "with a space in the middle gone, the next name is not one already in use")
+}
+checkSpaceName()
+
 // MARK: Skills
 
 // A skill is text for the composer's input. What is checked is what goes in: normalised, one
