@@ -240,6 +240,8 @@ private struct DockLeaf: View {
             HTTPClientPaneView(model: store.panelHTTPClient)
         case .bytes:
             BytesViewerPaneView(model: store.panelBytes)
+        case .byteTools:
+            ByteToolsPaneView(model: store.panelByteTools)
         }
     }
 

@@ -285,6 +285,11 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("y", modifiers: [.command, .option])
 
+            Button("Toggle Byte Tools Panel") {
+                WorkspaceStore.shared.togglePanel(.byteTools)
+            }
+            .keyboardShortcut("k", modifiers: [.command, .option])
+
             Divider()
 
             // Opening either starts it; closing it ends the process.

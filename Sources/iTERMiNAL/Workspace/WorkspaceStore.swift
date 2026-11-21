@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 enum SidePanel: String, CaseIterable, Identifiable {
-    case browser, files, notes, superfile, btop, http, bytes
+    case browser, files, notes, superfile, btop, http, bytes, byteTools
     var id: String { rawValue }
 
     /// The bundled program this panel runs, for the two that are one.
@@ -14,7 +14,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         switch self {
         case .superfile: return .superfile
         case .btop: return .btop
-        case .browser, .files, .notes, .http, .bytes: return nil
+        case .browser, .files, .notes, .http, .bytes, .byteTools: return nil
         }
     }
 
@@ -29,6 +29,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return TerminalTool.btop.title
         case .http: return "HTTP Client"
         case .bytes: return "Bytes"
+        case .byteTools: return "Byte Tools"
         }
     }
     var icon: String {
@@ -40,6 +41,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return TerminalTool.btop.icon
         case .http: return "arrow.up.arrow.down"
         case .bytes: return "number.square"
+        case .byteTools: return "wrench.and.screwdriver"
         }
     }
 
@@ -55,6 +57,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .btop: return "⌥⌘P"
         case .http: return "⌥⌘R"
         case .bytes: return "⌥⌘Y"
+        case .byteTools: return "⌥⌘K"
         }
     }
 
@@ -79,7 +82,8 @@ enum SidePanel: String, CaseIterable, Identifiable {
     /// inside it, which is why it is asked for a little more width than the
     /// rest. The Bytes panel is asked for room for a row of eight bytes beside
     /// its scroller, and for enough height that the grid still has a few rows
-    /// with the inspector open.
+    /// with the inspector open. Byte Tools is asked for the width of a row of
+    /// eight bit switches and the two tiles of its home screen.
     var dockMinimum: DockSize {
         switch self {
         case .browser: return DockSize(width: 280, height: 220)
@@ -87,6 +91,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
         case .notes: return DockSize(width: 280, height: 160)
         case .http: return DockSize(width: 360, height: 340)
         case .bytes: return DockSize(width: 380, height: 340)
+        case .byteTools: return DockSize(width: 360, height: 320)
         case .superfile, .btop: return DockSize(width: minimumWidth ?? 640, height: 360)
         }
     }
@@ -318,6 +323,9 @@ final class WorkspaceStore: ObservableObject {
     /// Kept for as long as the app runs, so closing the panel puts the file away
     /// without letting go of it or what was selected in it.
     lazy var panelBytes = BytesViewerModel()
+    /// What is typed in each Byte Tools tool, kept while the app runs (and not
+    /// written to disk: people paste keys and tokens into tools like these).
+    lazy var panelByteTools = ByteToolsModel()
 
     /// The notes, kept together and not tied to a space.
     let panelNotes = NotesModel()
