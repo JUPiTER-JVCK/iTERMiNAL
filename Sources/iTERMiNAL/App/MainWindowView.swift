@@ -230,13 +230,18 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            // Always: the globe at its right end is where you connect to a
-            // host, so the strip cannot be switched away with the readouts.
-            FadedDivider()
-            DetailBottomStrip(
-                showStatus: settings.showStatusBar,
-                showMetrics: settings.showSystemMetrics
-            )
+            // Gone altogether once everything on it is switched off under
+            // Appearance → Status, rather than leaving an empty line.
+            if settings.showStatusBar || settings.showSystemMetrics
+                || settings.showConnectButton || settings.showComposerButton
+                || settings.showRemotePorts {
+                FadedDivider()
+                DetailBottomStrip(
+                    showStatus: settings.showStatusBar,
+                    showMetrics: settings.showSystemMetrics,
+                    showComposerButton: settings.showComposerButton
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background)
@@ -325,6 +330,7 @@ struct DetailView: View {
 private struct DetailBottomStrip: View {
     let showStatus: Bool
     let showMetrics: Bool
+    let showComposerButton: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -338,7 +344,9 @@ private struct DetailBottomStrip: View {
             }
             // Beside the globe, in the bottom-right corner: it hides the
             // composer, and its pill with it, from the terminal.
-            ComposerToggleButton()
+            if showComposerButton {
+                ComposerToggleButton()
+            }
             // Last, past the network figure, in the bottom-right corner.
             RemotePortsButton()
         }

@@ -226,6 +226,11 @@ final class AppSettings: ObservableObject {
     }
     @Published var showStatusBar: Bool { didSet { defaults.set(showStatusBar, forKey: "showStatusBar") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
+    /// The globe in the status bar's corner that opens the Connect list, and the
+    /// button beside it that shows and hides the composer. Both on unless turned
+    /// off under Appearance → Status.
+    @Published var showConnectButton: Bool { didSet { defaults.set(showConnectButton, forKey: "showConnectButton") } }
+    @Published var showComposerButton: Bool { didSet { defaults.set(showComposerButton, forKey: "showComposerButton") } }
     /// How a focused split pane is marked, and in what colour.
     @Published var splitFocusStyleTag: String { didSet { defaults.set(splitFocusStyleTag, forKey: "splitFocusStyleTag") } }
     @Published var splitFocusColorTag: String { didSet { defaults.set(splitFocusColorTag, forKey: "splitFocusColorTag") } }
@@ -470,6 +475,8 @@ final class AppSettings: ObservableObject {
         }
         showStatusBar = defaults.object(forKey: "showStatusBar") as? Bool ?? true
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
+        showConnectButton = defaults.object(forKey: "showConnectButton") as? Bool ?? true
+        showComposerButton = defaults.object(forKey: "showComposerButton") as? Bool ?? true
         if let data = defaults.data(forKey: "savedTunnels"),
            let decoded = try? JSONDecoder().decode([SavedTunnel].self, from: data) {
             savedTunnels = decoded
@@ -859,6 +866,8 @@ final class AppSettings: ObservableObject {
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showStatusBar = true
         showRemotePorts = false
+        showConnectButton = true
+        showComposerButton = true
         ipLookupProviderTag = GeoProvider.disabled.rawValue
         ipLookupMMDBPath = ""
         ipLookupASNMMDBPath = ""
