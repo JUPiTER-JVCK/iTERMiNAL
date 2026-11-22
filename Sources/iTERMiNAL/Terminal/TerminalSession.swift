@@ -263,8 +263,24 @@ final class TerminalSession: ObservableObject, Identifiable {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(EditorCommand.quote(path), forType: .string)
             })
+            // The Bytes panel refuses a folder in its own words, but offering
+            // it one is offering something that cannot work.
+            if !isFolder.boolValue {
+                items.append(TerminalMenuAction(title: "Open in Bytes", modifiers: []) {
+                    WorkspaceStore.shared.openInBytes(path: path)
+                })
+            }
         case .text:
             break
+        }
+        // The selected text itself, as its bytes: hex, Base64, hashes and the
+        // rest are one "Send to…" away once Byte Tools has it. Left out when
+        // it is more than a tool takes, rather than offered and ignored.
+        let selectedBytes = Array(text.utf8)
+        if WorkspaceStore.fitsByteTools(byteCount: selectedBytes.count) {
+            items.append(TerminalMenuAction(title: "Send to Byte Tools", modifiers: []) {
+                WorkspaceStore.shared.sendToByteTools(selectedBytes)
+            })
         }
         items.append(TerminalMenuAction(title: "Explain Selection", modifiers: []) {
             WorkspaceStore.shared.requestComposerHelp(.explainSelection, selection: text)
