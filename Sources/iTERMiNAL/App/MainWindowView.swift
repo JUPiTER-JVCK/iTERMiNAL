@@ -463,11 +463,8 @@ struct PanelResizeHandle: View {
     /// Where the seam lands for a drag that started at `start`. Shared by
     /// `onChanged` and `onEnded` so the committed value is the one last drawn,
     /// rather than a second calculation that could round differently.
-    private func resolved(from start: Double, drag: DragGesture.Value) -> Double {
-        let moved = Double(
-            axis == .horizontal ? drag.translation.width : drag.translation.height
-        )
-        return snapped(start + (inverted ? -moved : moved)).clamped(to: range)
+    private func resolved(from start: Double, moved: CGFloat) -> Double {
+        snapped(start + (inverted ? -Double(moved) : Double(moved))).clamped(to: range)
     }
 
     var body: some View {
@@ -482,49 +479,41 @@ struct PanelResizeHandle: View {
                 maxHeight: axis == .horizontal ? .infinity : nil
             )
             // A one-pixel line is impossible to grab, so widen the hit area
-            // without widening what's drawn.
+            // without widening what's drawn. It is an AppKit view (see
+            // `SeamGrabArea`) because the panels either side are AppKit views,
+            // which took the click before a SwiftUI strip over them could.
             .overlay {
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(
-                        width: axis == .horizontal ? 9 : nil,
-                        height: axis == .vertical ? 9 : nil
-                    )
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        hovering = inside
-                        // set() rather than push()/pop(): the view can vanish
-                        // mid-hover when a panel closes, which would strand a
-                        // resize cursor on the stack forever.
-                        if inside {
-                            (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
-                        } else {
-                            NSCursor.arrow.set()
+                SeamGrabArea(
+                    horizontal: axis == .horizontal,
+                    onHover: { hovering = $0 },
+                    onChange: { moved in
+                        let start = baseline ?? value
+                        if baseline == nil {
+                            baseline = start
+                            // Terminals hold their size until the
+                            // drag ends — see SeamDrag.
+                            SeamDrag.begin()
                         }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { drag in
-                                let start = baseline ?? value
-                                if baseline == nil {
-                                    baseline = start
-                                    // Terminals hold their size until the
-                                    // drag ends — see SeamDrag.
-                                    SeamDrag.begin()
-                                }
-                                onChange(resolved(from: start, drag: drag))
-                            }
-                            .onEnded { drag in
-                                let start = baseline ?? value
-                                baseline = nil
-                                onCommit(resolved(from: start, drag: drag))
-                                SeamDrag.end()
-                            }
-                    )
-                    .onTapGesture(count: 2) {
+                        onChange(resolved(from: start, moved: moved))
+                    },
+                    onEnd: { moved in
+                        let start = baseline ?? value
+                        baseline = nil
+                        onCommit(resolved(from: start, moved: moved))
+                        SeamDrag.end()
+                    },
+                    onReset: {
                         withAnimation(Motion.panel) { onCommit(resetTo) }
                     }
+                )
+                .frame(
+                    width: axis == .horizontal ? 14 : nil,
+                    height: axis == .vertical ? 14 : nil
+                )
             }
+            // Above the panels either side, whose AppKit views would otherwise
+            // sit over the part of the strip that reaches into them.
+            .zIndex(1)
             // A seam can vanish mid-drag — its panel closed by a shortcut —
             // and then onEnded never comes. Left set, every terminal would
             // wait out the catch-up delay on each resize from then on.
