@@ -76,6 +76,12 @@ struct MainWindowView: View {
         .background(theme.background)
         .overlay(alignment: .topLeading) { floatingPanel(theme) }
         .clipShape(shape)
+        // A clip hides what is outside the card but does not stop it taking
+        // clicks. The workspaces panel slides in from beyond the card's left
+        // edge, over the rail, so its "New terminal" row — level with the
+        // Spaces button — passed under the pointer and took the click meant
+        // for the rail. The card answers for its own rectangle only.
+        .contentShape(shape)
         .overlay {
             if settings.frameShowsBorder {
                 shape.strokeBorder(theme.surfaceBorder)
