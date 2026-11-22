@@ -59,6 +59,12 @@ struct MainWindowView: View {
                 openWindow(value: id)
             }
         }
+        // A pane's pop-out button asks here, the one place with `openWindow`.
+        .onReceive(NotificationCenter.default.publisher(for: .popOutPane)) { note in
+            if let id = note.userInfo?["id"] as? UUID {
+                openWindow(value: PoppedPaneID(id: id))
+            }
+        }
     }
 
     private func contentCard(_ theme: Theme) -> some View {

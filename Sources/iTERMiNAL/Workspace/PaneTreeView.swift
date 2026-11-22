@@ -14,6 +14,9 @@ struct PaneTreeView: View {
     var isSolo = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
+    /// Which panes are in a window of their own, so this can stand a placeholder
+    /// where one has gone. See `PoppedPanes`.
+    @ObservedObject private var popped = PoppedPanes.shared
 
     var body: some View {
         if isSolo, case .split = node.content {
@@ -31,17 +34,27 @@ struct PaneTreeView: View {
 
     @ViewBuilder
     private var tree: some View {
-        switch node.content {
-        case .terminal(let session):
-            TerminalPaneView(session: session, isSolo: isSolo)
-        case .browser(let model):
-            BrowserPaneView(model: model)
-        case .files(let model):
-            FilePaneView(model: model)
-        case .http(let model):
-            HTTPClientPaneView(model: model)
-        case .split(let direction, let children):
-            PaneSplitView(direction: direction, children: children)
+        if node.isLeaf && popped.contains(node.id) {
+            // Its content is in another window, which a live terminal or web
+            // view cannot also be in. Closing that window brings it back here.
+            PoppedOutPlaceholder(node: node)
+        } else {
+            switch node.content {
+            case .terminal(let session):
+                TerminalPaneView(session: session, isSolo: isSolo)
+                    .overlay(alignment: .topTrailing) { TerminalPopOutCorner(node: node, session: session) }
+            case .browser(let model):
+                BrowserPaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .files(let model):
+                FilePaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .http(let model):
+                HTTPClientPaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .split(let direction, let children):
+                PaneSplitView(direction: direction, children: children)
+            }
         }
     }
 }

@@ -50,6 +50,22 @@ struct ITerminalApp: App {
         // `AppDelegate.application(_:open:)` answers by opening tabs.
         .handlesExternalEvents(matching: [])
 
+        // A pane in a window of its own; the value is the pane's id. Opened by
+        // the main window when a pane's pop-out button is pressed, and closed —
+        // returning the pane to its tab — by closing it. See `PoppedPanes`.
+        WindowGroup("Pane", for: PoppedPaneID.self) { $pane in
+            PoppedPaneWindow(value: pane)
+                .environmentObject(settings)
+                .environmentObject(store)
+                .preferredColorScheme(settings.preferredColorScheme)
+                .environment(\.appThemeID, settings.appThemeID)
+                .tint(settings.accentColor)
+                .fontDesign(settings.uiFontDesign.design)
+        }
+        .defaultSize(width: 820, height: 520)
+        // As for Remote Desktop: only `openWindow(value:)` opens one.
+        .handlesExternalEvents(matching: [])
+
         Settings {
             SettingsRootView()
                 .environmentObject(settings)
@@ -234,6 +250,10 @@ struct AppCommands: Commands {
 
             Button("Split with HTTP Client") {
                 WorkspaceStore.shared.splitFocusedPane(.horizontal, kind: .http)
+            }
+
+            Button("Open Pane in New Window") {
+                WorkspaceStore.shared.popOutFocusedPane()
             }
 
             Divider()

@@ -542,6 +542,8 @@ struct BrowserPaneView: View {
                     Image(systemName: "house")
                 }
                 .buttonStyle(.plain)
+
+                PopOutButton()
             }
             .foregroundStyle(theme.textSecondary)
             .padding(.horizontal, 10)
