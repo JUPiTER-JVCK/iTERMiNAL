@@ -542,6 +542,8 @@ struct BrowserPaneView: View {
                     Image(systemName: "house")
                 }
                 .buttonStyle(.plain)
+
+                PopOutButton()
             }
             .foregroundStyle(theme.textSecondary)
             .padding(.horizontal, 10)
@@ -822,8 +824,8 @@ private struct BrowserNavigationRow: View {
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .sheet(isPresented: $showSource) { BrowserSourceSheet(model: model) }
-        .sheet(isPresented: $showConsole) { BrowserConsoleSheet(model: model) }
+        .sheet(isPresented: $showSource) { BrowserSourceSheet(model: model).dismissOnOutsideClick() }
+        .sheet(isPresented: $showConsole) { BrowserConsoleSheet(model: model).dismissOnOutsideClick() }
         // Clearing is irreversible and hits every site, so it asks first.
         .confirmationDialog(
             "Clear browsing data?",

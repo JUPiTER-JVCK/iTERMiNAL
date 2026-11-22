@@ -16,11 +16,13 @@ struct KeyboardShortcutsView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let groups = ShortcutCatalog.groups(matching: query)
+        // The editors people run in a terminal, after the app's own keys.
+        let editorGroups = EditorKeyCatalog.groups(matching: query)
         VStack(spacing: 0) {
             header(theme: theme)
             FadedDivider()
 
-            if groups.isEmpty {
+            if groups.isEmpty && editorGroups.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "keyboard")
                         .font(.system(size: 22))
@@ -30,24 +32,11 @@ struct KeyboardShortcutsView: View {
                 .foregroundStyle(theme.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(groups) { group in
-                            Section {
-                                ForEach(group.entries) { entry in
-                                    ShortcutRow(entry: entry)
-                                }
-                            } header: {
-                                sectionHeader(group.section.title, theme: theme)
-                            }
-                        }
-                    }
-                    .padding(.bottom, 8)
-                }
+                list(groups: groups, editorGroups: editorGroups, theme: theme)
             }
 
             FadedDivider()
-            Text("Some actions have no shortcut. The command palette lists every action.")
+            Text("Some actions have no shortcut. The command palette lists every action. The editor sections are for programs you run in a terminal: the app does not handle those keys.")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 16)
@@ -59,6 +48,43 @@ struct KeyboardShortcutsView: View {
         .background(theme.background)
         .onExitCommand { dismiss() }
         .onAppear { searchFocused = true }
+    }
+
+    /// The app's own shortcuts, then the editors'. Its own function — and its
+    /// own pieces — because all of it in `body` was more than the compiler
+    /// would type-check.
+    private func list(groups: [ShortcutGroup], editorGroups: [EditorKeyGroup], theme: Theme) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                ForEach(groups) { group in
+                    shortcutSection(group, theme: theme)
+                }
+                ForEach(editorGroups) { group in
+                    editorSection(group, theme: theme)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func shortcutSection(_ group: ShortcutGroup, theme: Theme) -> some View {
+        Section {
+            ForEach(group.entries) { entry in
+                ShortcutRow(entry: entry)
+            }
+        } header: {
+            sectionHeader(group.section.title, theme: theme)
+        }
+    }
+
+    private func editorSection(_ group: EditorKeyGroup, theme: Theme) -> some View {
+        Section {
+            ForEach(group.commands) { command in
+                EditorKeyRow(command: command)
+            }
+        } header: {
+            sectionHeader(group.section.title, note: group.section.note, theme: theme)
+        }
     }
 
     private func header(theme: Theme) -> some View {
@@ -103,17 +129,70 @@ struct KeyboardShortcutsView: View {
         .padding(16)
     }
 
-    private func sectionHeader(_ title: String, theme: Theme) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(theme.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-            // Opaque, so rows scrolling under a pinned header do not show
-            // through it.
-            .background(theme.background)
+    private func sectionHeader(_ title: String, note: String? = nil, theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+            if let note {
+                Text(note)
+                    .font(.system(size: 11, weight: .regular))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foregroundStyle(theme.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+        // Opaque, so rows scrolling under a pinned header do not show
+        // through it.
+        .background(theme.background)
+    }
+}
+
+/// One editor command: what it does, and the keys — one run of key caps for
+/// each way to do it, with "or" between the ways.
+private struct EditorKeyRow: View {
+    let command: EditorKeyEntry
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(command.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textPrimary)
+                if let detail = command.detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 12)
+            HStack(spacing: 6) {
+                ForEach(Array(command.ways.enumerated()), id: \.offset) { index, way in
+                    if index > 0 {
+                        Text("or")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    HStack(spacing: 3) {
+                        ForEach(Array(way.enumerated()), id: \.offset) { _, cap in
+                            KeyCap(symbol: cap, theme: theme)
+                        }
+                    }
+                }
+            }
+            // The caps, as one thing, read as the keys in order.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(command.ways.map { $0.joined(separator: " then ") }.joined(separator: " or "))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
 }
 

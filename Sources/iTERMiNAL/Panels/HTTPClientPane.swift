@@ -283,6 +283,8 @@ struct HTTPClientPaneView: View {
             )
             .help("Request: build and send one request · Explore: walk the paths a site publishes, like a directory · Lookup: what a name or an address is, and where")
             Spacer(minLength: 0)
+            PopOutButton()
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

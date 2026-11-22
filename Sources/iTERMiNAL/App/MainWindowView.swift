@@ -30,6 +30,7 @@ struct MainWindowView: View {
                             LogAnalysisSheet(target: target)
                                 .environmentObject(store)
                                 .environmentObject(settings)
+                                .dismissOnOutsideClick()
                         }
                 }
             }
@@ -39,6 +40,7 @@ struct MainWindowView: View {
                 KeyboardShortcutsView()
                     .environmentObject(store)
                     .environmentObject(settings)
+                    .dismissOnOutsideClick()
             }
         }
         .frame(minWidth: 900, minHeight: 560)
@@ -49,6 +51,7 @@ struct MainWindowView: View {
             CommandPaletteView()
                 .environmentObject(store)
                 .environmentObject(settings)
+                .dismissOnOutsideClick()
         }
         .onAppear { process.start() }
         .onDisappear { process.stop() }
@@ -57,6 +60,12 @@ struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openRemoteDesktop)) { note in
             if let id = note.userInfo?["id"] as? UUID {
                 openWindow(value: id)
+            }
+        }
+        // A pane's pop-out button asks here, the one place with `openWindow`.
+        .onReceive(NotificationCenter.default.publisher(for: .popOutPane)) { note in
+            if let id = note.userInfo?["id"] as? UUID {
+                openWindow(value: PoppedPaneID(id: id))
             }
         }
     }
@@ -76,6 +85,12 @@ struct MainWindowView: View {
         .background(theme.background)
         .overlay(alignment: .topLeading) { floatingPanel(theme) }
         .clipShape(shape)
+        // A clip hides what is outside the card but does not stop it taking
+        // clicks. The workspaces panel slides in from beyond the card's left
+        // edge, over the rail, so its "New terminal" row — level with the
+        // Spaces button — passed under the pointer and took the click meant
+        // for the rail. The card answers for its own rectangle only.
+        .contentShape(shape)
         .overlay {
             if settings.frameShowsBorder {
                 shape.strokeBorder(theme.surfaceBorder)
@@ -224,13 +239,18 @@ struct DetailView: View {
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.
-            // Always: the globe at its right end is where you connect to a
-            // host, so the strip cannot be switched away with the readouts.
-            FadedDivider()
-            DetailBottomStrip(
-                showStatus: settings.showStatusBar,
-                showMetrics: settings.showSystemMetrics
-            )
+            // Gone altogether once everything on it is switched off under
+            // Appearance → Status, rather than leaving an empty line.
+            if settings.showStatusBar || settings.showSystemMetrics
+                || settings.showConnectButton || settings.showComposerButton
+                || settings.showRemotePorts {
+                FadedDivider()
+                DetailBottomStrip(
+                    showStatus: settings.showStatusBar,
+                    showMetrics: settings.showSystemMetrics,
+                    showComposerButton: settings.showComposerButton
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background)
@@ -319,6 +339,7 @@ struct DetailView: View {
 private struct DetailBottomStrip: View {
     let showStatus: Bool
     let showMetrics: Bool
+    let showComposerButton: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -332,7 +353,9 @@ private struct DetailBottomStrip: View {
             }
             // Beside the globe, in the bottom-right corner: it hides the
             // composer, and its pill with it, from the terminal.
-            ComposerToggleButton()
+            if showComposerButton {
+                ComposerToggleButton()
+            }
             // Last, past the network figure, in the bottom-right corner.
             RemotePortsButton()
         }
@@ -463,11 +486,8 @@ struct PanelResizeHandle: View {
     /// Where the seam lands for a drag that started at `start`. Shared by
     /// `onChanged` and `onEnded` so the committed value is the one last drawn,
     /// rather than a second calculation that could round differently.
-    private func resolved(from start: Double, drag: DragGesture.Value) -> Double {
-        let moved = Double(
-            axis == .horizontal ? drag.translation.width : drag.translation.height
-        )
-        return snapped(start + (inverted ? -moved : moved)).clamped(to: range)
+    private func resolved(from start: Double, moved: CGFloat) -> Double {
+        snapped(start + (inverted ? -Double(moved) : Double(moved))).clamped(to: range)
     }
 
     var body: some View {
@@ -482,49 +502,41 @@ struct PanelResizeHandle: View {
                 maxHeight: axis == .horizontal ? .infinity : nil
             )
             // A one-pixel line is impossible to grab, so widen the hit area
-            // without widening what's drawn.
+            // without widening what's drawn. It is an AppKit view (see
+            // `SeamGrabArea`) because the panels either side are AppKit views,
+            // which took the click before a SwiftUI strip over them could.
             .overlay {
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(
-                        width: axis == .horizontal ? 9 : nil,
-                        height: axis == .vertical ? 9 : nil
-                    )
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        hovering = inside
-                        // set() rather than push()/pop(): the view can vanish
-                        // mid-hover when a panel closes, which would strand a
-                        // resize cursor on the stack forever.
-                        if inside {
-                            (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
-                        } else {
-                            NSCursor.arrow.set()
+                SeamGrabArea(
+                    horizontal: axis == .horizontal,
+                    onHover: { hovering = $0 },
+                    onChange: { moved in
+                        let start = baseline ?? value
+                        if baseline == nil {
+                            baseline = start
+                            // Terminals hold their size until the
+                            // drag ends — see SeamDrag.
+                            SeamDrag.begin()
                         }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { drag in
-                                let start = baseline ?? value
-                                if baseline == nil {
-                                    baseline = start
-                                    // Terminals hold their size until the
-                                    // drag ends — see SeamDrag.
-                                    SeamDrag.begin()
-                                }
-                                onChange(resolved(from: start, drag: drag))
-                            }
-                            .onEnded { drag in
-                                let start = baseline ?? value
-                                baseline = nil
-                                onCommit(resolved(from: start, drag: drag))
-                                SeamDrag.end()
-                            }
-                    )
-                    .onTapGesture(count: 2) {
+                        onChange(resolved(from: start, moved: moved))
+                    },
+                    onEnd: { moved in
+                        let start = baseline ?? value
+                        baseline = nil
+                        onCommit(resolved(from: start, moved: moved))
+                        SeamDrag.end()
+                    },
+                    onReset: {
                         withAnimation(Motion.panel) { onCommit(resetTo) }
                     }
+                )
+                .frame(
+                    width: axis == .horizontal ? 14 : nil,
+                    height: axis == .vertical ? 14 : nil
+                )
             }
+            // Above the panels either side, whose AppKit views would otherwise
+            // sit over the part of the strip that reaches into them.
+            .zIndex(1)
             // A seam can vanish mid-drag — its panel closed by a shortcut —
             // and then onEnded never comes. Left set, every terminal would
             // wait out the catch-up delay on each resize from then on.

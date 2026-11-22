@@ -14,6 +14,9 @@ struct PaneTreeView: View {
     var isSolo = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
+    /// Which panes are in a window of their own, so this can stand a placeholder
+    /// where one has gone. See `PoppedPanes`.
+    @ObservedObject private var popped = PoppedPanes.shared
 
     var body: some View {
         if isSolo, case .split = node.content {
@@ -31,17 +34,27 @@ struct PaneTreeView: View {
 
     @ViewBuilder
     private var tree: some View {
-        switch node.content {
-        case .terminal(let session):
-            TerminalPaneView(session: session, isSolo: isSolo)
-        case .browser(let model):
-            BrowserPaneView(model: model)
-        case .files(let model):
-            FilePaneView(model: model)
-        case .http(let model):
-            HTTPClientPaneView(model: model)
-        case .split(let direction, let children):
-            PaneSplitView(direction: direction, children: children)
+        if node.isLeaf && popped.contains(node.id) {
+            // Its content is in another window, which a live terminal or web
+            // view cannot also be in. Closing that window brings it back here.
+            PoppedOutPlaceholder(node: node)
+        } else {
+            switch node.content {
+            case .terminal(let session):
+                TerminalPaneView(session: session, isSolo: isSolo)
+                    .overlay(alignment: .topTrailing) { TerminalPopOutCorner(node: node, session: session) }
+            case .browser(let model):
+                BrowserPaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .files(let model):
+                FilePaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .http(let model):
+                HTTPClientPaneView(model: model)
+                    .environment(\.hostPaneNode, node)
+            case .split(let direction, let children):
+                PaneSplitView(direction: direction, children: children)
+            }
         }
     }
 }
@@ -179,37 +192,31 @@ private struct PaneSplitHandle: View {
                     .animation(Motion.hover, value: hovering)
                     .allowsHitTesting(false)
             }
-            // The gap is 6pt, which is hard to land on, so the grab area runs a
+            // The gap is 8pt, which is hard to land on, so the grab area runs a
             // few points into the panes either side without moving anything.
+            // It is an AppKit view (see `SeamGrabArea`): the panes are AppKit
+            // views too, and a SwiftUI strip over them never got the click.
+            // The translation is measured in window coordinates, so it does
+            // not chase the handle as the handle moves with the drag.
             .overlay {
-                Color.clear
-                    .frame(
-                        width: horizontal ? PaneCard.gap + 8 : nil,
-                        height: horizontal ? nil : PaneCard.gap + 8
-                    )
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        hovering = inside
-                        // set() rather than push()/pop(): the view can vanish
-                        // mid-hover when a pane closes, which would strand a
-                        // resize cursor on the stack forever.
-                        if inside {
-                            (horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
-                        } else {
-                            NSCursor.arrow.set()
-                        }
-                    }
-                    .gesture(
-                        // Global, not local: the handle moves with the drag, and
-                        // a translation measured in its own space would chase it.
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { onChange(horizontal ? $0.translation.width : $0.translation.height) }
-                            .onEnded { onEnd(horizontal ? $0.translation.width : $0.translation.height) }
-                    )
-                    .onTapGesture(count: 2, perform: onReset)
+                SeamGrabArea(
+                    horizontal: horizontal,
+                    help: "Drag to resize · double-click for equal sizes",
+                    onHover: { hovering = $0 },
+                    onChange: onChange,
+                    onEnd: onEnd,
+                    onReset: onReset
+                )
+                .frame(
+                    width: horizontal ? PaneCard.gap + Self.reach : nil,
+                    height: horizontal ? nil : PaneCard.gap + Self.reach
+                )
             }
-            .help("Drag to resize · double-click for equal sizes")
     }
+
+    /// How far past the gap the grab strip reaches, in total — half a side.
+    /// Terminal padding is wider than half of it, so no text sits under it.
+    private static let reach: CGFloat = 12
 }
 
 /// What makes a pane inside a split its own card: rounded corners and a

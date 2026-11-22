@@ -353,6 +353,9 @@ struct CommandPaletteView: View {
             PaletteAction(id: "split.http", title: "Split with HTTP Client", subtitle: "Send requests alongside", systemImage: "arrow.up.arrow.down") {
                 store.splitFocusedPane(.horizontal, kind: .http)
             },
+            PaletteAction(id: "pane.popout", title: "Open Pane in New Window", subtitle: "Move it out of the tab; closing the window puts it back", systemImage: "arrow.up.right.square") {
+                store.popOutFocusedPane()
+            },
             PaletteAction(id: "pane.close", title: "Close Pane", systemImage: "xmark.square", shortcut: "⇧⌘W") {
                 store.closeFocusedPane()
             },

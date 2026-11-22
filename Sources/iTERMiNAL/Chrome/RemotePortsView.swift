@@ -199,13 +199,16 @@ final class RemotePortsModel: ObservableObject {
 /// The status bar's right corner: a globe that opens the Connect list and, when
 /// turned on in Settings, a second icon that opens the Listening ports. Two
 /// buttons with a popover each, rather than one popover with tabs, so each
-/// opens at its own fixed size and always in the same place.
+/// opens at its own fixed size and always in the same place. Either can be
+/// turned off under Appearance → Status.
 struct RemotePortsButton: View {
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         HStack(spacing: 10) {
-            ConnectButton()
+            if settings.showConnectButton {
+                ConnectButton()
+            }
             if settings.showRemotePorts {
                 PortsButton()
             }

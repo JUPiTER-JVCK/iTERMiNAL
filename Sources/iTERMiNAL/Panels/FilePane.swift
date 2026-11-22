@@ -506,6 +506,7 @@ struct FilePaneView: View {
         }
         .sheet(item: $model.markdownPreview) { document in
             MarkdownPreviewSheet(document: document)
+                .dismissOnOutsideClick()
         }
     }
 
@@ -616,6 +617,8 @@ struct FilePaneView: View {
                          help: "Show or hide the file tree")
             optionToggle("text.justify.left", isOn: $model.wordWrap, theme: theme,
                          help: "Wrap long lines in the preview")
+
+            PopOutButton()
         }
         .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 10)
