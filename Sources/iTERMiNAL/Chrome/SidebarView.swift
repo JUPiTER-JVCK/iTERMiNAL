@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The workspaces panel, opened from the left rail: a titled header with
 /// search and a pin button, a New terminal row, three collapsible sections
@@ -852,6 +853,22 @@ private struct SidebarTabRow: View {
         .contextMenu {
             Button(tab.isPinned ? "Unpin" : "Pin") { store.togglePin(tab) }
             Button("Rename…", action: onRename)
+            // Where the tab's shell is. A bundled tool draws its own screen and
+            // a remote session's folder is on another machine, so neither is
+            // offered a folder on this Mac.
+            if let session = tab.primarySession, !session.kind.isTool {
+                Divider()
+                Button("Copy Working Directory") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(session.currentDirectory, forType: .string)
+                }
+                if !session.isRemote {
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.currentDirectory)])
+                    }
+                    Button("New Tab Here") { store.newTab(directory: session.currentDirectory) }
+                }
+            }
             Divider()
             Button("Close Tab") { store.closeTab(tab) }
         }

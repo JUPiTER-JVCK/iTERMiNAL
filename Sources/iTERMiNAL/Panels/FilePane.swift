@@ -709,6 +709,21 @@ struct FilePaneView: View {
                         if !item.isDirectory && MarkdownHTML.isMarkdownFile(named: item.name) {
                             Button("Preview Markdown") { model.previewMarkdown(item) }
                         }
+                        // Local files only, for the same reason as the log:
+                        // a remote file would have to come down first. The
+                        // Bytes panel reads a window at a time, so any size
+                        // opens; Byte Tools holds every byte, so only a small
+                        // file is offered.
+                        if !item.isDirectory && !model.isRemote {
+                            Button("Open in Bytes") { store.openInBytes(path: item.path) }
+                            if let size = item.size, WorkspaceStore.fitsByteTools(byteCount: Int(clamping: size)) {
+                                Button("Send to Byte Tools") {
+                                    if let problem = store.sendFileToByteTools(path: item.path) {
+                                        model.say(problem)
+                                    }
+                                }
+                            }
+                        }
                         if model.isRemote {
                             Button("Download to Downloads") { model.download(item) }
                         } else {
@@ -730,6 +745,20 @@ struct FilePaneView: View {
                             Button("Reveal in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
                             }
+                        }
+                        Divider()
+                        // The file itself, so Paste in Finder (or a mail
+                        // message) makes a copy; a remote file is not here to
+                        // copy.
+                        if !model.isRemote {
+                            Button("Copy File") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.writeObjects([URL(fileURLWithPath: item.path) as NSURL])
+                            }
+                        }
+                        Button("Copy Name") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(item.name, forType: .string)
                         }
                         Button("Copy Path") { model.copyPath(item) }
                         Divider()
