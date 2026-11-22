@@ -17,7 +17,7 @@ struct KeyboardShortcutsView: View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let groups = ShortcutCatalog.groups(matching: query)
         // The editors people run in a terminal, after the app's own keys.
-        let editorGroups = EditorCommandCatalog.groups(matching: query)
+        let editorGroups = EditorKeyCatalog.groups(matching: query)
         VStack(spacing: 0) {
             header(theme: theme)
             FadedDivider()
@@ -32,29 +32,7 @@ struct KeyboardShortcutsView: View {
                 .foregroundStyle(theme.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(groups) { group in
-                            Section {
-                                ForEach(group.entries) { entry in
-                                    ShortcutRow(entry: entry)
-                                }
-                            } header: {
-                                sectionHeader(group.section.title, theme: theme)
-                            }
-                        }
-                        ForEach(editorGroups) { group in
-                            Section {
-                                ForEach(group.commands) { command in
-                                    EditorCommandRow(command: command)
-                                }
-                            } header: {
-                                sectionHeader(group.section.title, note: group.section.note, theme: theme)
-                            }
-                        }
-                    }
-                    .padding(.bottom, 8)
-                }
+                list(groups: groups, editorGroups: editorGroups, theme: theme)
             }
 
             FadedDivider()
@@ -70,6 +48,43 @@ struct KeyboardShortcutsView: View {
         .background(theme.background)
         .onExitCommand { dismiss() }
         .onAppear { searchFocused = true }
+    }
+
+    /// The app's own shortcuts, then the editors'. Its own function — and its
+    /// own pieces — because all of it in `body` was more than the compiler
+    /// would type-check.
+    private func list(groups: [ShortcutGroup], editorGroups: [EditorKeyGroup], theme: Theme) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                ForEach(groups) { group in
+                    shortcutSection(group, theme: theme)
+                }
+                ForEach(editorGroups) { group in
+                    editorSection(group, theme: theme)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func shortcutSection(_ group: ShortcutGroup, theme: Theme) -> some View {
+        Section {
+            ForEach(group.entries) { entry in
+                ShortcutRow(entry: entry)
+            }
+        } header: {
+            sectionHeader(group.section.title, theme: theme)
+        }
+    }
+
+    private func editorSection(_ group: EditorKeyGroup, theme: Theme) -> some View {
+        Section {
+            ForEach(group.commands) { command in
+                EditorKeyRow(command: command)
+            }
+        } header: {
+            sectionHeader(group.section.title, note: group.section.note, theme: theme)
+        }
     }
 
     private func header(theme: Theme) -> some View {
@@ -137,8 +152,8 @@ struct KeyboardShortcutsView: View {
 
 /// One editor command: what it does, and the keys — one run of key caps for
 /// each way to do it, with "or" between the ways.
-private struct EditorCommandRow: View {
-    let command: EditorCommand
+private struct EditorKeyRow: View {
+    let command: EditorKeyEntry
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
