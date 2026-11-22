@@ -30,6 +30,7 @@ struct MainWindowView: View {
                             LogAnalysisSheet(target: target)
                                 .environmentObject(store)
                                 .environmentObject(settings)
+                                .dismissOnOutsideClick()
                         }
                 }
             }
@@ -39,6 +40,7 @@ struct MainWindowView: View {
                 KeyboardShortcutsView()
                     .environmentObject(store)
                     .environmentObject(settings)
+                    .dismissOnOutsideClick()
             }
         }
         .frame(minWidth: 900, minHeight: 560)
@@ -49,6 +51,7 @@ struct MainWindowView: View {
             CommandPaletteView()
                 .environmentObject(store)
                 .environmentObject(settings)
+                .dismissOnOutsideClick()
         }
         .onAppear { process.start() }
         .onDisappear { process.stop() }

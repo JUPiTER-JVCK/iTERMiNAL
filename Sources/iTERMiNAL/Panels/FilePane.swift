@@ -506,6 +506,7 @@ struct FilePaneView: View {
         }
         .sheet(item: $model.markdownPreview) { document in
             MarkdownPreviewSheet(document: document)
+                .dismissOnOutsideClick()
         }
     }
 
