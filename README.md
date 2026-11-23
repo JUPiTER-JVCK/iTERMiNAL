@@ -26,196 +26,213 @@ A tour of the app in thirty-four pictures, in five groups.
 
 ### The window
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/split-panes.png" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
-      <br><b>Split panes</b> — terminals and the file browser side by side in one tab. The layout is saved and comes back when you relaunch.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/dock.png" alt="The window with the terminal dock open along the bottom: two tabs, the first showing git status and the last five commits, under the main terminal and the composer.">
-      <br><b>Terminal dock</b> — a row of shells along the bottom, each its own tab, under whatever is open above.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/tasks.png" alt="The task manager listing seven running shells, each with the command it is running, where it lives, how long it has been going, and Go to and Stop buttons.">
-      <br><b>Task manager</b> — every shell the app is running, wherever it lives, with how long it has been going and one click to jump to it or stop it.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/command-palette.png" alt="The command palette: a search box over a list of actions — New Terminal Tab, New Workspace, Split Right, Split Down, Split with Browser, Split with Files — each with its shortcut.">
-      <br><b>Command palette</b> — every action in one searchable list, with its shortcut beside it.
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/split-panes.png" width="880" alt="One tab split into three panes: a terminal listing git history, a terminal showing a request log, and the file browser.">
+</p>
+
+**Split panes** — terminals and the file browser side by side in one tab. The layout is saved and comes back when you relaunch.
+
+<p align="center">
+  <img src="docs/images/dock.png" width="880" alt="The window with the terminal dock open along the bottom: two tabs, the first showing git status and the last five commits, under the main terminal and the composer.">
+</p>
+
+**Terminal dock** — a row of shells along the bottom, each its own tab, under whatever is open above.
+
+<p align="center">
+  <img src="docs/images/tasks.png" width="880" alt="The task manager listing seven running shells, each with the command it is running, where it lives, how long it has been going, and Go to and Stop buttons.">
+</p>
+
+**Task manager** — every shell the app is running, wherever it lives, with how long it has been going and one click to jump to it or stop it.
+
+<p align="center">
+  <img src="docs/images/command-palette.png" width="632" alt="The command palette: a search box over a list of actions — New Terminal Tab, New Workspace, Split Right, Split Down, Split with Browser, Split with Files — each with its shortcut.">
+</p>
+
+**Command palette** — every action in one searchable list, with its shortcut beside it.
 
 ### The terminal
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/terminal-context-menu.png" alt="The menu a right-click on a terminal opens: Copy, Paste and Select All, then Find and Clear Scrollback, then Split Right, Split Down and New Tab, each with its shortcut.">
-      <br><b>Right-click menu</b> — Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that is a tab or a pane, the split and new-tab commands. Copy is greyed out until something is selected.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/terminal-colors.png" alt="A terminal after ls -AF: folders in bold blue, a symbolic link in bold cyan, a script in bold green, and the other files plain.">
-      <br><b>Colored <code>ls</code></b> — folders, links and programs, in the colors of the terminal theme. Nothing to install: the app sets the variables <code>ls</code> reads. See <a href="#colored-output">Colored output</a>.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/terminal-colors-man.png" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
-      <br><b>Colored man pages</b> — headings and options in red, what you fill in in green, from the same environment.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/terminal-tools.png" alt="A terminal after imgcat, bat and rg: a green-to-blue picture with a white disc drawn in the terminal itself, then main.rs listed by bat with line numbers and syntax colours, then the line rg found with the match in red.">
-      <br><b>Command-line tools</b> — <code>rg</code>, <code>bat</code> and <code>imgcat</code> ship inside the app and are on every terminal's <code>PATH</code>. Here: a picture drawn in the terminal, a source file with syntax colours, and a search hit. See <a href="#command-line-tools">Command-line tools</a>.
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/terminal-context-menu.png" width="300" alt="The menu a right-click on a terminal opens: Copy, Paste and Select All, then Find and Clear Scrollback, then Split Right, Split Down, New Tab and Close Pane, each with its shortcut.">
+</p>
+
+**Right-click menu** — Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that is a tab or a pane, the split, new-tab and Close Pane commands. Copy is greyed out until something is selected.
+
+<p align="center">
+  <img src="docs/images/terminal-colors.png" width="880" alt="A terminal after ls -AF: folders in bold blue, a symbolic link in bold cyan, a script in bold green, and the other files plain.">
+</p>
+
+**Colored `ls`** — folders, links and programs, in the colors of the terminal theme. Nothing to install: the app sets the variables `ls` reads. See [Colored output](#colored-output).
+
+<p align="center">
+  <img src="docs/images/terminal-colors-man.png" width="880" alt="The ls man page in less: headings and option names in red, the words you fill in in green.">
+</p>
+
+**Colored man pages** — headings and options in red, what you fill in in green, from the same environment.
+
+<p align="center">
+  <img src="docs/images/terminal-tools.png" width="880" alt="A terminal after imgcat, bat and rg: a green-to-blue picture with a white disc drawn in the terminal itself, then main.rs listed by bat with line numbers and syntax colours, then the line rg found with the match in red.">
+</p>
+
+**Command-line tools** — `rg`, `bat` and `imgcat` ship inside the app and are on every terminal's `PATH`. Here: a picture drawn in the terminal, a source file with syntax colours, and a search hit. See [Command-line tools](#command-line-tools).
 
 ### The composer and the assistant
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/composer-history.png" alt="The composer with “git” typed into it and a list of earlier git commands above, with the keys that work in the list underneath.">
-      <br><b>History search</b> — ⌃R lists earlier commands that match what you have typed; ↑↓ choose, and ↩ puts the choice in the input without running it.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/ai-assistant.png" alt="A reply from the assistant above the composer: a sentence of explanation, two git commands in a block with a warning that they throw away uncommitted changes, Insert and Copy buttons, and a closing tip.">
-      <br><b>Ask the assistant</b> — start a line with <code>@ai</code> and the reply appears above the composer. A command in it can be put in the input or copied; only you pressing ↩ runs anything.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/error-help.png" alt="A failed make command in the terminal and, above the composer, a line reading “That looked like an error” with Explain and Fix it buttons.">
-      <br><b>Explain / Fix it</b> — when a command prints something that reads like an error, the composer offers to explain it or suggest a fix. Nothing is sent until you choose one.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/settings-ai.png" alt="Settings, AI page: the provider preset (Ollama, local), its base URL and model, and the API key, which a local address does not need.">
-      <br><b>AI settings</b> — any OpenAI-compatible endpoint, a model on this Mac included. A local one needs no key; a key, when there is one, is kept in the Keychain.
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/composer-history.png" width="880" alt="The composer with “git” typed into it and a list of earlier git commands above, with the keys that work in the list underneath.">
+</p>
+
+**History search** — ⌃R lists earlier commands that match what you have typed; ↑↓ choose, and ↩ puts the choice in the input without running it.
+
+<p align="center">
+  <img src="docs/images/ai-assistant.png" width="880" alt="A reply from the assistant above the composer: a sentence of explanation, two git commands in a block with a warning that they throw away uncommitted changes, Insert and Copy buttons, and a closing tip.">
+</p>
+
+**Ask the assistant** — start a line with `@ai` and the reply appears above the composer. A command in it can be put in the input or copied; only you pressing ↩ runs anything.
+
+<p align="center">
+  <img src="docs/images/error-help.png" width="880" alt="A failed make command in the terminal and, above the composer, a line reading “That looked like an error” with Explain and Fix it buttons.">
+</p>
+
+**Explain / Fix it** — when a command prints something that reads like an error, the composer offers to explain it or suggest a fix. Nothing is sent until you choose one.
+
+<p align="center">
+  <img src="docs/images/settings-ai.png" width="1012" alt="Settings, AI page: the provider preset (Ollama, local), its base URL and model, and the API key, which a local address does not need.">
+</p>
+
+**AI settings** — any OpenAI-compatible endpoint, a model on this Mac included. A local one needs no key; a key, when there is one, is kept in the Keychain.
 
 ### Panels and tools
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/http-client.png" alt="The HTTP client panel after a GET request: the method and address, two headers, and the 200 response with its timing, size and pretty-printed JSON body.">
-      <br><b>HTTP client</b> — build a request, send it, and read the status, timing and formatted body.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/site-explorer.png" alt="The site explorer in the HTTP panel: a command-line session that opens a local site, lists its top-level paths with where each was declared, and prints a tree of /docs.">
-      <br><b>Site explorer</b> — walk what a site publishes (its <code>robots.txt</code>, its sitemaps and the links in pages you fetch) like a directory. It never guesses at paths.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-images.png" alt="The Extract tab on the Images list of a fetched page: six images, each with a small picture, its description, address and size, three ticked, and Filter, Previews, All, Download and Export controls beneath.">
-      <br><b>Extract</b> — read a response into lists you can filter, copy, save and download from: links, images (with previews, if you turn them on), video and audio, files, tables, text.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-query.png" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
-      <br><b>Query</b> — ask the response a question in CSS selectors, XPath, JSONPath or a regular expression, and take the answers as a list. See <a href="#extract">Extract</a>.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-crawl-confirm.png" alt="The crawl sheet: the site, up to 25 pages, 2 links deep, a second between requests, an option to stay under the page's folder, and four lines on what it will and won't do.">
-      <br><b>Crawl</b> — follow a page's own links to the rest of its site, after a sheet that says how far, how fast, and what it will and won't do.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-crawl.png" alt="The crawl's pages: each address reached with its status, title and depth, and the one robots.txt rules out listed as left alone.">
-      <br><b>What a crawl reached</b> — one page at a time, <code>robots.txt</code> first and obeyed: the page it rules out is listed, not fetched. See <a href="#extract">Extract</a>.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-ask-confirm.png" alt="The Ask sheet: a request, the question that would be sent and where, and a disclosure for every character of it.">
-      <br><b>Ask the assistant</b> — says where the page's text would go, and shows every character of it, before anything is sent.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-ask.png" alt="The assistant's answer as a table of regions with revenue and costs, labelled as written by the assistant.">
-      <br><b>Rows from a page</b> — the answer as a table of text, labelled as a model's. It is only ever shown: nothing in it is run, opened or fetched.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-download-confirm.png" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
-      <br><b>Download</b> — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/extract-crawl-links.png" alt="The links found on the crawled pages, each once with how often it came up and the first page it was found on.">
-      <br><b>What a crawl found</b> — every link, image, video and file on the pages it reached, each once, with the page it was first found on, in the same lists as above.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/browser.png" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
-      <br><b>Browser</b> — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/files.png" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
-      <br><b>File browser</b> — this Mac or any saved SFTP host, in a panel or a split pane.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/files-sftp-denied.png" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
-      <br><b>When a host won't let you in</b> — what went wrong, what to do in order, and a button for the next move. See <a href="#when-a-host-cant-be-reached">When a host can't be reached</a>.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/files-sftp-shared.png" alt="The file browser listing a host after a terminal tab signed in to it, with a link icon beside the path.">
-      <br><b>A host that wants a password</b> — sign in once in a terminal tab, where the password goes to <code>ssh</code> and not to the app, and the file browser uses that connection. See <a href="#a-host-that-wants-a-password">A host that wants a password</a>.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/superfile.png" alt="superfile, the terminal file manager, in a panel: a sidebar of places, the sample project's files with icons, and process, metadata and clipboard panels underneath.">
-      <br><b>superfile</b> — a terminal file manager, built in and wearing the terminal's colours. See <a href="#bundled-tools">Bundled tools</a>.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/btop.png" alt="btop, the resource monitor, in a panel: CPU, memory, disk, network and process boxes in the terminal's colours.">
-      <br><b>btop</b> — a resource monitor, built in the same way.
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/http-client.png" width="880" alt="The HTTP client panel after a GET request: the method and address, two headers, and the 200 response with its timing, size and pretty-printed JSON body.">
+</p>
+
+**HTTP client** — build a request, send it, and read the status, timing and formatted body.
+
+<p align="center">
+  <img src="docs/images/site-explorer.png" width="880" alt="The site explorer in the HTTP panel: a command-line session that opens a local site, lists its top-level paths with where each was declared, and prints a tree of /docs.">
+</p>
+
+**Site explorer** — walk what a site publishes (its `robots.txt`, its sitemaps and the links in pages you fetch) like a directory. It never guesses at paths.
+
+<p align="center">
+  <img src="docs/images/extract-images.png" width="880" alt="The Extract tab on the Images list of a fetched page: six images, each with a small picture, its description, address and size, three ticked, and Filter, Previews, All, Download and Export controls beneath.">
+</p>
+
+**Extract** — read a response into lists you can filter, copy, save and download from: links, images (with previews, if you turn them on), video and audio, files, tables, text.
+
+<p align="center">
+  <img src="docs/images/extract-query.png" width="880" alt="The Extract tab's query box: a CSS selector, img::attr(src), and the four image addresses it found, each with its element.">
+</p>
+
+**Query** — ask the response a question in CSS selectors, XPath, JSONPath or a regular expression, and take the answers as a list. See [Extract](#extract).
+
+<p align="center">
+  <img src="docs/images/extract-crawl-confirm.png" width="572" alt="The crawl sheet: the site, up to 25 pages, 2 links deep, a second between requests, an option to stay under the page's folder, and four lines on what it will and won't do.">
+</p>
+
+**Crawl** — follow a page's own links to the rest of its site, after a sheet that says how far, how fast, and what it will and won't do.
+
+<p align="center">
+  <img src="docs/images/extract-crawl.png" width="880" alt="The crawl's pages: each address reached with its status, title and depth, and the one robots.txt rules out listed as left alone.">
+</p>
+
+**What a crawl reached** — one page at a time, `robots.txt` first and obeyed: the page it rules out is listed, not fetched. See [Extract](#extract).
+
+<p align="center">
+  <img src="docs/images/extract-ask-confirm.png" width="592" alt="The Ask sheet: a request, the question that would be sent and where, and a disclosure for every character of it.">
+</p>
+
+**Ask the assistant** — says where the page's text would go, and shows every character of it, before anything is sent.
+
+<p align="center">
+  <img src="docs/images/extract-ask.png" width="880" alt="The assistant's answer as a table of regions with revenue and costs, labelled as written by the assistant.">
+</p>
+
+**Rows from a page** — the answer as a table of text, labelled as a model's. It is only ever shown: nothing in it is run, opened or fetched.
+
+<p align="center">
+  <img src="docs/images/extract-download-confirm.png" width="552" alt="The download sheet: four files from localhost, the folder they will go in, the size limit, and a line saying one more will not be fetched.">
+</p>
+
+**Download** — says which sites, which folder, and what will not be fetched (and why) before anything is requested.
+
+<p align="center">
+  <img src="docs/images/extract-crawl-links.png" width="880" alt="The links found on the crawled pages, each once with how often it came up and the first page it was found on.">
+</p>
+
+**What a crawl found** — every link, image, video and file on the pages it reached, each once, with the page it was first found on, in the same lists as above.
+
+<p align="center">
+  <img src="docs/images/browser.png" width="880" alt="The browser panel beside a terminal: three tabs with the pages' titles, an address bar, and the sample site's home page.">
+</p>
+
+**Browser** — a tabbed web view in a panel or a split pane, which the local scripting API can drive.
+
+<p align="center">
+  <img src="docs/images/files.png" width="880" alt="The file browser panel beside a terminal, listing the sample project's folders and files with their modification times.">
+</p>
+
+**File browser** — this Mac or any saved SFTP host, in a panel or a split pane.
+
+<p align="center">
+  <img src="docs/images/files-sftp-denied.png" width="880" alt="The file browser after a refused sign-in: Couldn't sign in to deploy@127.0.0.1, why, five numbered steps with commands to copy, and the buttons Try Again, Set Up Key, Sign In in a Terminal and Connection Settings.">
+</p>
+
+**When a host won't let you in** — what went wrong, what to do in order, and a button for the next move. See [When a host can't be reached](#when-a-host-cant-be-reached).
+
+<p align="center">
+  <img src="docs/images/files-sftp-shared.png" width="880" alt="The file browser listing a host after a terminal tab signed in to it, with a link icon beside the path.">
+</p>
+
+**A host that wants a password** — sign in once in a terminal tab, where the password goes to `ssh` and not to the app, and the file browser uses that connection. See [A host that wants a password](#a-host-that-wants-a-password).
+
+<p align="center">
+  <img src="docs/images/superfile.png" width="880" alt="superfile, the terminal file manager, in a panel: a sidebar of places, the sample project's files with icons, and process, metadata and clipboard panels underneath.">
+</p>
+
+**superfile** — a terminal file manager, built in and wearing the terminal's colours. See [Bundled tools](#bundled-tools).
+
+<p align="center">
+  <img src="docs/images/btop.png" width="880" alt="btop, the resource monitor, in a panel: CPU, memory, disk, network and process boxes in the terminal's colours.">
+</p>
+
+**btop** — a resource monitor, built in the same way.
 
 ### Look, keys and settings
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/light-theme.png" alt="The same window in the light theme: sidebar, terminal and composer in light colours, with the same git history.">
-      <br><b>Light theme</b> — the window follows the system's light and dark appearance, or is set to one by hand.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/custom-look.png" alt="The window with the Catppuccin Mocha terminal theme, a purple accent, a rounder frame and a rounded interface typeface.">
-      <br><b>Make it yours</b> — a terminal theme, an accent colour, the frame's tint and corner radius, and the interface typeface.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/keyboard-shortcuts.png" alt="The Keyboard Shortcuts window: a search box over the shortcuts, grouped as General and Tabs and panes, each drawn as key caps.">
-      <br><b>Keyboard shortcuts</b> — every shortcut in one searchable window, opened with ⌘/.
-    </td>
-    <td width="50%" valign="top">
-      <img src="docs/images/settings-appearance.png" alt="Settings, Appearance page: theme, accent colours, terminal opacity, and a preview of the workspace frame.">
-      <br><b>Appearance settings</b> — theme, accent colour, terminal opacity and the workspace frame. The whole Settings window is one colour, the rail and the page alike.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="docs/images/settings-security.png" alt="Settings, Security page: the local scripting API switch, off, and a list of how the app handles your data.">
-      <br><b>Security settings</b> — the local scripting API stays off until you turn it on, and the page says how your data is handled.
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/light-theme.png" width="880" alt="The same window in the light theme: sidebar, terminal and composer in light colours, with the same git history.">
+</p>
 
-<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-four into `docs/images/`.</sub>
+**Light theme** — the window follows the system's light and dark appearance, or is set to one by hand.
+
+<p align="center">
+  <img src="docs/images/custom-look.png" width="880" alt="The window with the Catppuccin Mocha terminal theme, a purple accent, a rounder frame and a rounded interface typeface.">
+</p>
+
+**Make it yours** — a terminal theme, an accent colour, the frame's tint and corner radius, and the interface typeface.
+
+<p align="center">
+  <img src="docs/images/keyboard-shortcuts.png" width="632" alt="The Keyboard Shortcuts window: a search box over the shortcuts, grouped as General and Tabs and panes, each drawn as key caps.">
+</p>
+
+**Keyboard shortcuts** — every shortcut in one searchable window, opened with ⌘/.
+
+<p align="center">
+  <img src="docs/images/settings-appearance.png" width="1012" alt="Settings, Appearance page: theme, accent colours, terminal opacity, and a preview of the workspace frame.">
+</p>
+
+**Appearance settings** — theme, accent colour, terminal opacity and the workspace frame. The whole Settings window is one colour, the rail and the page alike.
+
+<p align="center">
+  <img src="docs/images/settings-security.png" width="1012" alt="Settings, Security page: the local scripting API switch, off, and a list of how the app handles your data.">
+</p>
+
+**Security settings** — the local scripting API stays off until you turn it on, and the page says how your data is handled.
+
+<sub>These pictures are taken from the app itself by the [Screenshots workflow](.github/workflows/screenshots.yml), on a macOS runner, against an invented project (`hello-api`), a small web site on localhost, a stand-in for an AI model on localhost, and two SSH servers on localhost — one that lets no one in, and one that takes a single key made for the run — so nothing in them is real data, and the assistant's replies are canned ones, not a model's answers. The superfile and btop pictures show the runner's own files and processes, and the shared-sign-in picture the path of the sample project in its home folder, under its generic `runner` account. The status line at the foot of each window shows that account and the runner's machine name, which are generated for each run. Every picture is kept at the full 2× Retina size the app draws it at (a window is about 2,200 pixels wide) and the page scales it to fit, so it stays sharp on a high-resolution display. To retake them after the interface changes, run that workflow (Actions → Screenshots → Run workflow), download its artifact, and run `python3 scripts/screenshots/publish.py <folder>` on it: that writes these thirty-four into `docs/images/`.</sub>
 
 ## Features
 
@@ -224,7 +241,7 @@ A tour of the app in thirty-four pictures, in five groups.
   cursor animation, inline images, and an opt-in Metal GPU renderer.
 - **Right-click menu** — right-click a terminal (or the margin around it) for
   Copy, Paste, Select All, Find… and Clear Scrollback, and, for a terminal that
-  is a tab or a pane, Split Right, Split Down and New Tab. Copy is greyed out
+  is a tab or a pane, Split Right, Split Down, New Tab and Close Pane. Copy is greyed out
   until something is selected; Paste goes to the terminal you clicked, even if
   another one had the keyboard; Clear Scrollback drops only the history above
   the screen, so it is safe while a program is running. A program that has

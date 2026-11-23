@@ -10,12 +10,21 @@ holds everything the capture took, including pictures that are only there to
 find out why another came out wrong, and one is not fit to publish at all
 (see NOT_PUBLISHED).
 
-The app draws every picture at twice the size it appears. The README shows
-all but the first at half that — the exact 2x2 average, so the anti-aliasing
-the app drew survives — which is sharp where it is shown and a fraction of
-the size in the repository. The first is kept whole, because it is shown wide.
+The app draws every picture at twice the size it appears (a Retina display's
+own resolution), and every picture is published at that size: a window is
+about 2,200 pixels wide, a settings window about 2,000. Nothing is scaled
+down here, so the text in a picture is as sharp as on the screen it was drawn
+for, and GitHub scales it to fit on any display. The README sets each picture's
+displayed width itself (the `width` on its `<img>`), which is how a small
+sheet stays small and a window fills the page. Pictures were once halved to a
+quarter of the pixels, and the interface text in them came out too small to
+read once the page fitted them to a column.
 
-Standard library only. It writes 8-bit RGBA PNGs, and reads the same: what
+Each picture is read and written again with every row filtered cheaply and
+the whole compressed as hard as zlib goes, because AppKit's PNG writer does
+not, and these are large files.
+
+Standard library only. It reads and writes 8-bit RGBA PNGs, which is what
 AppKit's PNG writer produces.
 """
 import os
@@ -26,7 +35,6 @@ import zlib
 # What the README shows, in the order it shows it. Each name is also the
 # picture's file name in the artifact.
 README_PICTURES = [
-    # The whole window, kept at the size it was drawn.
     "workspace",
     "split-panes",
     "dock",
@@ -62,8 +70,6 @@ README_PICTURES = [
     "settings-ai",
     "settings-security",
 ]
-WHOLE_SIZE = {"workspace"}
-
 # Taken, and still not for the README. Settings -> Connections lists what
 # Bonjour finds on the network, which on a runner is the runner's own name.
 NOT_PUBLISHED = {"settings-connections"}
@@ -124,29 +130,6 @@ def read_png(path):
     return width, height, rows
 
 
-def halve(width, height, rows):
-    """Half the size each way: the average of each 2x2 block, weighted by alpha."""
-    out_width, out_height = width // 2, height // 2
-    out = []
-    for y in range(out_height):
-        blocks = []
-        for row in (rows[2 * y], rows[2 * y + 1]):
-            for offset in (0, 4):
-                blocks.append((row[offset::8], row[offset + 1::8], row[offset + 2::8], row[offset + 3::8]))
-        line = bytearray(out_width * 4)
-        for x in range(out_width):
-            alphas = [block[3][x] for block in blocks]
-            total = sum(alphas)
-            if not total:
-                continue
-            for channel in range(3):
-                mixed = sum(block[channel][x] * alpha for block, alpha in zip(blocks, alphas))
-                line[4 * x + channel] = (mixed + total // 2) // total
-            line[4 * x + 3] = (total + 2) // 4
-        out.append(line)
-    return out_width, out_height, out
-
-
 def write_png(path, width, height, rows):
     """Each row takes whichever of None, Sub and Up is cheapest."""
 
@@ -185,8 +168,6 @@ def main():
     total = 0
     for name in README_PICTURES:
         width, height, rows = read_png(os.path.join(source, name + ".png"))
-        if name not in WHOLE_SIZE:
-            width, height, rows = halve(width, height, rows)
         path = os.path.join(out, name + ".png")
         write_png(path, width, height, rows)
         size = os.path.getsize(path)
