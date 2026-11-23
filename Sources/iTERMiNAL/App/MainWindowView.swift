@@ -68,6 +68,12 @@ struct MainWindowView: View {
                 openWindow(value: PoppedPaneID(id: id))
             }
         }
+        // So does a side panel's.
+        .onReceive(NotificationCenter.default.publisher(for: .popOutPanel)) { note in
+            if let raw = note.userInfo?["panel"] as? String {
+                openWindow(value: PoppedPanelID(panel: raw))
+            }
+        }
     }
 
     private func contentCard(_ theme: Theme) -> some View {
