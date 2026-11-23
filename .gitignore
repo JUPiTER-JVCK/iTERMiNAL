@@ -18,3 +18,7 @@ xcuserdata/
 # committed: ~55 MB of binaries in history, forever, for something CI
 # reproduces from a pin.
 Vendor/
+
+# Python bytecode
+__pycache__/
+*.pyc
