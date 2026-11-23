@@ -200,6 +200,7 @@ private struct DockLeaf: View {
     let dragHandlers: DockDragHandlers
 
     @EnvironmentObject private var store: WorkspaceStore
+    @ObservedObject private var popped = PoppedPanels.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
@@ -225,37 +226,11 @@ private struct DockLeaf: View {
 
     @ViewBuilder
     private var content: some View {
-        switch panel {
-        case .browser:
-            BrowserPanelView(model: store.panelBrowserTabs)
-        case .files:
-            FilePaneView(model: store.panelFiles)
-        case .notes:
-            NotesPaneView(model: store.panelNotes)
-        case .superfile:
-            ToolPanelView(tool: .superfile)
-        case .btop:
-            ToolPanelView(tool: .btop)
-        case .http:
-            HTTPClientPaneView(model: store.panelHTTPClient)
-        case .bytes:
-            BytesViewerPaneView(model: store.panelBytes)
-        case .byteTools:
-            ByteToolsPaneView(model: store.panelByteTools)
-        case .tasks:
-            TaskManagerView()
-        case .automations:
-            SectionPageView(
-                title: "Automations",
-                subtitle: "Run commands on a schedule, or when something in a session changes.",
-                icon: "clock",
-                emptyTitle: "No automations yet",
-                emptyCaption: "Scheduled commands and triggers are coming soon."
-            )
-        case .skills:
-            SkillsView()
-        case .cheatsheet:
-            CheatsheetView()
+        // The panel's view is live and can only be in one window.
+        if popped.contains(panel) {
+            PoppedPanelPlaceholder(panel: panel)
+        } else {
+            SidePanelContent(panel: panel)
         }
     }
 
@@ -277,6 +252,7 @@ private struct DockLeaf: View {
             if store.panelsInReadingOrder.count > 1 {
                 DockArrangeMenuButton(panel: panel)
             }
+            popOutButton
             expandButton
             iconButton("xmark", help: "Close panel") { store.closeRightRegion() }
         }
@@ -292,6 +268,7 @@ private struct DockLeaf: View {
             dragHandle(theme: theme, isFocused: isFocused)
 
             DockArrangeMenuButton(panel: panel)
+            popOutButton
             if carriesRegionControls {
                 expandButton
             }
@@ -327,6 +304,10 @@ private struct DockLeaf: View {
         .help("Drag to move \(panel.title)")
     }
 
+    private var popOutButton: some View {
+        PanelPopOutButton(panel: panel)
+    }
+
     private var expandButton: some View {
         iconButton(
             store.rightPanelExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
@@ -346,5 +327,46 @@ private struct DockLeaf: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+/// A panel's own view, drawn in the dock or in a window of its own.
+struct SidePanelContent: View {
+    let panel: SidePanel
+    @EnvironmentObject private var store: WorkspaceStore
+
+    var body: some View {
+        switch panel {
+        case .browser:
+            BrowserPanelView(model: store.panelBrowserTabs)
+        case .files:
+            FilePaneView(model: store.panelFiles)
+        case .notes:
+            NotesPaneView(model: store.panelNotes)
+        case .superfile:
+            ToolPanelView(tool: .superfile)
+        case .btop:
+            ToolPanelView(tool: .btop)
+        case .http:
+            HTTPClientPaneView(model: store.panelHTTPClient)
+        case .bytes:
+            BytesViewerPaneView(model: store.panelBytes)
+        case .byteTools:
+            ByteToolsPaneView(model: store.panelByteTools)
+        case .tasks:
+            TaskManagerView()
+        case .automations:
+            SectionPageView(
+                title: "Automations",
+                subtitle: "Run commands on a schedule, or when something in a session changes.",
+                icon: "clock",
+                emptyTitle: "No automations yet",
+                emptyCaption: "Scheduled commands and triggers are coming soon."
+            )
+        case .skills:
+            SkillsView()
+        case .cheatsheet:
+            CheatsheetView()
+        }
     }
 }

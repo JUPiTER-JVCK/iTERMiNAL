@@ -66,6 +66,22 @@ struct ITerminalApp: App {
         // As for Remote Desktop: only `openWindow(value:)` opens one.
         .handlesExternalEvents(matching: [])
 
+        // A side panel in a window of its own; the value is the panel's raw
+        // value. Opened by the main window when a panel's pop-out button is
+        // pressed, and closed — returning the panel to the region — by closing
+        // it. See `PoppedPanels`.
+        WindowGroup("Panel", for: PoppedPanelID.self) { $panel in
+            PoppedPanelWindow(value: panel)
+                .environmentObject(settings)
+                .environmentObject(store)
+                .preferredColorScheme(settings.preferredColorScheme)
+                .environment(\.appThemeID, settings.appThemeID)
+                .tint(settings.accentColor)
+                .fontDesign(settings.uiFontDesign.design)
+        }
+        .defaultSize(width: 820, height: 520)
+        .handlesExternalEvents(matching: [])
+
         Settings {
             SettingsRootView()
                 .environmentObject(settings)
