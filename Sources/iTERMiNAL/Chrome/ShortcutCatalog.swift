@@ -271,7 +271,7 @@ enum ShortcutCatalog {
                       detail: "The same, across the whole content area"),
 
         // MARK: Inside btop
-        // btop 1.4.7's own help (F1 in btop; `help_text` in its src/btop_menu.cpp
+        // btop 1.4.8's own help (F1 in btop; `help_text` in its src/btop_menu.cpp
         // at the commit scripts/tools.env pins), minus the two mouse lines. btop's
         // keys are built in: no setting changes them.
         ShortcutEntry("btop.menu", "Main menu", [ShortcutChord(.escape), ShortcutChord("m")], in: .btop, .tool,
@@ -335,8 +335,8 @@ enum ShortcutCatalog {
         ShortcutEntry("btop.nice", "Change the selected process's nice value", [ShortcutChord("n", shift)], in: .btop, .tool),
 
         // MARK: Inside superfile
-        // superfile 1.6.0's default hotkeys (src/superfile_config/hotkeys.toml at
-        // its v1.6.0 tag), described as superfile's hotkey list does
+        // superfile 1.6.1's default hotkeys (src/superfile_config/hotkeys.toml at
+        // its v1.6.1 tag), described as superfile's hotkey list does
         // (superfile.dev/list/hotkey-list). The app does not change them; a
         // hotkeys.toml of your own in superfile's config folder does.
         ShortcutEntry("superfile.help", "Help", [ShortcutChord("?")], in: .superfile, .tool,

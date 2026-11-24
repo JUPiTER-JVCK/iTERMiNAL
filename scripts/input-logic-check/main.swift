@@ -11336,7 +11336,7 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
         if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
         let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
-        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        if ranges.map({ String($0) }) != ["1"] { wrong.append("\(name) full range: \(ranges)") }
         let hevc = heifFind(result.outcome.roots, "hvcC").first
         if heifField(hevc, "Level")?.hasPrefix("30 · level \(Double(30) / 30)") != true || heifField(hevc, "Profile")?.hasPrefix("3 ·") != true { wrong.append("\(name) hvcC: \(heifField(hevc, "Level") ?? "none")") }
     }
@@ -11361,7 +11361,7 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
         if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
         let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
-        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        if ranges.map({ String($0) }) != ["1"] { wrong.append("\(name) full range: \(ranges)") }
         let hevc = heifFind(result.outcome.roots, "hvcC").first
         if heifField(hevc, "Level")?.hasPrefix("30 · level \(Double(30) / 30)") != true || heifField(hevc, "Profile")?.hasPrefix("3 ·") != true { wrong.append("\(name) hvcC: \(heifField(hevc, "Level") ?? "none")") }
     }
@@ -11386,9 +11386,9 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
         if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
         let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
-        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        if ranges.map({ String($0) }) != ["1"] { wrong.append("\(name) full range: \(ranges)") }
         let av1 = heifFind(result.outcome.roots, "av1C").first
-        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+        if heifField(av1, "Profile").map({ String($0.prefix(1)) }) != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
     }
     do {
         let name = "avif_alpha"
@@ -11411,9 +11411,9 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
         if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
         let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
-        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        if ranges.map({ String($0) }) != ["1"] { wrong.append("\(name) full range: \(ranges)") }
         let av1 = heifFind(result.outcome.roots, "av1C").first
-        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+        if heifField(av1, "Profile").map({ String($0.prefix(1)) }) != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
     }
     do {
         let name = "avif_gray"
@@ -11436,9 +11436,9 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         if heifField(heifFind(result.outcome.roots, "pitm").first, "Item ID").flatMap({ structureNumber($0) }) != 1 { wrong.append("\(name) pitm") }
         if result.outcome.summary?.contains(size) != true { wrong.append("\(name) summary: \(result.outcome.summary ?? "none") lacks \(size)") }
         let ranges = heifFind(result.outcome.roots, "colr").compactMap { heifField($0, "Full range") }.map { $0.prefix(1) }
-        if ranges.map { String($0) } != ["1"] { wrong.append("\(name) full range: \(ranges)") }
+        if ranges.map({ String($0) }) != ["1"] { wrong.append("\(name) full range: \(ranges)") }
         let av1 = heifFind(result.outcome.roots, "av1C").first
-        if heifField(av1, "Profile").map { String($0.prefix(1)) } != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
+        if heifField(av1, "Profile").map({ String($0.prefix(1)) }) != "0" || heifField(av1, "Level") != "0" { wrong.append("\(name) av1C") }
     }
     do {
         let name = "jp2_rgb"
@@ -11506,115 +11506,115 @@ func checkHEICAVIFJPEG2000AndJPEGXL() {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0090010012080100bc005de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("1 × 1") != true { jxlWrong.append("1x1: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("1x1 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("1x1 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("1x1 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a4106001208010070015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277048126b")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("8 × 8") != true { jxlWrong.append("8x8: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("8x8 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("8x8 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("8x8 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a20c00100120801007c015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("7 × 5") != true { jxlWrong.append("7x5: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("7x5 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("7x5 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("7x5 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a40d00100120801009c025de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c838364927704812")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("16 × 9") != true { jxlWrong.append("16x9: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("16x9 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("16x9 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("16x9 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a88f101001208010089285de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("100 × 50") != true { jxlWrong.append("100x50: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("100x50 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("100x50 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("100x50 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a7f060012080100b64e015de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("256 × 256") != true { jxlWrong.append("256x256: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("256x256 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("256x256 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("256x256 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0af007000e00120801004c5106c0279a3e01f4035de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("257 × 255") != true { jxlWrong.append("257x255: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("257x255 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 4 { jxlWrong.append("257x255 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 4 { jxlWrong.append("257x255 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a589901001208010030511a001d963a01b15de95d75045de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db5")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("300 × 300") != true { jxlWrong.append("300x300: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("300x300 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("300x300 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("300x300 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0ada15e87c0c0012080100dcd22c471ea23f01823f012240010608016e3f01fe3e016240015208011eab009aaa006a")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("1000 × 700") != true { jxlWrong.append("1000x700: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("1000x700 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 5 { jxlWrong.append("1000x700 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 5 { jxlWrong.append("1000x700 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a10800ee7001208010048814bdc4423e4120c900bd009100f500bd009500cd008d007d00b100d50105006100e100e")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("5000 × 3") != true { jxlWrong.append("5000x3: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("5000x3 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 4 { jxlWrong.append("5000x3 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 4 { jxlWrong.append("5000x3 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a1fce0012080100393e5de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("64 × 128") != true { jxlWrong.append("64x128: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("64x128 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("64x128 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("64x128 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a93070012080100d53f5de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("100 × 80") != true { jxlWrong.append("100x80: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("100x80 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("100x80 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("100x80 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18c301001208010055845de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("150 × 100") != true { jxlWrong.append("150x100: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("150x100 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("150x100 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("150x100 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18f301001208010065b45de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("200 × 100") != true { jxlWrong.append("200x100: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("200x100 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("200x100 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("200x100 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a18a301001208010065655de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("120 × 100") != true { jxlWrong.append("120x100: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("120x100 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("120x100 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("120x100 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0ad706001208010051645de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d61492201326fe502f09ee061")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("128 × 96") != true { jxlWrong.append("128x96: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("128x96 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("128x96 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("128x96 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a5706001208010059485de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("96 × 96") != true { jxlWrong.append("96x96: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("96x96 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 2 { jxlWrong.append("96x96 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 2 { jxlWrong.append("96x96 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0800df221a0012080100508340fc833f08844000843ff0c33ff8833e00c43e040440f4833ff40340040440fc833f")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("70000 × 2") != true { jxlWrong.append("70000x2: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("70000x2 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 5 { jxlWrong.append("70000x2 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 5 { jxlWrong.append("70000x2 size header bytes") }
     }
     do {
         let result = FormatRegistry.analyze(DataByteSource(structureBytes("ff0a0080bf2709800100120801002804410c844020844118844020044114c4411484400c84401cc44018444010444010")))
         if result.identity?.id != "jxl" || result.identity?.hasParser != true || result.outcome.summary?.contains("300000 × 1") != true { jxlWrong.append("300000x1: \(result.outcome.summary ?? "none")") }
         if !structureProblems(result.outcome.roots, fileLength: 48).isEmpty { jxlWrong.append("300000x1 unsound") }
-        if result.outcome.roots.dropFirst().first.map { $0.length } != 6 { jxlWrong.append("300000x1 size header bytes") }
+        if result.outcome.roots.dropFirst().first.map({ $0.length }) != 6 { jxlWrong.append("300000x1 size header bytes") }
     }
     check(jxlWrong.isEmpty, "the size packed into a JPEG XL header is what ffprobe says, for 19 sizes: \(jxlWrong.prefix(2))")
     let wrappedBytes = structureBytes("0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c2000000e366a786c63ff0a88f101001208010089285de5120000152aa38c1bbc9cebf9f24387c5b48deb0c6db56d6149a2c8383649277098a4a0c0e9620cc6c5180f1b1a1919a31449c6635bb592783106c7316b04e40067fffa3ce4cbaf48e0dcbd9c426c2e2a334085b8c6419c1fe5f1154dcb97907f078fe2beaabb3b70801d9e81160dd3a4467047234e35c39c62b53381212f27f352a03efd16daf9176606f1cc315c96068b3d87357bd0b18b12ffaa108c63b70a50ae1d1a2e5200e89b07000945a69beb90d70000000000a8aa73ce1d638c85284290f3ff4a220033102920296051249851f244fa357a32349037b037b082c78c35cb0a336040053150315078152b403320414011217171722841f0dc09321028b03b90a5393e90331081723c30e9b057b129b8097297f072be4990204122d549baa4768cf86f00a85abd7f472ce1aefa415f4b6b1bc7f3ff854a8029ce7d7f57c88315500efaa036ead11bcdfcacbc0afa97ed4c2fdcd8dfa75ac13f94d66c9b4345d384420de3355654f7c7bcda68cc44eead010cb9f08e20821591bff62461adae772c2a686c6699c31d5a2d3794b938f86aca3d3e1577416e22c609bc0b70213195148972d66c258d2515fe7962a10f4c5109f82ddc794efd874406f694f41bc634cf1ba75cc6d6edce4ce97cf97cb2d3f7ee74f2e5d919d7e18a0aa5d286953a958be9340d7fc4c68444f9debeb3624a26e9070a0612948ba063cd910a6ec6cc8a1ca4f076cc3d5dea5268fecc963e1059e29e699ade76d6206963c20c909d76649cd56320fe3af0495f35c93be89052daba3d74c99daef572ee345c3404ed0f8502e7aad37800c29b84930eff0f1720c9682ee5a91f903d3c853054e4214b5d046565e1cd8cfce697bc928af50ba9287624cf60e02341af1ab300c22c541e036f6aaee7965a3e7839edc2b4be18881c5e4dcba6ca47d3c11c2cd86bb1413c316528a7ae26559192c53b93dd55539154ebb7932e4660e96d5fab4125af415ba1745077e89a5e62ab11f0a441690a5024473b3480715e248cb88e8b44e961a6928679a6c088d8b785008c433b72d393351e5b34622e6b4da851bfe094bd3fc1ddcdb1afc18f840a84f552ebf892c3170b824c544824241002d729d3fdc5edc430a1f9b477867690c52b4d39affc39fce0c9196aeb0ba2449a91f2e7e123f60110e8e179241dac6b753cc9f506fa94fb4592d9206cf18df7945e5fc453040b646913a953034906b9a4b4265dfabc593ad3e3b141d9aeedee7c6cb017121072195818b361686913e64c28db9c7b5dcca3e4ee04867c643b6d81dcfe97b3ab09549d292f9c9b1d126fe9819cd53d81e983a086358d532aebd075a87429fca1fa7a72c9b0173205ba72991792b721d3d98b30aeb3731f3de205723d14f50134aa5c6265f16d666e7f1c251e4739fc9c5ae2a48c8a1bb631f340a92509ca445be980ac3487bee789868de6edb24b9ee0a3df77bb5e3555b68bcb42ed0072bad487506f04d93830c107d8502898f715b4dce42fd9c6172928c20d69c6a92e0b4e587e493531f9a0a2d579d6a2ab9c7b8dc19fd100b9368ef1ac3db4ecd4fdb9511aeffb418d18042325cdd339a8e756a567770cc39eb0cf9d152c42cbd9b103c3e1340bba1be462566ca16492033ac86c85416912123fc22c43977df5b85212c81933b73e68461c0a2487803ffbc181807699d1bcfbce1ee82c2949489c7e94ec9310063d9e6ebb078c0737471ec9640a6353477462bfacf3298e3ab7e4cde49eb84eec9daca1f90ff98d65d8de82d82b73878a86669a513a8359087c1dc8917c512767db657be7ee1767d639b9e2a6dc41e2fc64772db21fec58d4278844e45440dcb9e0d7b9cf749700a93ad56916b1970efe87ff921af6045656842f0624c8b0a9cbcdaca8a5f5945cee9de6eab3db8af38f037f39c633fe60165f6504e540566a69ae2ef100b06ca4cd598d1e6a54b8a9255d7d2552193d744f67fdecfb989cc59b57408140bd8e2653a4acbdc13820baf52596e28fefe99b73d725b3702317f1b67e57854384c554ad8ab73199fb2798c809d126db8c6e3dc73a870f2f95e592e693d8bae9ff42159e87a31a9808ca7c719c57ca5865f42e3567dae052736de71e89acbc09a0faa2e9d56148c25df9ca70e008d297239984110bc253b5a4d39ce34d9e7828a33677c9659fee741751d8380f12df00a41cb3ec2384316c6007d3ab4401768bae935e24dbaefdc1dd129f69bfc0bfd50b53c198996c52a52613a275e993940fe347f01e167f4b5b761dbb7d01f57e5bb1952c9ba7fd8040f696d0abc4cdc9c44bcc4992192b9b1eef32d4379ad580ececcf5a5b99e78a31ff18aeecea59efda5ed9c95431f644a18b191ba396db5850c1a921fba82be1de9547df1db5f79275daf630ba060f20931c4938d4c8a772e4cf4a2f415f1eb194e14b13d6ec6da9ac515441b93d5d7420c25663e1009949941907082c7e5f8b5c7eb237f0a6d6ac78ae2dfb6bed57dda5deb6b72cec635a679da3e4428e7d4da294dc59038deed9c976053d0a869cbfaaef1fcb31b880439a4ad0548020369257fad92161e85a865ad3809f26ca6665dce3fb0bf55df73deeebf9989788770db6ba0f98891c8bb3bbc85de925d1d1ce309aac85aeeb89fe80953c35da607d6f980d77802c2c7bb80a230a2b3539f3c372949f9e42ffb84a04c12f83d4dee115648977d65770d7a2e7b42c996aacd4e4565a6c9268522844fdb3ac78e7da4e14b33bb56aa73e1a6ff379dcabbeb1ca9e051380265d6996c3b7ecb203c4e1e2be6a0b22eef65363e61b7035ca89b97007fdad6eb55b5c51bc1fb8ad1cc43eac07849c193fd029c71beb3445a16795ae57b11fc0b2f7ca93e965bd1edc866484f24625b929b60255fb55868f8d7a5ae65db3f2ac2423bf334446fd1000fc439e719f9cdeae711999945d8459a22b3c36e121cfe96ea801597869315b04bbaeeb7bca5f249a264d2cb33854c3b85b5480ebc3d7907aaf3a515e0eec68ce4bd5e79f71bfc5f029d333375bde4c46306f6c11a89f30a72121a760e719bd7682a42632e9ca89b604bcd6608a8c7e1cbafcb2820512bc10ae85220fa9b34da6566b6ad73f5a2bcd44a8ace6bb024b89e08b639d0a2d3535a310f88b98da5b720fd86b28f5e1e8d8db6e508605d8a7f42d4c7730e86585fce000dd908d4f1400238e3bcac069015af28a064a19a5afeae4ad633ed1ad9f48668fac3c0f724849d1e1ea8a07083cd72601bc3a8d5e10afd3c68acac334c7727e0e3f2585f9b25188e845902ab7f34ae83a990cddfc0171d36875a634672af04e6e5804c062c4abcc5c343256a899b1865e77b48b47a6438ffe845fac3dcbacabd00b8c602ba59187a2bf6b3db195c75e626b3ddec90419984a9d9d1c62b4371765d26979d903b810f10187f41f5727f8d1fcc005cef9071c1d65ab0ab303ee82771a9ad6cfeda9d4e5254c162d744e80f4620feff43700a98b4df21bceac8cad8336d177d5050043aa6b6e801b78a95c76589881fcb8376dffc8fcfd65b2faead9091f875f099ad626481144bc2e18e22b794d6947786d44a490294f966287a774b6ee7e207d7a4f7e45434449ecd055bb74242fa24f596dad4b0a2f882e4e3268acdd49b7c79ba92eb7ed3f77c312be8d9b2885ef77ef59cc0408da2714cfed15d7b2ae57a856917447d8e303cbde20484b049366615317b4620f6dd458f4e48a38d07f7236066617eefba4d55097daae30c94d237fb4006e0dcb5518ad9f90a165bf91f1c149b70fa0515d640f8c6c2c410d1ed30ffeb504622025b728932b4a57850825424a9401ea208f8381044c3ccab6e514bdbade82f01c659fd687df751b5e398c0379b48c9750bcefb240aae31f79ce01f0449318bbe3bcc459c0ce87fde348bbf3fdb0d2417d134857b837599e30217fdbd4804fd0fa75efbee9a263d63cada267a482d8ea4504ed7a88eaf24c32f0e280603268f933274a2bb98b4362d7e6fae99656a7a95641a5b882680802b567fb987e3d0e71ba18b07754c93f16cf1a88856a4dfb79d7edb852e198ee2f6c60c9ef20d792ef58a104c426c52a049aa6e69fb3d99f91a2f9e4895b3bd2f51e312a841fd6e463555c0d26f43949a8eeb0cd2a60f40861827969e1536765985b36cd60aecc90036ba68fccf817f1f7e4c81aaddab2b2401a88b66c4fc51c2a49cbbcb46b31efd64f70fda369f359a5c3f157b82396ef46086654d82016e8906bc05bb1e439b4a92a6b7d016f93d9aedd815ee9bfe5ee6ed7bd9bb5c16e66298c2007d0fdd290719345d7920fd8d6f195595a2287cd1efe2bc02548c31cbd022c36bbb7cb0a69e0437c2d8e2e14007fd5cab59364545199805fc31755e056d23de4129c720638b633f5a4b5c1c9d614a35545734ab6b3c84666582f6b9e79f7de5a83a7308568b5ab676ac603c407451e92c637ce32b7b1bc859b59774aeebd2f1da5c6d182072202c18010a9b2f54e612361555791ea11002de522e8bcb2226383cc480333c1800d0400427ca5bffdd12538e8cb177800610e8070367625e0d6483315470a135c5405053181536642fd77ffee41e4dad7bb585008bad49f1e56886e422a45f1042e4b8f044303024c78f2e78872a6499f670703d9919e61e900a81bc4b641940182ed1602c409ca402a8d2fdf06739bf347e935b358298d53c405201571a6cb4ec490f26e00380026e554eab11fe50c69e7bf99b5342bd2c1bf4f7dd34888c477fa7fb1662be1ae8c53302ba83275419ea3f5f29fbead6255b40cb35fe2452ac4142e328a881a0025112126506004e2a5fd3f37423b7ffcdd5b952003e7c5b5fc4200b2e5829f0ce225201588a00410001891100dfef4eb0deed86ad0cdeb79b4a7d0634a5dcaa64edc2f6a8676c049e40075280a10a9fcf4ed94b4fa3ffd17cd46a2aa3537469a1a206a8efedf9d50618222773b03ea0c252095cff97be8c2ed50078540e706293db3123ee54394e56708388a2166840c00425cedfd925a4df4c3bb2213823b0a48158253e2bf3793160cee66001c6520950ffd8b91cfc87209dbb80c52958f450412b1303a20b1418410801001")
@@ -15409,8 +15409,8 @@ func checkTypingAndSaving() {
     do {
         var b = buffer([1, 2, 3, 4, 5, 6, 7, 8])
         check(b.changedRanges() == [], "an unchanged buffer has no changed bytes")
-        try? b.overwrite(at: 1, with: [9, 9])
-        try? b.overwrite(at: 6, with: [0])
+        _ = try? b.overwrite(at: 1, with: [9, 9])
+        _ = try? b.overwrite(at: 6, with: [0])
         try? b.fill(3..<4, with: 0xAA)
         check(b.changedRanges() == [1..<4, 6..<7], "overwritten and filled runs are the changed ones, joined where they touch: \(String(describing: b.changedRanges()))")
         try? b.insert(at: 2, bytes: [1])
@@ -15581,7 +15581,7 @@ func checkTypingAndSaving() {
     check(ByteFileSaver.nameCount(ofFileAt: "/no/such/file") == nil, "a file that is not there has no count of names")
     do {
         var b = buffer((0..<100).map { UInt8($0) })
-        try? b.overwrite(at: 10, with: [0xFF, 0xFE, 0xFD])
+        _ = try? b.overwrite(at: 10, with: [0xFF, 0xFE, 0xFD])
         try? b.fill(50..<60, with: 0)
         check(ByteFileSaver.spaceNeeded(for: b, clones: true) == 13 && ByteFileSaver.spaceNeeded(for: b, clones: false) == 100, "where a copy shares the original's data, a save of overwrites needs room for the changed bytes alone")
         try? b.insert(at: 0, bytes: [1])

@@ -42,19 +42,24 @@ jobs:
         run: python3 scripts/imgcat-check.py
 
       # The same way build.yml installs it, and for the same reason: straight
-      # from its release, not through Homebrew.
+      # from its release, not through Homebrew, at the version and hash
+      # scripts/tools.env pins.
       - name: Install XcodeGen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          . scripts/tools.env
           dir="$RUNNER_TEMP/xcodegen"
           mkdir -p "$dir"
-          gh release download --repo yonaskolb/XcodeGen \
-            --pattern '*.zip' --dir "$dir" --clobber
-          for archive in "$dir"/*.zip; do
-            unzip -q "$archive" -d "$dir"
-          done
+          gh release download "$XCODEGEN_VERSION" --repo yonaskolb/XcodeGen \
+            --pattern 'xcodegen.zip' --dir "$dir" --clobber
+          got=$(shasum -a 256 "$dir/xcodegen.zip" | awk '{print $1}')
+          if [ "$got" != "$XCODEGEN_SHA256" ]; then
+            echo "::error::xcodegen.zip $XCODEGEN_VERSION hash mismatch: expected $XCODEGEN_SHA256, got $got"
+            exit 1
+          fi
+          unzip -q "$dir/xcodegen.zip" -d "$dir"
           binary=$(find "$dir" -type f -name xcodegen -perm -u+x | head -1)
           if [ -z "$binary" ]; then
             echo "::error::no xcodegen binary in the XcodeGen release archive"

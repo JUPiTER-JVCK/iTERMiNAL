@@ -394,18 +394,27 @@ jobs:
       # had nothing to do with this project. Taking the tool straight from its
       # own release skips Homebrew entirely — no warning, and much faster than
       # letting brew update itself first.
+      #
+      # The release is the one scripts/tools.env pins, checked against its
+      # hash. This used to take whatever release was newest, unchecked, so a
+      # new XcodeGen could change the generated project between two builds of
+      # the same commit, and nothing said which version had made it.
       - name: Install XcodeGen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          . scripts/tools.env
           dir="$RUNNER_TEMP/xcodegen"
           mkdir -p "$dir"
-          gh release download --repo yonaskolb/XcodeGen \
-            --pattern '*.zip' --dir "$dir" --clobber
-          for archive in "$dir"/*.zip; do
-            unzip -q "$archive" -d "$dir"
-          done
+          gh release download "$XCODEGEN_VERSION" --repo yonaskolb/XcodeGen \
+            --pattern 'xcodegen.zip' --dir "$dir" --clobber
+          got=$(shasum -a 256 "$dir/xcodegen.zip" | awk '{print $1}')
+          if [ "$got" != "$XCODEGEN_SHA256" ]; then
+            echo "::error::xcodegen.zip $XCODEGEN_VERSION hash mismatch: expected $XCODEGEN_SHA256, got $got"
+            exit 1
+          fi
+          unzip -q "$dir/xcodegen.zip" -d "$dir"
           # Locate the binary rather than assuming where in the archive it
           # sits; unzip preserves the layout either way, so the tool still
           # finds its own share/ resources next to it.

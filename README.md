@@ -821,7 +821,14 @@ open iTERMiNAL.xcodeproj
 ```
 
 Then build and run the `iTERMiNAL` scheme. CI builds every push on a macOS
-runner (`.github/workflows/build.yml`).
+runner (`.github/workflows/build.yml`), using the XcodeGen release pinned in
+`scripts/tools.env`. Homebrew's may be newer; if a generated project misbehaves,
+that pinned version is the one CI has proven.
+
+That build leaves out the bundled tools (superfile, btop, ripgrep, bat), the
+icon font and the Cheatsheet's tldr-pages examples, and says so where each one
+would appear. [Bundled tools](#bundled-tools) has the commands that fetch them
+into `Vendor/`, which the build copies in when it is there.
 
 ### Cutting a release
 
@@ -1771,7 +1778,7 @@ earlier commands, ⇥ to complete, ⌃R to search history — described under
 Features and listed in the window above.
 
 The same window lists btop's and superfile's own keys, under **Inside btop** and
-**Inside superfile**: btop 1.4.7's help and superfile 1.6.0's default hotkeys,
+**Inside superfile**: btop 1.4.8's help and superfile 1.6.1's default hotkeys,
 the versions the app bundles, with superfile's own descriptions. They work while
 that tool's panel is in front; the app's ⌘ shortcuts still work there too.
 btop's keys are built in. superfile's can be changed in a `hotkeys.toml` of your
@@ -2362,6 +2369,11 @@ scripts/fetch-superfile.sh                 # needs curl, lipo, codesign
 brew install gcc@15 make && scripts/build-btop.sh Vendor/Tools   # this Mac's arch only
 scripts/fetch-symbols-font.sh              # needs curl; runs anywhere
 scripts/fetch-cli-tools.sh                 # rg, bat, imgcat; needs curl, lipo, codesign
+scripts/fetch-tldr.sh                      # the Cheatsheet's examples; needs curl, python3
+# The versions Settings → Advanced shows, written the way CI writes them; without
+# this file the tools work and Settings says "version unknown".
+( . scripts/tools.env && printf '{"btop":"%s","superfile":"%s","ripgrep":"%s","bat":"%s"}\n' \
+    "$BTOP_VERSION" "$SUPERFILE_VERSION" "$RIPGREP_VERSION" "$BAT_VERSION" > Vendor/Tools/manifest.json )
 ```
 
 ### Command-line tools
@@ -2375,7 +2387,7 @@ when there is nothing else.
 
 | Command | What it is | Licence | Version | How it gets into the app |
 | --- | --- | --- | --- | --- |
-| `rg` | [ripgrep](https://github.com/BurntSushi/ripgrep): recursive regular-expression search | MIT or Unlicense | 15.2.0 | Upstream's macOS release binaries for both chips, checked against pinned SHA-256 hashes that were matched to upstream's own `.sha256` files, merged into one universal binary and ad-hoc signed |
+| `rg` | [ripgrep](https://github.com/BurntSushi/ripgrep): recursive regular-expression search | MIT or Unlicense | 16.0.0 | Upstream's macOS release binaries for both chips, checked against pinned SHA-256 hashes that were matched to upstream's own `.sha256` files, merged into one universal binary and ad-hoc signed |
 | `bat` | [bat](https://github.com/sharkdp/bat): `cat` with syntax highlighting; output longer than the screen is paged through `less` | MIT or Apache-2.0 | 0.26.1 | The same, except that upstream publishes no checksums for it: its hashes are those of the files when the pin was made, so they say a file has not changed since, not that upstream vouched for it |
 | `imgcat` | Shows an image in the terminal: `imgcat photo.png`, `imgcat -W 40 photo.heic`, or one piped in; sizes are cells, a percentage or pixels | MIT | this repository's own [script](scripts/imgcat) | Copied as it is |
 
@@ -2389,7 +2401,7 @@ over 25 MB, with exit codes a script can read.
 
 **Versions** are pinned in `scripts/tools.env` and move only by a pull request
 that edits it; nothing is downloaded at runtime. Settings → Advanced lists them
-with their licences. In the bundle ripgrep is 8.4 MB and bat 12.0 MB (each is both
+with their licences. In the bundle ripgrep is 8.1 MB and bat 12.0 MB (each is both
 chips' binaries in one file); the upstream archives they come from add up to
 10.2 MB, which is about what they add to the download.
 

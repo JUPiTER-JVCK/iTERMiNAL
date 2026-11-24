@@ -49,7 +49,10 @@ fi
 # STATIC=true on macOS with GCC links libgcc and libstdc++ statically — the
 # fully static `-static` branch in btop's Makefile is Linux/BSD only. Without
 # it the binary would load libstdc++ from Homebrew's Cellar at runtime.
-# GPU_SUPPORT is Linux-only upstream; stated so the build cannot drift.
+# GPU_SUPPORT stays off. Upstream's Makefile turns it on by default on macOS —
+# since 1.4.8 for Apple Silicon only, linking IOReport — so left to the
+# Makefile the two slices of one universal btop would have different features.
+# Stated so the build cannot drift.
 # No lowdown is installed, so the man page is skipped, which is fine: nothing
 # in the app bundle would ever read it.
 #
