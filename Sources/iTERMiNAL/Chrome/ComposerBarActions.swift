@@ -92,9 +92,9 @@ struct ComposerActionsPopover: View {
     }
 
     /// Whether the card has a transcript to act on: the chat, or the
-    /// composer's own shell once it has run something.
+    /// composer's own shell while the composer is pointed at it.
     private var hasTranscript: Bool {
-        chatting || (store.composerHasRun && store.composerSession != nil)
+        chatting || store.composerShellTranscriptVisible
     }
 
     /// The latest commands, newest first.

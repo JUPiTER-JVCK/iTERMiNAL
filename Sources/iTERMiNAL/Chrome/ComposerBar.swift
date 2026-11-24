@@ -299,9 +299,12 @@ struct ComposerBar: View {
     }
 
     /// Whether there is a transcript to show at all: the AI conversation, or
-    /// the composer's own shell once it has run something.
+    /// the composer's own shell once it has run something — and only while the
+    /// composer is pointed at it. Pointed at the terminals, its output is
+    /// somewhere else, and a transcript of a shell nothing is typing into
+    /// would just sit above the input.
     private var hasTranscript: Bool {
-        isChatting || (store.composerHasRun && store.composerSession != nil)
+        isChatting || store.composerShellTranscriptVisible
     }
 
     /// Whether it is showing: there is one, and it has not been retracted.

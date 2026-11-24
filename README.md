@@ -347,7 +347,8 @@ A tour of the app in thirty-four pictures, in five groups.
   is running, or a remote host.
 - **The composer's transcript, sidebar and pill** — a button in the card's
   header folds the transcript (the shell's output or the chat) away, leaving the
-  input on its own; the shell or chat keeps running, and sending brings it back.
+  input on its own — the shell's output shows only while the switch is on
+  **Composer's shell**; the shell or chat keeps running, and sending brings it back.
   The **+** menu is about the line and the transcript: the last few commands and
   your first few skills (each goes into the input, unrun), copy and clear for
   the transcript, and Explain / Fix it. Once the composer's shell has run a

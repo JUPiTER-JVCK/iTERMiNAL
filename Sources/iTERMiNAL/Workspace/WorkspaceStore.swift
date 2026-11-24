@@ -1398,6 +1398,15 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// Whether the composer's own shell is where input goes now and has
+    /// something to show. The inline transcript is gated on this, not on the
+    /// shell merely existing: with the switch on Terminals or AI the shell is
+    /// still alive underneath, but its output is not what the card is about.
+    var composerShellTranscriptVisible: Bool {
+        guard case .ownShell = composerDestination else { return false }
+        return composerHasRun && composerSession != nil
+    }
+
     /// Runs a command typed in the composer, in whatever it is pointed at.
     func sendFromComposer(_ text: String) {
         let session: TerminalSession
