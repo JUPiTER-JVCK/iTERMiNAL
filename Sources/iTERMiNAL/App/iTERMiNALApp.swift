@@ -63,6 +63,8 @@ struct ITerminalApp: App {
                 .fontDesign(settings.uiFontDesign.design)
         }
         .defaultSize(width: 820, height: 520)
+        // No system title bar: `PopOutFrame` draws a slim one of its own.
+        .windowStyle(.hiddenTitleBar)
         // As for Remote Desktop: only `openWindow(value:)` opens one.
         .handlesExternalEvents(matching: [])
 
@@ -80,6 +82,7 @@ struct ITerminalApp: App {
                 .fontDesign(settings.uiFontDesign.design)
         }
         .defaultSize(width: 820, height: 520)
+        .windowStyle(.hiddenTitleBar)
         .handlesExternalEvents(matching: [])
 
         Settings {

@@ -131,76 +131,16 @@ struct PoppedPanelWindow: View {
 
 private struct PoppedPanelContent: View {
     let panel: SidePanel
-    @EnvironmentObject private var store: WorkspaceStore
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.appThemeID) private var appThemeID
-
-    /// Shared with the pane pop-out windows.
-    @AppStorage("popOutKeepInFront") private var keepInFront = false
-    @State private var window: NSWindow?
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
-        SidePanelContent(panel: panel)
-            .navigationTitle(panel.title)
-            .frame(minWidth: 320, minHeight: 200)
-            .background(theme.background)
-            .background(PanelWindowReader { window = $0 })
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Toggle(isOn: $keepInFront) {
-                        Label("Keep in Front", systemImage: keepInFront ? "pin.fill" : "pin")
-                    }
-                    .toggleStyle(.button)
-                    .help(keepInFront
-                          ? "Let other windows cover this one"
-                          : "Keep this window in front of other windows")
-
-                    Button {
-                        PoppedPanels.shared.bringBack(panel)
-                    } label: {
-                        Label("Return to Main Window", systemImage: "arrow.down.left.and.arrow.up.right")
-                    }
-                    .help("Put this back in the main window")
-                }
-            }
-            .onChange(of: keepInFront) { _, _ in applyLevel() }
-            .onChange(of: window) { _, _ in applyLevel() }
-            // Closing the window — the red button, ⌘W — puts the panel back.
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-                if let closing = note.object as? NSWindow, closing === window {
-                    PoppedPanels.shared.bringBack(panel)
-                }
-            }
-    }
-
-    private func applyLevel() {
-        window?.level = keepInFront ? .floating : .normal
-    }
-}
-
-/// Hands back the window a view is in, once it has one.
-private struct PanelWindowReader: NSViewRepresentable {
-    let onWindow: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = Reader()
-        view.onWindow = onWindow
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? Reader)?.onWindow = onWindow
-    }
-
-    private final class Reader: NSView {
-        var onWindow: (NSWindow?) -> Void = { _ in }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            let found = window
-            DispatchQueue.main.async { [onWindow] in onWindow(found) }
+        // The bar's return button and closing the window — the red button, ⌘W —
+        // both put the panel back; `PopOutFrame` calls this for either.
+        PopOutFrame(
+            title: panel.title,
+            icon: panel.icon,
+            bringBack: { PoppedPanels.shared.bringBack(panel) }
+        ) {
+            SidePanelContent(panel: panel)
         }
     }
 }
