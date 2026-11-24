@@ -104,17 +104,21 @@ final class ComposerChatModel: ObservableObject {
             do {
                 let reply = try await service.chat(system: system, messages: history)
                 guard !Task.isCancelled else { return }
+                // A `let` for the hop to the main thread: a weak capture is a
+                // `var`, and a closure that runs concurrently may not read one.
+                guard let chat = self else { return }
                 await MainActor.run {
-                    self?.append(ChatMessage(role: .assistant, text: reply))
-                    self?.isReplying = false
+                    chat.append(ChatMessage(role: .assistant, text: reply))
+                    chat.isReplying = false
                 }
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, let chat = self else { return }
+                let message = error.localizedDescription
                 await MainActor.run {
-                    self?.append(ChatMessage(role: .error, text: error.localizedDescription))
-                    self?.isReplying = false
+                    chat.append(ChatMessage(role: .error, text: message))
+                    chat.isReplying = false
                 }
             }
         }

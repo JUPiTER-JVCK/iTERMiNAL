@@ -341,15 +341,18 @@ final class CheatsheetStore: ObservableObject {
                 )
                 guard !Task.isCancelled else { return }
                 let picks = request.picks(from: reply)
-                DispatchQueue.main.async {
-                    self?.finishAsk(question: request.question, .answered(question: request.question, picks: picks))
+                // A `let` for the hop to the main thread: a weak capture is a
+                // `var`, and a closure that runs concurrently may not read one.
+                guard let store = self else { return }
+                await MainActor.run {
+                    store.finishAsk(question: request.question, .answered(question: request.question, picks: picks))
                 }
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, let store = self else { return }
                 let message = error.localizedDescription
-                DispatchQueue.main.async { self?.finishAsk(question: request.question, .failed(message)) }
+                await MainActor.run { store.finishAsk(question: request.question, .failed(message)) }
             }
         }
     }

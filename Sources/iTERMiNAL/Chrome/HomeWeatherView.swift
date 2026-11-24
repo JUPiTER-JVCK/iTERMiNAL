@@ -149,6 +149,10 @@ struct HomeWeatherCard: View {
 
     @State private var editing = false
     @State private var draft = ""
+    /// The units as chosen in the form, saved with the city by Show. Writing
+    /// them straight to settings fetched again at once and left Cancel unable
+    /// to undo the change.
+    @State private var draftUnits: WeatherUnits = .metric
     @FocusState private var fieldFocused: Bool
 
     /// The two stops of the weather CLI's default title gradient.
@@ -286,10 +290,7 @@ struct HomeWeatherCard: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($fieldFocused)
                     .onSubmit(save)
-                Picker("Units", selection: Binding(
-                    get: { units },
-                    set: { settings.homeWeatherUnits = $0.rawValue }
-                )) {
+                Picker("Units", selection: $draftUnits) {
                     Text("°C").tag(WeatherUnits.metric)
                     Text("°F").tag(WeatherUnits.imperial)
                 }
@@ -316,11 +317,15 @@ struct HomeWeatherCard: View {
                 .font(.system(size: 11))
             }
         }
-        .onAppear { if draft.isEmpty { draft = settings.homeWeatherCity } }
+        .onAppear {
+            if draft.isEmpty { draft = settings.homeWeatherCity }
+            draftUnits = units
+        }
     }
 
     private func beginEditing() {
         draft = settings.homeWeatherCity
+        draftUnits = units
         editing = true
         DispatchQueue.main.async { fieldFocused = true }
     }
@@ -328,6 +333,7 @@ struct HomeWeatherCard: View {
     private func save() {
         guard let city = HomeWeather.cleanCity(draft) else { return }
         settings.homeWeatherCity = city
+        settings.homeWeatherUnits = draftUnits.rawValue
         editing = false
     }
 
