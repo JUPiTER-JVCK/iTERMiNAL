@@ -49,6 +49,11 @@ struct SidebarView: View {
 
                     pinnedSection(theme: theme)
                     projectsSection(theme: theme)
+                    // Each appears once there is something to list: the
+                    // composer's shell after it has run a command, the AI after
+                    // a message has been sent.
+                    SidebarComposerSection(query: query, onDone: dismissIfFloating)
+                    SidebarAISection(query: query, onDone: dismissIfFloating)
                     notesSection(theme: theme)
                     recentsSection(theme: theme)
                 }
@@ -445,7 +450,7 @@ struct SidebarView: View {
 
 /// Collapsible section header with a disclosure chevron, an optional unread
 /// dot, and room for one trailing action.
-private struct SidebarSectionHeader<Accessory: View>: View {
+struct SidebarSectionHeader<Accessory: View>: View {
     let title: String
     @Binding var isExpanded: Bool
     let showsDot: Bool
@@ -1096,7 +1101,7 @@ private struct SidebarPaneRow: View {
 }
 
 /// A compact trailing action inside a sidebar row.
-private struct RowIconButton: View {
+struct RowIconButton: View {
     let icon: String
     let help: String
     let theme: Theme

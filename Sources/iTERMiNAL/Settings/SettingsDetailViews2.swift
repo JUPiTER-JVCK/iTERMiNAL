@@ -280,7 +280,7 @@ struct ComposerSettingsView: View {
                 Text(settings.composerTarget.detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("The chip above the composer's input always names the destination, and doubles as a menu for changing it.")
+                Text("The arrow beside the composer's + opens a tray with the same three choices, so the destination can be changed without coming here.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

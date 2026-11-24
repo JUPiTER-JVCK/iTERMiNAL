@@ -50,14 +50,24 @@ struct TranscriptResizeHandle: View {
     }
 }
 
-/// `workspace · destination · branch`, sitting above the input the way the
-/// reference app shows a project, its environment, and its git branch.
+/// Preference keys the composer's views share, in one place so the card and the
+/// menus and sidebar rows that act on it cannot drift apart on a spelling.
+enum ComposerStorage {
+    /// Whether the card's transcript — the composer's shell, or the AI chat —
+    /// is folded away, leaving the input on its own. The shell and the chat
+    /// keep running underneath; only the view of them is put away.
+    static let transcriptRetracted = "composerTranscriptRetracted"
+}
+
+/// What the tray under the card holds: a switch for where what is typed goes —
+/// the terminals in view, the composer's own shell, or the AI — and a chip or
+/// two about wherever that is.
 ///
-/// The middle chip names the terminal the composer will type into, and is a
-/// menu for changing it. It used to show the *focused* session unconditionally
-/// while every command went to the composer's own local shell, so over a
-/// connection it read "Remote — my-host" and ran on this Mac.
-struct ContextChipRow: View {
+/// It used to be a menu behind a chip, beside one for the space and a button
+/// for the dock. The choice it hides is the one the card is most often wrong
+/// about, so it is laid out flat: all three options, one click each, the chosen
+/// one lit.
+struct ComposerDestinationRow: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -65,65 +75,105 @@ struct ContextChipRow: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
-        HStack(spacing: 6) {
-            Menu {
-                ForEach(store.workspaces) { workspace in
-                    Button(workspace.name) { store.newTab(in: workspace) }
-                }
-                Divider()
-                Button("New Space") { store.newWorkspace() }
-            } label: {
-                ComposerChip(
-                    icon: "folder",
-                    text: store.currentWorkspace?.name ?? "Space",
-                    theme: theme
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+        HStack(spacing: 8) {
+            ComposerDestinationPicker(
+                selection: $settings.composerTarget,
+                theme: theme,
+                accent: settings.accentColor
+            )
+            .help(settings.composerTarget.detail)
 
-            Menu {
-                Picker("Run commands in", selection: $settings.composerTarget) {
-                    ForEach(ComposerTarget.allCases) { target in
-                        Text(target.label(model: settings.assistantModel)).tag(target)
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                ComposerChip(icon: destinationIcon, text: destinationText, theme: theme)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Where the composer runs what you type")
-
-            if case .terminal(let session) = store.composerDestination {
-                BranchChip(session: session, theme: theme)
-            }
+            detail(theme: theme)
 
             Spacer(minLength: 0)
         }
     }
 
-    private var destinationIcon: String {
+    /// About where input is going now. Read from the destination rather than
+    /// the setting: with "Terminals" chosen, what that means is whichever
+    /// terminal has focus.
+    @ViewBuilder
+    private func detail(theme: Theme) -> some View {
         switch store.composerDestination {
-        case .ownShell: return "text.cursor"
-        case .assistant: return "sparkles"
-        case .terminal(let session): return session.isRemote ? "network" : "desktopcomputer"
+        case .terminal(let session):
+            if session.isRemote {
+                ComposerChip(icon: "network", text: session.connection?.name ?? "Remote", theme: theme)
+            }
+            BranchChip(session: session, theme: theme)
+        case .ownShell:
+            if let session = store.composerSession {
+                DirectoryChip(session: session, theme: theme)
+                BranchChip(session: session, theme: theme)
+            } else {
+                Text("Starts with the first command")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+        case .assistant:
+            ComposerChip(icon: "sparkles", text: modelName, theme: theme)
         }
     }
 
-    private var destinationText: String {
-        switch store.composerDestination {
-        case .assistant:
-            let name = settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines)
-            return name.isEmpty ? "AI assistant" : name
-        case .ownShell:
-            return "Composer shell"
-        case .terminal(let session):
-            return session.isRemote ? (session.connection?.name ?? "Remote") : "Local"
+    private var modelName: String {
+        let name = settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "AI assistant" : name
+    }
+}
+
+/// The three-way switch itself: a capsule track with the chosen option lit in
+/// the accent, drawn like the settings pages' `PillSegmentedPicker` but
+/// compact, and without a form row around it.
+struct ComposerDestinationPicker: View {
+    @Binding var selection: ComposerTarget
+    let theme: Theme
+    let accent: Color
+
+    @Namespace private var pill
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ComposerTarget.allCases) { target in
+                segment(target)
+            }
         }
+        .padding(2)
+        .background(Capsule().fill(theme.surfaceHover.opacity(0.6)))
+        .overlay(Capsule().strokeBorder(theme.surfaceBorder).allowsHitTesting(false))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Where the composer runs what you type")
+    }
+
+    private func segment(_ target: ComposerTarget) -> some View {
+        let isSelected = target == selection
+        return Button {
+            // Under Reduce Motion the pill changes place without travelling.
+            withAnimation(reduceMotion ? nil : Motion.suggestion) {
+                selection = target
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: target.icon)
+                    .font(.system(size: 9.5))
+                Text(target.shortLabel)
+                    .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(accent.opacity(0.24))
+                        .matchedGeometryEffect(id: "selection", in: pill)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(target.detail)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -137,6 +187,16 @@ struct BranchChip: View {
         if let branch = session.gitBranch {
             ComposerChip(icon: "arrow.triangle.branch", text: branch, theme: theme)
         }
+    }
+}
+
+/// Where the shell is, observed so it follows a `cd`.
+struct DirectoryChip: View {
+    @ObservedObject var session: TerminalSession
+    let theme: Theme
+
+    var body: some View {
+        ComposerChip(icon: "folder", text: session.abbreviatedDirectory, theme: theme)
     }
 }
 
@@ -160,7 +220,12 @@ struct ComposerChip: View {
     }
 }
 
-/// Where input is going — the shell name, or the host for a remote session.
+/// The shell the composer is typing into, shown only while that is worth
+/// saying: the composer's own shell once it is running, or a remote host.
+///
+/// It used to sit beside the send button all the time, naming a shell nothing
+/// was using — "zsh" next to a chat with the AI, or next to a local terminal
+/// that is plainly in view. Absent now unless it tells you something.
 struct SessionChip: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
@@ -169,25 +234,36 @@ struct SessionChip: View {
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
-        Text(label)
-            .font(.system(size: 11))
-            .foregroundStyle(theme.textSecondary)
-            .lineLimit(1)
-            .help("Input goes to this session")
+        if let label {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textSecondary)
+                .lineLimit(1)
+                .help("Input goes to this session")
+                .transition(.opacity)
+        }
     }
 
-    private var label: String {
-        if let session = store.focusedSession {
-            if session.isRemote {
-                return session.connection?.name ?? "remote"
-            }
+    /// Nil when there is nothing worth naming.
+    private var label: String? {
+        switch store.composerDestination {
+        case .assistant:
+            return nil
+        case .ownShell:
+            // Before the first command there is no shell yet, only the
+            // intention of one.
+            guard store.composerHasRun else { return nil }
+            // The composer's own override, not the global setting: this chip
+            // sits on the composer and its tooltip says input goes to this
+            // session, so naming the app-wide default while the composer runs
+            // bash would be pointing at the wrong shell.
+            let override = settings.composerShell
+            let shell = settings.resolvedShell(override: override.isEmpty ? nil : override)
+            return (shell.path as NSString).lastPathComponent
+        case .terminal(let session):
+            // A local terminal is in front of you; a remote one is the case
+            // where it is easy to forget the command is not running here.
+            return session.isRemote ? (session.connection?.name ?? "remote") : nil
         }
-        // The composer's own override, not the global setting: this chip sits
-        // on the composer and its tooltip says input goes to this session, so
-        // naming the app-wide default while the composer runs bash would be
-        // pointing at the wrong shell.
-        let override = settings.composerShell
-        let shell = settings.resolvedShell(override: override.isEmpty ? nil : override)
-        return (shell.path as NSString).lastPathComponent
     }
 }

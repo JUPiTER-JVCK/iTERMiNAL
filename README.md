@@ -338,9 +338,26 @@ A tour of the app in thirty-four pictures, in five groups.
   run and from the tail of your shell's history file (`~/.zsh_history` or
   `~/.bash_history`, up to 512 KB, read locally); they are held in memory, never
   saved, exported or sent anywhere, and a setting turns the file off. Only
-  single-line commands are suggested. The chip above the input names the
-  terminal it will run in, and switches it to a private shell of its own if you
-  want one.
+  single-line commands are suggested. The arrow beside the composer's **+**
+  opens a tray with a three-way switch — **Terminals** (whichever has focus),
+  **Composer's shell** (a private one, with its output inline) and **AI** (the
+  composer becomes a chat) — and a chip for where that is: the host of a remote
+  terminal, the shell's folder, or the model. The shell's name shows beside the
+  send button only while it means something: the composer's own shell once it
+  is running, or a remote host.
+- **The composer's transcript, sidebar and pill** — a button in the card's
+  header folds the transcript (the shell's output or the chat) away, leaving the
+  input on its own; the shell or chat keeps running, and sending brings it back.
+  The **+** menu is about the line and the transcript: the last few commands and
+  your first few skills (each goes into the input, unrun), copy and clear for
+  the transcript, and Explain / Fix it. Once the composer's shell has run a
+  command, the sidebar gains a **Composer** section under Workspaces — the shell
+  and the last few commands — and once you have sent the AI a message, an **AI**
+  section lists the conversation kept for each space, newest first, with a
+  search that looks through what was said. Choosing one opens that space and the
+  composer on its chat; right-click deletes it. The minimised pill shows where
+  input goes, a spinner while the AI is replying, and a dot while the shell is
+  alive; right-click it to change the destination without opening it.
 - **Closing brackets and quotes** — Settings → Composer → Typing, off by
   default. Typing `(`, `[`, `{`, `"`, `'` or a backtick in the composer also
   types the closer, with the caret between; typing the closer steps over it, and
@@ -1171,8 +1188,7 @@ system mode.
 ## Remote sessions and files
 
 Add hosts in **Settings → Connections**, then open one from the sidebar's
-**Connect** row, the composer's `+` menu, the terminal dock's `+` menu, or the
-palette. Transport can be
+**Connect** row, the terminal dock's `+` menu, or the palette. Transport can be
 `ssh`, `mosh`, or a custom command (which is how Tailscale SSH or Eternal
 Terminal fit — `%h`, `%p`, `%u`, `%d` expand to host, port, user, and
 user@host). The same hosts appear in the Files panel's source menu for SFTP.
@@ -1834,7 +1850,7 @@ Turn the offers off in Settings → AI.
 
 The same two actions work any time, for any terminal, without any detection:
 **Explain last output** (⌥⌘E) and **Suggest a fix** (⌥⌘X) in the Terminal menu
-and the composer's **+** menu.
+and the composer's **+** menu (while the composer is a terminal, not a chat).
 
 - **Explain what I typed.** The composer's **+** menu also has **Explain what I
   typed**, for a command in the input that you have not run: it asks what the

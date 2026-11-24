@@ -38,6 +38,25 @@ enum ComposerTarget: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The one-word name the composer's tray shows on its switch, where three
+    /// options have to share a strip.
+    var shortLabel: String {
+        switch self {
+        case .activeTerminal: return "Terminals"
+        case .ownShell: return "Composer's shell"
+        case .assistant: return "AI"
+        }
+    }
+
+    /// The glyph for this destination, wherever it is shown.
+    var icon: String {
+        switch self {
+        case .activeTerminal: return "terminal"
+        case .ownShell: return "text.cursor"
+        case .assistant: return "sparkles"
+        }
+    }
+
     var detail: String {
         switch self {
         case .activeTerminal:
