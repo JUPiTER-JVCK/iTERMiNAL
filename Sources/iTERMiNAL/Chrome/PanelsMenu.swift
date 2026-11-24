@@ -56,12 +56,11 @@ private struct PanelsMenuContent: View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 2) {
             sectionLabel("Panels", theme: theme)
-            ForEach(SidePanel.allCases.filter { !$0.isTool }) { panel in
-                panelRow(panel)
-            }
-
-            sectionLabel("Tools", theme: theme)
-            ForEach(SidePanel.allCases.filter(\.isTool)) { panel in
+            ForEach(
+                SidePanel.allCases.sorted {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+            ) { panel in
                 panelRow(panel)
             }
 
