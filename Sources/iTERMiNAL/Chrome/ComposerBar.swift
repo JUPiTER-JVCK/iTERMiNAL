@@ -48,6 +48,11 @@ struct ComposerBar: View {
     /// remembered across launches. Hidden until asked for: the card is the part
     /// that is always wanted.
     @AppStorage("composerTrayOpen") private var trayShown = false
+    /// Whether the transcript above the input is folded away. The shell or chat
+    /// behind it carries on; this only puts the view of it away, so the card
+    /// can be as small as an input again without ending anything. Remembered
+    /// across launches, like the tray.
+    @AppStorage(ComposerStorage.transcriptRetracted) private var transcriptRetracted = false
 
     var body: some View {
         Group {
@@ -161,22 +166,29 @@ struct ComposerBar: View {
 
     // MARK: Collapsed
 
+    /// The folded composer. It says where what is typed will go, shows when the
+    /// AI is still working on a reply or a shell is still alive, opens with the
+    /// caret already in the input, and — from its context menu — switches the
+    /// destination without opening at all.
     private var collapsedPill: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         return Button {
-            settings.composerCollapsed = false
+            // Not just un-collapsing: the point of opening it is to type.
+            store.focusComposer()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "chevron.up")
+                Image(systemName: settings.composerTarget.icon)
                     .font(.system(size: 10, weight: .semibold))
                 Text(isChatting ? "Ask anything" : "Run anything")
                     .font(.system(size: 12))
-                if store.composerHasRun {
-                    // A quiet reminder that a shell is still alive down here.
-                    Circle()
-                        .fill(settings.accentColor)
-                        .frame(width: 5, height: 5)
-                }
+                ComposerPillStatus(
+                    chat: store.composerChat,
+                    shellAlive: store.composerHasRun,
+                    accent: settings.accentColor
+                )
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 8, weight: .semibold))
+                    .opacity(0.6)
             }
             .foregroundStyle(theme.textSecondary)
             .padding(.horizontal, 14)
@@ -185,7 +197,15 @@ struct ComposerBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Show the composer")
+        .help("Show the composer (⇧⌘M)")
+        .contextMenu {
+            Picker("Run in", selection: $settings.composerTarget) {
+                ForEach(ComposerTarget.allCases) { target in
+                    Label(target.shortLabel, systemImage: target.icon).tag(target)
+                }
+            }
+            .pickerStyle(.inline)
+        }
     }
 
     // MARK: Expanded
@@ -199,6 +219,7 @@ struct ComposerBar: View {
             }
         }
         .animation(reduceMotion ? nil : Motion.panel, value: trayShown)
+        .animation(reduceMotion ? nil : Motion.panel, value: showsTranscript)
     }
 
     private var cardStack: some View {
@@ -242,45 +263,9 @@ struct ComposerBar: View {
             VStack(alignment: .leading, spacing: 6) {
                 gripBar(theme: theme)
 
-                if isChatting {
-                    // A chat instead of a shell: the same place, the same size,
-                    // and the same handle to resize it.
-                    ComposerChatView(
-                        chat: store.composerChat,
-                        modelName: settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                        theme: theme,
-                        accent: settings.accentColor
-                    )
-                    .frame(height: effectiveTranscriptHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(theme.surfaceBorder)
-                    )
-
-                    TranscriptResizeHandle(
-                        height: $settings.composerTranscriptHeight,
-                        maxHeight: maxTranscriptHeight,
-                        theme: theme
-                    )
-                } else if store.composerHasRun, let session = store.composerSession {
-                    // The composer's own shell. Identity is tied to the
-                    // session so a reset swaps the view rather than reusing
-                    // a container still hosting the old terminal.
-                    TerminalHostView(session: session)
-                        .id(session.id)
-                        .frame(height: effectiveTranscriptHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(theme.surfaceBorder)
-                        )
-
-                    TranscriptResizeHandle(
-                        height: $settings.composerTranscriptHeight,
-                        maxHeight: maxTranscriptHeight,
-                        theme: theme
-                    )
+                if showsTranscript {
+                    transcriptBlock(theme: theme)
+                        .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
                 }
 
                 if !notes.isEmpty {
@@ -311,6 +296,66 @@ struct ComposerBar: View {
             // as floating above the terminal rather than painted onto it.
             .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme))
         }
+    }
+
+    /// Whether there is a transcript to show at all: the AI conversation, or
+    /// the composer's own shell once it has run something.
+    private var hasTranscript: Bool {
+        isChatting || (store.composerHasRun && store.composerSession != nil)
+    }
+
+    /// Whether it is showing: there is one, and it has not been retracted.
+    private var showsTranscript: Bool {
+        hasTranscript && !transcriptRetracted
+    }
+
+    /// The transcript and the handle that resizes it, in one block so they
+    /// fold away together.
+    @ViewBuilder
+    private func transcriptBlock(theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isChatting {
+                // A chat instead of a shell: the same place, the same size,
+                // and the same handle to resize it.
+                ComposerChatView(
+                    chat: store.composerChat,
+                    modelName: settings.assistantModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                    theme: theme,
+                    accent: settings.accentColor
+                )
+                .frame(height: effectiveTranscriptHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(theme.surfaceBorder)
+                )
+            } else if let session = store.composerSession {
+                // The composer's own shell. Identity is tied to the session so
+                // a reset swaps the view rather than reusing a container still
+                // hosting the old terminal.
+                TerminalHostView(session: session)
+                    .id(session.id)
+                    .frame(height: effectiveTranscriptHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(theme.surfaceBorder)
+                    )
+            }
+
+            TranscriptResizeHandle(
+                height: $settings.composerTranscriptHeight,
+                maxHeight: maxTranscriptHeight,
+                theme: theme
+            )
+        }
+    }
+
+    /// Opens the transcript again, if it was retracted. Sending is the one
+    /// moment the answer is wanted, so it never stays folded over a reply.
+    private func revealTranscript() {
+        guard transcriptRetracted else { return }
+        withAnimation(reduceMotion ? nil : Motion.panel) { transcriptRetracted = false }
     }
 
     /// The card's drag handle: a grip in the middle, window controls on the
@@ -380,6 +425,26 @@ struct ComposerBar: View {
 
     private func headerControls(theme: Theme) -> some View {
         HStack(spacing: 6) {
+            if hasTranscript {
+                Button {
+                    withAnimation(reduceMotion ? nil : Motion.panel) {
+                        transcriptRetracted.toggle()
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        // Points the way it will go: down to fold the
+                        // transcript into the input, up to bring it back.
+                        .rotationEffect(.degrees(transcriptRetracted ? 180 : 0))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(transcriptRetracted ? "Show the transcript" : "Retract the transcript")
+                .accessibilityLabel(transcriptRetracted ? "Show transcript" : "Retract transcript")
+            }
+
             if store.composerHasRun {
                 Button {
                     store.resetComposerSession()
@@ -442,6 +507,7 @@ struct ComposerBar: View {
             ai.cancel()
             ai.clearBanner()
             outcome.stop()
+            revealTranscript()
             store.composerChat.send(command, settings: settings, store: store)
             text = ""
             historyIndex = nil
@@ -473,7 +539,11 @@ struct ComposerBar: View {
         let watching = settings.assistantOfferErrorHelp && ai.assistantIsConfigured()
         let target = store.composerDestinationSession
         let baseline = watching ? (target?.captureScrollback(maxBytes: CommandOutcomeWatcher.captureBytes) ?? "") : ""
-        // Wherever the chip above the input says: the focused terminal by
+        // The composer's own shell prints into the transcript, so a command
+        // sent to it brings a retracted one back. Another terminal prints in
+        // its own pane, and nothing here needs to open.
+        if case .ownShell = store.composerDestination { revealTranscript() }
+        // Wherever the tray under the card says: the focused terminal by
         // default, the composer's own shell if the user asked for that.
         withAnimation(Motion.panel) {
             store.sendFromComposer(command + "\n")
@@ -614,19 +684,23 @@ struct ComposerBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Add a terminal, split, or panel")
+            .help("Recent commands, skills, transcript and assistant actions")
             .popover(isPresented: $showActions, arrowEdge: .top) {
-                ComposerActionsPopover(isPresented: $showActions, typedCommand: text) {
-                    withAnimation(Motion.banner) {
-                        ai.requestHelp(.explainCommand, offer: nil, typed: text, store: store, settings: settings)
+                ComposerActionsPopover(
+                    isPresented: $showActions,
+                    typedCommand: text,
+                    explainTyped: {
+                        withAnimation(Motion.banner) {
+                            ai.requestHelp(.explainCommand, offer: nil, typed: text, store: store, settings: settings)
+                        }
                     }
-                }
-                    .environmentObject(store)
-                    .environmentObject(settings)
+                )
+                .environmentObject(store)
+                .environmentObject(settings)
             }
 
             // Shows and hides the tray under the card, which holds the
-            // workspace and run-in chips.
+            // switch for where what is typed goes.
             Button {
                 trayShown.toggle()
             } label: {
@@ -638,8 +712,8 @@ struct ComposerBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(trayShown ? "Hide space and destination" : "Show space and destination")
-            .accessibilityLabel(trayShown ? "Hide status tray" : "Show status tray")
+            .help(trayShown ? "Hide where commands run" : "Choose where commands run")
+            .accessibilityLabel(trayShown ? "Hide destination tray" : "Show destination tray")
         }
         // 28pt tall and 3 up from the field's bottom edge: centred on a
         // single line of text, and on the last line of several.
@@ -803,36 +877,47 @@ private struct PressScaleButtonStyle: ButtonStyle {
     }
 }
 
-/// The strip that slides out beneath the card: the workspace and where
-/// commands run (and that destination's branch), and the terminal dock.
-private struct ComposerStatusTray: View {
-    let theme: Theme
-    @EnvironmentObject private var store: WorkspaceStore
+/// A small badge on the folded pill: a spinner while the AI is working out a
+/// reply, otherwise a dot while the composer's shell is still alive. Its own
+/// view because only a view can watch the chat for the reply arriving.
+private struct ComposerPillStatus: View {
+    @ObservedObject var chat: ComposerChatModel
+    let shellAlive: Bool
+    let accent: Color
 
     var body: some View {
-        HStack(spacing: 16) {
-            ContextChipRow()
-            Button {
-                store.toggleBottomDock()
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "rectangle.bottomthird.inset.filled")
-                    Text("Terminal dock")
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Show or hide the terminal dock (⌘J)")
+        if chat.isReplying {
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 10, height: 10)
+                .help("The AI is replying")
+        } else if shellAlive {
+            // A quiet reminder that a shell is still alive down here.
+            Circle()
+                .fill(accent)
+                .frame(width: 5, height: 5)
+                .help("The composer's shell is running")
         }
-        .font(.system(size: 11.5))
-        .foregroundStyle(theme.textSecondary)
-        .lineLimit(1)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
-        .frame(maxWidth: .infinity)
-        .background(
-            UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14, style: .continuous)
-                .fill(theme.surface)
-        )
-        .padding(.horizontal, 14)
+    }
+}
+
+/// The strip that slides out beneath the card: where what is typed goes —
+/// terminals, the composer's shell or the AI — and a line about that place.
+private struct ComposerStatusTray: View {
+    let theme: Theme
+
+    var body: some View {
+        ComposerDestinationRow()
+            .font(.system(size: 11.5))
+            .foregroundStyle(theme.textSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .frame(maxWidth: .infinity)
+            .background(
+                UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14, style: .continuous)
+                    .fill(theme.surface)
+            )
+            .padding(.horizontal, 14)
     }
 }
