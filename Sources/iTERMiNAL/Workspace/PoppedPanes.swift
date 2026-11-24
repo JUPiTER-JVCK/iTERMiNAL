@@ -238,66 +238,35 @@ private struct PoppedPaneContent: View {
     @ObservedObject var node: PaneNode
     @EnvironmentObject private var store: WorkspaceStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.appThemeID) private var appThemeID
-
-    /// Remembered between pop-outs: someone who keeps one in front wants the
-    /// next one to stay there too.
-    @AppStorage("popOutKeepInFront") private var keepInFront = false
-    @State private var window: NSWindow?
 
     var body: some View {
-        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        // Closing the window — the red button, ⌘W — and the bar's return button
+        // both put the pane back; `PopOutFrame` calls this for either.
+        let bringBack = { PoppedPanes.shared.bringBack(node.id) }
         Group {
             switch node.content {
             case .terminal(let session):
-                PoppedTerminal(session: session)
+                PoppedTerminal(session: session, bringBack: bringBack)
             case .browser(let model):
-                BrowserPaneView(model: model)
-                    .navigationTitle("Browser")
+                PopOutFrame(title: "Browser", icon: SidePanel.browser.icon, bringBack: bringBack) {
+                    BrowserPaneView(model: model)
+                }
             case .files(let model):
-                FilePaneView(model: model)
-                    .navigationTitle("Files")
+                PopOutFrame(title: "Files", icon: SidePanel.files.icon, bringBack: bringBack) {
+                    FilePaneView(model: model)
+                }
             case .http(let model):
-                HTTPClientPaneView(model: model)
-                    .navigationTitle("HTTP Client")
+                PopOutFrame(title: "HTTP Client", icon: SidePanel.http.icon, bringBack: bringBack) {
+                    HTTPClientPaneView(model: model)
+                }
             case .split:
                 // The pane was split while it was out here, so it is a layout
                 // again and belongs in the tab.
                 Color.clear.onAppear { PoppedPanes.shared.bringBack(node.id) }
             }
         }
-        .frame(minWidth: 320, minHeight: 200)
-        .background(theme.background)
-        .background(PopOutWindowReader { window = $0 })
         // No pop-out button inside the pop-out window.
         .environment(\.hostPaneNode, nil)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Toggle(isOn: $keepInFront) {
-                    Label("Keep in Front", systemImage: keepInFront ? "pin.fill" : "pin")
-                }
-                .toggleStyle(.button)
-                .help(keepInFront
-                      ? "Let other windows cover this one"
-                      : "Keep this window in front of other windows")
-
-                Button {
-                    PoppedPanes.shared.bringBack(node.id)
-                } label: {
-                    Label("Return to Main Window", systemImage: "arrow.down.left.and.arrow.up.right")
-                }
-                .help("Put this back in the main window")
-            }
-        }
-        .onChange(of: keepInFront) { _, _ in applyLevel() }
-        .onChange(of: window) { _, _ in applyLevel() }
-        // Closing the window — the red button, ⌘W — puts the pane back.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-            if let closing = note.object as? NSWindow, closing === window {
-                PoppedPanes.shared.bringBack(node.id)
-            }
-        }
         // A tab or pane closed while this window is open does not announce
         // itself to the store's observers, so look now and then.
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
@@ -307,45 +276,16 @@ private struct PoppedPaneContent: View {
             }
         }
     }
-
-    /// Above ordinary windows while it is on; the same as any other when off.
-    private func applyLevel() {
-        window?.level = keepInFront ? .floating : .normal
-    }
 }
 
 /// The terminal, with the shell's own title on the window as it changes.
 private struct PoppedTerminal: View {
     @ObservedObject var session: TerminalSession
+    let bringBack: () -> Void
 
     var body: some View {
-        TerminalPaneView(session: session, isSolo: true)
-            .navigationTitle(session.displayTitle)
-    }
-}
-
-/// Hands back the window a view is in, once it has one.
-private struct PopOutWindowReader: NSViewRepresentable {
-    let onWindow: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = Reader()
-        view.onWindow = onWindow
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? Reader)?.onWindow = onWindow
-    }
-
-    private final class Reader: NSView {
-        var onWindow: (NSWindow?) -> Void = { _ in }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            let found = window
-            // Not now: this is mid-layout, and the callback sets view state.
-            DispatchQueue.main.async { [onWindow] in onWindow(found) }
+        PopOutFrame(title: session.displayTitle, icon: "terminal", bringBack: bringBack) {
+            TerminalPaneView(session: session, isSolo: true)
         }
     }
 }
