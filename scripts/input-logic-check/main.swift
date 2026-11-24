@@ -17593,5 +17593,132 @@ func checkByteTools() {
 }
 checkByteTools()
 
+// MARK: Home weather
+
+func checkHomeWeather() {
+    // What the person typed.
+    check(HomeWeather.cleanCity("  Seattle \t ") == "Seattle" && HomeWeather.cleanCity("New   York") == "New York",
+          "a city is trimmed and its spaces collapsed")
+    check(HomeWeather.cleanCity("") == nil && HomeWeather.cleanCity("   ") == nil && HomeWeather.cleanCity("a\nb") == nil
+            && HomeWeather.cleanCity(String(repeating: "x", count: HomeWeather.maxCityLength + 1)) == nil
+            && HomeWeather.cleanCity(String(repeating: "x", count: HomeWeather.maxCityLength)) != nil,
+          "nothing, a line break, or a very long name is not a city")
+    check(HomeWeather.split(city: "Seattle").qualifier == nil && HomeWeather.split(city: "Seattle, WA").name == "Seattle"
+            && HomeWeather.split(city: "Seattle, WA").qualifier == "WA" && HomeWeather.split(city: "Seattle,").qualifier == nil,
+          "the part after a comma narrows the answer and is not asked about")
+
+    // What is asked.
+    let geocode = HomeWeather.geocodeURL(city: "São Paulo, BR")
+    check(geocode?.scheme == "https" && geocode?.host == HomeWeather.geocodingHost && geocode?.path == "/v1/search",
+          "the place lookup is an https request to the geocoder")
+    let geocodeQuery = URLComponents(url: geocode ?? URL(string: "https://x")!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    check(geocodeQuery.first { $0.name == "name" }?.value == "São Paulo" && geocodeQuery.count == 4,
+          "only the name is sent, not what narrows it: \(geocodeQuery)")
+    let hostile = HomeWeather.geocodeURL(city: "x&latitude=1#/..?")
+    check(hostile?.host == HomeWeather.geocodingHost
+            && URLComponents(url: hostile ?? URL(string: "https://x")!, resolvingAgainstBaseURL: false)?.queryItems?.count == 4,
+          "a name cannot add to the request or change where it goes")
+    check(HomeWeather.geocodeURL(city: "") == nil && HomeWeather.geocodeURL(city: ", WA") == nil,
+          "no city, no request")
+
+    let forecast = HomeWeather.forecastURL(latitude: 47.60621, longitude: -122.33207, units: .imperial)
+    let forecastQuery = Dictionary(uniqueKeysWithValues: (URLComponents(url: forecast ?? URL(string: "https://x")!, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    check(forecast?.host == HomeWeather.forecastHost && forecast?.scheme == "https"
+            && forecastQuery["latitude"] == "47.6062" && forecastQuery["longitude"] == "-122.3321"
+            && forecastQuery["temperature_unit"] == "fahrenheit" && forecastQuery["wind_speed_unit"] == "mph"
+            && forecastQuery["timezone"] == "auto",
+          "the forecast asks for the city's coordinates in the chosen units: \(forecastQuery)")
+    check(HomeWeather.forecastURL(latitude: 91, longitude: 0, units: .metric) == nil
+            && HomeWeather.forecastURL(latitude: 0, longitude: 181, units: .metric) == nil
+            && HomeWeather.forecastURL(latitude: .nan, longitude: 0, units: .metric) == nil
+            && HomeWeather.forecastURL(latitude: 0, longitude: 0, units: .metric) != nil,
+          "coordinates that are not on Earth are not sent")
+
+    // Reading the places.
+    func data(_ json: String) -> Data { Data(json.utf8) }
+    let portlands = data("""
+    {"results":[
+      {"name":"Portland","latitude":45.52,"longitude":-122.68,"country":"United States","country_code":"US","admin1":"Oregon"},
+      {"name":"Portland","latitude":43.66,"longitude":-70.25,"country":"United States","country_code":"US","admin1":"Maine"},
+      {"name":"Portland","latitude":-38.34,"longitude":141.6,"country":"Australia","country_code":"AU","admin1":"Victoria"}]}
+    """)
+    if case .success(let first) = HomeWeather.parsePlace(portlands, city: "Portland") {
+        check(first.region == "Oregon" && first.title == "Portland, Oregon", "with no qualifier the service's first place is taken")
+    } else { check(false, "Portland is found") }
+    if case .success(let maine) = HomeWeather.parsePlace(portlands, city: "portland, maine") {
+        check(maine.region == "Maine" && maine.latitude == 43.66, "a region narrows the answer, in any case")
+    } else { check(false, "Portland, Maine is found") }
+    if case .success(let au) = HomeWeather.parsePlace(portlands, city: "Portland, AU") {
+        check(au.country == "Australia", "a country code narrows it too")
+    } else { check(false, "Portland, AU is found") }
+    check(HomeWeather.parsePlace(portlands, city: "Portland, Texas") == .failure(.notFound("Portland, Texas")),
+          "a qualifier nothing matches is not answered with a different city")
+    check(HomeWeather.parsePlace(data("{\"generationtime_ms\":0.5}"), city: "Zzzz") == .failure(.notFound("Zzzz")),
+          "no results is no such place")
+    check(HomeWeather.parsePlace(data("not json"), city: "x") == .failure(.unreadable)
+            && HomeWeather.parsePlace(data("[1]"), city: "x") == .failure(.unreadable)
+            && HomeWeather.parsePlace(data("{\"error\":true,\"reason\":\"no\"}"), city: "x") == .failure(.unavailable)
+            && HomeWeather.parsePlace(Data(repeating: 32, count: HomeWeather.maxResponseBytes + 1), city: "x") == .failure(.unreadable),
+          "what is not an answer is not read as one")
+    check(HomeWeather.parsePlace(data("{\"results\":[{\"name\":\"Nowhere\",\"latitude\":99,\"longitude\":0}]}"), city: "Nowhere")
+            == .failure(.notFound("Nowhere")),
+          "a place off the map is skipped")
+    check(WeatherPlace(name: "Reykjavík", region: nil, country: "Iceland", latitude: 0, longitude: 0).title == "Reykjavík, Iceland"
+            && WeatherPlace(name: "Monaco", region: nil, country: nil, latitude: 0, longitude: 0).title == "Monaco",
+          "a place is named with its region, else its country, else alone")
+
+    // Reading the weather.
+    let place = WeatherPlace(name: "Seattle", region: "Washington", country: "United States", latitude: 47.6, longitude: -122.3)
+    let weather = data("""
+    {"utc_offset_seconds":-28800,"current":{"time":"2026-11-24T14:30","temperature_2m":8.4,"apparent_temperature":5.6,
+     "relative_humidity_2m":82,"weather_code":61,"wind_speed_10m":14.2,"is_day":1}}
+    """)
+    if case .success(let reading) = HomeWeather.parseReading(weather, place: place, units: .metric) {
+        check(reading.temperature == 8.4 && reading.feelsLike == 5.6 && reading.humidity == 82 && reading.code == 61
+                && reading.isDay && reading.utcOffsetSeconds == -28800 && reading.place == place,
+              "a reading carries what the service said")
+        check(reading.condition == WeatherCondition(kind: .rain, text: "Light rain"), "code 61 is light rain")
+        check(HomeWeather.details(reading) == ["Feels like 6°", "82% humidity", "14 km/h wind"], "the details read in order: \(HomeWeather.details(reading))")
+    } else { check(false, "a reading is read") }
+    let sparse = data("{\"current\":{\"temperature_2m\":-0.2,\"weather_code\":0,\"is_day\":0}}")
+    if case .success(let reading) = HomeWeather.parseReading(sparse, place: place, units: .imperial) {
+        check(reading.feelsLike == nil && reading.humidity == nil && reading.windSpeed == nil && !reading.isDay && reading.utcOffsetSeconds == 0,
+              "what the service leaves out stays empty")
+        check(HomeWeather.details(reading).isEmpty && HomeWeather.degrees(reading.temperature) == "0°", "a reading with no details has none, and never says -0°")
+    } else { check(false, "a sparse reading is read") }
+    check(HomeWeather.parseReading(data("{\"current\":{\"weather_code\":0}}"), place: place, units: .metric) == .failure(.unreadable)
+            && HomeWeather.parseReading(data("{}"), place: place, units: .metric) == .failure(.unreadable)
+            && HomeWeather.parseReading(data("{\"current\":{\"temperature_2m\":1e300,\"weather_code\":1e300}}"), place: place, units: .metric) == .failure(.unreadable),
+          "a reading with no temperature or condition, or an absurd one, is not shown")
+    check(HomeWeather.degrees(1e300) == "—" && HomeWeather.degrees(-3.6) == "-4°" && HomeWeather.degrees(21.5) == "22°",
+          "degrees are whole, and a wild value is a dash")
+
+    // In words and pictures.
+    check(HomeWeather.condition(code: 0, isDay: true).text == "Clear sky" && HomeWeather.condition(code: 0, isDay: false).text == "Clear night"
+            && HomeWeather.condition(code: 95, isDay: true).kind == .thunderstorm && HomeWeather.condition(code: 73, isDay: true).kind == .snow
+            && HomeWeather.condition(code: 45, isDay: true).kind == .fog && HomeWeather.condition(code: 2, isDay: true).kind == .partlyCloudy,
+          "weather codes become words and kinds")
+    check(HomeWeather.condition(code: 12345, isDay: true).text == "Unknown", "a code not in the table is called unknown")
+    let kinds: [WeatherKind] = [.clear, .partlyCloudy, .cloudy, .fog, .drizzle, .rain, .snow, .thunderstorm]
+    var crooked: [String] = []
+    for kind in kinds {
+        for day in [true, false] {
+            let art = HomeWeather.art(kind, isDay: day)
+            if art.count != 5 || art.contains(where: { $0.count != HomeWeather.artWidth }) { crooked.append("\(kind) day=\(day)") }
+        }
+    }
+    check(crooked.isEmpty, "every picture is five lines of the same width: \(crooked)")
+    check(HomeWeather.art(.clear, isDay: true) != HomeWeather.art(.clear, isDay: false), "the sun and the moon differ")
+
+    // The place's clock.
+    let midnight: Int = 1_800_000_000 / 86400 * 86400
+    let noon = Date(timeIntervalSince1970: TimeInterval(midnight + 12 * 3600))
+    check(HomeWeather.localTime(at: noon, utcOffsetSeconds: 9 * 3600, locale: Locale(identifier: "en_GB")) == "21:00"
+            && HomeWeather.localTime(at: noon, utcOffsetSeconds: -8 * 3600, locale: Locale(identifier: "en_GB")) == "04:00",
+          "the place's own time, from its offset")
+    check(WeatherUnits.metric.temperatureSymbol == "°C" && WeatherUnits.imperial.speedSymbol == "mph", "units name themselves")
+}
+checkHomeWeather()
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

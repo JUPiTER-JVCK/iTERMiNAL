@@ -250,6 +250,11 @@ final class AppSettings: ObservableObject {
     @Published var showHiddenFiles: Bool { didSet { defaults.set(showHiddenFiles, forKey: "showHiddenFiles") } }
     @Published var followTerminalDirectory: Bool { didSet { defaults.set(followTerminalDirectory, forKey: "followTerminalDirectory") } }
     @Published var composerEnabled: Bool { didSet { defaults.set(composerEnabled, forKey: "composerEnabled") } }
+    /// The city whose weather Home shows. Empty — the default — means no weather
+    /// and no request: nothing is asked of any service until one is typed.
+    @Published var homeWeatherCity: String { didSet { defaults.set(homeWeatherCity, forKey: "homeWeatherCity") } }
+    /// `WeatherUnits.rawValue`. Starts as Fahrenheit for a US region, Celsius elsewhere.
+    @Published var homeWeatherUnits: String { didSet { defaults.set(homeWeatherUnits, forKey: "homeWeatherUnits") } }
     /// Panel geometry, persisted so a resized layout survives relaunch.
     @Published var rightPanelWidth: Double { didSet { defaults.set(rightPanelWidth, forKey: "rightPanelWidth") } }
     @Published var bottomDockHeight: Double { didSet { defaults.set(bottomDockHeight, forKey: "bottomDockHeight") } }
@@ -522,6 +527,9 @@ final class AppSettings: ObservableObject {
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
         followTerminalDirectory = defaults.object(forKey: "followTerminalDirectory") as? Bool ?? true
         composerEnabled = defaults.object(forKey: "composerEnabled") as? Bool ?? true
+        homeWeatherCity = defaults.string(forKey: "homeWeatherCity") ?? ""
+        homeWeatherUnits = defaults.string(forKey: "homeWeatherUnits")
+            ?? (Locale.current.measurementSystem == .us ? WeatherUnits.imperial : WeatherUnits.metric).rawValue
         rightPanelWidth = defaults.object(forKey: "rightPanelWidth") as? Double ?? 420
         bottomDockHeight = defaults.object(forKey: "bottomDockHeight") as? Double ?? 260
         composerOffsetX = defaults.object(forKey: "composerOffsetX") as? Double ?? 0
@@ -898,6 +906,8 @@ final class AppSettings: ObservableObject {
         showHiddenFiles = false
         followTerminalDirectory = true
         composerEnabled = true
+        homeWeatherCity = ""
+        homeWeatherUnits = (Locale.current.measurementSystem == .us ? WeatherUnits.imperial : WeatherUnits.metric).rawValue
         rightPanelWidth = 420
         bottomDockHeight = 260
         composerOffsetX = 0
