@@ -17711,7 +17711,8 @@ func checkHomeWeather() {
     check(HomeWeather.art(.clear, isDay: true) != HomeWeather.art(.clear, isDay: false), "the sun and the moon differ")
 
     // The place's clock.
-    let noon = Date(timeIntervalSince1970: 1_800_000_000 - (1_800_000_000 % 86400) + 12 * 3600)
+    let midnight: Int = 1_800_000_000 / 86400 * 86400
+    let noon = Date(timeIntervalSince1970: TimeInterval(midnight + 12 * 3600))
     check(HomeWeather.localTime(at: noon, utcOffsetSeconds: 9 * 3600, locale: Locale(identifier: "en_GB")) == "21:00"
             && HomeWeather.localTime(at: noon, utcOffsetSeconds: -8 * 3600, locale: Locale(identifier: "en_GB")) == "04:00",
           "the place's own time, from its offset")
