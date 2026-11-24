@@ -21,6 +21,14 @@ struct MainWindowView: View {
 
             VStack(spacing: 0) {
                 TopBar()
+                    // Its own anchor, apart from the others: SwiftUI has not
+                    // always honoured two sheets on one view.
+                    .sheet(isPresented: $store.showComposerHistory) {
+                        ComposerHistoryView()
+                            .environmentObject(store)
+                            .environmentObject(settings)
+                            .dismissOnOutsideClick()
+                    }
 
                 HStack(spacing: 0) {
                     SidebarRail()

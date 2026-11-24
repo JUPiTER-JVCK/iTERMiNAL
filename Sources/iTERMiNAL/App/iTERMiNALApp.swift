@@ -174,6 +174,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // quit would otherwise drop.
         WorkspaceStore.shared.flushNotes()
         WorkspaceStore.shared.flushChats()
+        // Before the shells are stopped: the composer's has output to keep.
+        WorkspaceStore.shared.finishComposerLog()
         WorkspaceStore.shared.saveNow()
         WorkspaceStore.shared.terminateAllSessions()
     }

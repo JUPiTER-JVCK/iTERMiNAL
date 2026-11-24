@@ -57,6 +57,16 @@ struct ComposerActionsPopover: View {
                 }
             }
 
+            sectionHeader("History", theme: theme)
+            ComposerActionRow(
+                icon: "clock.arrow.circlepath",
+                title: "Session history",
+                detail: "Shells, terminals and AI chats, once they have ended",
+                shortcut: nil
+            ) {
+                store.openComposerHistory(afterPresentation: true)
+            }
+
             if !usableSkills.isEmpty {
                 sectionHeader("Skills", theme: theme)
                 ForEach(usableSkills) { offer in

@@ -41,6 +41,11 @@ final class ComposerChatModel: ObservableObject {
     /// list of conversations (the sidebar's) can follow this one without
     /// observing every space's model separately.
     var onMessagesChanged: (() -> Void)?
+    /// Called with each message that is kept — not an error — as it is added,
+    /// for the session log.
+    var onMessageAdded: ((ChatMessage) -> Void)?
+    /// Called when the conversation is cleared, which ends it.
+    var onCleared: (() -> Void)?
 
     /// What a list of conversations shows for this one: nothing, until
     /// something has been said. Errors do not count — they are never saved.
@@ -139,6 +144,7 @@ final class ComposerChatModel: ObservableObject {
         pendingSave?.cancel()
         pendingSave = nil
         Self.deleteFile(for: workspaceID)
+        onCleared?()
         onMessagesChanged?()
     }
 
@@ -173,7 +179,10 @@ final class ComposerChatModel: ObservableObject {
         if messages.count > Self.maxStoredMessages {
             messages.removeFirst(messages.count - Self.maxStoredMessages)
         }
-        if message.role != .error { scheduleSave() }
+        if message.role != .error {
+            scheduleSave()
+            onMessageAdded?(message)
+        }
         onMessagesChanged?()
     }
 

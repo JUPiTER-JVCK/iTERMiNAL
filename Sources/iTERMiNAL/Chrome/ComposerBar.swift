@@ -172,32 +172,41 @@ struct ComposerBar: View {
     /// destination without opening at all.
     private var collapsedPill: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
-        return Button {
+        // Not a Button: a Button owns the press, so a drag that started on it
+        // either did nothing or ended by opening the composer. A tap opens it
+        // and a drag moves it, which a plain view with both gestures does.
+        return HStack(spacing: 8) {
+            Image(systemName: settings.composerTarget.icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(isChatting ? "Ask anything" : "Run anything")
+                .font(.system(size: 12))
+            ComposerPillStatus(
+                chat: store.composerChat,
+                shellAlive: store.composerHasRun,
+                accent: settings.accentColor
+            )
+            Image(systemName: "chevron.up")
+                .font(.system(size: 8, weight: .semibold))
+                .opacity(0.6)
+        }
+        .foregroundStyle(theme.textSecondary)
+        .padding(.horizontal, 14)
+        .frame(height: 32)
+        .elevated(cornerRadius: 16, radius: 14, y: 4, fill: cardFill(theme), outsideOnly: true)
+        .contentShape(Rectangle())
+        .onTapGesture {
             // Not just un-collapsing: the point of opening it is to type.
             store.focusComposer()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: settings.composerTarget.icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(isChatting ? "Ask anything" : "Run anything")
-                    .font(.system(size: 12))
-                ComposerPillStatus(
-                    chat: store.composerChat,
-                    shellAlive: store.composerHasRun,
-                    accent: settings.accentColor
-                )
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 8, weight: .semibold))
-                    .opacity(0.6)
-            }
-            .foregroundStyle(theme.textSecondary)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .elevated(cornerRadius: 16, radius: 14, y: 4, fill: cardFill(theme))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help("Show the composer (⇧⌘M)")
+        .gesture(moveGesture)
+        .onHover { inside in
+            if inside { NSCursor.openHand.set() } else { NSCursor.arrow.set() }
+        }
+        .help("Show the composer (⇧⌘M) · drag to move")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Show the composer")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { store.focusComposer() }
         .contextMenu {
             Picker("Run in", selection: $settings.composerTarget) {
                 ForEach(ComposerTarget.allCases) { target in
@@ -211,15 +220,9 @@ struct ComposerBar: View {
     // MARK: Expanded
 
     private var expandedCard: some View {
-        VStack(spacing: 0) {
-            cardStack
-            if trayShown {
-                ComposerStatusTray(theme: Theme.current(for: colorScheme, themeID: appThemeID))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(reduceMotion ? nil : Motion.panel, value: trayShown)
-        .animation(reduceMotion ? nil : Motion.panel, value: showsTranscript)
+        cardStack
+            .animation(reduceMotion ? nil : Motion.panel, value: trayShown)
+            .animation(reduceMotion ? nil : Motion.panel, value: showsTranscript)
     }
 
     private var cardStack: some View {
@@ -260,42 +263,63 @@ struct ComposerBar: View {
                 .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                gripBar(theme: theme)
+            // One surface for the card and the tray under it, so there is one
+            // outline, one fill and one shadow to line up. The tray used to be
+            // a second shape tucked under the first, and where its square top
+            // met the card's rounded bottom corners they left a gap.
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    gripBar(theme: theme)
 
-                if showsTranscript {
-                    transcriptBlock(theme: theme)
-                        .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
-                }
-
-                if !notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(notes.prefix(3), id: \.self) { note in
-                            Label(note, systemImage: "exclamationmark.triangle")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
+                    if showsTranscript {
+                        transcriptBlock(theme: theme)
+                            .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
                     }
-                    // The warning sign over the "+" below it. At 4 it sat 7pt
-                    // short of it and 5pt in from the field's edge: on neither.
-                    .padding(.leading, ComposerMetrics.glyphColumn)
-                    .padding(.trailing, 4)
-                    .accessibilityElement(children: .combine)
-                    .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
-                }
 
-                inputField(theme: theme)
+                    if !notes.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(notes.prefix(3), id: \.self) { note in
+                                Label(note, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        // The warning sign over the "+" below it. At 4 it sat 7pt
+                        // short of it and 5pt in from the field's edge: on neither.
+                        .padding(.leading, ComposerMetrics.glyphColumn)
+                        .padding(.trailing, 4)
+                        .accessibilityElement(children: .combine)
+                        .transition(Motion.bannerTransition(reduceMotion: reduceMotion))
+                    }
+
+                    inputField(theme: theme)
+                }
+                // Less above than at the sides and below: the grip row is taller
+                // than its 4pt capsule, which leaves the capsule with about the
+                // same air above it as between it and the field.
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                // Less below while the tray is out: it supplies the rest.
+                .padding(.bottom, trayShown ? 6 : 12)
+
+                if trayShown {
+                    ComposerStatusTray(theme: theme)
+                        .transition(trayTransition)
+                }
             }
-            // Less above than at the sides and below: the grip row is taller
-            // than its 4pt capsule, which leaves the capsule with about the
-            // same air above it as between it and the field.
-            .padding(.horizontal, 12)
-            .padding(.top, 4)
-            .padding(.bottom, 12)
             // A distinctly lighter surface and a deeper shadow, so this reads
-            // as floating above the terminal rather than painted onto it.
-            .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme))
+            // as floating above the terminal rather than painted onto it. The
+            // shadow is cast outside the card only: through a translucent fill
+            // it showed as a dark smear that swelled over a dark background.
+            .elevated(cornerRadius: 22, radius: 22, y: 8, fill: cardFill(theme), outsideOnly: true)
         }
+    }
+
+    /// The tray fading in from just above where it settles. It does not slide
+    /// from the card's edge: it is inside the card now, and sliding would pass
+    /// over the input.
+    private var trayTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6))
     }
 
     /// Whether there is a transcript to show at all: the AI conversation, or
@@ -385,37 +409,7 @@ struct ComposerBar: View {
         .overlay(alignment: .trailing) { headerControls(theme: theme).padding(.trailing, 8) }
         .contentShape(Rectangle())
         .onHover { NSCursor.openHand.set(); if !$0 { NSCursor.arrow.set() } }
-        .gesture(
-            // The default 10pt threshold swallowed short drags, which is what
-            // made the card feel stuck — it only moved once you had committed
-            // to a big gesture.
-            DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    // Clamp while dragging, not only on release. Assigning the
-                    // raw translation let the card follow the pointer clean off
-                    // the surface and then snap back when let go, which is not
-                    // what "stays inside" should feel like.
-                    let limits = offsetLimits
-                    let x = (settings.composerOffsetX + value.translation.width)
-                        .clamped(to: limits.x)
-                    let y = (settings.composerOffsetY + value.translation.height)
-                        .clamped(to: limits.y)
-                    dragDelta = CGSize(
-                        width: x - settings.composerOffsetX,
-                        height: y - settings.composerOffsetY
-                    )
-                    if !dragging { dragging = true }
-                }
-                .onEnded { value in
-                    let limits = offsetLimits
-                    settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
-                        .clamped(to: limits.x)
-                    settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
-                        .clamped(to: limits.y)
-                    dragDelta = .zero
-                    dragging = false
-                }
-        )
+        .gesture(moveGesture)
         // Double-click the handle to put it back where it started.
         .onTapGesture(count: 2) {
             withAnimation(Motion.panel) {
@@ -424,6 +418,45 @@ struct ComposerBar: View {
             }
         }
         .help("Drag to move the composer · double-click to reset")
+    }
+
+    /// Picks the card, or its pill, up and moves it.
+    ///
+    /// Measured in the window's own space, not the view's. The default is the
+    /// view's local space, and this view is the thing being moved: each step
+    /// shifts the space the next step is measured in, so the translation is
+    /// measured against a target that has moved since — a feedback loop that
+    /// showed as the card shuddering as it followed the pointer.
+    private var moveGesture: some Gesture {
+        // The default 10pt threshold swallowed short drags, which is what made
+        // the card feel stuck — it only moved once you had committed to a big
+        // gesture.
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .onChanged { value in
+                // Clamp while dragging, not only on release. Assigning the raw
+                // translation let the card follow the pointer clean off the
+                // surface and then snap back when let go, which is not what
+                // "stays inside" should feel like.
+                let limits = offsetLimits
+                let x = (settings.composerOffsetX + value.translation.width)
+                    .clamped(to: limits.x)
+                let y = (settings.composerOffsetY + value.translation.height)
+                    .clamped(to: limits.y)
+                dragDelta = CGSize(
+                    width: x - settings.composerOffsetX,
+                    height: y - settings.composerOffsetY
+                )
+                if !dragging { dragging = true }
+            }
+            .onEnded { value in
+                let limits = offsetLimits
+                settings.composerOffsetX = (settings.composerOffsetX + value.translation.width)
+                    .clamped(to: limits.x)
+                settings.composerOffsetY = (settings.composerOffsetY + value.translation.height)
+                    .clamped(to: limits.y)
+                dragDelta = .zero
+                dragging = false
+            }
     }
 
     private func headerControls(theme: Theme) -> some View {
@@ -525,6 +558,7 @@ struct ComposerBar: View {
             guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             outcome.stop()
             store.recordComposerCommand(command)
+            store.logAssistantPrompt(prompt)
             text = ""
             historyIndex = nil
             draft = ""
@@ -904,23 +938,24 @@ private struct ComposerPillStatus: View {
     }
 }
 
-/// The strip that slides out beneath the card: where what is typed goes —
-/// terminals, the composer's shell or the AI — and a line about that place.
+/// The strip along the bottom of the card when it is opened: where what is
+/// typed goes — terminals, the composer's shell or the AI — and a line about
+/// that place. Part of the card's own surface, set off by a hairline, and as
+/// thin as the switch in it allows.
 private struct ComposerStatusTray: View {
     let theme: Theme
 
     var body: some View {
-        ComposerDestinationRow()
-            .font(.system(size: 11.5))
-            .foregroundStyle(theme.textSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .frame(maxWidth: .infinity)
-            .background(
-                UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14, style: .continuous)
-                    .fill(theme.surface)
-            )
-            .padding(.horizontal, 14)
+        VStack(spacing: 0) {
+            FadedDivider()
+                .padding(.horizontal, 14)
+            ComposerDestinationRow()
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textSecondary)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+        }
+        .padding(.bottom, 2)
     }
 }

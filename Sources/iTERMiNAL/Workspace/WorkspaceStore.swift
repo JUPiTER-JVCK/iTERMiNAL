@@ -272,8 +272,9 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var composerHasRun = false
     /// Commands sent from the composer, oldest first, for arrow-key recall.
     /// In memory only and never written to the state file: composer input is
-    /// as likely to contain a token as a `ls`, and none of it is worth
-    /// keeping on disk.
+    /// as likely to contain a token as a `ls`. The session log (`ComposerLog`)
+    /// is the one place it is kept on disk — masked, bounded, and switchable
+    /// off — and this list is not read from it.
     @Published private(set) var composerHistory: [String] = []
     /// Bumped when something — a menu command, a revealed task — asks the
     /// composer to take keyboard focus. The view watches the number rather
@@ -359,6 +360,12 @@ final class WorkspaceStore: ObservableObject {
         if let model = chatModels[workspaceID] { return model }
         let model = ComposerChatModel(workspaceID: workspaceID)
         model.onMessagesChanged = { [weak self] in self?.chatRevision += 1 }
+        model.onMessageAdded = { [weak self] message in
+            self?.logChatMessage(message, workspaceID: workspaceID)
+        }
+        model.onCleared = { [weak self] in
+            self?._composerLog?.close(Self.chatLogKey(workspaceID))
+        }
         chatModels[workspaceID] = model
         return model
     }
@@ -366,6 +373,84 @@ final class WorkspaceStore: ObservableObject {
     /// The composer's chat for the space being looked at; each space has its own.
     var composerChat: ComposerChatModel {
         chat(for: currentWorkspace?.id ?? Self.fallbackNotesID)
+    }
+
+    // MARK: Session log
+
+    private var _composerLog: ComposerLog?
+
+    /// What was done in the composer, kept for looking back at. Read from disk
+    /// the first time it is needed: a launch that never opens the composer's
+    /// history should not pay for it.
+    var composerLog: ComposerLog {
+        if let log = _composerLog { return log }
+        let log = ComposerLog()
+        _composerLog = log
+        return log
+    }
+
+    /// The Composer History sheet.
+    @Published var showComposerHistory = false
+
+    /// Opens the history. From a menu or the palette, the thing that was open
+    /// has only just been dismissed to run this, and a sheet asked for while
+    /// one is closing is dropped — so it waits for that to finish, as
+    /// `showShortcuts` does.
+    func openComposerHistory(afterPresentation: Bool = false) {
+        let wait = afterPresentation || showCommandPalette
+        showCommandPalette = false
+        guard wait else {
+            showComposerHistory = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.showComposerHistory = true
+        }
+    }
+
+    private static func chatLogKey(_ workspaceID: UUID) -> String {
+        "ai:\(workspaceID.uuidString)"
+    }
+
+    private func logChatMessage(_ message: ChatMessage, workspaceID: UUID) {
+        let space = workspaces.first { $0.id == workspaceID }?.name ?? "Space"
+        composerLog.record(
+            message.text,
+            who: message.role == .user ? "You" : "AI",
+            in: Self.chatLogKey(workspaceID),
+            kind: .assistant,
+            title: "AI · \(space)"
+        )
+    }
+
+    /// An `@ai` question typed into the composer. The question only: the
+    /// answer is a banner over the input, not a conversation.
+    func logAssistantPrompt(_ text: String) {
+        guard let workspace = currentWorkspace else { return }
+        composerLog.record(
+            text,
+            who: "You (@ai)",
+            in: Self.chatLogKey(workspace.id),
+            kind: .assistant,
+            title: "AI · \(workspace.name)"
+        )
+    }
+
+    /// Puts the end on the composer's shell session in the log, with what the
+    /// shell printed, while there is still a shell to ask.
+    private func endComposerShellLog() {
+        guard let log = _composerLog, let session = composerSession else { return }
+        let output = AppSettings.shared.composerKeepHistory
+            ? session.captureScrollback(maxBytes: ComposerLog.maxOutputBytes)
+            : nil
+        log.close("shell:\(session.id.uuidString)", output: output)
+    }
+
+    /// Ends every session in the log and writes it. At quit, before the shells
+    /// are stopped.
+    func finishComposerLog() {
+        endComposerShellLog()
+        _composerLog?.closeAll()
     }
 
     /// Writes any chat message still inside its debounce window.
@@ -700,6 +785,7 @@ final class WorkspaceStore: ObservableObject {
         chatModels[workspace.id]?.cancel()
         chatModels[workspace.id] = nil
         ComposerChatModel.deleteFile(for: workspace.id)
+        _composerLog?.close(Self.chatLogKey(workspace.id))
         scheduleSave()
     }
 
@@ -1039,6 +1125,7 @@ final class WorkspaceStore: ObservableObject {
         chatModels[workspace.id]?.cancel()
         chatModels[workspace.id] = nil
         ComposerChatModel.deleteFile(for: workspace.id)
+        _composerLog?.close(Self.chatLogKey(workspace.id))
         if workspaces.isEmpty {
             bootstrap()
         } else if selectedTab == nil {
@@ -1417,9 +1504,22 @@ final class WorkspaceStore: ObservableObject {
         case .terminal(let target):
             target.send(text: text)
             session = target
+            composerLog.record(
+                text,
+                who: target.displayTitle,
+                in: "terminals",
+                kind: .terminals,
+                title: "Terminals"
+            )
         case .ownShell:
             session = ensureComposerSession()
             session.send(text: text)
+            composerLog.record(
+                text,
+                in: "shell:\(session.id.uuidString)",
+                kind: .shell,
+                title: "Composer shell"
+            )
             // Gates the inline transcript, so it only appears when there is a
             // composer shell whose output has nowhere else to go.
             if !composerHasRun { composerHasRun = true }
@@ -1480,6 +1580,7 @@ final class WorkspaceStore: ObservableObject {
 
     /// Ends the composer's shell and clears its transcript.
     func resetComposerSession() {
+        endComposerShellLog()
         composerSession?.terminate()
         composerSession = nil
         composerHasRun = false

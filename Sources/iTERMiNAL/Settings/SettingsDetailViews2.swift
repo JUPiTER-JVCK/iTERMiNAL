@@ -255,7 +255,22 @@ struct ComposerSettingsView: View {
 
             Section("Suggestions") {
                 Toggle("Suggest from shell history", isOn: $settings.composerSuggestFromShellHistory)
-                Text("As you type, the rest of a command you have run before appears in grey after the caret — → or ⇥ takes it, esc waves it away. ⌃R searches your history, and ⇥ completes file names for terminals on this Mac. What the composer has run in this session is always used. With this on, the tail of your shell's history file (~/.zsh_history or ~/.bash_history) is read too. It is kept in memory only: never saved, exported, or sent anywhere.")
+                Text("As you type, the rest of a command you have run before appears in grey after the caret — → or ⇥ takes it, esc waves it away. ⌃R searches your history, and ⇥ completes file names for terminals on this Mac. What the composer has run in this session is always used. With this on, the tail of your shell's history file (~/.zsh_history or ~/.bash_history) is read too. The suggestions themselves are held in memory only and never sent anywhere; the session history below is what is saved.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("History") {
+                Toggle("Keep a history of composer sessions", isOn: $settings.composerKeepHistory)
+                Picker("Keep sessions for", selection: $settings.composerHistoryDays) {
+                    Text("A week").tag(7)
+                    Text("A month").tag(30)
+                    Text("Three months").tag(90)
+                    Text("A year").tag(365)
+                    Text("Until I delete them").tag(0)
+                }
+                .disabled(!settings.composerKeepHistory)
+                Text("Each stretch of composer use is kept until it ends, to look back at from + → History or the command palette: a run of the composer's own shell with what it printed, the commands sent to your terminals, and each AI conversation. This is the one place what you type in the composer is written to disk. Values that look like passwords or tokens are masked first, which is best effort — a secret in a shape it does not know is kept as typed. The files stay on this Mac, readable only by you, and are left out of exports. Turning this off stops recording; it does not delete what is already kept.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

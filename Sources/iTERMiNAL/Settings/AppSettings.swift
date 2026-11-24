@@ -304,6 +304,18 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(composerShowNotes, forKey: "composerShowNotes") }
     }
 
+    /// Keep a record of what is done in the composer, to look back at. On by
+    /// default — it is what the History view shows — but this is the one place
+    /// the composer's input is written to disk, so it can be switched off.
+    @Published var composerKeepHistory: Bool {
+        didSet { defaults.set(composerKeepHistory, forKey: "composerKeepHistory") }
+    }
+    /// How long a session is kept after it ends, in days. 0 keeps them until
+    /// they are deleted.
+    @Published var composerHistoryDays: Int {
+        didSet { defaults.set(composerHistoryDays, forKey: "composerHistoryDays") }
+    }
+
     // MARK: Sidebar section state
     @Published var pinnedExpanded: Bool { didSet { defaults.set(pinnedExpanded, forKey: "pinnedExpanded") } }
     @Published var projectsExpanded: Bool { didSet { defaults.set(projectsExpanded, forKey: "projectsExpanded") } }
@@ -550,6 +562,8 @@ final class AppSettings: ObservableObject {
         }
         composerAutoClose = defaults.object(forKey: "composerAutoClose") as? Bool ?? false
         composerShowNotes = defaults.object(forKey: "composerShowNotes") as? Bool ?? true
+        composerKeepHistory = defaults.object(forKey: "composerKeepHistory") as? Bool ?? true
+        composerHistoryDays = defaults.object(forKey: "composerHistoryDays") as? Int ?? 30
 
         pinnedExpanded = defaults.object(forKey: "pinnedExpanded") as? Bool ?? true
         projectsExpanded = defaults.object(forKey: "projectsExpanded") as? Bool ?? true
@@ -922,6 +936,8 @@ final class AppSettings: ObservableObject {
         composerSuggestFromShellHistory = true
         composerAutoClose = false
         composerShowNotes = true
+        composerKeepHistory = true
+        composerHistoryDays = 30
 
         assistantBaseURL = "https://api.openai.com/v1"
         assistantModel = "gpt-4o-mini"
