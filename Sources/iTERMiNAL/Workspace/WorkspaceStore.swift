@@ -347,13 +347,25 @@ final class WorkspaceStore: ObservableObject {
 
     private var chatModels: [UUID: ComposerChatModel] = [:]
 
+    /// Bumped whenever any space's conversation gains a message or is cleared.
+    /// Views that list conversations read it through the store, so they follow
+    /// changes in spaces other than the one being looked at without observing
+    /// each space's model.
+    @Published private(set) var chatRevision = 0
+
+    /// The conversation kept for a space, read from disk the first time it is
+    /// asked for.
+    func chat(for workspaceID: UUID) -> ComposerChatModel {
+        if let model = chatModels[workspaceID] { return model }
+        let model = ComposerChatModel(workspaceID: workspaceID)
+        model.onMessagesChanged = { [weak self] in self?.chatRevision += 1 }
+        chatModels[workspaceID] = model
+        return model
+    }
+
     /// The composer's chat for the space being looked at; each space has its own.
     var composerChat: ComposerChatModel {
-        let id = currentWorkspace?.id ?? Self.fallbackNotesID
-        if let model = chatModels[id] { return model }
-        let model = ComposerChatModel(workspaceID: id)
-        chatModels[id] = model
-        return model
+        chat(for: currentWorkspace?.id ?? Self.fallbackNotesID)
     }
 
     /// Writes any chat message still inside its debounce window.
@@ -1299,6 +1311,26 @@ final class WorkspaceStore: ObservableObject {
         AppSettings.shared.composerEnabled = true
         AppSettings.shared.composerCollapsed = false
         composerFocusRequest += 1
+    }
+
+    /// Points the composer at `target` and brings it forward with its
+    /// transcript showing — what choosing a conversation or the composer's
+    /// shell in the sidebar means, whether or not the card was hidden, folded
+    /// to its pill, or had its transcript retracted.
+    func openComposer(on target: ComposerTarget) {
+        AppSettings.shared.composerTarget = target
+        UserDefaults.standard.set(false, forKey: ComposerStorage.transcriptRetracted)
+        focusComposer()
+    }
+
+    /// Shows the AI conversation kept for `workspace`, in the composer. The
+    /// space is opened first, since the composer's chat is the one for the
+    /// space being looked at.
+    func openConversation(in workspace: Workspace) {
+        if currentWorkspace?.id != workspace.id, let tab = workspace.tabs.first {
+            selectedTabID = tab.id
+        }
+        openComposer(on: .assistant)
     }
 
     /// Puts `text` in the composer's input and the caret there. It is added to

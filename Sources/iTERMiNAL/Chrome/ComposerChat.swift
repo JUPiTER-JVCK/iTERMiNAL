@@ -37,6 +37,17 @@ final class ComposerChatModel: ObservableObject {
     private var task: Task<Void, Never>?
     private var pendingSave: DispatchWorkItem?
 
+    /// Called after a message is added or the conversation is cleared, so a
+    /// list of conversations (the sidebar's) can follow this one without
+    /// observing every space's model separately.
+    var onMessagesChanged: (() -> Void)?
+
+    /// What a list of conversations shows for this one: nothing, until
+    /// something has been said. Errors do not count — they are never saved.
+    var lastSaid: ChatMessage? {
+        messages.last(where: { $0.role != .error })
+    }
+
     private static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base
@@ -124,6 +135,7 @@ final class ComposerChatModel: ObservableObject {
         pendingSave?.cancel()
         pendingSave = nil
         Self.deleteFile(for: workspaceID)
+        onMessagesChanged?()
     }
 
     static let systemPrompt = """
@@ -158,6 +170,7 @@ final class ComposerChatModel: ObservableObject {
             messages.removeFirst(messages.count - Self.maxStoredMessages)
         }
         if message.role != .error { scheduleSave() }
+        onMessagesChanged?()
     }
 
     private func scheduleSave() {
