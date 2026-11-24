@@ -308,10 +308,10 @@ A tour of the app in thirty-four pictures, in five groups.
 - **Chat-style shell** — sidebar with New terminal / Automations / Skills rows
   and workspaces whose tabs read like conversations (blue activity dots for
   live background sessions; drag a tab to put it where you want it, or onto
-  another project to move it there); a Home page with tiles for a terminal, split
-  panes, each panel and the two bundled tools — btop and superfile, which open in
-  a panel or in full view — each showing its shortcut, and the last few commands
-  from your shell history; and a floating composer that types
+  another project to move it there); a Home page with a greeting, the weather
+  for a city you choose (see the Security model), and a list to start from — a terminal, split
+  panes, each panel and the two bundled tools, btop and superfile, which open in
+  a panel or in full view — each showing its shortcut; and a floating composer that types
   into whichever terminal has focus — drag it anywhere, minimise it to a pill,
   and recall earlier commands with the arrow keys. It colours what you type —
   commands, flags, strings, variables, pipes — in your terminal theme's colours,
@@ -1658,6 +1658,14 @@ to `ssh`, never to iTERMiNAL. **Try Again** afterwards.
   from reading what you type here. It is held only while iTERMiNAL is the active
   app and is released when you switch away or quit; while it is on, tools that
   watch the keyboard, such as text expanders, cannot see keystrokes made here.
+- **Home's weather asks nothing until you give it a city.** With no city typed,
+  the feature makes no request at all. With one, it asks
+  [Open-Meteo](https://open-meteo.com) (no account or key) over https: the
+  city's name to find it (again only when the city changes), then its
+  coordinates for the weather, about every fifteen minutes while Home is up. The
+  city is saved in settings; the reading is kept in memory only. Open-Meteo,
+  like any site, sees this Mac's address when it is asked. To turn it off, choose
+  the pencil on the Home card, then **Remove weather from Home**.
 - **The assistant sends only what you switch on.** Working directory, git
   branch and workspace name travel by default; the visible terminal screen
   does not, and has to be turned on in Settings → AI — except that Explain /

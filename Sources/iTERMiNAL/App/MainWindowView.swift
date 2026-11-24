@@ -571,36 +571,31 @@ private struct TabContentView: View {
 
 /// Home: what shows when no tab is open.
 ///
-/// One column, centred, that scrolls when the window is short: where (a
-/// greeting, the space, a way to switch it), then what to start — terminals
-/// and panels, the two bundled tools, the last few commands from shell
-/// history — each with the keys that do the same from anywhere, and at the
-/// bottom the two ways to find everything else.
+/// One column, centred, that scrolls when the window is short: a greeting, the
+/// weather for the city set on it (`HomeWeatherCard` — or the one-line form
+/// that asks for a city), and then everything to start from as one list: a
+/// terminal and split panes, the panels, the two bundled tools. Each row shows
+/// the keys that do the same from anywhere.
 private struct LandingView: View {
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
-    @State private var recentCommands: [String] = []
-
-    /// Wide enough for three tiles a row; the column never stretches past it,
-    /// however wide the window.
-    private static let columnWidth: CGFloat = 720
-    private let tileColumns = [GridItem(.adaptive(minimum: 200), spacing: 10)]
+    /// The column never stretches past this, however wide the window.
+    private static let columnWidth: CGFloat = 560
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    header(theme)
-                    section("Start", theme: theme) { startTiles(theme) }
-                    section("Tools", theme: theme) { toolTiles(theme) }
-                    if !recentCommands.isEmpty {
-                        section("Recent commands", theme: theme) { recentList(theme) }
-                    }
-                    footer(theme)
+                    Text(greeting)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(theme.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    HomeWeatherCard(theme: theme)
+                    startList(theme)
                 }
                 .frame(maxWidth: Self.columnWidth)
                 .padding(.horizontal, 32)
@@ -612,161 +607,72 @@ private struct LandingView: View {
             }
             .scrollIndicators(.automatic)
         }
-        .onAppear {
-            // Read once per appearance; the file rarely changes mid-session.
-            if recentCommands.isEmpty {
-                recentCommands = ShellHistory.recentCommands(limit: 3)
-            }
-        }
     }
 
     // MARK: Parts
 
-    private func header(_ theme: Theme) -> some View {
-        VStack(spacing: 8) {
-            Text(greeting)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.textSecondary)
-
-            Text(heading)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
-                .multilineTextAlignment(.center)
-                .accessibilityAddTraits(.isHeader)
-
-            spaceMenu(theme)
-                .padding(.top, 2)
+    private func startList(_ theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            group("Terminal", theme: theme) {
+                LandingRow(icon: "terminal", tint: settings.accentColor, title: "New terminal",
+                           subtitle: "A shell in this space", shortcut: "⌘T", theme: theme) {
+                    store.openTab()
+                }
+                LandingRow(icon: "rectangle.split.2x1", tint: Color(hex: 0x3B82F6), title: "Split panes",
+                           subtitle: "Two terminals side by side", shortcut: nil, theme: theme) {
+                    store.newTab()
+                    store.splitFocusedPane(.horizontal, kind: .terminal)
+                }
+            }
+            group("Panels", theme: theme) {
+                panelRow(.browser, tint: Color(hex: 0x8B5CF6), subtitle: "Web pages beside your work", theme: theme)
+                panelRow(.files, tint: Color(hex: 0xF97316), subtitle: "This Mac or a server", theme: theme)
+                panelRow(.notes, tint: Color(hex: 0xEAB308), subtitle: "Quick notes that stay put", theme: theme)
+                panelRow(.http, tint: Color(hex: 0x14B8A6), subtitle: "Requests, APIs and sites", theme: theme)
+            }
+            // The two programs that ship inside the app, each with a second
+            // button for full view — the same as their ⌥⇧⌘ shortcuts.
+            group("Tools", theme: theme) {
+                toolRow(.btop, tint: Color(hex: 0xEC4899), subtitle: "CPU, memory, disks and processes",
+                        fullView: "⌥⇧⌘P", theme: theme)
+                toolRow(.superfile, tint: Color(hex: 0x10B981), subtitle: "A fast file manager, keyboard first",
+                        fullView: "⌥⇧⌘S", theme: theme)
+            }
         }
-        .frame(maxWidth: .infinity)
     }
 
-    private func spaceMenu(_ theme: Theme) -> some View {
-        Menu {
-            ForEach(store.workspaces) { workspace in
-                Button(workspace.name) { store.newTab(in: workspace) }
-            }
-            Divider()
-            Button("New Space") { store.newWorkspace() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(settings.accentColor)
-                Text(store.currentWorkspace?.name ?? "Space")
-                    .font(.system(size: 12, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(theme.textSecondary)
-            }
-            .foregroundStyle(theme.textPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(theme.surface))
-            .overlay(Capsule().strokeBorder(theme.surfaceBorder))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Open a new tab in another space")
-    }
-
-    private func section<Content: View>(
+    private func group<Content: View>(
         _ title: String,
         theme: Theme,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.textSecondary)
+                .padding(.horizontal, 8)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
     }
 
-    private func startTiles(_ theme: Theme) -> some View {
-        LazyVGrid(columns: tileColumns, alignment: .leading, spacing: 10) {
-            LandingTile(icon: "terminal", tint: settings.accentColor, title: "New terminal",
-                        subtitle: "A shell in this space", shortcut: "⌘T", theme: theme) {
-                store.openTab()
-            }
-            LandingTile(icon: "rectangle.split.2x1", tint: Color(hex: 0x3B82F6), title: "Split panes",
-                        subtitle: "Two terminals side by side", shortcut: nil, theme: theme) {
-                store.newTab()
-                store.splitFocusedPane(.horizontal, kind: .terminal)
-            }
-            panelTile(.browser, tint: Color(hex: 0x8B5CF6), subtitle: "Web pages beside your work", theme: theme)
-            panelTile(.files, tint: Color(hex: 0xF97316), subtitle: "This Mac or a server", theme: theme)
-            panelTile(.notes, tint: Color(hex: 0xEAB308), subtitle: "Quick notes that stay put", theme: theme)
-            panelTile(.http, tint: Color(hex: 0x14B8A6), subtitle: "Requests, APIs and sites", theme: theme)
-        }
-    }
-
-    private func panelTile(_ panel: SidePanel, tint: Color, subtitle: String, theme: Theme) -> some View {
-        LandingTile(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
-                    shortcut: panel.shortcutHint, theme: theme) {
+    private func panelRow(_ panel: SidePanel, tint: Color, subtitle: String, theme: Theme) -> some View {
+        LandingRow(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
+                   shortcut: panel.shortcutHint, theme: theme) {
             store.openPanel(panel)
         }
     }
 
-    /// The two programs that ship inside the app, each with a second button
-    /// for full view — the same as their ⌥⇧⌘ shortcuts.
-    private func toolTiles(_ theme: Theme) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 10)], alignment: .leading, spacing: 10) {
-            toolTile(.btop, tint: Color(hex: 0xEC4899), subtitle: "CPU, memory, disks and processes",
-                     fullView: "⌥⇧⌘P", theme: theme)
-            toolTile(.superfile, tint: Color(hex: 0x10B981), subtitle: "A fast file manager, keyboard first",
-                     fullView: "⌥⇧⌘S", theme: theme)
-        }
-    }
-
-    private func toolTile(_ panel: SidePanel, tint: Color, subtitle: String, fullView: String, theme: Theme) -> some View {
-        LandingTile(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
-                    shortcut: panel.shortcutHint, theme: theme, trailing: AnyView(
-                        LandingIconButton(icon: "arrow.up.left.and.arrow.down.right", theme: theme,
-                                          help: "Open \(panel.title) in full view (\(fullView))") {
-                            store.openPanelExpanded(panel)
-                        }
-                    )) {
+    private func toolRow(_ panel: SidePanel, tint: Color, subtitle: String, fullView: String, theme: Theme) -> some View {
+        LandingRow(icon: panel.icon, tint: tint, title: panel.title, subtitle: subtitle,
+                   shortcut: panel.shortcutHint, theme: theme, trailing: AnyView(
+                    LandingIconButton(icon: "arrow.up.left.and.arrow.down.right", theme: theme,
+                                      help: "Open \(panel.title) in full view (\(fullView))") {
+                        store.openPanelExpanded(panel)
+                    }
+                   )) {
             store.openPanel(panel)
         }
-    }
-
-    private func recentList(_ theme: Theme) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(recentCommands.enumerated()), id: \.offset) { index, command in
-                if index > 0 {
-                    Rectangle()
-                        .fill(theme.divider)
-                        .frame(height: 1)
-                        .padding(.leading, 38)
-                }
-                RecentCommandRow(command: command, theme: theme) {
-                    run(command)
-                }
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(theme.surface.opacity(0.6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(theme.surfaceBorder)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func footer(_ theme: Theme) -> some View {
-        HStack(spacing: 18) {
-            LandingHint(keys: "⌘K", label: "Command palette", theme: theme) {
-                store.showCommandPalette = true
-            }
-            LandingHint(keys: "⌘/", label: "Keyboard shortcuts", theme: theme) {
-                store.showShortcuts()
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: Words
@@ -778,23 +684,12 @@ private struct LandingView: View {
         default: return "Good evening"
         }
     }
-
-    private var heading: String {
-        if let name = store.currentWorkspace?.name, !name.isEmpty {
-            return "What should we build in \(name)?"
-        }
-        return "What should we build?"
-    }
-
-    private func run(_ command: String) {
-        let tab = store.newTab()
-        tab.primarySession?.send(text: command + "\n")
-    }
 }
 
 /// One thing to start from Home: a tinted icon, what it is, a line on what it
-/// is for, and the keys that do the same from anywhere.
-private struct LandingTile: View {
+/// is for, and the keys that do the same from anywhere. A row in a list, so
+/// it has no card of its own — only a wash when the pointer is over it.
+private struct LandingRow: View {
     let icon: String
     let tint: Color
     let title: String
@@ -807,34 +702,34 @@ private struct LandingTile: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(tint.opacity(0.16))
                         Image(systemName: icon)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(tint)
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: 30, height: 30)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(theme.textPrimary)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            if let shortcut {
-                                KeyCaps(keys: shortcut, theme: theme)
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
                         Text(subtitle)
                             .font(.system(size: 11))
                             .foregroundStyle(theme.textSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if let shortcut {
+                        KeyCaps(keys: shortcut, theme: theme)
                     }
                 }
                 .contentShape(Rectangle())
@@ -845,15 +740,11 @@ private struct LandingTile: View {
 
             if let trailing { trailing }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(hovering ? theme.surfaceHover : theme.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(hovering ? tint.opacity(0.45) : theme.surfaceBorder)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(hovering ? theme.surfaceHover : Color.clear)
         )
         .animation(Motion.hover, value: hovering)
         .onHover { hovering = $0 }
@@ -884,7 +775,7 @@ private struct KeyCaps: View {
 }
 
 /// A small square button inside a tile.
-private struct LandingIconButton: View {
+struct LandingIconButton: View {
     let icon: String
     let theme: Theme
     let help: String
@@ -908,73 +799,6 @@ private struct LandingIconButton: View {
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(help)
-    }
-}
-
-/// One recent command from shell history: click to run it in a new tab.
-private struct RecentCommandRow: View {
-    let command: String
-    let theme: Theme
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 18)
-                Text(command)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 8)
-                Text("Run")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .opacity(hovering ? 1 : 0)
-                Image(systemName: "return")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.textSecondary)
-                    .opacity(hovering ? 1 : 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(hovering ? theme.surfaceHover : Color.clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(Motion.hover, value: hovering)
-        .onHover { hovering = $0 }
-        .help("Run in a new terminal")
-        .accessibilityLabel("Run \(command) in a new terminal")
-    }
-}
-
-/// "⌘K Command palette": a key and what it does, which also does it.
-private struct LandingHint: View {
-    let keys: String
-    let label: String
-    let theme: Theme
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                KeyCaps(keys: keys, theme: theme)
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 
