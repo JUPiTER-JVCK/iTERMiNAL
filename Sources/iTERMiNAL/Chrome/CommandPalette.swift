@@ -39,6 +39,9 @@ struct CommandPaletteView: View {
 
     @State private var query = ""
     @State private var selectedIndex = 0
+    /// Set when the pointer, not the keyboard, changed `selectedIndex`, so the
+    /// list is not scrolled to follow it.
+    @State private var selectionFromPointer = false
     @FocusState private var searchFocused: Bool
     /// The files under the focused terminal's folder, listed once when the
     /// palette opens. Nil until that finishes, or when there is nothing to
@@ -97,13 +100,24 @@ struct CommandPaletteView: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { run(action) }
                                 .onHover { hovering in
-                                    if hovering { selectedIndex = index }
+                                    guard hovering, selectedIndex != index else { return }
+                                    // The pointer is already looking at this
+                                    // row: highlight it, but never scroll to it.
+                                    selectionFromPointer = true
+                                    selectedIndex = index
                                 }
                         }
                     }
                     .padding(6)
                 }
                 .onChange(of: selectedIndex) { _, index in
+                    // Only the keyboard (and typing) moves the list; hovering
+                    // used to recentre it under the pointer, which put a new
+                    // row under the pointer, and so on down the list.
+                    if selectionFromPointer {
+                        selectionFromPointer = false
+                        return
+                    }
                     guard matches.indices.contains(index) else { return }
                     proxy.scrollTo(matches[index].id, anchor: .center)
                 }
