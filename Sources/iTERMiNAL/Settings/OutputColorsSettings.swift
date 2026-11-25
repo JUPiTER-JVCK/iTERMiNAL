@@ -22,12 +22,15 @@ struct OutputColorsSettingsSection: View {
             Toggle("Color command output", isOn: $settings.colorizeOutput)
             Toggle("ls: directories, links and scripts", isOn: $settings.colorizeListings)
                 .disabled(!settings.colorizeOutput)
+            Toggle("More file types in ls (GNU ls, eza)", isOn: $settings.colorizeMoreFileTypes)
+                .disabled(!settings.colorizeOutput || !settings.colorizeListings)
             Toggle("man pages and less", isOn: $settings.colorizeManPages)
                 .disabled(!settings.colorizeOutput)
 
             OutputColorsPreview(
                 theme: settings.resolvedTerminalTheme(darkMode: colorScheme == .dark),
                 listings: settings.colorizeOutput && settings.colorizeListings,
+                moreFileTypes: settings.colorizeOutput && settings.colorizeListings && settings.colorizeMoreFileTypes,
                 manPages: settings.colorizeOutput && settings.colorizeManPages
             )
 
@@ -50,7 +53,7 @@ struct OutputColorsSettingsSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button(copied ? "Copied" : "Copy") { copy() }
                     }
-                    Text("macOS's own ls colors folders, links and programs, and nothing else. GNU ls (with --color) and eza also read LS_COLORS, which is set too, and color archives, pictures and audio.")
+                    Text("macOS's own ls colors folders, links and programs, and nothing else. GNU ls (with --color) and eza also read LS_COLORS, which is set too, and color archives, pictures and audio. \"More file types\" adds source code, config and data, documents and logs for those two, using only your theme's own colors.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -78,6 +81,7 @@ struct OutputColorsSettingsSection: View {
 private struct OutputColorsPreview: View {
     let theme: TerminalTheme
     let listings: Bool
+    let moreFileTypes: Bool
     let manPages: Bool
 
     private var palette: [UInt32] { theme.ansi }
@@ -119,6 +123,15 @@ private struct OutputColorsPreview: View {
         rows.append([run("-rwxr-xr-x  "), run("deploy.sh", style(.executable))])
         rows.append([run("-rw-r--r--  "), run("notes.txt")])
         rows.append([run("-rw-r--r--  "), run("photo.png")])
+        if moreFileTypes {
+            // macOS's ls never colors by ending; these are what GNU ls and
+            // eza print once `LS_COLORS` names them.
+            rows.append([run("GNU ls, eza:")])
+            for name in ["main.swift", "config.json", "README.md", "build.log"] {
+                let ending = String(name.split(separator: ".").last ?? "")
+                rows.append([run("-rw-r--r--  "), run(name, OutputColors.extensionSGR(for: ending, includingMore: true))])
+            }
+        }
         return rows
     }
 

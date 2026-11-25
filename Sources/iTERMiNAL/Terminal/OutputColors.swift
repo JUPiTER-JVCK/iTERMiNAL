@@ -21,6 +21,11 @@ struct OutputColors: Equatable {
     var listings: Bool
     /// `man`, and anything else read through `less`.
     var manPages: Bool
+    /// Colour more kinds of file by their ending — source, config and data,
+    /// documents, logs — for the tools that read `LS_COLORS`. Off by default,
+    /// so an `ls` that was archives, pictures and audio stays that. Still only
+    /// the theme's sixteen colours: nothing here is a fixed RGB value.
+    var moreFileTypes: Bool = false
 
     // MARK: What gets coloured
 
@@ -62,12 +67,32 @@ struct OutputColors: Equatable {
         ("00;36", ["mp3", "m4a", "wav", "flac", "ogg", "aac"]),
     ]
 
+    /// The extra kinds of file, when asked for. Every code is one of the
+    /// theme's sixteen — `01;30`, bold black, is how the terminal says "bright
+    /// black", the grey themes draw for things to look past — so these follow
+    /// a theme change like everything else. No ending is in both tables.
+    static let moreExtensionStyles: [(sgr: String, endings: [String])] = [
+        ("01;33", ["swift", "py", "js", "jsx", "ts", "tsx", "go", "rs", "c", "h", "cc", "cpp", "hpp", "m", "mm", "java", "kt", "rb", "php", "lua", "cs"]),
+        ("00;32", ["json", "yaml", "yml", "toml", "ini", "conf", "cfg", "plist", "xml", "env", "csv"]),
+        ("00;34", ["md", "txt", "pdf", "rtf", "doc", "docx", "pages", "epub"]),
+        ("01;30", ["log", "tmp", "bak", "swp", "orig", "lock"]),
+    ]
+
+    /// The SGR codes for a file ending, or nil for one that is not coloured.
+    /// What the Settings sample draws from, so it matches what is exported.
+    static func extensionSGR(for ending: String, includingMore: Bool) -> String? {
+        let groups = includingMore ? extensionStyles + moreExtensionStyles : extensionStyles
+        return groups.first { $0.endings.contains(ending) }?.sgr
+    }
+
     /// GNU's `LS_COLORS`, from the same table.
-    static var gnuLSColors: String {
+    static var gnuLSColors: String { makeGNULSColors(moreFileTypes: false) }
+
+    static func makeGNULSColors(moreFileTypes: Bool) -> String {
         var parts = ["rs=0"]
         parts += listingStyles.map { "\($0.gnuKey)=\($0.sgr)" }
         parts += ["or=40;31;01", "mi=00"]
-        for group in extensionStyles {
+        for group in moreFileTypes ? extensionStyles + moreExtensionStyles : extensionStyles {
             parts += group.endings.map { "*.\($0)=\(group.sgr)" }
         }
         return parts.joined(separator: ":")
@@ -124,7 +149,7 @@ struct OutputColors: Equatable {
         if listings {
             added["CLICOLOR"] = "1"
             added["LSCOLORS"] = Self.bsdLSColors
-            added["LS_COLORS"] = Self.gnuLSColors
+            added["LS_COLORS"] = Self.makeGNULSColors(moreFileTypes: moreFileTypes)
         }
         if manPages {
             for style in Self.manPageStyles {

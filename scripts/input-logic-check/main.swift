@@ -3302,6 +3302,22 @@ func checkColouredCommandOutput() {
           "man pages alone leaves ls alone")
     check(OutputColors(listings: false, manPages: false).environment(inheriting: [:]).isEmpty, "both off is nothing")
 
+    // More file types: the theme's sixteen colours only, and off unless asked.
+    check(OutputColors(listings: true, manPages: false).environment(inheriting: [:])["LS_COLORS"] == gnu, "more file types is off by default")
+    let more = OutputColors(listings: true, manPages: false, moreFileTypes: true).environment(inheriting: [:])
+    let moreEntries = (more["LS_COLORS"] ?? "").split(separator: ":").map(String.init)
+    check(moreEntries.contains("*.swift=01;33") && moreEntries.contains("*.json=00;32") && moreEntries.contains("*.md=00;34") && moreEntries.contains("*.log=01;30"),
+          "on, source, config, documents and logs are coloured by ending")
+    check(entries.allSatisfy { moreEntries.contains($0) }, "and everything that was there still is")
+    check(moreEntries.allSatisfy { $0.range(of: #"^[*.a-z0-9]+=[0-9;]+$"#, options: .regularExpression) != nil }, "every extra entry is key=codes")
+    check(Set(moreEntries.map { $0.split(separator: "=")[0] }).count == moreEntries.count, "no key is given twice with more types on")
+    let paletteCodes = OutputColors.moreExtensionStyles.flatMap { $0.sgr.split(separator: ";").compactMap { Int($0) } }
+    check(paletteCodes.allSatisfy { $0 == 0 || $0 == 1 || (30...37).contains($0) }, "extra colours are SGR 0, 1 and 30-37: no 256-colour or RGB values, so a theme still decides them")
+    check(more["LSCOLORS"] == OutputColors.bsdLSColors, "BSD ls reads no endings, so its variable is unchanged")
+    check(OutputColors(listings: false, manPages: false, moreFileTypes: true).environment(inheriting: [:]).isEmpty, "more types without listings sets nothing")
+    check(OutputColors.extensionSGR(for: "swift", includingMore: false) == nil && OutputColors.extensionSGR(for: "swift", includingMore: true) == "01;33", "the Settings sample looks the same table up")
+    check(OutputColors.extensionSGR(for: "png", includingMore: false) == "01;35", "and the original groups too")
+
     // What a person has already said is theirs.
     let owned = OutputColors(listings: true, manPages: true).environment(inheriting: ["LS_COLORS": "di=1", "LESS_TERMCAP_md": "x"])
     check(owned["LS_COLORS"] == nil && owned["LESS_TERMCAP_md"] == nil, "a variable already set is not replaced")
