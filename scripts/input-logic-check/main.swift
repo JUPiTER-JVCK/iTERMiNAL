@@ -339,6 +339,15 @@ func checkAppThemes() {
             let darkGround = ColorMath.contrast(palette.background, 0x000000) < ColorMath.contrast(palette.background, 0xFFFFFF)
             check(darkGround == (variant == "dark"), "\(name): the background is \(darkGround ? "dark" : "light")")
 
+            // A split tab's panes stand on a ground deeper than themselves, in
+            // light as in dark: a gap the colour of the terminal in it is what
+            // made a split read as one flat sheet ruled into boxes.
+            let wellStep = ColorMath.contrast(palette.paneWell, palette.background)
+            check(ColorMath.contrast(palette.paneWell, 0x000000) < ColorMath.contrast(palette.background, 0x000000),
+                  "\(name): the pane well \(ColorMath.hex(palette.paneWell)) is not darker than the background \(ColorMath.hex(palette.background))")
+            check(wellStep >= AppThemes.minimumPaneWellStep,
+                  "\(name): the pane well is \(String(format: "%.3f", wellStep)):1 off the background, under \(AppThemes.minimumPaneWellStep)")
+
             // Whatever the terminal theme, every colour the composer paints a
             // command in reads on this theme's field: the fallbacks are shaded
             // until they do.

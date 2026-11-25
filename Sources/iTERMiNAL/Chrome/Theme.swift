@@ -79,6 +79,9 @@ struct Theme {
     /// `background` than `surface` is, so a floating panel never reads as
     /// painted onto the window behind it.
     let floatingSurface: Color
+    /// The recessed ground a split tab's panes stand on. See
+    /// `AppThemePalette.paneWell`.
+    let paneWell: Color
 
     /// The chrome for an appearance, in the chosen app theme (`AppThemes`).
     ///
@@ -126,6 +129,7 @@ struct Theme {
         terminalBackground = NSColor(p3: palette.background)
         terminalForeground = NSColor(p3: palette.textPrimary)
         floatingSurface = Color(p3: palette.floatingSurface)
+        paneWell = Color(p3: palette.paneWell)
         if dark {
             surfaceBorder = Color.white.opacity(0.07)
             elevatedShadow = Color.black.opacity(0.45)

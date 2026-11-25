@@ -37,6 +37,22 @@ struct AppThemePalette: Equatable {
 
     /// The colours text is drawn on, for checking contrast against.
     var grounds: [UInt32] { [background, sidebar, surface, surfaceHover, floatingSurface, inputField] }
+
+    /// What shows between the cards of a split tab, and round them: a shade
+    /// below the theme's chrome tier, the ground the content card sits on.
+    ///
+    /// Not `background`. A terminal that matches the app paints `background`
+    /// or near it, so a gap in that colour put each pane on a ground the same
+    /// as itself, and the split read as one flat sheet ruled into boxes. Not
+    /// `sidebar` alone either: two light themes' own terminal schemes are as
+    /// deep as their chrome (Nord's exactly, Everforest's a little deeper), and
+    /// the panes would have been flush with it again. The shade below it is
+    /// deeper than every theme's background and matched terminal, so the panes
+    /// stand on it and their shadows have somewhere to fall. A terminal set to
+    /// some other scheme can still be deeper; then the rim and shadow of
+    /// `PaneCard` are what set it apart. No text is drawn on it, so it is not
+    /// one of `grounds`.
+    var paneWell: UInt32 { ColorMath.mix(sidebar, 0x000000, 0.04) }
 }
 
 struct AppThemeDefinition: Identifiable, Equatable {
@@ -59,6 +75,12 @@ enum AppThemes {
     /// as well, which the input-logic check holds them to.
     static let minimumTextContrast = 7.0
     static let minimumSecondaryContrast = 4.5
+
+    /// How far below `background` a theme's `paneWell` must sit (as a contrast
+    /// ratio), so a split tab's panes always stand on something deeper than
+    /// themselves. Small on purpose — a recess, not a frame — and just under
+    /// the shallowest theme (Midnight's dark variant, near black, at 1.030).
+    static let minimumPaneWellStep = 1.02
 
     /// A stored id, made safe: one this build does not know (a newer build's,
     /// or a damaged value) is the default theme.

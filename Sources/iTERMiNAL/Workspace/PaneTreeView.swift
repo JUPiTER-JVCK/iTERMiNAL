@@ -21,12 +21,13 @@ struct PaneTreeView: View {
     var body: some View {
         if isSolo, case .split = node.content {
             // The outermost split owns the margin round the whole tree, the
-            // same width as the gaps between its cards, on the same surface
-            // as the content card around it: the gaps are that surface
-            // showing between panes, not a second frame inside the first.
+            // same width as the gaps between its cards. Margin and gaps are
+            // one recessed ground, a step deeper than the panes (see
+            // `AppThemePalette.paneWell`), so each pane stands on it as a card
+            // rather than being ruled off on a sheet the same colour as it.
             tree
                 .padding(PaneCard.gap)
-                .background(Theme.current(for: colorScheme, themeID: appThemeID).background)
+                .background(Theme.current(for: colorScheme, themeID: appThemeID).paneWell)
         } else {
             tree
         }
@@ -219,9 +220,17 @@ private struct PaneSplitHandle: View {
     private static let reach: CGFloat = 12
 }
 
-/// What makes a pane inside a split its own card: rounded corners and a
-/// hairline edge. The gap round it is not its own — `PaneTreeView` and
-/// `PaneSplitView` leave it, equal on every side.
+/// What makes a pane inside a split its own card: rounded corners, lit the
+/// way every other raised surface is (`ElevatedSurface`) — a tight contact
+/// shadow and a soft one under it, and a rim that catches the light along the
+/// top edge and fades to a hairline down the sides. The gap round it is not
+/// its own — `PaneTreeView` and `PaneSplitView` leave it, equal on every side,
+/// in the recessed `paneWell` the shadows fall onto.
+///
+/// With only a hairline, and the gap the same colour as the terminal in it, a
+/// split tab read as one flat sheet ruled into boxes while the other raised
+/// surfaces in the window — the composer, its suggestions, the floating
+/// workspaces panel — stood off what they were on.
 ///
 /// Applied to leaves only. A nested split is not a card — its children are.
 struct PaneCard: ViewModifier {
@@ -242,6 +251,13 @@ struct PaneCard: ViewModifier {
         max(CGFloat(frameRadius) - gap, 6)
     }
 
+    /// The soft shadow's blur and drop. Shorter than a floating surface's
+    /// (`ElevatedSurface` defaults to 14 and 4): a pane is raised off the
+    /// well, not floating over the window, and a wider blur would fill the
+    /// 8pt gap edge to edge and read as a darker gap rather than as depth.
+    static let shadowRadius: CGFloat = 5
+    static let shadowY: CGFloat = 2
+
     @ViewBuilder
     func body(content: Content) -> some View {
         if case .split = node.content {
@@ -254,7 +270,31 @@ struct PaneCard: ViewModifier {
             )
             content
                 .clipShape(shape)
-                .overlay(shape.strokeBorder(theme.surfaceBorder).allowsHitTesting(false))
+                .overlay(
+                    // The same lit rim as every other raised surface.
+                    shape
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [theme.elevatedHighlight, theme.surfaceBorder],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                        .allowsHitTesting(false)
+                )
+                // Cast by a plain shape behind the pane, not by the pane: a
+                // shadow on the pane itself is cast from everything drawn in
+                // it, a live terminal included. The shape is covered by the
+                // pane, so only the shadow shows. A see-through terminal shows
+                // the desktop through its own backdrop, not this.
+                .background(
+                    shape
+                        .fill(theme.background)
+                        .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
+                        .shadow(color: theme.elevatedShadow, radius: Self.shadowRadius, y: Self.shadowY)
+                        .allowsHitTesting(false)
+                )
         }
     }
 }

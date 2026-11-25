@@ -1544,6 +1544,14 @@ final class ScreenshotRun {
         }
         await pause(2.5)
         let taken = capture("split-panes")
+        // The same split in light, where a pane and the gap round it were both
+        // white: the picture to look at to see the panes still stand off the
+        // ground. Not in the README; publish.py leaves it in the artifact.
+        settings.theme = .light
+        await pause(2.5)
+        _ = capture("split-panes-light")
+        settings.theme = .dark
+        await pause(1.5)
         settings.composerCollapsed = false
         return taken
     }
