@@ -103,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // constructed — so the stored choice is applied here rather than in
         // the initialiser that loads it.
         AppSettings.shared.applyAppearance()
+        // After the line above, so the first icon already reflects a Light or
+        // Dark choice rather than flashing the system's.
+        DockIcon.shared.start()
         // The scripting API only listens when the user has enabled it.
         LocalAPIServer.shared.applyEnabledState(AppSettings.shared.localAPIEnabled)
         // Forwards a person marked "start when iTERMiNAL opens".
