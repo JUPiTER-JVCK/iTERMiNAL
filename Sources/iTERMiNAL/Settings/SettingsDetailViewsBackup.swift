@@ -65,7 +65,7 @@ struct BackupSettingsView: View {
                 Text("""
                 Secrets never travel: the API token stays in the keychain, SSH has no passwords to carry, and machine-local paths such as the composer shell are left out so importing on another Mac cannot point the app at a shell that isn't there.
 
-                Terminal scrollback is excluded too. Transcripts stay in their own files on this Mac at 0600, and a snapshot you hand to someone else should not contain what your shells printed.
+                Terminal scrollback is excluded too. Transcripts stay in their own files on this Mac at 0600, and a snapshot you hand to someone else should not contain what your shells printed. The same goes for the composer's session history.
                 """)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

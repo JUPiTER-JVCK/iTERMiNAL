@@ -438,6 +438,14 @@ struct CommandPaletteView: View {
         }
 
         actions.append(PaletteAction(
+            id: "composer.history",
+            title: "Composer History",
+            subtitle: "Look back at past composer sessions",
+            systemImage: "clock.arrow.circlepath"
+        ) {
+            store.openComposerHistory(afterPresentation: true)
+        })
+        actions.append(PaletteAction(
             id: "skills.open",
             title: "Skills",
             subtitle: "Saved commands and snippets",

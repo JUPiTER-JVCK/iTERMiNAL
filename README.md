@@ -336,8 +336,10 @@ A tour of the app in thirty-four pictures, in five groups.
   a flag that is not in it simply gets no completion, and, like file names, it
   is for terminals on this Mac only. Suggestions come from what the composer has
   run and from the tail of your shell's history file (`~/.zsh_history` or
-  `~/.bash_history`, up to 512 KB, read locally); they are held in memory, never
-  saved, exported or sent anywhere, and a setting turns the file off. Only
+  `~/.bash_history`, up to 512 KB, read locally); the
+  suggestions are held in memory and never sent anywhere (what the composer
+  keeps on disk is the session history, below), and a setting turns the file
+  off. Only
   single-line commands are suggested. The arrow beside the composer's **+**
   opens a tray with a three-way switch — **Terminals** (whichever has focus),
   **Composer's shell** (a private one, with its output inline) and **AI** (the
@@ -358,7 +360,17 @@ A tour of the app in thirty-four pictures, in five groups.
   search that looks through what was said. Choosing one opens that space and the
   composer on its chat; right-click deletes it. The minimised pill shows where
   input goes, a spinner while the AI is replying, and a dot while the shell is
-  alive; right-click it to change the destination without opening it.
+  alive; drag it anywhere, as you can the card, and right-click it to change the destination without opening it.
+- **Composer session history** — each stretch of composer use is kept until it
+  ends and can be looked back at from **+ → Session history** or the command
+  palette: a run of the composer's own shell with what it printed, the commands
+  sent to your terminals, and each AI conversation, grouped by day, searchable
+  and filterable, with copy and delete per session. **This is the one place what
+  you type in the composer is written to disk.** Values that look like passwords
+  or tokens are masked first, which is best effort, not a guarantee. The files
+  are readable only by you, stay out of exports, and are removed after a week, a
+  month, three months or a year as Settings → Composer → History says (or kept
+  until you delete them); the same section switches it off.
 - **Closing brackets and quotes** — Settings → Composer → Typing, off by
   default. Typing `(`, `[`, `{`, `"`, `'` or a backtick in the composer also
   types the closer, with the caret between; typing the closer steps over it, and

@@ -154,14 +154,14 @@ struct ComposerDestinationPicker: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: target.icon)
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 9))
                 Text(target.shortLabel)
-                    .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                    .font(.system(size: 10.5, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
             }
             .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
             .padding(.horizontal, 9)
-            .frame(height: 22)
+            .frame(height: 20)
             .background {
                 if isSelected {
                     Capsule()

@@ -180,6 +180,13 @@ struct ElevatedSurface: ViewModifier {
     /// Overridable so hover states can brighten the surface — a shadow
     /// growing on its own is weak feedback.
     var fill: Color?
+    /// Cast the shadow only outside the surface. A shadow is cast from what is
+    /// drawn, so under a translucent fill it is drawn beneath it and shows
+    /// through: a dark smear inside the surface and a halo that swells at its
+    /// edge, worst over a dark background. This casts it from an opaque copy
+    /// and cuts the surface itself out, so the fill's opacity changes how much
+    /// of what is behind shows and nothing else.
+    var outsideOnly = false
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
@@ -187,15 +194,32 @@ struct ElevatedSurface: ViewModifier {
     func body(content: Content) -> some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // Room for the ambient shadow to reach, past the surface's own edge.
+        let reach = radius * 3 + abs(y) + 8
         content
             .background(
                 ZStack {
-                    shape
-                        .fill(fill ?? theme.surface)
-                        // Contact first, then ambient: the second is cast from
-                        // the first's silhouette, which is the same shape.
-                        .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
-                        .shadow(color: theme.elevatedShadow, radius: radius, y: y)
+                    if outsideOnly {
+                        shape
+                            .fill(Color.black)
+                            .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
+                            .shadow(color: theme.elevatedShadow, radius: radius, y: y)
+                            .mask(
+                                ZStack {
+                                    Rectangle().padding(-reach)
+                                    shape.blendMode(.destinationOut)
+                                }
+                                .compositingGroup()
+                            )
+                        shape.fill(fill ?? theme.surface)
+                    } else {
+                        shape
+                            .fill(fill ?? theme.surface)
+                            // Contact first, then ambient: the second is cast from
+                            // the first's silhouette, which is the same shape.
+                            .shadow(color: theme.contactShadow, radius: 1.5, y: 1)
+                            .shadow(color: theme.elevatedShadow, radius: radius, y: y)
+                    }
                     // Light on the face, strongest at the top and gone by the
                     // middle. Behind the content, so it never washes text out.
                     shape
@@ -231,9 +255,10 @@ extension View {
         cornerRadius: CGFloat = 14,
         radius: CGFloat = 14,
         y: CGFloat = 4,
-        fill: Color? = nil
+        fill: Color? = nil,
+        outsideOnly: Bool = false
     ) -> some View {
-        modifier(ElevatedSurface(cornerRadius: cornerRadius, radius: radius, y: y, fill: fill))
+        modifier(ElevatedSurface(cornerRadius: cornerRadius, radius: radius, y: y, fill: fill, outsideOnly: outsideOnly))
     }
 }
 
