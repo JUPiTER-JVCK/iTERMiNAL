@@ -16,8 +16,8 @@ struct KeyboardShortcutsView: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let groups = ShortcutCatalog.groups(matching: query)
-        // The editors people run in a terminal, after the app's own keys.
-        let editorGroups = EditorKeyCatalog.groups(matching: query)
+        // The programs people run in a terminal, after the app's own keys.
+        let editorGroups = ProgramKeyCatalog.groups(matching: query)
         VStack(spacing: 0) {
             header(theme: theme)
             FadedDivider()
@@ -36,7 +36,7 @@ struct KeyboardShortcutsView: View {
             }
 
             FadedDivider()
-            Text("Some actions have no shortcut. The command palette lists every action. The editor sections are for programs you run in a terminal: the app does not handle those keys.")
+            Text("Some actions have no shortcut. The command palette lists every action. The sections after the app's own are for programs you run in a terminal: the app does not handle those keys.")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 16)
@@ -50,10 +50,10 @@ struct KeyboardShortcutsView: View {
         .onAppear { searchFocused = true }
     }
 
-    /// The app's own shortcuts, then the editors'. Its own function — and its
-    /// own pieces — because all of it in `body` was more than the compiler
-    /// would type-check.
-    private func list(groups: [ShortcutGroup], editorGroups: [EditorKeyGroup], theme: Theme) -> some View {
+    /// The app's own shortcuts, then the terminal programs'. Its own function —
+    /// and its own pieces — because all of it in `body` was more than the
+    /// compiler would type-check.
+    private func list(groups: [ShortcutGroup], editorGroups: [ProgramKeyGroup], theme: Theme) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 ForEach(groups) { group in
@@ -77,10 +77,10 @@ struct KeyboardShortcutsView: View {
         }
     }
 
-    private func editorSection(_ group: EditorKeyGroup, theme: Theme) -> some View {
+    private func editorSection(_ group: ProgramKeyGroup, theme: Theme) -> some View {
         Section {
             ForEach(group.commands) { command in
-                EditorKeyRow(command: command)
+                ProgramKeyRow(command: command)
             }
         } header: {
             sectionHeader(group.section.title, note: group.section.note, theme: theme)
@@ -150,10 +150,16 @@ struct KeyboardShortcutsView: View {
     }
 }
 
-/// One editor command: what it does, and the keys — one run of key caps for
-/// each way to do it, with "or" between the ways.
-private struct EditorKeyRow: View {
-    let command: EditorKeyEntry
+/// One terminal program's command: what it does, and the keys — one run of
+/// key caps for each way to do it, with "or" between the ways.
+///
+/// Shared with the quick reference strip's full list, which passes `onType`:
+/// then each way a click can type is a button that types it.
+struct ProgramKeyRow: View {
+    let command: ProgramKeyEntry
+    /// Types the way at an index. Nil, as in the Keyboard Shortcuts window,
+    /// leaves the keys as a reference.
+    var onType: ((Int) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
@@ -172,27 +178,44 @@ private struct EditorKeyRow: View {
                 }
             }
             Spacer(minLength: 12)
-            HStack(spacing: 6) {
-                ForEach(Array(command.ways.enumerated()), id: \.offset) { index, way in
-                    if index > 0 {
-                        Text("or")
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    HStack(spacing: 3) {
-                        ForEach(Array(way.enumerated()), id: \.offset) { _, cap in
-                            KeyCap(symbol: cap, theme: theme)
-                        }
-                    }
-                }
+            if let onType, command.click != .none {
+                ways(theme: theme, onType: onType)
+            } else {
+                ways(theme: theme, onType: nil)
+                    // The caps, as one thing, read as the keys in order.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(command.ways.map { $0.joined(separator: " then ") }.joined(separator: " or "))
             }
-            // The caps, as one thing, read as the keys in order.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(command.ways.map { $0.joined(separator: " then ") }.joined(separator: " or "))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: onType == nil ? .combine : .contain)
+    }
+
+    private func ways(theme: Theme, onType: ((Int) -> Void)?) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(command.ways.enumerated()), id: \.offset) { index, way in
+                if index > 0 {
+                    Text("or")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                let caps = HStack(spacing: 3) {
+                    ForEach(Array(way.enumerated()), id: \.offset) { _, cap in
+                        KeyCap(symbol: cap, theme: theme)
+                    }
+                }
+                if let onType, command.typed(way: index) != nil {
+                    Button { onType(index) } label: { caps.contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        .help(QuickReferenceWording.clickHelp(for: command, way: index))
+                        .accessibilityLabel("Type " + way.joined(separator: " then "))
+                } else {
+                    caps
+                }
+            }
+        }
     }
 }
 
@@ -255,16 +278,19 @@ struct ShortcutKeys: View {
     }
 }
 
-private struct KeyCap: View {
+/// One key, drawn as a cap. `compact` is the quick reference strip's size,
+/// which has a single line of the window's bottom to sit in.
+struct KeyCap: View {
     let symbol: String
     let theme: Theme
+    var compact = false
 
     var body: some View {
         Text(symbol)
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .font(.system(size: compact ? 10 : 11, weight: .medium, design: .monospaced))
             .foregroundStyle(theme.textPrimary)
-            .padding(.horizontal, symbol.count > 1 ? 5 : 0)
-            .frame(minWidth: 20, minHeight: 20)
+            .padding(.horizontal, symbol.count > 1 ? (compact ? 4 : 5) : 0)
+            .frame(minWidth: compact ? 16 : 20, minHeight: compact ? 16 : 20)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(theme.surface)

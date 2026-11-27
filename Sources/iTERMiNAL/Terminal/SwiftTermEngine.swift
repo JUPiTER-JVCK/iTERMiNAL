@@ -62,6 +62,30 @@ final class SwiftTermEngine: TerminalEngine {
     /// which is the only way to track `cd` in a shell that doesn't emit OSC 7.
     var shellPID: pid_t { terminalView.process?.shellPid ?? 0 }
 
+    var isAlternateScreen: Bool { terminalView.getTerminal().isCurrentBufferAlternate }
+
+    var foregroundProcessNames: [String]? {
+        let pid = shellPID
+        guard pid > 0 else { return nil }
+        return ForegroundProcess.names(forShell: pid)
+    }
+
+    var typedLine: String? { terminalView.typedLine }
+
+    /// Gives this terminal the keyboard, as a click on it would — for a
+    /// control outside it that types into it, so typing carries on here.
+    func takeFocus() {
+        guard let window = terminalView.window, window.firstResponder !== terminalView else { return }
+        window.makeFirstResponder(terminalView)
+    }
+
+    /// Called when the line being typed changes, with what `typedLine` now
+    /// says. Fires on the keystroke path, so whoever listens keeps it cheap.
+    var onLineEdited: ((String?) -> Void)? {
+        get { terminalView.onLineEdited }
+        set { terminalView.onLineEdited = newValue }
+    }
+
     init(options: TerminalOptions) {
         terminalView = InstrumentedTerminalView(
             frame: NSRect(x: 0, y: 0, width: 640, height: 400),

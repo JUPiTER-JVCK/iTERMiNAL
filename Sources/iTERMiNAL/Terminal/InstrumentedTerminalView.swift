@@ -51,6 +51,18 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// Cleared when something happens that makes the buffer stop matching what
     /// the shell will actually run.
     private var lineIsTrustworthy = true
+    /// Called after each keystroke with `typedLine`, for the quick reference
+    /// strip's "a command is being typed". Kept in memory: nothing here is
+    /// written anywhere.
+    var onLineEdited: ((String?) -> Void)?
+
+    /// What has been typed since the last Enter, while it still matches what
+    /// the shell has. Nil once anything has moved or rewritten the line where
+    /// the buffer cannot follow, and while nothing is typed.
+    var typedLine: String? {
+        guard lineIsTrustworthy, !lineBuffer.isEmpty else { return nil }
+        return String(bytes: lineBuffer, encoding: .utf8)
+    }
 
     /// The keystroke path — `super` writes the bytes to the PTY, so it must
     /// always run first.
@@ -58,6 +70,7 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
         accumulateCommand(data)
         onInput?()
+        if let onLineEdited { onLineEdited(typedLine) }
     }
 
     /// Rebuilds the command line from the bytes heading for the shell.

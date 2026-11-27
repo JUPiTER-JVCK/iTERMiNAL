@@ -72,5 +72,15 @@ protocol TerminalEngine: AnyObject {
     /// command so scripts can read what a pane is showing.
     func captureVisibleText() -> String
 
+    /// Whether the alternate screen is showing, which full-screen programs —
+    /// editors, pagers, top — switch to while they run.
+    var isAlternateScreen: Bool { get }
+    /// The processes in front of the terminal, from the kernel: empty at the
+    /// shell's prompt, nil when it cannot say. See `ForegroundProcess`.
+    var foregroundProcessNames: [String]? { get }
+    /// The line being typed at the prompt, while it can be trusted to match
+    /// what the shell has; nil otherwise.
+    var typedLine: String? { get }
+
     func terminate()
 }

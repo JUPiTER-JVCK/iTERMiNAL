@@ -2,7 +2,8 @@
 // mistake in it fails in seconds rather than after the build, and can be shown off a
 // Mac. Among it: the composer (tokenizer, palette, completion, suggestions), the
 // Cheatsheet, the assistant's helpers, the HTTP client's parsers and extractors, SSH
-// and remote-session rules, terminal and workspace logic, the API's request lines, and the
+// and remote-session rules, terminal and workspace logic, the quick reference strip's keys and
+// what it finds in front of a terminal, the API's request lines, and the
 // Bytes panel's reading, layout, editing, file-format parsers and entropy map.
 //
 // The files it compiles are listed once, in the "Check input logic" step of
@@ -17744,6 +17745,206 @@ func checkHomeWeather() {
     check(WeatherUnits.metric.temperatureSymbol == "°C" && WeatherUnits.imperial.speedSymbol == "mph", "units name themselves")
 }
 checkHomeWeather()
+
+// MARK: Quick reference: the keys listed for programs
+
+// What the strip above the status bar shows, and what a click on it types into the program. A click that typed the
+// wrong bytes would do something in someone's editor they did not ask for, so each kind of key is pinned here.
+func checkProgramKeyCatalog() {
+    let ids = ProgramKeyCatalog.all.map(\.id)
+    check(Set(ids).count == ids.count, "no two program keys share an id: \(ids.filter { id in ids.filter { $0 == id }.count > 1 })")
+    for section in ProgramKeySection.allCases {
+        let strip = ProgramKeyCatalog.strip(for: section)
+        check(!ProgramKeyCatalog.entries(in: section).isEmpty && !strip.isEmpty, "\(section) has keys, and some for the strip")
+        let ranks = strip.compactMap(\.strip)
+        check(Set(ranks).count == ranks.count, "\(section)'s strip has no two keys in one place: \(ranks)")
+        check(!section.executables.isEmpty && section.executables.allSatisfy { ProgramKeyCatalog.normalizedProgramName($0) == $0 },
+              "\(section)'s executables are written as the kernel names them")
+    }
+    // A key the strip shows as something to click must type something.
+    let deadStrip = ProgramKeyCatalog.all.filter { $0.strip != nil && $0.click != .none && !$0.isClickable }.map(\.id)
+    check(deadStrip.isEmpty, "every key the strip offers to type can be typed: \(deadStrip)")
+    let deadPrefix = ProgramKeyCatalog.all.filter {
+        if case .prefix = $0.click { return $0.typed(way: 0) == nil }
+        return false
+    }.map(\.id)
+    check(deadPrefix.isEmpty, "every prefix can be typed: \(deadPrefix)")
+    // Caps in a way are pressed one after another and typed with nothing between them, so two words written as
+    // separate caps would run together — ":set number" would type ":setnumber". Such a way needs a prefix that says
+    // where the space goes.
+    func isWord(_ cap: String) -> Bool {
+        cap.count > 1 && !cap.hasPrefix("⌃") && !cap.hasPrefix("⌥") && !["esc", "space"].contains(cap)
+    }
+    var runTogether: [String] = []
+    for entry in ProgramKeyCatalog.all where entry.click == .keys {
+        for way in entry.ways where zip(way, way.dropFirst()).contains(where: { isWord($0) && isWord($1) }) {
+            runTogether.append("\(entry.id): \(way.joined(separator: " "))")
+        }
+    }
+    check(runTogether.isEmpty, "no click types two words run together: \(runTogether)")
+
+    // Finding the section for what the kernel or a command line calls a program.
+    let found: [(String, ProgramKeySection?)] = [
+        ("vim", .vim), ("nvim", .vim), ("/usr/local/bin/nvim", .vim), ("VIM", .vim), ("pico", .nano), ("nano", .nano),
+        ("emacs-29.4", .emacs), ("emacsclient", .emacs), ("more", .pager), ("less", .pager), ("man", .man),
+        ("tmux", .tmux), ("screen", .screen), ("top", .top), ("htop", .htop), ("btop", .btop), ("ssh", .ssh),
+        ("-zsh", .shell), ("bash", .shell), ("spf", .superfile), ("superfile", .superfile),
+        ("git", nil), ("ssh-keygen", nil), ("", nil),
+    ]
+    for (name, section) in found {
+        check(ProgramKeyCatalog.section(forProgram: name) == section, "\"\(name)\" is \(String(describing: section))")
+    }
+
+    // btop's and superfile's keys are ShortcutCatalog's, not a second list: every one of them, and every one the strip
+    // picks really there.
+    for (section, shortcuts) in [(ProgramKeySection.btop, ShortcutSection.btop), (.superfile, .superfile)] {
+        let listed = ShortcutCatalog.all.filter { $0.section == shortcuts }.map(\.id)
+        check(ProgramKeyCatalog.entries(in: section).map(\.id) == listed, "\(section)'s keys are the Keyboard Shortcuts window's")
+    }
+    check(ProgramKeyCatalog.strip(for: .btop).count == 9 && ProgramKeyCatalog.strip(for: .superfile).count == 10,
+          "every key the strip picks for btop and superfile is in the shortcut list")
+
+    // The Keyboard Shortcuts window still finds them, and lists btop and superfile once, under their own sections.
+    check(ProgramKeyCatalog.groups(matching: "").map(\.section) == ProgramKeySection.allCases.filter { !$0.isBundledTool },
+          "with no search, every program is listed, and the bundled tools are left to their own sections")
+    let vimSave = ProgramKeyCatalog.groups(matching: "vim save")
+    check(vimSave.count == 1 && vimSave[0].section == .vim
+            && ["vim.save", "vim.saveQuit"].allSatisfy { id in vimSave[0].commands.contains { $0.id == id } },
+          "\"vim save\" finds Vim's ways to save, and only Vim's")
+    check(ProgramKeyCatalog.groups(matching: "tmux detach").first?.commands.map(\.id) == ["tmux.detach"], "\"tmux detach\" finds it")
+    check(ProgramKeyCatalog.groups(matching: "apropos").first?.section == .man, "man is found by apropos")
+}
+checkProgramKeyCatalog()
+
+func checkProgramKeySend() {
+    func typed(_ id: String, way: Int = 0) -> String? { ProgramKeyCatalog.entry(id: id)?.typed(way: way) }
+
+    // Control, Option as Meta, and the keys with names.
+    check(typed("nano.save") == "\u{0F}", "nano's Write Out is ⌃O, without the return that confirms the name")
+    check(typed("nano.exit") == "\u{18}" && typed("nano.replace") == "\u{1C}" && typed("nano.gotoLine") == "\u{1F}",
+          "⌃X, ⌃\\ and ⌃_ send their control codes")
+    check(typed("nano.undo") == "\u{1B}u" && typed("nano.copy") == "\u{1B}6", "⌥ sends esc and the key, lowercase")
+    check(typed("emacs.save") == "\u{18}\u{13}", "⌃X ⌃S is pressed in turn")
+    check(typed("emacs.undo") == "\u{1F}" && typed("emacs.undo", way: 1) == "\u{18}u",
+          "⌃/ is ⌃_, and Emacs's ⌃X U is the u key")
+    check(typed("emacs.mark") == "\u{0}" && typed("emacs.bufferEnds") == "\u{1B}<", "⌃Space is NUL; ⌥< is esc <")
+    check(typed("tmux.splitBelow") == "\u{02}\"" && typed("tmux.window") == "\u{02}",
+          "tmux keys follow ⌃B, and the numbered one stops at the prefix for the number")
+    check(typed("screen.nextRegion") == "\u{01}\t" && typed("screen.splitBelow") == "\u{01}S",
+          "screen's ⌃A ⇥ is a tab, and its capital S stays capital")
+    check(typed("pager.pageDown") == " " && typed("pager.pageDown", way: 1) == "f", "space is a space")
+    check(typed("shell.previousFolder") == "cd -" && typed("shell.repeat") == "!!", "the shell's typed ones are typed as written")
+
+    // Vim: esc first, so a click from insert mode does not type into the file, and no return at the end.
+    check(typed("vim.save") == "\u{1B}:w" && typed("vim.saveQuit") == "\u{1B}:wq" && typed("vim.saveQuit", way: 1) == "\u{1B}ZZ",
+          "Vim's commands start from normal mode and wait for return")
+    check(typed("vim.search") == "\u{1B}/" && typed("vim.edit") == "\u{1B}:e " && typed("vim.numbers") == "\u{1B}:set number"
+            && typed("vim.replace") == "\u{1B}:%s/" && typed("vim.gotoLine", way: 1) == "\u{1B}:",
+          "what needs the person's own words types only the part before them")
+    check(typed("vim.normal") == "\u{1B}\u{1B}" && typed("vim.window") == "\u{1B}\u{17}w", "esc, and ⌃W then w")
+
+    // What is never typed.
+    check(typed("ssh.disconnect") == nil && typed("ssh.help") == nil, "ssh's escapes are not typed: they start with a return")
+    check(typed("man.section1") == nil && typed("man.keyword") == nil, "man's sections and searches are a reference")
+    check(typed("btop.sortColumn") == nil && typed("btop.details") == nil, "arrows, and a return on its own, are not sent")
+    check(typed("htop.quit") == "q" && typed("htop.quit", way: 1) == nil, "a function key is not sent; the letter beside it is")
+
+    // The bundled tools' keys, from the shortcut list, which prints a letter as a capital and says ⇧ for one.
+    check(typed("btop.filter") == "f" && typed("btop.presetPrevious") == "P" && typed("btop.quit", way: 1) == "\u{03}",
+          "btop's f is f, its ⇧P is P, and ⌃C is ⌃C")
+    if let help = ProgramKeyCatalog.entry(id: "btop.help") {
+        check(help.stripWay == 1 && help.typed(way: help.stripWay) == "?", "the strip shows btop's ? for help, not F1, which is not sent")
+    } else { check(false, "btop's help is listed") }
+    check(typed("superfile.copy") == "\u{03}" && typed("superfile.selectUp") == nil && typed("superfile.selectUp", way: 1) == "K",
+          "superfile's ⌃C copies; ⇧↑ is not sent, ⇧K is K")
+    check(ProgramKeySend.text(for: [":wq", "↩"]) == ":wq" && ProgramKeySend.text(for: ["↩", "~", "."]) == nil
+            && ProgramKeySend.text(for: ["↩"]) == nil && ProgramKeySend.text(for: []) == nil,
+          "a return is left off the end, and anywhere else stops it")
+    check(ProgramKeySend.text(forCap: "⌃?") == "\u{7F}" && ProgramKeySend.text(forCap: "⌃[") == "\u{1B}"
+            && ProgramKeySend.text(forCap: "⌃]") == "\u{1D}" && ProgramKeySend.text(forCap: "⌃6") == "\u{1E}",
+          "the control codes that are not letters")
+    check(ProgramKeySend.text(forCap: "⌃é") == nil && ProgramKeySend.text(forCap: "⌃AB") == nil && ProgramKeySend.text(forCap: "⌥←") == nil
+            && ProgramKeySend.text(forCap: "⇞") == nil && ProgramKeySend.text(forCap: "F12") == nil
+            && ProgramKeySend.text(forCap: "⌘K") == nil && ProgramKeySend.text(forCap: "⇧⇥") == nil,
+          "what is not a key the strip can type is refused, ⌘ included")
+    check(ProgramKeySend.text(forCap: "F") == "F" && ProgramKeySend.text(forCap: "U", lowercaseLetters: true) == "u"
+            && ProgramKeySend.text(forCap: ":Q", lowercaseLetters: true) == ":Q",
+          "F alone is a key, and lowercasing is for a lone letter only")
+}
+checkProgramKeySend()
+
+// MARK: Quick reference: what is in front of a terminal
+
+func checkActiveProgram() {
+    typealias Signals = ActiveProgram.Signals
+    func resolve(_ build: (inout Signals) -> Void) -> ActiveProgram {
+        var signals = Signals()
+        build(&signals)
+        return ActiveProgram.resolve(signals)
+    }
+
+    // On this Mac, the kernel's foreground group decides.
+    check(resolve { $0.foreground = ["vim"] } == .program(.vim, name: "vim"), "Vim in front is Vim")
+    check(resolve { $0.foreground = ["nvim"] } == .program(.vim, name: "nvim"), "Neovim is found by its own name")
+    check(resolve { $0.foreground = [] } == .shell(remote: false), "the shell's own group in front is a prompt")
+    check(resolve { $0.foreground = ["bash"] } == .shell(remote: false), "so is a shell started from the shell")
+    check(resolve { $0.foreground = ["git", "less"] } == .program(.pager, name: "less"), "git log's pager is found in its group")
+    check(resolve { $0.foreground = ["git", "vim"] } == .program(.vim, name: "vim"), "and the editor git commit opens")
+    check(resolve { $0.foreground = ["man", "less"] } == .program(.man, name: "man"), "man stays man while its pager runs")
+    check(resolve { $0.foreground = ["make", "sh"] } == .running("make"), "a build is running, with no keys listed")
+    check(resolve { $0.foreground = ["python3.12"] } == .running("python3.12"), "an unlisted program is named by the kernel")
+
+    // Past sudo, from the line typed at the prompt — and never a word that is no program.
+    check(resolve { $0.foreground = ["sudo"]; $0.lastCommandLine = "sudo -u root vim /etc/hosts" } == .program(.vim, name: "vim"),
+          "sudo -u root vim is Vim")
+    check(resolve { $0.foreground = ["sudo"]; $0.lastCommandLine = "hunter2" } == .running("sudo"),
+          "a typed word that is no program is never shown")
+    check(resolve { $0.foreground = ["vim"]; $0.lastCommandLine = "nano x" } == .program(.vim, name: "vim"),
+          "what the kernel sees wins over the line")
+
+    // ssh, from here or as a remote session: the far end's shell, or the program the line started full screen.
+    check(resolve { $0.foreground = ["ssh"] } == .shell(remote: true), "ssh in front is a shell on the far end")
+    check(resolve { $0.foreground = ["ssh"]; $0.alternateScreen = true; $0.lastCommandLine = "htop" } == .program(.htop, name: "htop"),
+          "a full-screen program on the far end is the one typed")
+    check(resolve { $0.isRemote = true; $0.alternateScreen = true; $0.lastCommandLine = "man ls" } == .program(.man, name: "man"),
+          "man on the far end")
+    check(resolve { $0.isRemote = true; $0.foreground = ["ssh"]; $0.alternateScreen = true; $0.lastCommandLine = "sudo nano /etc/fstab" }
+            == .program(.nano, name: "nano"),
+          "a remote session ignores what the kernel says of its local ssh")
+    check(resolve { $0.isRemote = true } == .shell(remote: true), "a remote session at its prompt")
+    check(resolve { $0.isRemote = true; $0.alternateScreen = true; $0.lastCommandLine = "secret"; $0.title = "notes.txt (~) - VIM" }
+            == .program(.vim, name: "vim"),
+          "the title names it when the line does not")
+    check(resolve { $0.isRemote = true; $0.alternateScreen = true; $0.lastCommandLine = "secret" } == .running(nil),
+          "full screen and nothing to name it")
+
+    // A bundled tool's session.
+    check(resolve { $0.tool = "btop" } == .program(.btop, name: "btop") && resolve { $0.tool = "superfile" } == .program(.superfile, name: "superfile"),
+          "a tool's session is that tool")
+    check(resolve { $0.foreground = ["spf"] } == .program(.superfile, name: "spf"), "superfile run in a shell is found by its binary's name")
+    check(resolve { $0.tool = "sometool" } == .running("sometool"), "a tool with no keys listed is named")
+
+    // A command typed at the prompt, once its name is finished.
+    check(resolve { $0.foreground = []; $0.typedLine = "tar " } == .typing(.init(command: "tar", subcommand: nil)), "tar, then a space")
+    check(resolve { $0.foreground = []; $0.typedLine = "tar" } == .shell(remote: false), "not while the name is still being typed")
+    check(resolve { $0.foreground = []; $0.typedLine = "git commit " } == .typing(.init(command: "git", subcommand: "commit")),
+          "a subcommand once it is finished too")
+    check(resolve { $0.foreground = []; $0.typedLine = "git comm" } == .typing(.init(command: "git", subcommand: nil)), "and not before")
+    check(resolve { $0.foreground = []; $0.typedLine = "sudo -E LANG=C tar -x" } == .typing(.init(command: "tar", subcommand: nil)),
+          "past a wrapper, its flags and an assignment")
+    check(resolve { $0.foreground = []; $0.typedLine = "hunter2 more" } == .shell(remote: false), "a word no tool is called is never shown")
+    check(resolve { $0.isRemote = true; $0.typedLine = "ls " } == .typing(.init(command: "ls", subcommand: nil)), "at a remote prompt too")
+
+    // Reading a command line.
+    check(ActiveProgram.program(in: "TERM=xterm-256color vim x")?.section == .vim && ActiveProgram.program(in: "env FOO=1 nano")?.section == .nano
+            && ActiveProgram.program(in: "time make")?.section == nil && ActiveProgram.program(in: "ls -la") == nil
+            && ActiveProgram.program(in: "./bin/less x")?.name == "less" && ActiveProgram.program(in: nil) == nil,
+          "a command line's program, past assignments and wrappers")
+    check(ActiveProgram.program(inTitle: "editing notes in nano land") == nil && ActiveProgram.program(inTitle: "htop")?.section == .htop
+            && ActiveProgram.program(inTitle: "zsh") == nil,
+          "a title names a program only at its ends, and a shell is no program")
+}
+checkActiveProgram()
 
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
