@@ -75,9 +75,9 @@ protocol TerminalEngine: AnyObject {
     /// Whether the alternate screen is showing, which full-screen programs —
     /// editors, pagers, top — switch to while they run.
     var isAlternateScreen: Bool { get }
-    /// The processes in front of the terminal, from the kernel: empty at the
-    /// shell's prompt, nil when it cannot say. See `ForegroundProcess`.
-    var foregroundProcessNames: [String]? { get }
+    /// The process group in front of the terminal, from the kernel: `.prompt`
+    /// at the shell's prompt, nil when it cannot say. See `ForegroundProcess`.
+    var foregroundGroup: ActiveProgram.ForegroundGroup? { get }
     /// The line being typed at the prompt, while it can be trusted to match
     /// what the shell has; nil otherwise.
     var typedLine: String? { get }

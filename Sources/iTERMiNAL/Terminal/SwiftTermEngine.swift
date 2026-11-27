@@ -64,10 +64,10 @@ final class SwiftTermEngine: TerminalEngine {
 
     var isAlternateScreen: Bool { terminalView.getTerminal().isCurrentBufferAlternate }
 
-    var foregroundProcessNames: [String]? {
+    var foregroundGroup: ActiveProgram.ForegroundGroup? {
         let pid = shellPID
         guard pid > 0 else { return nil }
-        return ForegroundProcess.names(forShell: pid)
+        return ForegroundProcess.group(forShell: pid)
     }
 
     var typedLine: String? { terminalView.typedLine }

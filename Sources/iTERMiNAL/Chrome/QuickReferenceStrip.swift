@@ -216,9 +216,8 @@ private struct QuickReferenceSessionStrip: View {
             isRunning: session.isRunning,
             isTool: session.kind.isTool
         )
-        let row = LeadingFitRow(spacing: 12)
-        HStack(spacing: 10) {
-            ProgramBadge(name: content.badge, theme: theme)
+        let row = LeadingFitRow(spacing: 16)
+        HStack(spacing: 12) {
             Group {
                 row {
                     ForEach(content.hints) { hint in
@@ -236,30 +235,21 @@ private struct QuickReferenceSessionStrip: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .clipped()
 
-            if content.hasFullList {
-                Button {
-                    showAll.toggle()
-                } label: {
-                    HStack(spacing: 3) {
-                        Text("All keys")
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 8, weight: .semibold))
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .help("Every key listed for \(content.badge)")
-                .popover(isPresented: $showAll, arrowEdge: .top) {
-                    QuickReferenceFullList(
-                        content: content,
-                        run: { hintAction in
-                            showAll = false
-                            run(hintAction, in: content)
-                        },
-                        openCheatsheet: cheatsheetOpener(for: content)
-                    )
-                }
+            // At the end of the line, where it costs the hints nothing: what
+            // is in front, and — when there is more listed for it than fits —
+            // the way to the rest.
+            ProgramButton(name: content.badge, theme: theme, opensList: content.hasFullList) {
+                showAll.toggle()
+            }
+            .popover(isPresented: $showAll, arrowEdge: .top) {
+                QuickReferenceFullList(
+                    content: content,
+                    run: { hintAction in
+                        showAll = false
+                        run(hintAction, in: content)
+                    },
+                    openCheatsheet: cheatsheetOpener(for: content)
+                )
             }
         }
         .font(.system(size: 11))
@@ -311,23 +301,55 @@ private struct QuickReferenceSessionStrip: View {
     }
 }
 
-/// The program's name, in a small capsule at the strip's start.
-private struct ProgramBadge: View {
+/// The program's name, in a small capsule at the end of the line — and, when
+/// more is listed for it than the line shows, the button that opens the rest.
+/// Narrow on purpose: it is a label, and every point it takes is one a hint
+/// does not get.
+private struct ProgramButton: View {
     let name: String
     let theme: Theme
+    let opensList: Bool
+    let open: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        Text(name)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(theme.textPrimary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: 120)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(theme.surface))
-            .overlay(Capsule().strokeBorder(theme.surfaceBorder))
-            .help("What is in front of the focused terminal")
+        if opensList {
+            Button(action: open) {
+                capsule.contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .onHover { inside in
+                withAnimation(Motion.hover) { hovering = inside }
+            }
+            .help("All keys for \(name)")
+            .accessibilityLabel("All keys for \(name)")
+        } else {
+            capsule
+                .help("What is in front of the focused terminal")
+                .accessibilityLabel(name)
+        }
+    }
+
+    private var capsule: some View {
+        HStack(spacing: 3) {
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 72)
+            if opensList {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(theme.textSecondary)
+            }
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(theme.textPrimary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .fixedSize()
+        .background(Capsule().fill(hovering ? theme.surfaceHover : theme.surface))
+        .overlay(Capsule().strokeBorder(theme.surfaceBorder))
     }
 }
 
@@ -372,18 +394,45 @@ private struct HintView: View {
     }
 
     private var label: some View {
-        HStack(spacing: 5) {
-            HStack(spacing: 2) {
+        HStack(spacing: 6) {
+            HStack(spacing: 3) {
                 ForEach(Array(hint.caps.enumerated()), id: \.offset) { _, cap in
-                    KeyCap(symbol: cap, theme: theme, compact: true)
+                    KeyCap(symbol: cap, theme: theme, compact: true, tintsModifiers: true)
                 }
             }
+            // The keys never give way: shown cut down they read as "…", which
+            // says nothing. Only the words beside them may be shortened.
+            .fixedSize()
+            .layoutPriority(1)
             Text(hint.label)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 // A flag's description can run to a sentence; the strip has
                 // room for a few words of each.
                 .frame(maxWidth: 170, alignment: .leading)
+        }
+    }
+}
+
+/// What each modifier's colour means, in the colours the caps use.
+private struct ModifierLegend: View {
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(ModifierGlyph.allCases) { modifier in
+                HStack(spacing: 4) {
+                    Text(String(modifier.rawValue))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(modifier.tint)
+                    Text(modifier == .option ? "Option (Meta)" : modifier.name)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(modifier.name)
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -416,7 +465,10 @@ private struct LeadingFitRow: Layout {
             let size = subview.sizeThatFits(.unspecified)
             let start = x + (index > 0 ? spacing : 0)
             if fits, start + size.width <= bounds.maxX + 0.5 {
-                subview.place(at: CGPoint(x: start, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(size))
+                // Asked for nothing in particular, as when it was measured, so
+                // it takes the size it measured at rather than a rounded copy
+                // of it that can come out a fraction short.
+                subview.place(at: CGPoint(x: start, y: bounds.midY), anchor: .leading, proposal: .unspecified)
                 x = start + size.width
             } else {
                 // Everything after the first that does not fit goes too, so a
@@ -425,15 +477,15 @@ private struct LeadingFitRow: Layout {
                 // clicked.
                 fits = false
                 subview.place(at: CGPoint(x: bounds.maxX + 10_000, y: bounds.midY), anchor: .leading,
-                              proposal: ProposedViewSize(size))
+                              proposal: .unspecified)
             }
         }
     }
 }
 
-/// Everything listed for what the strip shows, from its All keys button. A
-/// click types a key as the strip does, and closes the list so typing goes
-/// back to the terminal.
+/// Everything listed for what the strip shows, opened from the program's name
+/// at the end of the line. A click types a key as the strip does, and closes
+/// the list so typing goes back to the terminal.
 private struct QuickReferenceFullList: View {
     let content: QuickReferenceContent
     let run: (QuickReferenceHint.Action) -> Void
@@ -444,6 +496,12 @@ private struct QuickReferenceFullList: View {
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(spacing: 0) {
+            if !content.sections.isEmpty {
+                ModifierLegend(theme: theme)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                FadedDivider()
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(content.sections) { section in
@@ -451,7 +509,7 @@ private struct QuickReferenceFullList: View {
                         ForEach(ProgramKeyCatalog.entries(in: section)) { entry in
                             ProgramKeyRow(command: entry, onType: { index in
                                 if let text = entry.typed(way: index) { run(.keys(text)) }
-                            })
+                            }, tintsModifiers: true)
                         }
                     }
                     if !content.commandEntries.isEmpty {

@@ -23,8 +23,14 @@ it describes the pane you are typing into.
   sidebar's footer as one line. When the status bar is switched off the strip
   is the last row, and because it is the same height its seam lines up instead.
 - Hints are in the order they matter, and a narrow window drops them from the
-  end (`LeadingFitRow`): nothing wraps or scrolls. **All keys** opens the rest
-  in a popover.
+  end (`LeadingFitRow`): nothing wraps or scrolls. A key cap never gives way —
+  cut down it reads as "…" — so only the words beside it are shortened.
+- The program's name sits at the end of the line, in a narrow capsule, and is
+  the button that opens the rest in a popover. At the start it took room the
+  hints needed.
+- ⌃, ⌥, ⇧ and ⌘ are each drawn in a system colour of their own (orange,
+  purple, green, blue), so which modifier a key needs reads at a glance; the
+  popover opens with a legend.
 
 Considered and not chosen: inside the status bar (too little room beside the
 system figures, and it would hide the directory while a program runs), inside
@@ -44,6 +50,9 @@ Worked out from what the session already has, with no timer:
    a prompt. A member counts as well as the leader, so `git log` (git, with less
    in its group) is the pager and `git commit` the editor it opens. This is how
    Terminal.app names its tabs, and it needs nothing from the shell.
+   The leader's parent is read too: macOS's man (mandoc) puts its pager in a
+   process group of its own and hands it the terminal, so while a page is read
+   the group in front is less alone, and only its parent says it is man.
 2. **Past `sudo`**, whose child can run on a terminal of its own, the command
    line typed at the prompt names the program.
 3. **Over ssh** the kernel only ever sees `ssh`. A full-screen program switches
@@ -55,10 +64,14 @@ Worked out from what the session already has, with no timer:
    strip shows its flags or subcommands from `CommandSpecs`. The composer's
    input counts too, while it has the keyboard.
 
-It is asked again on the signals that mark a change: the debounced repaint,
-return (and once more 0.3 s after, for a program that prints nothing at
-first), the shell integration's marks, a title, the shell exiting, and focus
-arriving. Only the focused session is kept up to date, and nothing at all
+It is asked again on the signals that mark a change: a repaint, and once more
+half a second after the drawing settles; return, and 0.3 s after it, for a
+program that prints nothing at first; the shell integration's marks; a title;
+the shell exiting; and focus arriving. The look after the drawing settles is
+not optional: the engine passes on at most one repaint in each quarter second
+and drops the others rather than holding the last, so a page drawn whole just
+after the echo of return — man, less — and then left still would otherwise
+never be looked at again. Only the focused session is kept up to date, and nothing at all
 while the strip is off. Each refresh is at most two `sysctl` calls, and the
 answer is published only when it changes.
 

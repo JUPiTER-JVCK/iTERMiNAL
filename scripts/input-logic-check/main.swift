@@ -17891,6 +17891,14 @@ func checkActiveProgram() {
     check(resolve { $0.foreground = ["git", "less"] } == .program(.pager, name: "less"), "git log's pager is found in its group")
     check(resolve { $0.foreground = ["git", "vim"] } == .program(.vim, name: "vim"), "and the editor git commit opens")
     check(resolve { $0.foreground = ["man", "less"] } == .program(.man, name: "man"), "man stays man while its pager runs")
+    // macOS's man hands the terminal to its pager in a group of its own: only the pager's parent says it is man.
+    check(resolve { $0.foreground = ["less"]; $0.foregroundParent = "man" } == .program(.man, name: "man"),
+          "a pager man started is a manual page")
+    check(resolve { $0.foreground = ["less"] } == .program(.pager, name: "less")
+            && resolve { $0.foreground = ["less"]; $0.foregroundParent = "git" } == .program(.pager, name: "less"),
+          "a pager anything else started is the pager")
+    check(resolve { $0.foreground = ["vim"]; $0.foregroundParent = "man" } == .program(.vim, name: "vim"),
+          "only a pager is taken for the manual page it shows")
     check(resolve { $0.foreground = ["make", "sh"] } == .running("make"), "a build is running, with no keys listed")
     check(resolve { $0.foreground = ["python3.12"] } == .running("python3.12"), "an unlisted program is named by the kernel")
 

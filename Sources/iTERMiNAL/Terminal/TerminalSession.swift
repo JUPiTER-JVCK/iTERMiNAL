@@ -59,7 +59,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var programLine: String?
     /// The kernel's last answer about this terminal's foreground group, reused
     /// between keystrokes rather than asked again for each one.
-    private var lastForeground: [String]?
+    private var lastForeground: ActiveProgram.ForegroundGroup?
     private var programRecheck: DispatchWorkItem?
 
     struct CommandResult: Equatable {
@@ -202,8 +202,14 @@ final class TerminalSession: ObservableObject, Identifiable {
                 // hook.
                 self.refreshDirectoryFromProcess()
                 // And where a program that has just started, or just quit,
-                // shows itself: it draws.
+                // shows itself: it draws. Once now and once as the drawing
+                // settles, because the engine passes on at most one repaint in
+                // each quarter second and drops the rest rather than holding
+                // the last: a page that is drawn whole just after the echo of
+                // return, and then sits still — man, less — never sent one of
+                // its own.
                 self.refreshActiveProgram()
+                self.recheckActiveProgram(after: 0.5)
                 EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
             }
         }
@@ -440,10 +446,11 @@ final class TerminalSession: ObservableObject, Identifiable {
         if askKernel {
             // Only a shell on this Mac: a remote session's child is ssh, and a
             // tool's is the tool.
-            lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundProcessNames
+            lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundGroup
         }
         var signals = ActiveProgram.Signals()
-        signals.foreground = lastForeground
+        signals.foreground = lastForeground?.names
+        signals.foregroundParent = lastForeground?.parent
         signals.alternateScreen = engine.isAlternateScreen
         signals.isRemote = isRemote
         signals.tool = kind.tool?.rawValue
@@ -466,10 +473,17 @@ final class TerminalSession: ObservableObject, Identifiable {
         }
         // What a command starts may print nothing at first — `sleep 30` — so
         // look again a moment after return rather than wait for it to draw.
+        recheckActiveProgram(after: 0.3)
+    }
+
+    /// Asks again after `delay`, replacing a look already waiting: one look
+    /// once things have settled, however much was drawn before then.
+    private func recheckActiveProgram(after delay: TimeInterval) {
+        guard quickReferenceWatches else { return }
         programRecheck?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.refreshActiveProgram() }
         programRecheck = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Types what a quick reference key sends — if what it was shown for is

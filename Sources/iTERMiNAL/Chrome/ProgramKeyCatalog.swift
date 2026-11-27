@@ -17,7 +17,7 @@ import Foundation
 // Read in two places: the Keyboard Shortcuts window lists every section, and
 // the quick reference strip above the status bar shows the one for the program
 // in front of the focused terminal — its `strip` entries in the strip, the rest
-// behind All keys.
+// behind the program's name at the end of it.
 //
 // Foundation only, so it can be compiled without Xcode.
 

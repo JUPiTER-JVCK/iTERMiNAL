@@ -160,6 +160,8 @@ struct ProgramKeyRow: View {
     /// Types the way at an index. Nil, as in the Keyboard Shortcuts window,
     /// leaves the keys as a reference.
     var onType: ((Int) -> Void)?
+    /// Colours the modifiers, as the quick reference does throughout.
+    var tintsModifiers = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
 
@@ -202,7 +204,7 @@ struct ProgramKeyRow: View {
                 }
                 let caps = HStack(spacing: 3) {
                     ForEach(Array(way.enumerated()), id: \.offset) { _, cap in
-                        KeyCap(symbol: cap, theme: theme)
+                        KeyCap(symbol: cap, theme: theme, tintsModifiers: tintsModifiers)
                     }
                 }
                 if let onType, command.typed(way: index) != nil {
@@ -284,13 +286,18 @@ struct KeyCap: View {
     let symbol: String
     let theme: Theme
     var compact = false
+    /// Draws ⌃ ⌥ ⇧ ⌘ each in a colour of its own, a hair apart from the key,
+    /// so which is which reads at a glance in a cap as small as the strip's.
+    var tintsModifiers = false
 
     var body: some View {
-        Text(symbol)
+        face
             .font(.system(size: compact ? 10 : 11, weight: .medium, design: .monospaced))
-            .foregroundStyle(theme.textPrimary)
-            .padding(.horizontal, symbol.count > 1 ? (compact ? 4 : 5) : 0)
-            .frame(minWidth: compact ? 16 : 20, minHeight: compact ? 16 : 20)
+            .padding(.horizontal, symbol.count > 1 ? 5 : 0)
+            .frame(minWidth: compact ? 18 : 20, minHeight: compact ? 17 : 20)
+            // A key shown cut down reads as "…", which says nothing: a cap is
+            // always as wide as what is on it.
+            .fixedSize()
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(theme.surface)
@@ -299,5 +306,68 @@ struct KeyCap: View {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .strokeBorder(theme.surfaceBorder)
             )
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        let parts = ModifierGlyph.split(symbol)
+        if tintsModifiers, !parts.modifiers.isEmpty {
+            HStack(spacing: 1.5) {
+                ForEach(Array(parts.modifiers.enumerated()), id: \.offset) { _, modifier in
+                    Text(String(modifier.rawValue))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(modifier.tint)
+                }
+                if !parts.key.isEmpty {
+                    Text(parts.key)
+                        .foregroundStyle(theme.textPrimary)
+                }
+            }
+        } else {
+            Text(symbol)
+                .foregroundStyle(theme.textPrimary)
+        }
+    }
+}
+
+/// The modifier keys as caps print them, each with the colour the quick
+/// reference gives it. System colours, so each keeps its contrast in light and
+/// dark and under Increase Contrast.
+enum ModifierGlyph: Character, CaseIterable, Identifiable {
+    case control = "⌃"
+    case option = "⌥"
+    case shift = "⇧"
+    case command = "⌘"
+
+    var id: Character { rawValue }
+
+    var name: String {
+        switch self {
+        case .control: return "Control"
+        case .option: return "Option"
+        case .shift: return "Shift"
+        case .command: return "Command"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .control: return Color(nsColor: .systemOrange)
+        case .option: return Color(nsColor: .systemPurple)
+        case .shift: return Color(nsColor: .systemGreen)
+        case .command: return Color(nsColor: .systemBlue)
+        }
+    }
+
+    /// The modifiers a cap starts with, and the key after them: "⌃X" is
+    /// Control and "X". A cap with none has them empty.
+    static func split(_ cap: String) -> (modifiers: [ModifierGlyph], key: String) {
+        var modifiers: [ModifierGlyph] = []
+        var rest = Substring(cap)
+        while let first = rest.first, let modifier = ModifierGlyph(rawValue: first) {
+            modifiers.append(modifier)
+            rest = rest.dropFirst()
+        }
+        return (modifiers, String(rest))
     }
 }

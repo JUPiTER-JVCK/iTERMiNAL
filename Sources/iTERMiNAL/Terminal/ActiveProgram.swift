@@ -44,6 +44,11 @@ enum ActiveProgram: Equatable {
         /// as the kernel names them. Empty when the shell's own group is in
         /// front: a prompt. Nil when the kernel was not asked or could not say.
         var foreground: [String]?
+        /// What started the group's leader, when that was not the shell. man
+        /// on macOS puts its pager in a group of its own and hands it the
+        /// terminal, so while a page is read the group in front is less alone,
+        /// and only its parent says it is a manual page.
+        var foregroundParent: String?
         /// Whether the terminal shows the alternate screen, which full-screen
         /// programs draw on.
         var alternateScreen = false
@@ -56,6 +61,18 @@ enum ActiveProgram: Equatable {
         var typedLine: String?
         /// The title the program gave the terminal.
         var title = ""
+    }
+
+    /// What the kernel says has a terminal: the foreground group's processes,
+    /// its leader first, and the name of what started the leader when that was
+    /// not the shell. `ForegroundProcess` reads it; it is here, in plain
+    /// Foundation, so the rules that use it can be checked off a Mac.
+    struct ForegroundGroup: Equatable {
+        var names: [String]
+        var parent: String?
+
+        /// The shell's own group: a prompt.
+        static let prompt = ForegroundGroup(names: [], parent: nil)
     }
 
     /// Programs that run another one named after them: `sudo vim` is Vim.
@@ -77,6 +94,9 @@ enum ActiveProgram: Equatable {
             case .ssh?:
                 // A shell on the far end, reached from this one.
                 return farEnd(signals, remote: true)
+            case .pager? where signals.foregroundParent.flatMap(ProgramKeyCatalog.section(forProgram:)) == .man:
+                // The pager man started: what is being read is a manual page.
+                return .program(.man, name: "man")
             case let section?:
                 return .program(section, name: ProgramKeyCatalog.normalizedProgramName(leader))
             case nil:
