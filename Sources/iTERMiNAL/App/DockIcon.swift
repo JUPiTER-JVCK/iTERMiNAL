@@ -2,10 +2,10 @@ import AppKit
 
 /// Keeps the Dock icon matched to the app's appearance.
 ///
-/// The icon in the bundle is the dark keycap. An asset-catalog icon cannot
+/// The icon in the bundle is the dark icon. An asset-catalog icon cannot
 /// switch with the appearance on the toolchain this is built with (that takes
 /// an Icon Composer file and Xcode 26), so while the app runs the Dock is given
-/// the light keycap when the app is light and put back to the bundle's when it
+/// the light icon when the app is light and put back to the bundle's when it
 /// is dark. Finder, Launchpad and the app switcher read the bundle and so show
 /// the dark one either way.
 ///
