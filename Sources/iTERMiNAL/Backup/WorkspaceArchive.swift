@@ -85,6 +85,7 @@ struct PreferencesArchive: Codable {
     var colorizeOutput: Bool?
     var colorizeListings: Bool?
     var colorizeManPages: Bool?
+    var colorizeMoreFileTypes: Bool?
     /// The window frame's look and the interface typeface. Appearance
     /// preferences like `theme` and `accentID`, so they travel; optional
     /// because older archives predate them.
@@ -141,6 +142,7 @@ struct PreferencesArchive: Codable {
         colorizeOutput = settings.colorizeOutput
         colorizeListings = settings.colorizeListings
         colorizeManPages = settings.colorizeManPages
+        colorizeMoreFileTypes = settings.colorizeMoreFileTypes
         sidebarTranslucent = settings.sidebarTranslucent
         frameTintSource = settings.frameTintSource.rawValue
         frameTintStrength = settings.frameTintStrength
@@ -234,6 +236,7 @@ struct PreferencesArchive: Codable {
         if let colorizeOutput { settings.colorizeOutput = colorizeOutput }
         if let colorizeListings { settings.colorizeListings = colorizeListings }
         if let colorizeManPages { settings.colorizeManPages = colorizeManPages }
+        if let colorizeMoreFileTypes { settings.colorizeMoreFileTypes = colorizeMoreFileTypes }
         // An archive is a file someone could have edited, so a value is only
         // adopted when it is one the settings screen could have produced:
         // a known name, a color that parses, a number inside its range.

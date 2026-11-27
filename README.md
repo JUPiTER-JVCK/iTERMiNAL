@@ -947,6 +947,7 @@ those commands already read, to each **local** shell.
 |---|---|---|
 | **ls: directories, links and scripts** | `CLICOLOR=1`, `LSCOLORS` | macOS's `ls`: folders in bold blue, symbolic links in bold cyan, programs in bold green, and sockets, pipes, devices, set-id files and writable folders in the usual extra colors. macOS's `ls` colors by kind of file and has no way to color by ending: an archive or a picture is plain there. |
 | | `LS_COLORS` | GNU `ls --color` and eza read this instead, and add archives (red), pictures and video (magenta) and audio (cyan) by their ending. |
+| **More file types in ls (GNU ls, eza)**, off by default | `LS_COLORS` | Adds source code (bright yellow), config and data (green), documents (blue) and logs and temp files (grey) by their ending. Only the theme's own sixteen colors, so these follow a theme change too. Needs the ls setting above; macOS's `ls` ignores it. |
 | **man pages and less** | `LESS_TERMCAP_*`, `GROFF_NO_SGR=1` | Headings, command names and option names in bold red; what you fill in (`file`) in green; `less`'s own status line in yellow on blue. These are the choices zsh-colored-man-pages made. |
 
 - **The theme decides how they look.** Every color is an ANSI palette number,

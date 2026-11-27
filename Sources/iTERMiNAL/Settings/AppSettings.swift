@@ -244,6 +244,7 @@ final class AppSettings: ObservableObject {
     @Published var colorizeOutput: Bool { didSet { defaults.set(colorizeOutput, forKey: "colorizeOutput") } }
     @Published var colorizeListings: Bool { didSet { defaults.set(colorizeListings, forKey: "colorizeListings") } }
     @Published var colorizeManPages: Bool { didSet { defaults.set(colorizeManPages, forKey: "colorizeManPages") } }
+    @Published var colorizeMoreFileTypes: Bool { didSet { defaults.set(colorizeMoreFileTypes, forKey: "colorizeMoreFileTypes") } }
 
     // MARK: Panels
     @Published var browserHomepage: String { didSet { defaults.set(browserHomepage, forKey: "browserHomepage") } }
@@ -534,6 +535,7 @@ final class AppSettings: ObservableObject {
         colorizeOutput = defaults.object(forKey: "colorizeOutput") as? Bool ?? true
         colorizeListings = defaults.object(forKey: "colorizeListings") as? Bool ?? true
         colorizeManPages = defaults.object(forKey: "colorizeManPages") as? Bool ?? true
+        colorizeMoreFileTypes = defaults.object(forKey: "colorizeMoreFileTypes") as? Bool ?? false
 
         browserHomepage = defaults.string(forKey: "browserHomepage") ?? "https://www.google.com"
         showHiddenFiles = defaults.bool(forKey: "showHiddenFiles")
@@ -778,7 +780,7 @@ final class AppSettings: ObservableObject {
     /// when that is off.
     var outputColors: OutputColors? {
         guard colorizeOutput, colorizeListings || colorizeManPages else { return nil }
-        return OutputColors(listings: colorizeListings, manPages: colorizeManPages)
+        return OutputColors(listings: colorizeListings, manPages: colorizeManPages, moreFileTypes: colorizeMoreFileTypes)
     }
 
     var localTerminalType: TerminalType { TerminalType.resolve(localTerminalTypeTag) }
@@ -916,6 +918,7 @@ final class AppSettings: ObservableObject {
         colorizeOutput = true
         colorizeListings = true
         colorizeManPages = true
+        colorizeMoreFileTypes = false
         browserHomepage = "https://www.google.com"
         showHiddenFiles = false
         followTerminalDirectory = true
