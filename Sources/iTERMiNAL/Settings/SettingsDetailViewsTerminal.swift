@@ -89,6 +89,10 @@ struct TerminalSettingsView: View {
                     }
                 }
             }
+            // Both add to or change the theme list in Colors, so they sit
+            // right under it.
+            GhosttyThemeImportSection()
+            ThemeEditorSection()
             OutputColorsSettingsSection()
             Section("Font") {
                 Picker("Font", selection: $settings.terminalFontName) {
@@ -166,12 +170,10 @@ struct TerminalSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             TerminalColorOverridesSection()
-            ThemeEditorSection()
             TerminalLineSpacingSection()
             TerminalPaddingSection()
             SplitFocusSettingsSection()
             TerminalTypeSettingsSection()
-            GhosttyThemeImportSection()
             Section("Scrollback") {
                 Stepper(value: $settings.scrollbackLines, in: 500...200_000, step: 500) {
                     Text("\(settings.scrollbackLines) lines")
@@ -223,28 +225,6 @@ struct TerminalSettingsView: View {
     }
 }
 
-struct PanelsSettingsView: View {
-    @EnvironmentObject private var settings: AppSettings
-
-    var body: some View {
-        Form {
-            Section("Composer") {
-                Toggle("Show composer bar", isOn: $settings.composerEnabled)
-            }
-            Section("Browser") {
-                TextField("Homepage", text: $settings.browserHomepage)
-            }
-            Section("Files") {
-                Toggle("Show hidden files", isOn: $settings.showHiddenFiles)
-                Toggle("Follow the focused terminal's directory", isOn: $settings.followTerminalDirectory)
-            }
-        }
-        .formStyle(.grouped)
-    }
-}
-
-/// Lists the recommended fonts this Mac doesn't have, with somewhere to get
-/// them. Collapsed by default — it is a suggestion, not a task.
 extension TerminalSettingsView {
     fileprivate func importFonts() {
         let panel = NSOpenPanel()
@@ -322,6 +302,8 @@ private struct ImportedFontsList: View {
     }
 }
 
+/// Lists the recommended fonts this Mac doesn't have, with somewhere to get
+/// them. Collapsed by default — it is a suggestion, not a task.
 struct RecommendedFontsNotice: View {
     let missing: [(family: String, source: String)]
 
