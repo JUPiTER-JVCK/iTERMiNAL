@@ -16,8 +16,10 @@ final class SwiftTermEngine: TerminalEngine {
     var onAttention: ((TerminalAttention) -> Void)?
     /// Called when the user clicks a link in the terminal.
     var onLinkActivated: ((String) -> Void)?
-    /// Called with each command line the shell is given.
-    var onCommand: ((String) -> Void)?
+    /// Called with each line typed into the terminal, and what was true as its
+    /// Return was pressed — which says whether it was the shell's (see
+    /// `TypedCommand`).
+    var onCommand: ((String, TypedCommand.Moment) -> Void)?
     /// Called with each mark from a shell started with the integration hooks.
     var onShellMark: ((ShellIntegration.Mark) -> Void)? {
         get { terminalView.onShellMark }
@@ -87,8 +89,8 @@ final class SwiftTermEngine: TerminalEngine {
         terminalView.onActivity = { [weak self] in
             self?.noteActivity()
         }
-        terminalView.onCommand = { [weak self] command in
-            self?.onCommand?(command)
+        terminalView.onCommand = { [weak self] command, moment in
+            self?.onCommand?(command, moment)
         }
         terminalView.onAttention = { [weak self] attention in
             self?.onAttention?(attention)

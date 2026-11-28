@@ -22,9 +22,12 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     var onLink: ((String) -> Void)?
     /// Bell / OSC 9 / OSC 777 from the PTY stream.
     var onAttention: ((TerminalAttention) -> Void)?
-    /// Reports a finished command line, for naming the tab after what it is
-    /// doing rather than after its directory.
-    var onCommand: ((String) -> Void)?
+    /// Reports a finished line, for naming the tab after what it is doing
+    /// rather than after its directory, with what was true as Return was
+    /// pressed. That is what says whether the shell was reading it, or a
+    /// program it started — sudo asking for a password, say: see
+    /// `TypedCommand`.
+    var onCommand: ((String, TypedCommand.Moment) -> Void)?
     /// A mark from a shell started with the integration hooks (OSC 633): a prompt
     /// is about to be drawn, a command starts, a command ended with a status.
     /// Called on whichever queue SwiftTerm parses on.
@@ -46,61 +49,33 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// can be long.
     private var dragIsAcceptable = false
 
-    /// What has been typed since the last Enter.
-    private var lineBuffer: [UInt8] = []
-    /// Cleared when something happens that makes the buffer stop matching what
-    /// the shell will actually run.
-    private var lineIsTrustworthy = true
+    /// What has been typed since the last Enter, rebuilt from the keystrokes
+    /// (see `TypedCommand.LineBuffer`).
+    private var lineBuffer = TypedCommand.LineBuffer()
 
     /// The keystroke path — `super` writes the bytes to the PTY, so it must
-    /// always run first.
+    /// always run, and nothing here may stop it.
+    ///
+    /// Who is reading the terminal is asked before it does, when the bytes
+    /// hold a Return: once the shell has the Return, the program the line
+    /// starts can take the terminal before the line is judged. Every other
+    /// keystroke asks nothing.
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        let moment = data.contains(where: { $0 == 0x0D || $0 == 0x0A }) ? momentAtReturn() : nil
         super.send(source: source, data: data)
-        accumulateCommand(data)
+        for entered in lineBuffer.feed(data, moment: moment) {
+            onCommand?(entered.line, entered.moment)
+        }
         onInput?()
     }
 
-    /// Rebuilds the command line from the bytes heading for the shell.
-    ///
-    /// Deliberately conservative. These are the bytes the user typed, not what
-    /// the shell has after its own line editing, so anything that rewrites the
-    /// line behind our back — history recall, tab completion, any arrow key —
-    /// abandons the buffer rather than reporting a command that was never run.
-    /// A wrong tab name is worse than the directory it would otherwise show.
-    private func accumulateCommand(_ data: ArraySlice<UInt8>) {
-        for byte in data {
-            switch byte {
-            case 0x0D, 0x0A:                    // Enter: the line is complete
-                if lineIsTrustworthy, !lineBuffer.isEmpty,
-                   let line = String(bytes: lineBuffer, encoding: .utf8) {
-                    onCommand?(line)
-                }
-                lineBuffer.removeAll(keepingCapacity: true)
-                lineIsTrustworthy = true
-            case 0x7F, 0x08:                    // Backspace
-                // One keypress deletes one character, which in UTF-8 may be
-                // several bytes: dropping a single byte would leave a broken
-                // sequence that fails to decode on Enter, silently losing an
-                // otherwise perfectly good command.
-                while let last = lineBuffer.last, last & 0xC0 == 0x80 {
-                    lineBuffer.removeLast()
-                }
-                if !lineBuffer.isEmpty { lineBuffer.removeLast() }
-            case 0x03, 0x04, 0x15:              // ^C, ^D, ^U abandon the line
-                lineBuffer.removeAll(keepingCapacity: true)
-                lineIsTrustworthy = true
-            case 0x20...0x7E, 0x80...0xFF:      // Printable ASCII and UTF-8
-                lineBuffer.append(byte)
-            default:
-                // Every other control byte — escape sequences, Tab, and the
-                // readline editing keys (^W, ^K, ^A, ^E, ^Y…) — moves or
-                // rewrites the shell's line somewhere this buffer cannot
-                // follow. Treating them as "no effect" produced titles that
-                // were confidently wrong: `echo old`, ^W, `new` runs
-                // `echo new` and would have been recorded as `echo oldnew`.
-                lineIsTrustworthy = false
-            }
-        }
+    /// What is true of the terminal now, for a Return about to be passed on.
+    private func momentAtReturn() -> TypedCommand.Moment {
+        TypedCommand.Moment(
+            shellInFront: TerminalReader.shellIsInFront(shellPID: process?.shellPid ?? 0),
+            hiddenInput: TerminalReader.isReadingHiddenLine(pty: process?.childfd ?? -1),
+            alternateScreen: getTerminal().isCurrentBufferAlternate
+        )
     }
 
     /// Fires whenever the terminal repaints a row range: the closest thing

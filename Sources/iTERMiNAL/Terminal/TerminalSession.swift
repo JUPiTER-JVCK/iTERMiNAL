@@ -38,7 +38,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var startedAt: Date?
     /// The most recent command this shell was given, so a tab can be
     /// identified by what it is doing rather than by its directory — which is
-    /// the same for every tab opened in one project.
+    /// the same for every tab opened in one project. Only a line the shell was
+    /// reading as Return was pressed: never one typed into a program it
+    /// started, which at a sudo or ssh prompt is a password (`TypedCommand`).
     @Published private(set) var lastCommand: String?
     /// True after a bell / OSC attention while this pane was not in front of
     /// the user. Cleared when the session (or its tab) becomes focused.
@@ -194,10 +196,11 @@ final class TerminalSession: ObservableObject, Identifiable {
                 self?.noteAttention(attention)
             }
         }
-        engine.onCommand = { [weak self] command in
-            // Same queue caveat as the activity callback above.
+        engine.onCommand = { [weak self] command, moment in
+            // Same queue caveat as the activity callback above. `moment` was
+            // read as Return was pressed, so the hop does not change it.
             DispatchQueue.main.async {
-                self?.noteCommand(command)
+                self?.noteCommand(command, at: moment)
             }
         }
         engine.onShellMark = { [weak self] mark in
@@ -319,21 +322,21 @@ final class TerminalSession: ObservableObject, Identifiable {
         return AppSettings.shared.sshConnections.first { $0.id == id }
     }
 
-    /// Records a command line and shortens it for display.
+    /// Records a command line, shortened for display to the program and its
+    /// first argument (`TypedCommand.label`) — if it was one.
     ///
-    /// Only the program and its first argument are kept: a full command line
-    /// with paths and flags is far wider than a sidebar row, and the head of
-    /// it is what distinguishes one tab from another.
-    private func noteCommand(_ command: String) {
+    /// The line is rebuilt from keystrokes, whatever was reading them, so it is
+    /// judged by `moment`: what was true as Return was pressed. A line typed at
+    /// a password prompt, into an editor or into a program on the far end of
+    /// a local `ssh` is not a command and leaves the name as it was.
+    private func noteCommand(_ command: String, at moment: TypedCommand.Moment) {
         // The line buffer behind this assumes a shell prompt. Inside btop or
         // superfile, Enter confirms a selection, and what was "typed" before
         // it is navigation keys — recorded, it would retitle the panel "jjk".
         guard !kind.isTool else { return }
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let words = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-        let label = words.prefix(2).joined(separator: " ")
-        lastCommand = label.isEmpty ? nil : label
+        guard TypedCommand.isCommand(at: moment, remote: isRemote),
+              let label = TypedCommand.label(for: command) else { return }
+        lastCommand = label
     }
 
     var displayTitle: String {

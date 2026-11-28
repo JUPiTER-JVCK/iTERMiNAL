@@ -1078,13 +1078,37 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// Recents read from a saved or imported layout, with each title an older
+    /// build wrote renamed after its host or folder: it may be a password that
+    /// was taken for a command (see `TypedCommand.recentTitle`). `renamed` says
+    /// whether any was, so the file can be written again without it.
+    private static func vetted(_ recents: [RecentSession]) -> (recents: [RecentSession], renamed: Bool) {
+        var renamed = false
+        let vetted = recents.map { recent -> RecentSession in
+            guard recent.titleVetted != true else { return recent }
+            let host = recent.connection
+                .flatMap(UUID.init(uuidString:))
+                .flatMap { id in AppSettings.shared.sshConnections.first { $0.id == id } }
+                .map { $0.name.isEmpty ? $0.destination : $0.name }
+            var entry = recent
+            entry.title = TypedCommand.recentTitle(
+                recent.title, vetted: recent.titleVetted, directory: recent.directory, connectionName: host
+            )
+            entry.titleVetted = true
+            renamed = true
+            return entry
+        }
+        return (vetted, renamed)
+    }
+
     private func rememberClosed(_ session: TerminalSession, title: String) {
         let entry = RecentSession(
             id: session.id,
             title: title,
             directory: session.currentDirectory,
             connection: session.kind.connectionID?.uuidString,
-            closedAt: Date()
+            closedAt: Date(),
+            titleVetted: true
         )
         // Capture before the shell is terminated: once the view is gone so is
         // its buffer.
@@ -2172,7 +2196,10 @@ final class WorkspaceStore: ObservableObject {
         chatModels.values.forEach { $0.cancel() }
         chatModels.removeAll()
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
-        recentSessions = snapshot.recents ?? []
+        // An archive from an older build may carry titles taken from a
+        // password. The state file is written again either way: below, or by
+        // the new tab `bootstrap` opens.
+        recentSessions = Self.vetted(snapshot.recents ?? []).recents
         pruneOrphanedTranscripts()
         pruneOrphanedHTTPHistory()
         if workspaces.isEmpty {
@@ -2220,7 +2247,10 @@ final class WorkspaceStore: ObservableObject {
         guard !snapshot.workspaces.isEmpty else { return false }
 
         workspaces = snapshot.workspaces.map { Workspace(snapshot: $0) }
-        recentSessions = snapshot.recents ?? []
+        let recents = Self.vetted(snapshot.recents ?? [])
+        recentSessions = recents.recents
+        // The file still holds the old titles until it is next written.
+        if recents.renamed { scheduleSave() }
         pruneOrphanedTranscripts()
         let allTabs = workspaces.flatMap(\.tabs)
         guard !allTabs.isEmpty else { return false }
