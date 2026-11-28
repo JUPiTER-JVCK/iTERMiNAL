@@ -11,11 +11,14 @@ struct DownloadConfirmSheet: View {
     let pending: PendingDownload
 
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     /// The batch as it stands now: Change… may have replanned it since the sheet opened.
     private var current: PendingDownload { extraction.pendingDownload ?? pending }
 
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let plan = current.plan
         VStack(alignment: .leading, spacing: 12) {
             Text(plan.items.isEmpty ? "Nothing to download" : "Download \(plan.items.count) file\(plan.items.count == 1 ? "" : "s")")
@@ -23,11 +26,11 @@ struct DownloadConfirmSheet: View {
 
             if !plan.items.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    labelled("From", plan.hosts.joined(separator: ", "))
+                    labelled("From", plan.hosts.joined(separator: ", "), theme: theme)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Into")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                             .frame(width: 44, alignment: .trailing)
                         Text((current.destination.path as NSString).abbreviatingWithTildeInPath)
                             .font(.system(size: 11, design: .monospaced))
@@ -37,7 +40,7 @@ struct DownloadConfirmSheet: View {
                             .help(current.destination.path)
                         Button("Change…") { extraction.chooseDownloadFolder(settings: settings) }
                     }
-                    labelled("Up to", "\(settings.httpMaxDownloadMB) MB each")
+                    labelled("Up to", "\(settings.httpMaxDownloadMB) MB each", theme: theme)
                 }
 
                 DisclosureGroup("The files (\(plan.items.count))") {
@@ -50,7 +53,7 @@ struct DownloadConfirmSheet: View {
                                         .lineLimit(1)
                                     Text(item.url)
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(theme.textSecondary)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 }
@@ -58,7 +61,7 @@ struct DownloadConfirmSheet: View {
                             if plan.items.count > 200 {
                                 Text("… and \(plan.items.count - 200) more")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.textSecondary)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,7 +83,7 @@ struct DownloadConfirmSheet: View {
                                         .truncationMode(.middle)
                                     Text(refusal.reason)
                                         .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(theme.textSecondary)
                                 }
                             }
                         }
@@ -94,12 +97,12 @@ struct DownloadConfirmSheet: View {
             if plan.overLimit > 0 {
                 Text("\(plan.overLimit) more were left out: a batch is at most \(DownloadPlan.maxItems) files.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
 
             Text("Each file is requested without cookies or credentials. Nothing is overwritten, and each file is marked as downloaded from the web.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
@@ -114,14 +117,15 @@ struct DownloadConfirmSheet: View {
         }
         .padding(16)
         .frame(width: 480)
+        .background(theme.background)
         .tint(settings.accentColor)
     }
 
-    private func labelled(_ name: String, _ value: String) -> some View {
+    private func labelled(_ name: String, _ value: String, theme: Theme) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(name)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .frame(width: 44, alignment: .trailing)
             Text(value)
                 .font(.system(size: 12))
@@ -136,8 +140,11 @@ struct DownloadProgressSheet: View {
     @ObservedObject var extraction: PageExtractionModel
 
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
 
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         let summary = downloader.summary
         VStack(alignment: .leading, spacing: 10) {
             Text(downloader.isRunning ? "Downloading…" : "Finished")
@@ -145,7 +152,7 @@ struct DownloadProgressSheet: View {
             if let folder = downloader.folder {
                 Text((folder.path as NSString).abbreviatingWithTildeInPath)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -161,7 +168,7 @@ struct DownloadProgressSheet: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Spacer(minLength: 6)
-                            status(entry.state)
+                            status(entry.state, theme: theme)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -169,11 +176,11 @@ struct DownloadProgressSheet: View {
                 }
             }
             .frame(minHeight: 160, maxHeight: 280)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.surface.opacity(0.6)))
 
             Text(summaryLine(summary))
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
 
             HStack {
                 if downloader.isRunning {
@@ -196,14 +203,15 @@ struct DownloadProgressSheet: View {
         }
         .padding(16)
         .frame(width: 520)
+        .background(theme.background)
         .tint(settings.accentColor)
     }
 
     @ViewBuilder
-    private func status(_ state: AssetDownloader.Entry.State) -> some View {
+    private func status(_ state: AssetDownloader.Entry.State, theme: Theme) -> some View {
         switch state {
         case .waiting:
-            Text("waiting").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("waiting").font(.system(size: 11)).foregroundStyle(theme.textSecondary)
         case .receiving(let received, let expected):
             if let expected {
                 ProgressView(value: Double(received), total: Double(expected))
@@ -211,7 +219,7 @@ struct DownloadProgressSheet: View {
             } else {
                 Text(ByteCountFormatter.string(fromByteCount: received, countStyle: .file))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
         case .saved(_, let bytes):
             Label(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file), systemImage: "checkmark.circle.fill")
@@ -224,7 +232,7 @@ struct DownloadProgressSheet: View {
                 .lineLimit(2)
                 .help(reason)
         case .cancelled:
-            Text("stopped").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("stopped").font(.system(size: 11)).foregroundStyle(theme.textSecondary)
         }
     }
 

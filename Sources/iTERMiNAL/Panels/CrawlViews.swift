@@ -9,6 +9,8 @@ struct CrawlConfirmSheet: View {
     let proposal: CrawlProposal
 
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var pages: Int
     @State private var depth: Int
     @State private var delay: Double
@@ -32,6 +34,7 @@ struct CrawlConfirmSheet: View {
     }
 
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 12) {
             Text("Crawl \(proposal.host)")
                 .font(.headline)
@@ -39,14 +42,14 @@ struct CrawlConfirmSheet: View {
             if let refusal = proposal.refusal {
                 Text(refusal)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    fact("From", proposal.startURL, monospaced: true)
-                    fact("Stays on", "\(proposal.host) only. A link to another site, or to another subdomain such as www., is listed and not followed.")
+                    fact("From", proposal.startURL, monospaced: true, theme: theme)
+                    fact("Stays on", "\(proposal.host) only. A link to another site, or to another subdomain such as www., is listed and not followed.", theme: theme)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        label("Pages")
+                        label("Pages", theme: theme)
                         Picker("Pages", selection: $pages) {
                             ForEach(CrawlLimits.pageChoices, id: \.self) { Text("up to \($0)").tag($0) }
                         }
@@ -54,10 +57,10 @@ struct CrawlConfirmSheet: View {
                         .fixedSize()
                         Text("counting this one")
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        label("Depth")
+                        label("Depth", theme: theme)
                         Picker("Depth", selection: $depth) {
                             ForEach(CrawlLimits.depthChoices, id: \.self) { value in
                                 Text(value == 1 ? "1 — the pages this one links to" : "\(value) links from here").tag(value)
@@ -67,7 +70,7 @@ struct CrawlConfirmSheet: View {
                         .fixedSize()
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        label("Wait")
+                        label("Wait", theme: theme)
                         Picker("Wait", selection: $delay) {
                             ForEach(CrawlLimits.delayChoices, id: \.self) { value in
                                 Text(Self.delayLabel(value)).tag(value)
@@ -77,10 +80,10 @@ struct CrawlConfirmSheet: View {
                         .fixedSize()
                         Text("between requests")
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        label("Scope")
+                        label("Scope", theme: theme)
                         Toggle("Only pages under \(proposal.directory)", isOn: $sectionOnly)
                             .disabled(proposal.directory == "/")
                     }
@@ -88,14 +91,14 @@ struct CrawlConfirmSheet: View {
 
                 Text("\(proposal.candidates) link\(proposal.candidates == 1 ? "" : "s") on this page lead to pages on this site. At most \(pages) pages at one request every \(Self.delayLabel(delay)) is about \(Self.duration(Double(pages - 1) * delay)), plus the time the site takes to answer.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    bullet("The site's robots.txt is read first. Pages it asks crawlers to leave alone are listed and not fetched, and a Crawl-delay longer than the wait above is waited out.")
-                    bullet("One page at a time. Only web pages: anything the server says is a picture, a file or a download is not taken, and no page is read past 2 MB.")
-                    bullet("Only addresses the pages themselves link to. Nothing is guessed, and a link to another site is listed, not followed.")
-                    bullet("Each request stands alone: no cookies, no login, nothing carried from one to the next. It says who is asking — iTERMiNAL, with this app's address.")
+                    bullet("The site's robots.txt is read first. Pages it asks crawlers to leave alone are listed and not fetched, and a Crawl-delay longer than the wait above is waited out.", theme: theme)
+                    bullet("One page at a time. Only web pages: anything the server says is a picture, a file or a download is not taken, and no page is read past 2 MB.", theme: theme)
+                    bullet("Only addresses the pages themselves link to. Nothing is guessed, and a link to another site is listed, not followed.", theme: theme)
+                    bullet("Each request stands alone: no cookies, no login, nothing carried from one to the next. It says who is asking — iTERMiNAL, with this app's address.", theme: theme)
                 }
             }
 
@@ -112,19 +115,20 @@ struct CrawlConfirmSheet: View {
         }
         .padding(16)
         .frame(width: 500)
+        .background(theme.background)
         .tint(settings.accentColor)
     }
 
-    private func label(_ text: String) -> some View {
+    private func label(_ text: String, theme: Theme) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.textSecondary)
             .frame(width: 56, alignment: .trailing)
     }
 
-    private func fact(_ name: String, _ value: String, monospaced: Bool = false) -> some View {
+    private func fact(_ name: String, _ value: String, monospaced: Bool = false, theme: Theme) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            label(name)
+            label(name, theme: theme)
             Text(value)
                 .font(.system(size: monospaced ? 11 : 12, design: monospaced ? .monospaced : .default))
                 .textSelection(.enabled)
@@ -134,14 +138,14 @@ struct CrawlConfirmSheet: View {
         }
     }
 
-    private func bullet(_ text: String) -> some View {
+    private func bullet(_ text: String, theme: Theme) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("•").foregroundStyle(.secondary)
+            Text("•").foregroundStyle(theme.textSecondary)
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 11))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(theme.textSecondary)
     }
 
     static func delayLabel(_ seconds: Double) -> String {

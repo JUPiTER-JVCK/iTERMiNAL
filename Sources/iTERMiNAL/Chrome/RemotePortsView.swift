@@ -290,11 +290,14 @@ private struct RemotePortsPopover: View {
     @ObservedObject private var tunnels = TunnelManager.shared
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     /// Ports it has been asked to show every fact about.
     @State private var expanded: Set<Int> = []
 
     var body: some View {
-        portsContent
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        portsContent(theme: theme)
             .padding(12)
             .frame(width: 460)
             // Scanning runs only while the list is open.
@@ -302,7 +305,7 @@ private struct RemotePortsPopover: View {
             .onDisappear { model.stop() }
     }
 
-    private var portsContent: some View {
+    private func portsContent(theme: Theme) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
@@ -310,7 +313,7 @@ private struct RemotePortsPopover: View {
                         .font(.system(size: 12, weight: .semibold))
                     Text(model.machineName)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
                 Spacer()
                 if model.isScanning {
@@ -335,7 +338,7 @@ private struct RemotePortsPopover: View {
             if let note = model.note {
                 Text(note)
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
 
             // A fixed height, so the popover is the same size whatever is in it.
@@ -343,13 +346,13 @@ private struct RemotePortsPopover: View {
                 if model.ports.isEmpty {
                     Text(model.isScanning ? "Scanning…" : "No listening TCP ports found.")
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(6)
                 } else {
                     VStack(spacing: 2) {
                         ForEach(model.ports) { port in
-                            row(port)
+                            row(port, theme: theme)
                         }
                     }
                 }
@@ -380,7 +383,7 @@ private struct RemotePortsPopover: View {
 
             Text("Choosing a port does what fits it: a web page opens in the browser panel, ssh opens a tab, VNC and RDP open the system's client, and anything else (a database, say) is forwarded and its address copied. On a host that goes through an ssh forward that listens on this Mac only. The arrow shows everything known about a port.")
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -395,7 +398,7 @@ private struct RemotePortsPopover: View {
         }
     }
 
-    private func row(_ port: ListeningPort) -> some View {
+    private func row(_ port: ListeningPort, theme: Theme) -> some View {
         let isExpanded = expanded.contains(port.id)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 2) {
@@ -406,7 +409,7 @@ private struct RemotePortsPopover: View {
                         Image(systemName: icon(for: port))
                             .frame(width: 16)
                             .padding(.top, 1)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(spacing: 6) {
                                 Text(String(port.port))
@@ -420,18 +423,18 @@ private struct RemotePortsPopover: View {
                                 if let process = port.process {
                                     Text(process)
                                         .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(theme.textSecondary)
                                         .lineLimit(1)
                                 }
                             }
                             Text(port.summaryLine())
                                 .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)
                             if let about = port.service?.summary {
                                 Text(about)
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.textSecondary)
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -463,12 +466,12 @@ private struct RemotePortsPopover: View {
             }
 
             if isExpanded {
-                detailGrid(port)
+                detailGrid(port, theme: theme)
             }
         }
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isExpanded ? Color.primary.opacity(0.06) : Color.clear)
+                .fill(isExpanded ? theme.surface : Color.clear)
         )
         .contextMenu {
             Button("Choose Port") {
@@ -483,13 +486,13 @@ private struct RemotePortsPopover: View {
         }
     }
 
-    private func detailGrid(_ port: ListeningPort) -> some View {
+    private func detailGrid(_ port: ListeningPort, theme: Theme) -> some View {
         Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 3) {
             ForEach(port.details(machine: model.machineName, onHost: model.isOnHost), id: \.label) { detail in
                 GridRow {
                     Text(detail.label)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                         .gridColumnAlignment(.trailing)
                     Text(detail.value)
                         .font(.system(size: 10, design: detail.label == "Command" ? .monospaced : .default))
@@ -512,6 +515,8 @@ private struct ConnectList: View {
 
     @EnvironmentObject private var store: WorkspaceStore
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @ObservedObject private var discovery = ServiceDiscovery.shared
     /// Set once the person has asked to look for machines, so the next time the
     /// list opens it looks again and the green marks are there without asking
@@ -519,15 +524,16 @@ private struct ConnectList: View {
     @AppStorage("globeNetworkScan") private var scanOptIn = false
 
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 10) {
             // A fixed height, so the popover is the same size whatever is in it.
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    group("Saved hosts") {
+                    group("Saved hosts", theme: theme) {
                         if settings.sshConnections.isEmpty {
                             Text("No saved hosts — add one in Settings → Connections")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.textSecondary)
                                 .padding(.horizontal, 6)
                         } else {
                             ForEach(settings.sshConnections) { connection in
@@ -535,7 +541,8 @@ private struct ConnectList: View {
                                     icon: "terminal",
                                     title: connection.name,
                                     detail: connection.subtitle,
-                                    live: isAdvertised(connection)
+                                    live: isAdvertised(connection),
+                                    theme: theme
                                 ) {
                                     store.newTab(kind: .remote(connection.id))
                                     dismiss()
@@ -545,13 +552,14 @@ private struct ConnectList: View {
                     }
 
                     if !settings.remoteServices.isEmpty {
-                        group("Screen sharing") {
+                        group("Screen sharing", theme: theme) {
                             ForEach(settings.remoteServices) { service in
                                 row(
                                     icon: "display",
                                     title: service.name,
                                     detail: service.subtitle,
-                                    live: isAdvertised(service)
+                                    live: isAdvertised(service),
+                                    theme: theme
                                 ) {
                                     RemoteServiceLauncher.open(service, store: store, settings: settings)
                                     dismiss()
@@ -561,13 +569,14 @@ private struct ConnectList: View {
                     }
 
                     if !discovery.services.isEmpty {
-                        group("On this network") {
+                        group("On this network", theme: theme) {
                             ForEach(discovery.services) { service in
                                 row(
                                     icon: "network",
                                     title: service.name,
                                     detail: service.kind.shortLabel,
-                                    live: true
+                                    live: true,
+                                    theme: theme
                                 ) {
                                     connect(service)
                                     dismiss()
@@ -587,7 +596,7 @@ private struct ConnectList: View {
                         .foregroundStyle(.green)
                     Text("Green: advertising on this network now")
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
                 .padding(.horizontal, 6)
             }
@@ -626,11 +635,11 @@ private struct ConnectList: View {
         }
     }
 
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func group<Content: View>(_ title: String, theme: Theme, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 6)
             content()
         }
@@ -643,20 +652,21 @@ private struct ConnectList: View {
         title: String,
         detail: String,
         live: Bool,
+        theme: Theme,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .frame(width: 16)
-                    .foregroundStyle(live ? Color.green : Color.secondary)
+                    .foregroundStyle(live ? Color.green : theme.textSecondary)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title)
                         .font(.system(size: 12))
                         .lineLimit(1)
                     Text(detail)
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
