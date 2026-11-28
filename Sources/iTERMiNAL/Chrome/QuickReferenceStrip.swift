@@ -293,7 +293,10 @@ private struct QuickReferenceSessionStrip: View {
                 help: content.hasFullList ? "All keys for \(content.badge) (⌥⌘/)"
                     : "Examples for \(content.badge) in the Cheatsheet"
             )
-            .popover(isPresented: $showAll, arrowEdge: .top) {
+            // Upward, over the terminal: the line is at the window's bottom.
+            // The arrow edge is the popover's own side that points at the
+            // button, so `.top` hangs it below, where it ran off the screen.
+            .popover(isPresented: $showAll, arrowEdge: .bottom) {
                 QuickReferenceFullList(
                     content: content,
                     run: { hintAction in
