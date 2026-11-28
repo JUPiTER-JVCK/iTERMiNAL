@@ -3,21 +3,34 @@ import AppKit
 
 struct AdvancedSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var store: WorkspaceStore
+    @State private var confirmingReset = false
+
+    /// What `resetToDefaults` leaves alone: the things a person made rather
+    /// than chose, and the Keychain, which it never touches. Not "every
+    /// preference": the Bytes and Files panels keep a few view choices of
+    /// their own that it does not reach.
+    private static let resetCaption = "Puts preferences back to their defaults. What you have added is kept — saved hosts, profiles, tunnels, skills, imported themes and fonts — and so is everything in the Keychain."
 
     var body: some View {
         Form {
-            Section("Session state") {
-                Button("Save Session Now") { store.saveNow() }
-                Button("Reveal State File in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([store.stateFileURL])
-                }
-            }
+            // Saving the session and finding its file are under Backup, beside
+            // where it says the file is.
             Section("Reset") {
-                Button("Reset All Settings", role: .destructive) {
-                    settings.resetToDefaults()
-                    AttentionSettings.shared.resetToInApp()
+                Button("Reset All Settings…", role: .destructive) {
+                    confirmingReset = true
                 }
+                .confirmationDialog("Reset all settings?", isPresented: $confirmingReset) {
+                    Button("Reset All Settings", role: .destructive) {
+                        settings.resetToDefaults()
+                        AttentionSettings.shared.resetToInApp()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(Self.resetCaption)
+                }
+                Text(Self.resetCaption)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")

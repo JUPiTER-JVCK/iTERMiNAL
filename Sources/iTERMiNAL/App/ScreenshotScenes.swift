@@ -2100,7 +2100,8 @@ final class ScreenshotRun {
         let pages: [(SettingsSection, String, CGFloat)] = [
             (.terminal, "settings-terminal", 640),
             (.composer, "settings-composer", 640),
-            (.panels, "settings-panels", 640),
+            (.browser, "settings-browser", 640),
+            (.files, "settings-files", 640),
             (.security, "settings-security", 640),
             (.ai, "settings-ai", 640),
             (.http, "settings-http", 640),

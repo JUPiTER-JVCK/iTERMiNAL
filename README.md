@@ -800,9 +800,11 @@ A tour of the app in thirty-four pictures, in five groups.
   and the springs behind them become a short ease. The app follows the setting
   live, so changing it applies without a relaunch. Splitting or closing a pane
   is not animated.
-- **Settings for everything** — General, Appearance, Terminal (theme, font,
-  cursor, scrollback, GPU), Composer, Panels, Connections, Security, AI, HTTP
-  Client, Backup, Shortcuts, and Advanced, all applying live.
+- **Settings for everything** — grouped as Workspace (General, Appearance,
+  Terminal — theme, font, cursor, scrollback, GPU — and Composer), Panels (a
+  page for each panel with settings of its own: Browser, Files, and HTTP
+  Client), and System (Connections, Security, AI, Backup, Shortcuts, and
+  Advanced), all applying live.
 - **AI assistant** — type `@ai …` in the composer to ask an OpenAI-compatible
   endpoint (OpenAI, Claude, Ollama, or any `/v1` proxy). Keys stay in the keychain;
   replies appear above the input and are never auto-run in a PTY. When a

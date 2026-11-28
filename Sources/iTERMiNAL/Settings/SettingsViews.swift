@@ -1,6 +1,7 @@
 import SwiftUI
 
 // Section enum: SettingsSection.swift · AI pane: AISettingsView.swift
+// Panel pages: PanelsSettingsViews.swift, HTTPClientSettingsView.swift
 
 struct SettingsRootView: View {
     @State private var selection: SettingsSection
@@ -139,11 +140,12 @@ struct SettingsRootView: View {
                 case .appearance: AppearanceSettingsView()
                 case .composer: ComposerSettingsView()
                 case .terminal: TerminalSettingsView()
-                case .panels: PanelsSettingsView()
+                case .browser: BrowserSettingsView()
+                case .files: FilesSettingsView()
+                case .http: HTTPClientSettingsView()
                 case .connections: ConnectionsSettingsView()
                 case .security: SecuritySettingsView()
                 case .ai: AISettingsView()
-                case .http: HTTPClientSettingsView()
                 case .backup: BackupSettingsView()
                 case .shortcuts: ShortcutsSettingsView()
                 case .advanced: AdvancedSettingsView()

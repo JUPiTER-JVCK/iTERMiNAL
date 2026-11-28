@@ -121,7 +121,7 @@ struct AISettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Asking about a web page") {
+            Section("Asking from the HTTP client and Cheatsheet") {
                 Text("In the HTTP client's Extract tab, Ask… sends the text of the page you have in hand, its address and title, and what you asked for, to the same endpoint — after a sheet that says where it goes and can show every character. Keys and passwords are masked first (best effort, and nothing else is, so don't send a private page), the text is cut at 12,000 characters, and the answer comes back as a table of text that is only ever shown: nothing in it is run, opened or fetched.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
