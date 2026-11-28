@@ -448,7 +448,7 @@ def scenario_command_line(wrapper: Path):
             check(lines == wanted, f"each command's first line arrives as typed — a leading space kept, !! expanded, cut at 1000 characters: {shown!r}", session)
             raw = [m for m in session.marks() if m.startswith("E;")]
             check(all(all(0x20 <= ord(ch) <= 0x7E for ch in m) for m in raw),
-                  "and as plain ASCII throughout, so no byte of UTF-8 can end the sequence early")
+                  "and as printable ASCII throughout, so nothing in the line can end the sequence early")
             marks = session.marks()
             order = [m if not m.startswith("E;") else "E" for m in marks]
             check(order[:5] == ["A", "E", "C", "D;0", "A"] and order.count("E") == order.count("C"),

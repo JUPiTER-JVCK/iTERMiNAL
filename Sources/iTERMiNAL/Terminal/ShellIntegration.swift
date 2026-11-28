@@ -142,10 +142,11 @@ enum ShellIntegration {
     /// The line in `E;<nonce>;<line>`, or nil. Nil unless `nonce` is given and
     /// is the one there; unless the line is plain ASCII throughout, with `\\`
     /// for a backslash and `\xHH` for any other byte, as the hook writes it —
-    /// SwiftTerm ends a sequence at some bytes of UTF-8 (`Ü` has one), so the
-    /// hook writes none raw; and unless those bytes are UTF-8 for a line with
-    /// something in it and no control characters. A tab, which can only have
-    /// been typed on purpose, is read as a space.
+    /// SwiftTerm ends a sequence at ESC, BEL or CAN and drops other control
+    /// bytes from it, so the hook writes nothing but printable ASCII; and
+    /// unless those bytes are UTF-8 for a line with something in it and no
+    /// control characters. A tab, which can only have been typed on purpose,
+    /// is read as a space.
     static func commandLine(in bytes: [UInt8], nonce: String?) -> String? {
         guard let nonce, !nonce.isEmpty else { return nil }
         let head = Array("E;\(nonce);".utf8)

@@ -143,9 +143,10 @@ after the Return: its `preexec` hook sends the first line as typed (OSC 633 `E`)
 signed with a code made for that shell as it starts, so nothing printed to the
 terminal can pass for one. That line takes the place of the one kept at the
 Return, and is exact where Tab or ↑ had changed the line beyond what the keys,
-or the screen, could say. The hook writes every byte outside plain ASCII as
-`\xHH`: SwiftTerm reads an OSC byte by byte, and ends it at any byte from 0x80
-to 0x9F, which UTF-8 uses inside characters such as `Ü` and `€`.
+or the screen, could say. The hook writes every byte outside printable ASCII as
+`\xHH`, so nothing in the line can end the sequence (SwiftTerm ends an OSC at
+ESC, BEL or CAN) or be dropped from it (it drops other control bytes), and the
+app can refuse anything that is not exactly what the hook writes.
 
 Inside a shell somewhere else — ssh typed here, a container's, sudo's root
 shell — the kernel can only say ssh, docker or sudo is in front, so what this
