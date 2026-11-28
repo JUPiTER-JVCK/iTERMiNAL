@@ -15368,6 +15368,90 @@ func checkByteSearch() {
 }
 checkByteSearch()
 
+// MARK: Looking for one byte first
+
+// A search looks for one byte of the pattern, sixteen bytes at a time, and checks the whole pattern only where that
+// byte is. Here the scan is held against a plain loop at every length up to past four vectors, the byte chosen is
+// checked, and whole searches over files longer than a vector, with letters in either case, are held against
+// looking at every place in turn.
+
+func checkLookingForOneByteFirst() {
+    var random = BytesCheckRandom(seed: 0xB17E5)
+
+    var scanWrong: [String] = []
+    for length in 0...70 {
+        let data: [UInt8] = (0..<length).map { _ in [0x41, 0x61, 0x42, 0x00, 0x5A][random.below(5)] }
+        data.withUnsafeBytes { raw in
+            for lower in [-1, 0, 1, 7, 15, 16, 17, 31, 32, 33, 69] where lower <= length + 1 {
+                for upper in [length + 3, length, length - 1, length - 2, length - 17, lower + 15, lower + 16, lower, lower - 1] {
+                    for (byte, folds) in [(UInt8(0x41), false), (UInt8(0x61), false), (UInt8(0x61), true), (UInt8(0x7A), true), (UInt8(0x00), false)] {
+                        let low = max(lower, 0)
+                        let high = min(upper, length - 1)
+                        let hits = low <= high ? (low...high).filter { folds ? data[$0] | 0x20 == byte : data[$0] == byte } : []
+                        let first = ByteScan.firstIndex(of: byte, foldsCase: folds, in: raw, from: lower, through: upper)
+                        let last = ByteScan.lastIndex(of: byte, foldsCase: folds, in: raw, from: lower, through: upper)
+                        if first != hits.first || last != hits.last {
+                            scanWrong.append("\(String(byte, radix: 16)) folding \(folds) in \(lower)...\(upper) of \(length): \(String(describing: first)), \(String(describing: last)) not \(String(describing: hits.first)), \(String(describing: hits.last))")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    check(scanWrong.isEmpty, "the scan finds the first and last of a byte as a plain loop does, at every length to 70, from ranges inside, across and outside the bytes: \(scanWrong.prefix(2))")
+    check([UInt8]().withUnsafeBytes { ByteScan.firstIndex(of: 0, foldsCase: false, in: $0, from: 0, through: 10) == nil && ByteScan.lastIndex(of: 0, foldsCase: false, in: $0, from: -3, through: 0) == nil }, "and in no bytes at all finds nothing")
+    let bothCases = Array("aAzZ@`[{".utf8)
+    let folded = bothCases.withUnsafeBytes { raw in (0..<bothCases.count).filter { ByteScan.firstIndex(of: 0x61, foldsCase: true, in: raw, from: $0, through: $0) != nil || ByteScan.firstIndex(of: 0x7A, foldsCase: true, in: raw, from: $0, through: $0) != nil } }
+    check(folded == [0, 1, 2, 3], "folding finds a letter in either case, and not @, `, [ or {, which sit just outside the letters")
+
+    func hex(_ text: String) -> SearchPattern { try! SearchPattern.hex(text).get() }
+    check(hex("00 00 7F").anchor == SearchPattern.Anchor(index: 2, byte: 0x7F, foldsCase: false), "a byte that is not zero is looked for before zeros")
+    check(hex("00 FF").anchor?.index == 1 && hex("FF 41").anchor?.index == 1 && hex("41 9C 9D").anchor?.index == 1 && hex("00 00").anchor?.index == 0, "zero is looked for last, then 0xFF, then letters, and among the rarest the first")
+    check(hex("?? ??").anchor == nil && hex("?? 00 ??").anchor?.index == 1, "a wildcard is never looked for, so a pattern of only wildcards has nothing to look for")
+    let shout = try! SearchPattern.text("HELLO", encoding: .utf8, ignoresCase: true).get()
+    let exact = try! SearchPattern.text("HELLO", encoding: .utf8, ignoresCase: false).get()
+    let mark = try! SearchPattern.text("Hi!", encoding: .utf8, ignoresCase: true).get()
+    check(shout.anchor == SearchPattern.Anchor(index: 0, byte: 0x68, foldsCase: true) && exact.anchor == SearchPattern.Anchor(index: 0, byte: 0x48, foldsCase: false), "with case ignored a letter is looked for in either case, and only then")
+    check(mark.anchor == SearchPattern.Anchor(index: 2, byte: 0x21, foldsCase: false), "and a mark is looked for before letters, as it is")
+    check((0...255).allSatisfy { (0...3).contains(SearchPattern.commonness(UInt8($0))) } && SearchPattern.commonness(0) == 3 && SearchPattern.commonness(0xFF) == 2 && SearchPattern.commonness(0x7F) == 0, "how common a byte is, from 0 to 3")
+
+    // Whole searches, against looking at every place in turn in the order `find` promises.
+    var searchWrong: [String] = []
+    for round in 0..<300 {
+        let length = round % 10 == 0 ? 1000 + random.below(3000) : random.below(300)
+        let letters: [UInt8] = [0x00, 0x41, 0x61, 0x42, 0x62, 0x21]
+        let data = (0..<length).map { _ in letters[random.below(letters.count)] }
+        let width = 1 + random.below(6)
+        var bytes = (0..<width).map { _ in letters[random.below(letters.count)] }
+        // Half the patterns are taken from the file, so that there is something to find.
+        if length >= width, random.below(2) == 0 {
+            let from = random.below(length - width + 1)
+            bytes = Array(data[from..<(from + width)])
+        }
+        let wild = (0..<width).map { _ in random.below(4) == 0 }
+        let want = SearchPattern(bytes: bytes, wildcard: wild, ignoresCase: random.below(2) == 0)
+        let starts = (0..<max(0, length - width + 1)).filter { want.matches(in: data, at: $0) }.map { Int64($0) }
+        let start = Int64(random.below(length + 6)) - 3
+        let chunk = [1, 2, 15, 16, 17, 100, 1 << 20][random.below(7)]
+        for forward in [true, false] {
+            for wraps in [true, false] {
+                var expected: SearchOutcome = .notFound
+                if forward {
+                    if let first = starts.first(where: { $0 >= start }) { expected = .found(first..<(first + Int64(width))) }
+                    else if wraps, let first = starts.first(where: { $0 < start }) { expected = .found(first..<(first + Int64(width))) }
+                } else {
+                    if let last = starts.last(where: { $0 <= start }) { expected = .found(last..<(last + Int64(width))) }
+                    else if wraps, let last = starts.last(where: { $0 > start }) { expected = .found(last..<(last + Int64(width))) }
+                }
+                let got = ByteSearcher.find(want, in: DataByteSource(data), startingAt: start, direction: forward ? .forward : .backward, wraps: wraps, chunk: chunk)
+                if got != expected { searchWrong.append("round \(round): \(forward ? "forward" : "back") from \(start) wraps \(wraps), chunk \(chunk), in \(length) bytes: \(got) not \(expected)") }
+            }
+        }
+    }
+    check(searchWrong.isEmpty, "1,200 searches through files of up to 4,000 bytes, with letters in either case and chunks either side of a vector, agree with looking at every place: \(searchWrong.prefix(2))")
+}
+checkLookingForOneByteFirst()
+
 // MARK: Typing and saving
 
 // What typing does to the bytes (where a digit lands, what the second digit changes, where the cursor goes, what Delete is for)
