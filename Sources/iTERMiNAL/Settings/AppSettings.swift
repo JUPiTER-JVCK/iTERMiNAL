@@ -134,6 +134,10 @@ final class AppSettings: ObservableObject {
     /// A `CursorAnimation` raw value. Kept as the string so a name this build
     /// does not know (from a newer one) is read as "none" and not lost.
     @Published var cursorAnimationTag: String { didSet { defaults.set(cursorAnimationTag, forKey: "cursorAnimationTag") } }
+    /// Whether a block cursor flashes above SDR white on a display with the
+    /// headroom for it (see `HDRCursor`). Off, or on a display without, the
+    /// cursor is SwiftTerm's own.
+    @Published var hdrCursor: Bool { didSet { defaults.set(hdrCursor, forKey: "hdrCursor") } }
     @Published var scrollbackLines: Int { didSet { defaults.set(scrollbackLines, forKey: "scrollbackLines") } }
     @Published var terminalThemeID: String { didSet { defaults.set(terminalThemeID, forKey: "terminalThemeID") } }
     /// `TerminalType` raw values for `TERM` in local shells and in remote
@@ -177,6 +181,14 @@ final class AppSettings: ObservableObject {
     @Published var shellIntegration: Bool { didSet { defaults.set(shellIntegration, forKey: "shellIntegration") } }
     /// Says so when a command that ran for `longCommandSeconds` ends in a tab
     /// nobody is looking at. Needs shell integration.
+    /// Whether the Dock icon's cursor blinks while a command runs (see
+    /// `DockBlink`). Needs the shell integration above to know when one does.
+    @Published var dockBlink: Bool {
+        didSet {
+            defaults.set(dockBlink, forKey: "dockBlink")
+            if !dockBlink { DockBlink.shared.cancel() }
+        }
+    }
     @Published var notifyLongCommands: Bool { didSet { defaults.set(notifyLongCommands, forKey: "notifyLongCommands") } }
     /// How long counts as long, in seconds: 5 to 3600.
     @Published var longCommandSeconds: Int { didSet { defaults.set(longCommandSeconds, forKey: "longCommandSeconds") } }
@@ -485,6 +497,7 @@ final class AppSettings: ObservableObject {
         terminalFontSize = defaults.object(forKey: "terminalFontSize") as? Double ?? 13
         cursorStyleTag = defaults.string(forKey: "cursorStyleTag") ?? "steadyBlock"
         cursorAnimationTag = defaults.string(forKey: "cursorAnimationTag") ?? CursorAnimation.none.rawValue
+        hdrCursor = defaults.object(forKey: "hdrCursor") as? Bool ?? true
         scrollbackLines = defaults.object(forKey: "scrollbackLines") as? Int ?? 10_000
         terminalThemeID = defaults.string(forKey: "terminalThemeID") ?? "auto"
         localTerminalTypeTag = defaults.string(forKey: "localTerminalTypeTag") ?? TerminalType.default.rawValue
@@ -519,6 +532,7 @@ final class AppSettings: ObservableObject {
         optionAsMeta = defaults.object(forKey: "optionAsMeta") as? Bool ?? true
         secureKeyboardEntry = defaults.object(forKey: "secureKeyboardEntry") as? Bool ?? false
         shellIntegration = defaults.object(forKey: "shellIntegration") as? Bool ?? false
+        dockBlink = defaults.object(forKey: "dockBlink") as? Bool ?? true
         notifyLongCommands = defaults.object(forKey: "notifyLongCommands") as? Bool ?? false
         longCommandSeconds = min(max(defaults.object(forKey: "longCommandSeconds") as? Int ?? 30, 5), 3600)
         terminalLineSpacing = VisualRange.clamp(
@@ -889,6 +903,7 @@ final class AppSettings: ObservableObject {
         terminalFontSize = 13
         cursorStyleTag = "steadyBlock"
         cursorAnimationTag = CursorAnimation.none.rawValue
+        hdrCursor = true
         scrollbackLines = 10_000
         terminalThemeID = "auto"
         localTerminalTypeTag = TerminalType.default.rawValue
@@ -911,6 +926,7 @@ final class AppSettings: ObservableObject {
         optionAsMeta = true
         secureKeyboardEntry = false
         shellIntegration = false
+        dockBlink = true
         notifyLongCommands = false
         longCommandSeconds = 30
         terminalLineSpacing = 1

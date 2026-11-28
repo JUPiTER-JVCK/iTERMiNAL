@@ -44,6 +44,7 @@ final class SwiftTermEngine: TerminalEngine {
     private var lastGPURequest: Bool?
     private var lastCursor: (style: CursorStyle, animation: CursorAnimation)?
     private lazy var cursorAnimator = CursorAnimator(host: terminalView)
+    private lazy var hdrCursor = HDRCursor(host: terminalView)
     private var clickMonitor: Any?
     private var lastActivityAt = Date.distantPast
 
@@ -214,6 +215,7 @@ final class SwiftTermEngine: TerminalEngine {
         terminalView.backgroundOpacity = requested < 1 ? 0 : 1
         terminalView.caretColor = appearance.cursorColor ?? appearance.foreground
         terminalView.caretTextColor = appearance.cursorTextColor
+        hdrCursor.color = appearance.cursorColor ?? appearance.foreground
         if let selection = appearance.selectionColor ?? defaultSelectionColor {
             terminalView.selectedTextBackgroundColor = selection
         }
@@ -244,8 +246,13 @@ final class SwiftTermEngine: TerminalEngine {
         }
     }
 
-    func applyCursor(styleTag: String, animation: CursorAnimation) {
+    func applyCursor(styleTag: String, animation: CursorAnimation, hdr: Bool) {
         let base = CursorStyle(tagName: styleTag) ?? .steadyBlock
+        // Before the check below: switching HDR on or off changes neither the
+        // style nor the animation. It is drawn over the cursor SwiftTerm draws
+        // as a layer, so not with the GPU renderer, and only for a block.
+        let isBlock = base == .steadyBlock || base == .blinkBlock
+        hdrCursor.set(enabled: hdr && isBlock && !isGPUAccelerated)
         // An animation is the blink, so SwiftTerm's own would only fight it —
         // and it can only be drawn where the cursor is a layer, which under the
         // GPU renderer it is not. There the plain style is kept as it is.

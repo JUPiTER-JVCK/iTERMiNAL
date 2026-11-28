@@ -5,18 +5,23 @@
 
 Reads, as the sources:
 
-  Resources/AppIcon/AppIcon-dark.svg    the bundle icon
-  Resources/AppIcon/AppIcon-light.svg   the Dock's icon while the app is light
+  Resources/AppIcon/AppIcon-dark.svg, AppIcon-light.svg
+  Resources/AppIcon/AppIcon-dark-cursor-off.svg, AppIcon-light-cursor-off.svg
+      the same two icons with the cursor hidden: the "off" frame of the Dock blink
 
 and writes:
 
   Resources/Assets.xcassets/AppIcon.appiconset/            the bundle icon (dark)
   Resources/Assets.xcassets/DockIconLight.imageset/        the Dock's icon while the app is light
+  Resources/Assets.xcassets/DockCursorOff.imageset/        the Dock's blink frame, dark
+  Resources/Assets.xcassets/DockCursorOffLight.imageset/   the Dock's blink frame, light
 
-The icon is two stacked terminal windows with a phosphor-green prompt, output
-bars and cursor, on a black (dark) or slate-grey (light) tile. The SVGs are
-1024x1024 masters on Apple's macOS icon grid (824pt body, 100pt margin, shadow
-built in) with the text outlined, so rendering needs no font.
+The icon (M9, "Status Line") is one terminal window on a charcoal (dark) or
+slate-grey (light) tile: phosphor-green output bars, a `$_` prompt, and a status
+line with `~/` and the exit code. No layer is pure black, which clips on XDR
+screens. The SVGs are 1024x1024 masters on Apple's macOS icon grid (824pt body,
+100pt margin, shadow built in) with the text outlined, so rendering needs no
+font.
 
 Rendering needs Node with `playwright` (Chromium).
 """
@@ -77,22 +82,26 @@ def main():
     jobs = [
         (str(sources / "AppIcon-dark.svg"), [(str(appicon / name), px) for name, px in APPICON]),
     ]
-    # While the app is light the Dock shows this one (see DockIcon.swift); when
-    # it is dark the Dock shows the bundle icon above. 512pt at 1x and 2x.
-    name = "DockIconLight"
-    d = catalog / f"{name}.imageset"
-    d.mkdir(exist_ok=True)
-    (d / "Contents.json").write_text(json.dumps({
-        "images": [
-            {"filename": f"{name}_512.png", "idiom": "universal", "scale": "1x"},
-            {"filename": f"{name}_1024.png", "idiom": "universal", "scale": "2x"},
-        ],
-        "info": {"author": "xcode", "version": 1},
-    }, indent=2) + "\n")
-    jobs.append((str(sources / "AppIcon-light.svg"), [
-        (str(d / f"{name}_512.png"), 512),
-        (str(d / f"{name}_1024.png"), 1024),
-    ]))
+    # The Dock's own pictures (see DockIcon.swift): the light icon while the app
+    # is light, and a cursor-less frame of each for the blink. 512pt at 1x and 2x.
+    for name, svg in [
+        ("DockIconLight", "AppIcon-light.svg"),
+        ("DockCursorOff", "AppIcon-dark-cursor-off.svg"),
+        ("DockCursorOffLight", "AppIcon-light-cursor-off.svg"),
+    ]:
+        d = catalog / f"{name}.imageset"
+        d.mkdir(exist_ok=True)
+        (d / "Contents.json").write_text(json.dumps({
+            "images": [
+                {"filename": f"{name}_512.png", "idiom": "universal", "scale": "1x"},
+                {"filename": f"{name}_1024.png", "idiom": "universal", "scale": "2x"},
+            ],
+            "info": {"author": "xcode", "version": 1},
+        }, indent=2) + "\n")
+        jobs.append((str(sources / svg), [
+            (str(d / f"{name}_512.png"), 512),
+            (str(d / f"{name}_1024.png"), 1024),
+        ]))
     render(jobs)
 
 

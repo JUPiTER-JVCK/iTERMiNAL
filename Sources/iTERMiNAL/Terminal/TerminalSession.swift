@@ -70,6 +70,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     let engine: SwiftTermEngine
+
+    deinit {
+        DockBlink.shared.end(id)
+    }
     /// Coalesces rapid bells / identical OSC text to about one event per
     /// second. Private because nothing outside `noteAttention` has any business
     /// moving the debounce window.
@@ -100,6 +104,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         var gpuRequested: Bool
         var cursorStyleTag: String
         var cursorAnimationTag: String
+        var hdrCursor: Bool
         var cursorColorHex: String
         var cursorTextColorHex: String
         var selectionColorHex: String
@@ -407,6 +412,11 @@ final class TerminalSession: ObservableObject, Identifiable {
         refreshActiveProgram()
         // A command is starting: whatever the last one did is no longer the news.
         if case .commandStart = mark { lastCommandResult = nil }
+        // The Dock icon's cursor blinks for as long as any tab has one running.
+        switch mark {
+        case .commandStart: DockBlink.shared.begin(id)
+        case .commandFinished, .promptStart: DockBlink.shared.end(id)
+        }
         let now = Date()
         guard let finished = commandTracker.handle(mark, at: now) else { return }
         lastCommandResult = CommandResult(exitCode: finished.exitCode, seconds: finished.seconds, finishedAt: now)
@@ -726,6 +736,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             gpuRequested: settings.useGPURendering,
             cursorStyleTag: settings.cursorStyleTag,
             cursorAnimationTag: settings.cursorAnimationTag,
+            hdrCursor: settings.hdrCursor,
             cursorColorHex: settings.cursorColorHex,
             cursorTextColorHex: settings.cursorTextColorHex,
             selectionColorHex: settings.selectionColorHex,
@@ -767,7 +778,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         if !kind.isTool {
             engine.applyCursor(
                 styleTag: settings.cursorStyleTag,
-                animation: CursorAnimation(rawValue: settings.cursorAnimationTag) ?? .none
+                animation: CursorAnimation(rawValue: settings.cursorAnimationTag) ?? .none,
+                hdr: settings.hdrCursor
             )
         }
         // A bundled tool follows the palette the terminal just took on —
@@ -805,6 +817,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard hasStarted, isRunning else { return }
         engine.terminate()
         isRunning = false
+        DockBlink.shared.end(id)
     }
 
     // MARK: Automatic reconnect
@@ -1110,6 +1123,7 @@ extension TerminalSession: TerminalEngineDelegate {
 
     func engineProcessTerminated(exitCode: Int32?) {
         isRunning = false
+        DockBlink.shared.end(id)
         refreshActiveProgram()
         // What the engine hands over is the raw wait status; what is shown and
         // published is the exit code, as a shell's `$?` has it.
