@@ -293,18 +293,24 @@ private struct QuickReferenceSessionStrip: View {
                 help: content.hasFullList ? "All keys for \(content.badge) (⌥⌘/)"
                     : "Examples for \(content.badge) in the Cheatsheet"
             )
-            // Upward, over the terminal: the line is at the window's bottom.
-            // The arrow edge is the popover's own side that points at the
-            // button, so `.top` hangs it below, where it ran off the screen.
-            .popover(isPresented: $showAll, arrowEdge: .bottom) {
-                QuickReferenceFullList(
-                    content: content,
-                    run: { hintAction in
-                        showAll = false
-                        run(hintAction, in: content)
-                    },
-                    openCheatsheet: cheatsheetOpener(for: content.command)
-                )
+            // Above the line, over the terminal: the line is at the window's
+            // bottom. Shown by AppKit, which keeps to the edge it is given:
+            // SwiftUI's `.popover` took its arrow edge as a hint, and opened
+            // this below the line and off the screen with either one.
+            .background {
+                AnchoredPopover(isPresented: $showAll, edge: .top) {
+                    QuickReferenceFullList(
+                        content: content,
+                        run: { hintAction in
+                            showAll = false
+                            run(hintAction, in: content)
+                        },
+                        openCheatsheet: cheatsheetOpener(for: content.command)
+                    )
+                    // Hosted on its own, it has none of this view's environment.
+                    .environment(\.appThemeID, appThemeID)
+                    .environment(\.colorScheme, colorScheme)
+                }
             }
         }
         .font(.system(size: 11))

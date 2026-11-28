@@ -41,10 +41,12 @@ it describes the pane you are typing into.
   start, in a capsule, it took room the hints needed and stood out more than a
   label should. For a program with no keys listed that the Cheatsheet has a
   page for, it opens that page instead.
-- The popover opens upward, over the terminal: below, it ran off the screen.
-  It is as tall as its list, up to 400pt, opens with its search field focused,
-  and Return there types the first key found. Its legend shows only the
-  modifiers the list uses — never ⌘, which no program here is sent.
+- The popover opens upward, over the terminal. AppKit shows it
+  (`AnchoredPopover`), on the edge it is given: SwiftUI's `.popover` takes its
+  arrow edge as a hint, and opened it below the line and off the screen with
+  either edge. It is as tall as its list, up to 400pt, opens with its search
+  field focused, and Return there types the first key found. Its legend shows
+  only the modifiers the list uses — never ⌘, which no program here is sent.
 - At a prompt the shell's keys can be switched off (Settings → Appearance →
   Status → Shell keys at a prompt). The line stays, empty, so the terminal
   keeps its size.
