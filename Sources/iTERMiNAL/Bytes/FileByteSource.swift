@@ -47,6 +47,12 @@ enum Staleness: Equatable {
 /// bytes and the window a few kilobytes, so nearly every read is of a page just
 /// read. One lock covers it, so the grid and a background scan can share a source,
 /// though a scan that must not push the grid's pages out should have its own.
+///
+/// A source opened without the cache (`caching: false`) is for one pass over the
+/// file, which reads each byte once and has no use for one. Its reads take no lock:
+/// `pread` is told where to read, so any number of threads can read at once
+/// without disturbing one another. Shared by the threads of the byte map's pass,
+/// the one lock held every read in turn, and four threads ran no faster than one.
 final class FileByteSource: ByteSource {
     static let pageSize = 64 * 1024
     /// 256 pages of 64 KB: 16 MB.
@@ -55,6 +61,8 @@ final class FileByteSource: ByteSource {
     let path: String
     let count: Int64
     let identity: FileIdentity
+    /// Whether reads go through the page cache, and so through its lock.
+    let caches: Bool
 
     private let descriptor: Int32
     private let lock = NSLock()
@@ -66,11 +74,12 @@ final class FileByteSource: ByteSource {
         var lastUsed: UInt64
     }
 
-    private init(path: String, descriptor: Int32, identity: FileIdentity) {
+    private init(path: String, descriptor: Int32, identity: FileIdentity, caches: Bool) {
         self.path = path
         self.descriptor = descriptor
         self.identity = identity
         self.count = identity.size
+        self.caches = caches
     }
 
     deinit {
@@ -83,7 +92,9 @@ final class FileByteSource: ByteSource {
     /// what is checked is what is read: a name swapped for something else in
     /// between cannot get past. It is opened without waiting, so a named pipe
     /// with no writer is refused rather than waited on.
-    static func opening(path: String) -> Result<FileByteSource, BytesFilePolicy.Refusal> {
+    ///
+    /// `caching: false` opens it for a single pass over it, as the type says.
+    static func opening(path: String, caching: Bool = true) -> Result<FileByteSource, BytesFilePolicy.Refusal> {
         let descriptor = openWithoutWaiting(path)
         guard descriptor >= 0 else {
             let code = errno
@@ -108,12 +119,13 @@ final class FileByteSource: ByteSource {
             _ = close(descriptor)
             return .failure(.empty)
         }
-        return .success(FileByteSource(path: path, descriptor: descriptor, identity: FileIdentity(info)))
+        return .success(FileByteSource(path: path, descriptor: descriptor, identity: FileIdentity(info), caches: caching))
     }
 
     func read(_ range: Range<Int64>) -> [UInt8] {
         let limited = clamped(range)
         guard !limited.isEmpty else { return [] }
+        guard caches else { return readDirect(limited) }
         var result: [UInt8] = []
         result.reserveCapacity(Int(limited.upperBound - limited.lowerBound))
         let pageSize = Int64(FileByteSource.pageSize)
@@ -148,6 +160,27 @@ final class FileByteSource: ByteSource {
         if now.modifiedSeconds != identity.modifiedSeconds
             || now.modifiedNanoseconds != identity.modifiedNanoseconds { return .modified }
         return .unchanged
+    }
+
+    /// `range`, already limited to the file, read straight from it with no cache
+    /// and no lock. A read that comes back short ends it, so what is returned is
+    /// the readable prefix, as from the cache.
+    private func readDirect(_ range: Range<Int64>) -> [UInt8] {
+        let want = Int(range.upperBound - range.lowerBound)
+        return [UInt8](unsafeUninitializedCapacity: want) { buffer, initialized in
+            var have = 0
+            while have < want {
+                let got = pread(descriptor, buffer.baseAddress! + have, want - have, off_t(range.lowerBound) + off_t(have))
+                if got > 0 {
+                    have += got
+                } else if got < 0 && errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+            initialized = have
+        }
     }
 
     /// Page `index`, from the cache or the file. The lock is held.

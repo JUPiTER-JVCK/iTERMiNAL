@@ -425,15 +425,22 @@ final class BytesViewerModel: ObservableObject {
             // cache the pages the grid is showing. If the file is not the one that was opened (it
             // was replaced, or is gone), the shared source, which still holds what the grid shows,
             // is read instead.
+            //
+            // Its own source has no cache, which a pass reading each byte once has no use for, and
+            // so no lock: then the pass is shared among all of the Mac's cores. Through the shared
+            // source, or the edits over it, the threads would only wait on its lock, so one reads.
             var source: ByteSource = shared
+            var limits = ByteMapAnalyzer.Limits.standard
             if let edited {
                 source = edited
-            } else if case .success(let own) = FileByteSource.opening(path: shared.path), own.identity == shared.identity {
+            } else if case .success(let own) = FileByteSource.opening(path: shared.path, caching: false), own.identity == shared.identity {
                 source = own
+                limits.workers = ProcessInfo.processInfo.activeProcessorCount
             }
             var lastReport = DispatchTime.now().uptimeNanoseconds
             let analysis = ByteMapAnalyzer.analyze(
                 source,
+                limits: limits,
                 isCancelled: { token.isCancelled },
                 progress: { fraction in
                     let now = DispatchTime.now().uptimeNanoseconds
