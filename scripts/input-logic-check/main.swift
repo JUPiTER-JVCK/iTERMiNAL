@@ -18323,5 +18323,55 @@ func checkQuickReferenceMore() {
 }
 checkQuickReferenceMore()
 
+/// How many hints the quick reference line shows, now that it is measured
+/// once rather than laid out as a `ViewThatFits` with a row for every count.
+func checkQuickReferenceFit() {
+    func fit(_ widths: [CGFloat?], note: CGFloat? = nil, hasNote: Bool = false, room: CGFloat) -> Int {
+        QuickReferenceFit.count(widths: widths, hasNote: hasNote || note != nil, noteWidth: note, spacing: 16, room: room)
+    }
+    check(fit([50, 60, 70], room: 200) == 2, "50 + 16 + 60 fits in 200, and the 70 after it does not")
+    check(fit([50, 60, 70], room: 212) == 3, "all three fit in exactly their width")
+    check(fit([50, 60, 70], room: 211.6) == 3, "and in a hair less, from rounding in what was measured")
+    check(fit([50, 60, 70], room: 211) == 2, "but not in a point less")
+    check(fit([50, 60, 70], room: 49) == 0, "too narrow for the first: none")
+    check(fit([], room: 500) == 0 && fit([50], room: 0) == 0, "nothing to show, or no room yet")
+    check(fit([50, nil, 70], room: 500) == 1, "a hint not measured yet ends the run: nothing is shown that might not fit")
+    check(fit([nil, 60], room: 500) == 0, "even the first")
+    check(fit([50, 60], note: 40, room: 182) == 2, "the note after every hint, when it fits too")
+    check(fit([50, 60], note: 40, room: 181) == 1, "a note that does not fit costs the last hint, as ViewThatFits had it")
+    check(fit([50, 60], hasNote: true, room: 500) == 1, "and so does a note not measured yet")
+    check(fit([], note: 400, room: 100) == 0, "a line that is only its note shows it whatever the room")
+    let git = [CGFloat](repeating: 120, count: 33)
+    check(fit(git, room: 1000) == 7, "git's 33 subcommands at 120 each: seven fit in 1000")
+
+    // What ViewThatFits picked: the first row, from the longest, that fits —
+    // and the shortest when none does. The count must agree with it always.
+    func viewThatFits(_ widths: [CGFloat], note: CGFloat?, room: CGFloat) -> Int {
+        for count in stride(from: widths.count, through: 0, by: -1) {
+            var parts = Array(widths.prefix(count))
+            if count == widths.count, let note { parts.append(note) }
+            let width = parts.reduce(0, +) + 16 * CGFloat(max(parts.count - 1, 0))
+            if width <= room { return count }
+        }
+        return 0
+    }
+    var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+    func next(_ bound: Int) -> Int {
+        seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return Int((seed >> 33) % UInt64(bound))
+    }
+    var disagreements: [String] = []
+    for _ in 0..<5_000 {
+        let widths = (0..<next(14)).map { _ in CGFloat(20 + next(180)) }
+        let note: CGFloat? = next(4) == 0 ? CGFloat(30 + next(200)) : nil
+        let room = CGFloat(next(1_400))
+        let expected = viewThatFits(widths, note: note, room: room)
+        let got = fit(widths.map(Optional.some), note: note, room: room)
+        if got != expected { disagreements.append("\(widths) note \(String(describing: note)) room \(room): \(got) not \(expected)") }
+    }
+    check(disagreements.isEmpty, "the same count as ViewThatFits's choice, for 5000 lines: \(disagreements.prefix(3))")
+}
+checkQuickReferenceFit()
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

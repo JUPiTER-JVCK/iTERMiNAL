@@ -23,9 +23,13 @@ it describes the pane you are typing into.
   sidebar's footer as one line. When the status bar is switched off the strip
   is the last row, and because it is the same height its seam lines up instead.
 - Hints are in the order they matter, and a narrow window drops them from the
-  end: nothing wraps or scrolls. `ViewThatFits` picks the longest run of them
-  that fits, so the ones left out are not on the screen at all — moved off it,
-  as an earlier layout did, VoiceOver still read them. A key cap never gives
+  end: nothing wraps or scrolls. Only the longest run of them that fits is
+  built, so the ones left out are not on the screen at all — moved off it, as
+  an earlier layout did, VoiceOver still read them. How many fit comes from
+  each hint's width, measured on a copy of the row that is never drawn and
+  VoiceOver never sees (`QuickReferenceFit`). A `ViewThatFits` with a row for
+  every count did the same, but built n(n+1)/2 hints at each redraw — 561
+  buttons for git's 33 subcommands — and made typing lag. A key cap never gives
   way — cut down it reads as "…" — so only the words beside it are shortened.
 - The first key lines up with the status bar's first icon below it: the line
   starts 4pt further left than the status bar, by the hint's own hover padding.
@@ -125,7 +129,9 @@ not optional: the engine passes on at most one repaint in each quarter second
 and drops the others rather than holding the last, so a page drawn whole just
 after the echo of return — man, less — and then left still would otherwise
 never be looked at again. Only the focused session is kept up to date, and nothing at all
-while the strip is off. Each refresh is a few `sysctl` calls; a leader's arguments
+while the strip is off. Typing itself redraws nothing: the session's activity time,
+which the echo of each key moves, is not published to the views that watch it
+(`TerminalSession.lastActivityAt`). Each refresh is a few `sysctl` calls; a leader's arguments
 are read once per job, tmux is asked at most once a second, and the answer is
 published only when it changes.
 
