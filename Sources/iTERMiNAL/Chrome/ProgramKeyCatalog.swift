@@ -24,13 +24,16 @@ import Foundation
 /// A program, as the Keyboard Shortcuts window groups them and the quick
 /// reference strip finds them.
 enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
-    case vim, nano, emacs, micro, pager, man, tmux, screen, top, htop, btop, superfile, ssh, shell
+    case vim, helix, nano, emacs, micro, pager, man, tmux, screen, top, htop, btop, superfile
+    case python, node, irb, psql, mysql, sqlite, fzf, lazygit, gitPatch
+    case ssh, shell
 
     var id: ProgramKeySection { self }
 
     var title: String {
         switch self {
         case .vim: return "Editor: Vim and Neovim"
+        case .helix: return "Editor: Helix"
         case .nano: return "Editor: nano"
         case .emacs: return "Editor: Emacs (in the terminal)"
         case .micro: return "Editor: micro"
@@ -42,6 +45,15 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
         case .htop: return "Monitor: htop"
         case .btop: return "Monitor: btop"
         case .superfile: return "File manager: superfile"
+        case .python: return "Python prompt"
+        case .node: return "Node.js prompt"
+        case .irb: return "Ruby prompt: irb"
+        case .psql: return "Database: psql (PostgreSQL)"
+        case .mysql: return "Database: mysql and mariadb"
+        case .sqlite: return "Database: sqlite3"
+        case .fzf: return "Finder: fzf"
+        case .lazygit: return "Git: lazygit"
+        case .gitPatch: return "Git: choosing hunks (git add -p)"
         case .ssh: return "ssh: escape keys"
         case .shell: return "Shell: the command line"
         }
@@ -52,6 +64,8 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
         switch self {
         case .vim:
             return "Normal mode unless it says otherwise; esc gets back to it. Typed one after another, not held together. vi and Neovim take the same ones."
+        case .helix:
+            return "Normal mode unless it says otherwise; esc gets back to it. Helix selects first, then acts: x selects the line, d deletes what is selected. space opens a menu of its own — press it, then the key."
         case .nano:
             return "⌃ is Control. ⌥ keys are nano's Meta (M-) keys: they need Option sent as Meta in the terminal."
         case .emacs:
@@ -63,15 +77,33 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
         case .man:
             return "A page is read in the pager, so the pager's keys work in it. The sections and searches are typed at the prompt, with man."
         case .tmux:
-            return "⌃B is the prefix: press it, let go, then the key. A ~/.tmux.conf that changes the prefix — often to ⌃A — is not reflected."
+            return "⌃B is tmux's own prefix: press it, let go, then the key. When tmux runs on this Mac, the strip asks it which prefix is set and shows that one."
         case .screen:
-            return "⌃A is the prefix: press it, let go, then the key."
+            return "⌃A is screen's own prefix: press it, let go, then the key. An escape line in ~/.screenrc changes it, and the strip shows that one."
         case .top:
             return "macOS's top and Linux's top share only a few keys. The ones that work in just one say which."
         case .htop:
             return "Most also have a function key — F10 quits — which needs fn on most Mac keyboards."
         case .btop, .superfile:
             return "The keys of the version iTERMiNAL bundles, as Keyboard Shortcuts lists them."
+        case .python:
+            return "Python's >>> prompt: typed there, and return runs it. The same in python3 and ipython."
+        case .node:
+            return "Node's > prompt. The commands with a dot are the prompt's own; anything else is JavaScript."
+        case .irb:
+            return "Ruby's interactive prompt."
+        case .psql:
+            return "PostgreSQL's prompt. A backslash command runs with return; SQL runs once it ends with ;."
+        case .mysql:
+            return "MySQL's and MariaDB's prompt. SQL runs once it ends with ;."
+        case .sqlite:
+            return "SQLite's prompt. A dot command runs with return; SQL runs once it ends with ;."
+        case .fzf:
+            return "Type to narrow the list. fzf's default keys; FZF_DEFAULT_OPTS can change them."
+        case .lazygit:
+            return "lazygit's default keys. Most act on the panel in front, and ? lists that panel's."
+        case .gitPatch:
+            return "git asks about each hunk of changes in turn. Type the letter, then return — unless interactive.singleKey is set, when the letter is enough."
         case .ssh:
             return "ssh reads these only at the start of a line, so press return first. They are typed by hand: a click would send the return, and whatever is half typed with it."
         case .shell:
@@ -83,6 +115,7 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
     var badge: String {
         switch self {
         case .vim: return "vim"
+        case .helix: return "hx"
         case .nano: return "nano"
         case .emacs: return "emacs"
         case .micro: return "micro"
@@ -94,6 +127,15 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
         case .htop: return "htop"
         case .btop: return "btop"
         case .superfile: return "superfile"
+        case .python: return "python"
+        case .node: return "node"
+        case .irb: return "irb"
+        case .psql: return "psql"
+        case .mysql: return "mysql"
+        case .sqlite: return "sqlite3"
+        case .fzf: return "fzf"
+        case .lazygit: return "lazygit"
+        case .gitPatch: return "git add -p"
         case .ssh: return "ssh"
         case .shell: return "shell"
         }
@@ -101,10 +143,13 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
 
     /// The executables that are this program, as the kernel names a running
     /// process: lowercased, with no path. What finds the section for the
-    /// program in front of a terminal.
+    /// program in front of a terminal. A version on the end is looked past
+    /// (`section(forProgram:)`): python3.12 is python. Choosing hunks has
+    /// none: it is `git` reading the terminal, told apart by its command line.
     var executables: [String] {
         switch self {
         case .vim: return ["vim", "vi", "nvim", "view", "vimdiff", "rvim", "rview"]
+        case .helix: return ["hx", "helix"]
         case .nano: return ["nano", "rnano", "pico"]
         case .emacs: return ["emacs", "emacsclient", "emacs-nox"]
         case .micro: return ["micro"]
@@ -118,6 +163,15 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
         // spf is what the binary is called; superfile is the name of a panel's
         // session.
         case .superfile: return ["spf", "superfile"]
+        case .python: return ["python", "python3", "ipython", "ipython3", "bpython"]
+        case .node: return ["node", "nodejs"]
+        case .irb: return ["irb"]
+        case .psql: return ["psql"]
+        case .mysql: return ["mysql", "mariadb"]
+        case .sqlite: return ["sqlite3"]
+        case .fzf: return ["fzf"]
+        case .lazygit: return ["lazygit"]
+        case .gitPatch: return []
         case .ssh: return ["ssh"]
         case .shell: return ["zsh", "bash", "sh", "dash", "ksh"]
         }
@@ -127,8 +181,16 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
     fileprivate var names: [String] {
         switch self {
         case .vim: return executables + ["neovim"]
+        case .helix: return executables
         case .pager: return executables + ["pager"]
         case .man: return executables + ["manual", "apropos", "whatis"]
+        case .python: return executables + ["repl"]
+        case .node: return executables + ["javascript", "repl"]
+        case .irb: return executables + ["ruby", "repl"]
+        case .psql: return executables + ["postgres", "postgresql", "sql"]
+        case .mysql: return executables + ["sql"]
+        case .sqlite: return executables + ["sqlite", "sql"]
+        case .gitPatch: return ["git", "patch", "hunk", "stage"]
         case .ssh: return executables + ["escape", "disconnect"]
         case .shell: return executables + ["readline", "prompt"]
         default: return executables
@@ -137,10 +199,11 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
 
     /// Key caps a click types ahead of the entry's own keys.
     ///
-    /// Vim's commands are normal mode's, and a click in insert mode would
-    /// otherwise type `:w` into the file. esc in normal mode does nothing.
+    /// Vim's and Helix's commands are normal mode's, and a click in insert
+    /// mode would otherwise type `:w` into the file. esc in normal mode does
+    /// nothing.
     var clickLead: [String] {
-        self == .vim ? ["esc"] : []
+        self == .vim || self == .helix ? ["esc"] : []
     }
 
     /// Whether a letter on its own cap means the lowercase key. Emacs writes
@@ -155,6 +218,30 @@ enum ProgramKeySection: CaseIterable, Hashable, Identifiable {
     /// Inside superfile, so it leaves these sections out.
     var isBundledTool: Bool {
         self == .btop || self == .superfile
+    }
+
+    /// Python and Node: one program runs a prompt and runs programs, and only
+    /// its arguments say which (`ActiveProgram.isInteractiveInterpreter`).
+    var isInterpreter: Bool {
+        self == .python || self == .node
+    }
+
+    /// Whether the arguments of a leader of this kind are read when it is in
+    /// front: a shell's, to tell a script from a prompt, and an interpreter's,
+    /// a prompt from a program.
+    var readsArguments: Bool {
+        self == .shell || isInterpreter
+    }
+
+    /// The prefix key a multiplexer's keys start with when nothing changes it:
+    /// tmux's ⌃B, screen's ⌃A. The one set can be swapped in
+    /// (`ProgramKeyCatalog.entries(in:prefix:)`).
+    var defaultPrefix: String? {
+        switch self {
+        case .tmux: return "⌃B"
+        case .screen: return "⌃A"
+        default: return nil
+        }
     }
 }
 
@@ -240,6 +327,10 @@ struct ProgramKeyEntry: Identifiable, Hashable {
         case .none:
             return nil
         case .prefix(let prefix):
+            // One button types it, not one per way: Vim's ":42" and "42G" both
+            // need the number, and two buttons typing the same ":" read as two
+            // different things.
+            guard index == 0 else { return nil }
             caps = prefix.split(separator: " ").map(String.init)
         case .keys:
             guard ways.indices.contains(index) else { return nil }
@@ -260,6 +351,32 @@ struct ProgramKeyEntry: Identifiable, Hashable {
 
     /// Whether a click on the way the strip shows types anything.
     var isClickable: Bool { typed(way: stripWay) != nil }
+
+    /// Whether `term` starts one of the words it is found by, for the full
+    /// list's search.
+    func isFound(by term: String) -> Bool { matches(term: term) }
+
+    /// The same entry with one cap swapped for another wherever it is — in its
+    /// keys, in what a click types and in the words around them. For a
+    /// multiplexer whose prefix has been changed: tmux's ⌃B for the ⌃A set.
+    func replacingCap(_ old: String, with new: String) -> ProgramKeyEntry {
+        guard old != new else { return self }
+        func swap(_ caps: [String]) -> String {
+            caps.map { $0 == old ? new : $0 }.joined(separator: " ")
+        }
+        let click: Click
+        switch self.click {
+        case .prefix(let prefix):
+            click = .prefix(swap(prefix.split(separator: " ").map(String.init)))
+        default:
+            click = self.click
+        }
+        return ProgramKeyEntry(
+            id, title.replacingOccurrences(of: old, with: new), ways.map(swap), in: section,
+            detail: detail?.replacingOccurrences(of: old, with: new),
+            short: short.replacingOccurrences(of: old, with: new), strip: strip, click: click
+        )
+    }
 }
 
 struct ProgramKeyGroup: Identifiable {
@@ -269,8 +386,9 @@ struct ProgramKeyGroup: Identifiable {
 }
 
 enum ProgramKeyCatalog {
-    static let all: [ProgramKeyEntry] = vim + nano + emacs + micro + pager + man + tmux + screen
-        + top + htop + btop + superfile + ssh + shell
+    static let all: [ProgramKeyEntry] = vim + helix + nano + emacs + micro + pager + man + tmux + screen
+        + top + htop + btop + superfile + python + node + irb + psql + mysql + sqlite + fzf + lazygit
+        + gitPatch + ssh + shell
 
     private static let bySection: [ProgramKeySection: [ProgramKeyEntry]] = Dictionary(grouping: all, by: \.section)
 
@@ -294,9 +412,35 @@ enum ProgramKeyCatalog {
 
     /// What the strip shows for `section`, in its order.
     static func strip(for section: ProgramKeySection) -> [ProgramKeyEntry] {
-        entries(in: section)
+        strip(of: entries(in: section))
+    }
+
+    /// `section`'s keys, with `prefix` — the prefix key the person set — in
+    /// place of the program's own (`defaultPrefix`): tmux's ⌃B becomes the ⌃A
+    /// a ~/.tmux.conf asked for. Nil, or the program's own, changes nothing.
+    static func entries(in section: ProgramKeySection, prefix: String?) -> [ProgramKeyEntry] {
+        let listed = entries(in: section)
+        guard let prefix, let standard = section.defaultPrefix, prefix != standard else { return listed }
+        return listed.map { $0.replacingCap(standard, with: prefix) }
+    }
+
+    /// What the strip shows for `section` with `prefix` swapped in.
+    static func strip(for section: ProgramKeySection, prefix: String?) -> [ProgramKeyEntry] {
+        strip(of: entries(in: section, prefix: prefix))
+    }
+
+    private static func strip(of entries: [ProgramKeyEntry]) -> [ProgramKeyEntry] {
+        entries
             .filter { $0.strip != nil }
             .sorted { ($0.strip ?? 0) < ($1.strip ?? 0) }
+    }
+
+    /// The entries every word of `query` finds, as the Keyboard Shortcuts
+    /// window searches: for the full list's own search box.
+    static func filter(_ entries: [ProgramKeyEntry], matching query: String) -> [ProgramKeyEntry] {
+        let terms = query.lowercased().split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard !terms.isEmpty else { return entries }
+        return entries.filter { entry in terms.allSatisfy { entry.isFound(by: $0) } }
     }
 
     static func entry(id: String) -> ProgramKeyEntry? {
@@ -323,10 +467,20 @@ enum ProgramKeyCatalog {
     }
 
     /// The section for a running program or a command's first word, if any.
+    ///
+    /// A version run into the name is looked past when the name itself is not
+    /// listed: python3.12 is python, node20 is node. Only for finding the
+    /// section — the name shown stays as the kernel gave it.
     static func section(forProgram raw: String) -> ProgramKeySection? {
         let name = normalizedProgramName(raw)
         guard !name.isEmpty else { return nil }
-        return ProgramKeySection.allCases.first { $0.executables.contains(name) }
+        if let found = ProgramKeySection.allCases.first(where: { $0.executables.contains(name) }) {
+            return found
+        }
+        var base = Substring(name)
+        while let last = base.last, last.isNumber || last == "." { base = base.dropLast() }
+        guard base.count < name.count, base.count > 1, base.last?.isLetter == true else { return nil }
+        return ProgramKeySection.allCases.first { $0.executables.contains(String(base)) }
     }
 
     // MARK: Vim
@@ -391,6 +545,46 @@ enum ProgramKeyCatalog {
         ProgramKeyEntry("vim.buffers", "Next or previous file", [":bn ↩", ":bp ↩"], in: .vim, detail: "Buffers"),
         ProgramKeyEntry("vim.numbers", "Show line numbers", [":set number ↩"], in: .vim, click: .prefix(":set space number")),
         ProgramKeyEntry("vim.help", "Help", [":help ↩"], in: .vim, detail: ":help followed by a topic opens that topic", strip: 9),
+    ]
+
+    // MARK: Helix
+
+    // Helix's default keymap. It selects, then acts on the selection, so many
+    // keys read differently from Vim's: x selects a line, d deletes what is
+    // selected. `space` starts a menu of its own.
+    private static let helix: [ProgramKeyEntry] = [
+        ProgramKeyEntry("helix.save", "Save", [":w ↩"], in: .helix, strip: 1),
+        ProgramKeyEntry("helix.quit", "Quit", [":q ↩"], in: .helix, detail: "Refuses while there are unsaved changes", strip: 2),
+        ProgramKeyEntry("helix.saveQuit", "Save and quit", [":wq ↩", ":x ↩"], in: .helix, strip: 3),
+        ProgramKeyEntry("helix.quitForce", "Quit without saving", [":q! ↩"], in: .helix, short: "Quit, don't save", strip: 4),
+        ProgramKeyEntry("helix.insert", "Insert before the selection", ["i"], in: .helix, short: "Insert", strip: 5),
+        ProgramKeyEntry("helix.append", "Insert after the selection", ["a"], in: .helix),
+        ProgramKeyEntry("helix.open", "New line below or above, and insert", ["o", "O"], in: .helix),
+        ProgramKeyEntry("helix.normal", "Back to normal mode", ["esc"], in: .helix, short: "Normal mode", strip: 6),
+        ProgramKeyEntry("helix.select", "Select mode, where moving extends the selection", ["v"], in: .helix),
+        ProgramKeyEntry("helix.line", "Select the line", ["x"], in: .helix, detail: "Again for the line after"),
+        ProgramKeyEntry("helix.all", "Select the whole file", ["%"], in: .helix),
+        ProgramKeyEntry("helix.collapse", "Collapse the selection to the cursor", [";"], in: .helix),
+        ProgramKeyEntry("helix.delete", "Delete what is selected", ["d"], in: .helix),
+        ProgramKeyEntry("helix.change", "Change what is selected", ["c"], in: .helix, detail: "Deletes it and starts inserting"),
+        ProgramKeyEntry("helix.yank", "Copy what is selected", ["y"], in: .helix, detail: "Yank"),
+        ProgramKeyEntry("helix.paste", "Paste after or before the selection", ["p", "P"], in: .helix),
+        ProgramKeyEntry("helix.undo", "Undo", ["u"], in: .helix, detail: "U redoes", strip: 7),
+        ProgramKeyEntry("helix.redo", "Redo", ["U"], in: .helix),
+        ProgramKeyEntry("helix.words", "Next word, previous word, end of the word", ["w", "b", "e"], in: .helix),
+        ProgramKeyEntry("helix.ends", "Start or end of the file", ["gg", "ge"], in: .helix),
+        ProgramKeyEntry("helix.search", "Search forward", ["/word ↩"], in: .helix, detail: "? searches backward",
+                        short: "Find", strip: 8, click: .prefix("/")),
+        ProgramKeyEntry("helix.searchNext", "Next or previous match", ["n", "N"], in: .helix),
+        ProgramKeyEntry("helix.palette", "Every command, to search", ["space ?"], in: .helix, short: "Commands", strip: 9),
+        ProgramKeyEntry("helix.files", "Open a file", ["space f"], in: .helix, short: "Files", strip: 10),
+        ProgramKeyEntry("helix.buffers", "Switch between open files", ["space b"], in: .helix),
+        ProgramKeyEntry("helix.globalSearch", "Search every file in the folder", ["space /"], in: .helix),
+        ProgramKeyEntry("helix.comment", "Comment or uncomment the lines", ["⌃C"], in: .helix),
+        ProgramKeyEntry("helix.indent", "Indent or outdent", [">", "<"], in: .helix),
+        ProgramKeyEntry("helix.join", "Join the lines", ["J"], in: .helix),
+        ProgramKeyEntry("helix.case", "Switch upper and lower case", ["~"], in: .helix),
+        ProgramKeyEntry("helix.tutor", "The tutorial", [":tutor ↩"], in: .helix),
     ]
 
     // MARK: nano
@@ -666,6 +860,144 @@ enum ProgramKeyCatalog {
         }
         return chord.symbols.joined().replacingOccurrences(of: "Space", with: "space")
     }
+
+    // MARK: Python, Node, Ruby
+
+    // Typed at the prompt, and run with return. How to leave comes first:
+    // it is what people look for.
+    private static let python: [ProgramKeyEntry] = [
+        ProgramKeyEntry("python.quit", "Quit", ["exit()"], in: .python, detail: "Or ⌃D on an empty line", strip: 1),
+        ProgramKeyEntry("python.interrupt", "Stop what is running", ["⌃C"], in: .python, detail: "At the prompt, abandons the line",
+                        short: "Stop", strip: 2),
+        ProgramKeyEntry("python.help", "Help", ["help()"], in: .python, detail: "q leaves it", strip: 3),
+        ProgramKeyEntry("python.helpOn", "Help on one thing", ["help(name)"], in: .python, detail: "A module, function or object",
+                        short: "Help on…", strip: 4, click: .prefix("help(")),
+        ProgramKeyEntry("python.dir", "The names something has", ["dir(name)"], in: .python, short: "Names in…", strip: 5,
+                        click: .prefix("dir(")),
+        ProgramKeyEntry("python.last", "The last result", ["_"], in: .python, short: "Last result", strip: 6),
+        ProgramKeyEntry("python.endInput", "End the input, and quit", ["⌃D"], in: .python, detail: "On an empty line"),
+    ]
+
+    private static let node: [ProgramKeyEntry] = [
+        ProgramKeyEntry("node.quit", "Quit", [".exit"], in: .node, detail: "Or ⌃D, or ⌃C twice", strip: 1),
+        ProgramKeyEntry("node.help", "The prompt's own commands", [".help"], in: .node, short: "Help", strip: 2),
+        ProgramKeyEntry("node.interrupt", "Stop what is running", ["⌃C"], in: .node, detail: "At the prompt, abandons the line",
+                        short: "Stop", strip: 3),
+        ProgramKeyEntry("node.editor", "Write several lines, then run them", [".editor"], in: .node,
+                        detail: "⌃D runs them, ⌃C cancels", short: "Editor", strip: 4),
+        ProgramKeyEntry("node.last", "The last result", ["_"], in: .node, short: "Last result", strip: 5),
+        ProgramKeyEntry("node.load", "Run a file in this session", [".load file"], in: .node, short: "Load",
+                        strip: 6, click: .prefix(".load space")),
+        ProgramKeyEntry("node.clear", "Clear the screen", ["⌃L"], in: .node),
+    ]
+
+    private static let irb: [ProgramKeyEntry] = [
+        ProgramKeyEntry("irb.quit", "Quit", ["exit"], in: .irb, detail: "Or ⌃D on an empty line", strip: 1),
+        ProgramKeyEntry("irb.help", "Help", ["help"], in: .irb, strip: 2),
+        ProgramKeyEntry("irb.interrupt", "Stop what is running", ["⌃C"], in: .irb, short: "Stop", strip: 3),
+        ProgramKeyEntry("irb.last", "The last result", ["_"], in: .irb, short: "Last result", strip: 4),
+    ]
+
+    // MARK: Database prompts
+
+    private static let psql: [ProgramKeyEntry] = [
+        ProgramKeyEntry("psql.quit", "Quit", ["\\q"], in: .psql, detail: "Or ⌃D", strip: 1),
+        ProgramKeyEntry("psql.help", "psql's own commands", ["\\?"], in: .psql, short: "Help", strip: 2),
+        ProgramKeyEntry("psql.sqlHelp", "Help on SQL", ["\\h"], in: .psql, detail: "\\h and a statement, such as \\h SELECT, for that one",
+                        short: "SQL help", strip: 3),
+        ProgramKeyEntry("psql.databases", "List the databases", ["\\l"], in: .psql, short: "Databases", strip: 4),
+        ProgramKeyEntry("psql.tables", "List the tables", ["\\dt"], in: .psql, short: "Tables", strip: 5),
+        ProgramKeyEntry("psql.describe", "Describe a table", ["\\d name"], in: .psql, short: "Describe", strip: 6,
+                        click: .prefix("\\d space")),
+        ProgramKeyEntry("psql.connect", "Connect to another database", ["\\c name"], in: .psql, short: "Connect", strip: 7,
+                        click: .prefix("\\c space")),
+        ProgramKeyEntry("psql.expanded", "One column per row, or back", ["\\x"], in: .psql, detail: "Expanded output",
+                        short: "Expanded", strip: 8),
+        ProgramKeyEntry("psql.timing", "Show how long each query takes", ["\\timing"], in: .psql),
+        ProgramKeyEntry("psql.edit", "Edit the query in your editor", ["\\e"], in: .psql),
+        ProgramKeyEntry("psql.cancel", "Cancel the query that is running", ["⌃C"], in: .psql),
+    ]
+
+    private static let mysql: [ProgramKeyEntry] = [
+        ProgramKeyEntry("mysql.quit", "Quit", ["exit"], in: .mysql, detail: "Or \\q", strip: 1),
+        ProgramKeyEntry("mysql.help", "Help", ["help"], in: .mysql, detail: "help and a statement explains that one", strip: 2),
+        ProgramKeyEntry("mysql.databases", "List the databases", ["show databases;"], in: .mysql, short: "Databases", strip: 3,
+                        click: .prefix("show space databases;")),
+        ProgramKeyEntry("mysql.use", "Switch to a database", ["use name;"], in: .mysql, short: "Use", strip: 4,
+                        click: .prefix("use space")),
+        ProgramKeyEntry("mysql.tables", "List the tables", ["show tables;"], in: .mysql, short: "Tables", strip: 5,
+                        click: .prefix("show space tables;")),
+        ProgramKeyEntry("mysql.describe", "Describe a table", ["describe name;"], in: .mysql, short: "Describe", strip: 6,
+                        click: .prefix("describe space")),
+        ProgramKeyEntry("mysql.cancel", "Cancel what is half typed", ["\\c"], in: .mysql, short: "Cancel", strip: 7),
+        ProgramKeyEntry("mysql.vertical", "End a query with this for one column per row", ["\\G"], in: .mysql),
+    ]
+
+    private static let sqlite: [ProgramKeyEntry] = [
+        ProgramKeyEntry("sqlite.quit", "Quit", [".quit"], in: .sqlite, detail: "Or .exit, or ⌃D", strip: 1),
+        ProgramKeyEntry("sqlite.help", "Help", [".help"], in: .sqlite, strip: 2),
+        ProgramKeyEntry("sqlite.tables", "List the tables", [".tables"], in: .sqlite, short: "Tables", strip: 3),
+        ProgramKeyEntry("sqlite.schema", "How the tables are made", [".schema"], in: .sqlite,
+                        detail: "A table's name after it for just that one", short: "Schema", strip: 4),
+        ProgramKeyEntry("sqlite.mode", "How results are shown", [".mode column"], in: .sqlite,
+                        detail: "column, box, table, csv, json, line, markdown", short: "Mode", strip: 5,
+                        click: .prefix(".mode space")),
+        ProgramKeyEntry("sqlite.headers", "Column names above results", [".headers on"], in: .sqlite, short: "Headers",
+                        strip: 6, click: .prefix(".headers space")),
+        ProgramKeyEntry("sqlite.open", "Open another database file", [".open file"], in: .sqlite, short: "Open", strip: 7,
+                        click: .prefix(".open space")),
+    ]
+
+    // MARK: fzf and lazygit
+
+    private static let fzf: [ProgramKeyEntry] = [
+        ProgramKeyEntry("fzf.accept", "Choose the line", ["↩"], in: .fzf, short: "Choose", strip: 1, click: .none),
+        ProgramKeyEntry("fzf.cancel", "Cancel", ["esc"], in: .fzf, detail: "⌃C and ⌃G too", strip: 2),
+        ProgramKeyEntry("fzf.down", "Down the list", ["⌃J", "⌃N"], in: .fzf, short: "Down", strip: 3),
+        ProgramKeyEntry("fzf.up", "Up the list", ["⌃K", "⌃P"], in: .fzf, short: "Up", strip: 4),
+        ProgramKeyEntry("fzf.mark", "Mark the line, to choose several", ["⇥"], in: .fzf, detail: "With -m; ⇧⇥ unmarks",
+                        short: "Mark", strip: 5),
+        ProgramKeyEntry("fzf.clear", "Clear what is typed", ["⌃U"], in: .fzf, short: "Clear", strip: 6),
+        ProgramKeyEntry("fzf.exact", "Match these letters exactly", ["'word"], in: .fzf, short: "Exact", strip: 7,
+                        click: .prefix("'")),
+        ProgramKeyEntry("fzf.starts", "Lines that start with it", ["^word"], in: .fzf, click: .prefix("^")),
+        ProgramKeyEntry("fzf.ends", "Lines that end with it", ["word$"], in: .fzf, click: .none),
+        ProgramKeyEntry("fzf.without", "Lines without it", ["!word"], in: .fzf, click: .prefix("!")),
+    ]
+
+    private static let lazygit: [ProgramKeyEntry] = [
+        ProgramKeyEntry("lazygit.quit", "Quit", ["q"], in: .lazygit, detail: "esc goes back from a menu or panel", strip: 1),
+        ProgramKeyEntry("lazygit.keys", "Every key for the panel in front", ["?"], in: .lazygit, short: "Keys", strip: 2),
+        ProgramKeyEntry("lazygit.stage", "Stage or unstage the file", ["space"], in: .lazygit, short: "Stage", strip: 3),
+        ProgramKeyEntry("lazygit.stageAll", "Stage or unstage everything", ["a"], in: .lazygit, short: "Stage all", strip: 4),
+        ProgramKeyEntry("lazygit.commit", "Commit", ["c"], in: .lazygit, strip: 5),
+        ProgramKeyEntry("lazygit.push", "Push", ["P"], in: .lazygit, strip: 6),
+        ProgramKeyEntry("lazygit.pull", "Pull", ["p"], in: .lazygit, strip: 7),
+        ProgramKeyEntry("lazygit.panels", "Previous or next panel", ["h", "l"], in: .lazygit, detail: "← and → too"),
+        ProgramKeyEntry("lazygit.discard", "Discard the change", ["d"], in: .lazygit, detail: "Asks first"),
+        ProgramKeyEntry("lazygit.undo", "Undo", ["z"], in: .lazygit, detail: "From the reflog"),
+        ProgramKeyEntry("lazygit.menu", "The panel's commands, as a menu", ["x"], in: .lazygit),
+        ProgramKeyEntry("lazygit.filter", "Filter or search", ["/"], in: .lazygit),
+        ProgramKeyEntry("lazygit.back", "Back", ["esc"], in: .lazygit),
+    ]
+
+    // MARK: Choosing hunks
+
+    // `git add -p`, and `checkout`, `reset`, `restore`, `stash` and `commit`
+    // with -p: one question for each hunk.
+    private static let gitPatch: [ProgramKeyEntry] = [
+        ProgramKeyEntry("gitPatch.yes", "Take this hunk", ["y"], in: .gitPatch, short: "Yes", strip: 1),
+        ProgramKeyEntry("gitPatch.no", "Leave this hunk", ["n"], in: .gitPatch, short: "No", strip: 2),
+        ProgramKeyEntry("gitPatch.split", "Split it into smaller hunks", ["s"], in: .gitPatch, short: "Split", strip: 3),
+        ProgramKeyEntry("gitPatch.edit", "Edit it by hand", ["e"], in: .gitPatch, short: "Edit", strip: 4),
+        ProgramKeyEntry("gitPatch.all", "This one and every later one in the file", ["a"], in: .gitPatch, short: "All in file", strip: 5),
+        ProgramKeyEntry("gitPatch.none", "None of the rest in the file", ["d"], in: .gitPatch, short: "None in file", strip: 6),
+        ProgramKeyEntry("gitPatch.quit", "Stop here", ["q"], in: .gitPatch, detail: "What was taken so far stays",
+                        short: "Quit", strip: 7),
+        ProgramKeyEntry("gitPatch.help", "Help", ["?"], in: .gitPatch, strip: 8),
+        ProgramKeyEntry("gitPatch.goto", "Go to a hunk", ["g"], in: .gitPatch),
+        ProgramKeyEntry("gitPatch.search", "Find a hunk by what it changes", ["/"], in: .gitPatch),
+    ]
 
     // MARK: ssh
 

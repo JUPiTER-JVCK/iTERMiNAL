@@ -29,9 +29,14 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// `EnteredLine`.
     var onCommand: ((String, EnteredLine.Moment) -> Void)?
     /// A mark from a shell started with the integration hooks (OSC 633): a prompt
-    /// is about to be drawn, a command starts, a command ended with a status.
+    /// is about to be drawn, a command starts — and, signed with
+    /// `shellIntegrationNonce`, what it is — or a command ended with a status.
     /// Called on whichever queue SwiftTerm parses on.
     var onShellMark: ((ShellIntegration.Mark) -> Void)?
+    /// The code this launch's hooks sign command lines with; nil for a shell
+    /// started without them, whose output then cannot name a command at all.
+    /// Set as each process is started, before it can print anything.
+    var shellIntegrationNonce: String?
     /// What the app adds to the right-click menu beneath the editing items —
     /// splitting the pane, opening a tab. Asked each time the menu opens, so it
     /// can reflect the moment.
@@ -57,10 +62,28 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// written anywhere.
     var onLineEdited: ((String?) -> Void)?
 
-    /// What has been typed since the last Enter, while it still matches what
-    /// the shell has. Nil once anything has moved or rewritten the line where
-    /// the buffer cannot follow, and while nothing is typed.
-    var typedLine: String? { lineBuffer.text }
+    /// A line the keys alone could not follow — Tab completed a word, ↑ brought
+    /// one back — read off the screen as Return was pressed, with the moment
+    /// it was entered at. For the quick reference's record of what was run,
+    /// never for a tab's name: those keep to lines the keys spell out, or that
+    /// the shell's own hooks report (`ShellIntegration.Mark.commandLine`).
+    var onEnteredFromScreen: ((String, EnteredLine.Moment) -> Void)?
+
+    /// Where the line being typed began on the screen: the cursor's column,
+    /// and its row counted from the top of the scrollback, as the first key of
+    /// the line was pressed — just past the prompt. Nil until then.
+    private var lineStart: (column: Int, row: Int)?
+
+    /// What has been typed since the last Enter, as far as it can be known.
+    /// While the keys spell it out, from them. Once Tab or ↑ has changed it
+    /// where the keys cannot follow, from the screen, between where it began
+    /// and the cursor — which is where a completed word or a recalled command
+    /// is drawn. Nil while nothing is typed, and when neither can say.
+    var typedLine: String? {
+        if let text = lineBuffer.text { return text }
+        guard lineBuffer.isUntracked, let screen = lineOnScreen() else { return nil }
+        return EnteredLine.lineOnScreen(screen, typedBefore: lineBuffer.typedBeforeUntracked)
+    }
 
     /// The keystroke path — `super` writes the bytes to the PTY, so it must
     /// always run, and nothing here may stop it.
@@ -70,13 +93,53 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// starts can take the terminal before the line is judged. Every other
     /// keystroke asks nothing.
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        let moment = data.contains(where: { $0 == 0x0D || $0 == 0x0A }) ? momentAtReturn() : nil
+        let hasReturn = data.contains(where: { $0 == 0x0D || $0 == 0x0A })
+        let moment = hasReturn ? momentAtReturn() : nil
+        // Before the key reaches the shell, the cursor is where the line
+        // starts, or still where it was.
+        if lineBuffer.isAtLineStart { lineStart = cursorOnScreen() }
+        let untrackedLine = hasReturn && lineBuffer.isUntracked ? typedLine : nil
         super.send(source: source, data: data)
         for entered in lineBuffer.feed(data, moment: moment) {
             onCommand?(entered.line, entered.moment)
         }
+        if let untrackedLine, let moment { onEnteredFromScreen?(untrackedLine, moment) }
+        if lineBuffer.isAtLineStart { lineStart = nil }
         onInput?()
         if let onLineEdited { onLineEdited(typedLine) }
+    }
+
+    /// The cursor, with its row counted from the top of the scrollback — when
+    /// that can be told: on the normal screen, scrolled to the bottom, where
+    /// the rows on view are the newest.
+    private func cursorOnScreen() -> (column: Int, row: Int)? {
+        let terminal = getTerminal()
+        guard !terminal.isCurrentBufferAlternate, isScrolledToBottom else { return nil }
+        let cursor = terminal.getCursorLocation()
+        return (cursor.x, terminal.getTopVisibleRow() + cursor.y)
+    }
+
+    private var isScrolledToBottom: Bool {
+        !canScroll || scrollPosition >= 0.999
+    }
+
+    /// The text between where the line began and the cursor, across the rows
+    /// a long line wraps onto — at most four, beyond which it is something
+    /// else on the screen.
+    private func lineOnScreen() -> String? {
+        guard let start = lineStart, let cursor = cursorOnScreen() else { return nil }
+        guard cursor.row >= start.row, cursor.row - start.row < 4 else { return nil }
+        let terminal = getTerminal()
+        let top = terminal.getTopVisibleRow()
+        var text = ""
+        for row in start.row...cursor.row {
+            guard let line = terminal.getLine(row: row - top) else { return nil }
+            let from = row == start.row ? start.column : 0
+            let to = row == cursor.row ? cursor.column : -1
+            if to != -1, to <= from { continue }
+            text += line.translateToString(startCol: from, endCol: to)
+        }
+        return text
     }
 
     /// What is true of the terminal now, for a Return about to be passed on.
@@ -259,8 +322,8 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// so, as above, it holds `self` weakly.
     func installShellMarkHandler() {
         getTerminal().registerOscHandler(code: ShellIntegration.oscCode) { [weak self] data in
-            guard let mark = ShellIntegration.parse(data) else { return }
-            self?.onShellMark?(mark)
+            guard let self, let mark = ShellIntegration.parse(data, nonce: self.shellIntegrationNonce) else { return }
+            self.onShellMark?(mark)
         }
     }
 

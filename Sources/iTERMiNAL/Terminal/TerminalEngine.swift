@@ -11,6 +11,9 @@ struct TerminalLaunchConfiguration {
     /// start and exit status (see `ShellIntegration`). Marks from any other
     /// session are ignored.
     var shellIntegration = false
+    /// The code those hooks sign each command line with, made for this launch
+    /// alone (`ShellIntegration.makeNonce`). A line without it is not believed.
+    var shellIntegrationNonce: String? = nil
 }
 
 /// Visual properties the UI pushes into the terminal view whenever the theme

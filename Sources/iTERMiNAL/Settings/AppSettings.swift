@@ -177,7 +177,8 @@ final class AppSettings: ObservableObject {
         }
     }
     /// Starts new zsh tabs on this Mac with hooks that report each command's
-    /// start and exit status. Off: nothing about a shell's startup is touched.
+    /// start, first line and exit status. Off: nothing about a shell's startup
+    /// is touched.
     @Published var shellIntegration: Bool { didSet { defaults.set(shellIntegration, forKey: "shellIntegration") } }
     /// Says so when a command that ran for `longCommandSeconds` ends in a tab
     /// nobody is looking at. Needs shell integration.
@@ -241,6 +242,12 @@ final class AppSettings: ObservableObject {
     /// the focused terminal. Off also stops each terminal working out what that
     /// program is.
     @Published var showQuickReference: Bool { didSet { defaults.set(showQuickReference, forKey: "showQuickReference") } }
+    /// Whether the quick reference shows the shell's own keys at a prompt.
+    /// Off leaves the line empty there — it stays, so the terminal keeps its
+    /// size — for people who know them already.
+    @Published var showQuickReferenceShellKeys: Bool {
+        didSet { defaults.set(showQuickReferenceShellKeys, forKey: "showQuickReferenceShellKeys") }
+    }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// The globe in the status bar's corner that opens the Connect list, and the
     /// button beside it that shows and hides the composer. Both on unless turned
@@ -510,6 +517,7 @@ final class AppSettings: ObservableObject {
         }
         showStatusBar = defaults.object(forKey: "showStatusBar") as? Bool ?? true
         showQuickReference = defaults.object(forKey: "showQuickReference") as? Bool ?? true
+        showQuickReferenceShellKeys = defaults.object(forKey: "showQuickReferenceShellKeys") as? Bool ?? true
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
         showConnectButton = defaults.object(forKey: "showConnectButton") as? Bool ?? true
         showComposerButton = defaults.object(forKey: "showComposerButton") as? Bool ?? true
@@ -910,6 +918,7 @@ final class AppSettings: ObservableObject {
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showStatusBar = true
         showQuickReference = true
+        showQuickReferenceShellKeys = true
         showRemotePorts = false
         showConnectButton = true
         showComposerButton = true

@@ -12,16 +12,32 @@ struct QuickReferenceContent {
         case composer(ActiveProgram.TypedCommand)
     }
 
+    /// How the strip is set up around what it shows: which prefix keys are
+    /// set, whether the shell's own keys are wanted at a prompt, and which
+    /// programs the Cheatsheet has a page for.
+    struct Context {
+        /// The prefix key the person set, for a multiplexer whose own one it
+        /// replaces: tmux's ⌃B, screen's ⌃A.
+        var prefixes: [ProgramKeySection: String] = [:]
+        var showsShellKeys = true
+        var hasCheatsheet: (String) -> Bool = { _ in false }
+    }
+
     let source: Source
-    /// The program's name, as the badge at the strip's start shows it.
+    /// The program's name, as the end of the strip shows it.
     let badge: String
     var hints: [QuickReferenceHint]
     /// The catalog's sections the full list shows.
     var sections: [ProgramKeySection]
+    /// The prefix key set for a section, when it is not the program's own.
+    var prefixes: [ProgramKeySection: String] = [:]
     /// For a command being typed: every flag or subcommand there is for it.
     var commandEntries: [SpecEntry] = []
     /// The command being typed, for opening its Cheatsheet page.
     var command: String?
+    /// A program with no keys listed that the Cheatsheet has a page for: its
+    /// name opens that page.
+    var cheatsheetName: String?
     /// A word after the hints, when there are none to click.
     var note: String?
 
@@ -30,10 +46,16 @@ struct QuickReferenceContent {
     /// Changes whenever what is shown does: the cross-fade's key.
     var id: String { badge + "|" + hints.map(\.id).joined(separator: ",") }
 
+    /// `section`'s keys as shown here: with the prefix set swapped in.
+    func entries(in section: ProgramKeySection) -> [ProgramKeyEntry] {
+        ProgramKeyCatalog.entries(in: section, prefix: prefixes[section])
+    }
+
     /// The shell's keys, which the strip shows at a prompt. A remote session
     /// adds ssh's way out, which matters most when the far end stops answering.
-    static func shell(remote: Bool, source: Source) -> QuickReferenceContent {
-        var content = catalog(.shell, badge: remote ? "ssh" : "shell", source: source)
+    static func shell(remote: Bool, source: Source, context: Context) -> QuickReferenceContent {
+        var content = catalog(.shell, badge: remote ? "ssh" : "shell", source: source, context: context)
+        if !context.showsShellKeys { content.hints = [] }
         if remote, let disconnect = ProgramKeyCatalog.entry(id: "ssh.disconnect") {
             content.hints.append(QuickReferenceHint(disconnect))
             content.sections.append(.ssh)
@@ -47,7 +69,8 @@ struct QuickReferenceContent {
         program: ActiveProgram,
         composer: ActiveProgram.TypedCommand?,
         isRunning: Bool,
-        isTool: Bool
+        isTool: Bool,
+        context: Context = Context()
     ) -> QuickReferenceContent {
         if let composer, let fromComposer = typing(composer, source: .composer(composer)) {
             return fromComposer
@@ -58,12 +81,21 @@ struct QuickReferenceContent {
                                          note: "Nothing is running in this terminal")
         }
         switch program {
-        case .program(let section, let name):
-            return catalog(section, badge: name, source: source)
+        case .program(let section, let name, let host):
+            var content = catalog(section, badge: name, source: source, context: context)
+            if let host {
+                // The program in a tmux pane: its keys in the strip, and
+                // tmux's beside them in the full list.
+                content = QuickReferenceContent(
+                    source: source, badge: "\(name) in \(host.badge)", hints: content.hints,
+                    sections: [section, host], prefixes: context.prefixes
+                )
+            }
+            return content
         case .shell(let remote):
-            return shell(remote: remote, source: source)
+            return shell(remote: remote, source: source, context: context)
         case .typing(let typed):
-            return typing(typed, source: source) ?? shell(remote: false, source: source)
+            return typing(typed, source: source) ?? shell(remote: false, source: source, context: context)
         case .running(let name):
             // Keys no program can miss: they are the terminal's own. Not for a
             // tool's panel, where ⌃Z would leave the panel holding a stopped
@@ -71,17 +103,24 @@ struct QuickReferenceContent {
             let hints = isTool ? [] : ["shell.interrupt", "shell.suspend", "shell.endInput"]
                 .compactMap(ProgramKeyCatalog.entry(id:))
                 .map(QuickReferenceHint.init)
-            return QuickReferenceContent(source: source, badge: name ?? "running", hints: hints, sections: [],
-                                         note: "No keys listed for it")
+            let cheatsheet = name.flatMap { context.hasCheatsheet($0) ? $0 : nil }
+            return QuickReferenceContent(
+                source: source, badge: name ?? "running", hints: hints, sections: [],
+                cheatsheetName: cheatsheet,
+                note: cheatsheet == nil ? "No keys listed for it" : "No keys listed — its name opens the Cheatsheet"
+            )
         }
     }
 
-    private static func catalog(_ section: ProgramKeySection, badge: String, source: Source) -> QuickReferenceContent {
+    private static func catalog(
+        _ section: ProgramKeySection, badge: String, source: Source, context: Context
+    ) -> QuickReferenceContent {
         QuickReferenceContent(
             source: source,
             badge: badge,
-            hints: ProgramKeyCatalog.strip(for: section).map(QuickReferenceHint.init),
-            sections: [section]
+            hints: ProgramKeyCatalog.strip(for: section, prefix: context.prefixes[section]).map(QuickReferenceHint.init),
+            sections: [section],
+            prefixes: context.prefixes
         )
     }
 
@@ -148,22 +187,23 @@ struct QuickReferenceHint: Identifiable {
 /// What the strip and its full list say about a click.
 enum QuickReferenceWording {
     static func clickHelp(for entry: ProgramKeyEntry, way index: Int) -> String {
+        let lead = entry.section.clickLead.isEmpty ? "" : " (after esc, for normal mode)"
         if case .prefix(let prefix) = entry.click {
-            let shown = prefix.replacingOccurrences(of: "space", with: "␣")
-            return "Click to type \(shown.replacingOccurrences(of: " ", with: "")), then the rest yourself"
+            let shown = prefix.replacingOccurrences(of: "space", with: "␣").replacingOccurrences(of: " ", with: "")
+            return "Click to type \(shown)\(lead), then the rest yourself"
         }
         guard entry.ways.indices.contains(index) else { return "" }
         let way = entry.ways[index]
         let typed = way.last == "↩" ? Array(way.dropLast()) : way
-        let lead = entry.section.clickLead.isEmpty ? "" : " (after esc, for normal mode)"
         let ending = way.last == "↩" ? ", then press return to go ahead" : ""
         return "Click to type " + typed.joined(separator: " ") + lead + ending
     }
 }
 
 /// The command typed in the composer's input, while the input has the
-/// keyboard. Its own small object rather than state on the workspace store:
-/// every view that watches the store would otherwise redraw at each keystroke.
+/// keyboard and is a shell's. Its own small object rather than state on the
+/// workspace store: every view that watches the store would otherwise redraw
+/// at each keystroke.
 final class QuickReferenceModel: ObservableObject {
     static let shared = QuickReferenceModel()
 
@@ -204,43 +244,45 @@ private struct QuickReferenceSessionStrip: View {
     @ObservedObject var session: TerminalSession
     @ObservedObject private var model = QuickReferenceModel.shared
     @EnvironmentObject private var store: WorkspaceStore
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var showAll = false
 
-    var body: some View {
-        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
-        let content = QuickReferenceContent.make(
+    private var content: QuickReferenceContent {
+        var context = QuickReferenceContent.Context()
+        if let prefix = session.tmuxPrefix { context.prefixes[.tmux] = prefix }
+        if let escape = session.screenEscape { context.prefixes[.screen] = escape }
+        context.showsShellKeys = settings.showQuickReferenceShellKeys
+        context.hasCheatsheet = { CheatsheetStore.shared.library.program(named: $0) != nil }
+        return QuickReferenceContent.make(
             program: session.activeProgram,
             composer: model.composerTyping,
             isRunning: session.isRunning,
-            isTool: session.kind.isTool
+            isTool: session.kind.isTool,
+            context: context
         )
-        let row = LeadingFitRow(spacing: 16)
+    }
+
+    var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        let content = self.content
         HStack(spacing: 12) {
-            Group {
-                row {
-                    ForEach(content.hints) { hint in
-                        HintView(hint: hint, theme: theme, perform: perform(hint, in: content))
-                    }
-                    if let note = content.note {
-                        Text(note)
-                            .lineLimit(1)
-                            .foregroundStyle(theme.textSecondary.opacity(0.8))
-                    }
-                }
-            }
-            .id(content.id)
-            .transition(.opacity)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .clipped()
+            hints(content, theme: theme)
+                .id(content.id)
+                .transition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
 
             // At the end of the line, where it costs the hints nothing: what
-            // is in front, and — when there is more listed for it than fits —
-            // the way to the rest.
-            ProgramButton(name: content.badge, theme: theme, opensList: content.hasFullList) {
-                showAll.toggle()
-            }
+            // is in front, and — when there is more to see for it — the way
+            // to the rest.
+            ProgramButton(
+                name: content.badge, theme: theme,
+                action: content.hasFullList || content.cheatsheetName != nil ? { open(content) } : nil,
+                help: content.hasFullList ? "All keys for \(content.badge) (⌥⌘/)"
+                    : "Examples for \(content.badge) in the Cheatsheet"
+            )
             .popover(isPresented: $showAll, arrowEdge: .top) {
                 QuickReferenceFullList(
                     content: content,
@@ -248,30 +290,72 @@ private struct QuickReferenceSessionStrip: View {
                         showAll = false
                         run(hintAction, in: content)
                     },
-                    openCheatsheet: cheatsheetOpener(for: content)
+                    openCheatsheet: cheatsheetOpener(for: content.command)
                 )
             }
         }
         .font(.system(size: 11))
         .foregroundStyle(theme.textSecondary)
         .lineLimit(1)
-        .padding(.horizontal, 14)
+        // 10, not the status bar's 14: a hint's own 4 of padding, for its
+        // hover, brings its first key onto the status bar's first icon.
+        .padding(.leading, 10)
+        .padding(.trailing, 14)
         .frame(height: QuickReferenceStrip.height)
         .animation(Motion.hover, value: content.id)
         // Focus moving here, or the setting just switched on: what is in
         // front may have changed while nothing was looking.
-        .onAppear { session.refreshActiveProgram() }
+        .onAppear {
+            session.refreshActiveProgram()
+            if store.quickReferenceListPending { DispatchQueue.main.async { open(self.content) } }
+        }
+        .onChange(of: store.quickReferenceListPending) { _, pending in
+            if pending { open(self.content) }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Quick reference for \(content.badge)")
     }
 
-    /// Opens the Cheatsheet on the command being typed, found by its name so
-    /// its page is the first in the list.
-    private func cheatsheetOpener(for content: QuickReferenceContent) -> (() -> Void)? {
-        guard let command = content.command else { return nil }
+    /// The hints that fit, in the order they matter, leaving out every one
+    /// from the first that would not — so a narrow window keeps the ones that
+    /// matter most, nothing wraps or scrolls, and nothing left out is still
+    /// there for VoiceOver to read.
+    private func hints(_ content: QuickReferenceContent, theme: Theme) -> some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(Array(stride(from: content.hints.count, through: 0, by: -1)), id: \.self) { count in
+                HStack(spacing: 16) {
+                    ForEach(content.hints.prefix(count)) { hint in
+                        HintView(hint: hint, theme: theme, perform: perform(hint, in: content))
+                    }
+                    if count == content.hints.count, let note = content.note {
+                        Text(note)
+                            .lineLimit(1)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    /// The program's name was clicked, or ⌥⌘/ pressed: the full list, or for
+    /// a program with none, its Cheatsheet page.
+    private func open(_ content: QuickReferenceContent) {
+        if store.quickReferenceListPending { store.quickReferenceListPending = false }
+        if content.hasFullList {
+            showAll = true
+        } else if let name = content.cheatsheetName {
+            cheatsheetOpener(for: name)?()
+        }
+    }
+
+    /// Opens the Cheatsheet on a program, found by its name so its page is the
+    /// first in the list.
+    private func cheatsheetOpener(for name: String?) -> (() -> Void)? {
+        guard let name else { return nil }
         return {
             showAll = false
-            CheatsheetStore.shared.query = command
+            CheatsheetStore.shared.query = name
             store.openPanel(.cheatsheet)
         }
     }
@@ -301,20 +385,20 @@ private struct QuickReferenceSessionStrip: View {
     }
 }
 
-/// The program's name at the end of the line, as plain text — and, when more
-/// is listed for it than the line shows, the button that opens the rest, which
-/// brightens under the pointer as the bar's other text controls do. Narrow on
-/// purpose: it is a label, and every point it takes is one a hint does not get.
+/// The program's name at the end of the line, as plain text — and, when there
+/// is more to see for it, the button that opens it, brightening under the
+/// pointer as the bar's other text controls do. Narrow on purpose: it is a
+/// label, and every point it takes is one a hint does not get.
 private struct ProgramButton: View {
     let name: String
     let theme: Theme
-    let opensList: Bool
-    let open: () -> Void
+    let action: (() -> Void)?
+    let help: String
     @State private var hovering = false
 
     var body: some View {
-        if opensList {
-            Button(action: open) {
+        if let action {
+            Button(action: action) {
                 label.contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -322,8 +406,8 @@ private struct ProgramButton: View {
             .onHover { inside in
                 withAnimation(Motion.hover) { hovering = inside }
             }
-            .help("All keys for \(name)")
-            .accessibilityLabel("All keys for \(name)")
+            .help(help)
+            .accessibilityLabel(help)
         } else {
             label
                 .help("What is in front of the focused terminal")
@@ -336,14 +420,15 @@ private struct ProgramButton: View {
             Text(name)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 72)
-            if opensList {
+                .frame(maxWidth: 96)
+            if action != nil {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 7, weight: .bold))
             }
         }
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
+        // The status bar's size, a step heavier: it names what the line is for.
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(hovering && action != nil ? theme.textPrimary : theme.textSecondary)
         // Room to hit it, without a shape around it.
         .padding(.vertical, 3)
         .fixedSize()
@@ -352,22 +437,27 @@ private struct ProgramButton: View {
 
 /// One hint: its keys as caps and a word on what they do. A button when a
 /// click types something, warming under the pointer like the bar's other
-/// controls.
+/// controls, and flashing in the accent for a moment when clicked, so a key
+/// sent to a program that shows nothing for it was still seen to go.
 private struct HintView: View {
     let hint: QuickReferenceHint
     let theme: Theme
     let perform: (() -> Void)?
     @State private var hovering = false
+    @State private var flashing = false
 
     var body: some View {
         if let perform {
-            Button(action: perform) {
-                label
+            Button {
+                flash()
+                perform()
+            } label: {
+                label(quiet: false)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .background(
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(hovering ? theme.surfaceHover : Color.clear)
+                            .fill(background)
                     )
                     .contentShape(Rectangle())
             }
@@ -382,7 +472,9 @@ private struct HintView: View {
             .accessibilityLabel(hint.label)
             .accessibilityHint("Types " + hint.caps.joined(separator: " then "))
         } else {
-            label
+            // Shown, not typed: its keys drawn quieter, so what a click
+            // will do is plain before the pointer gets there.
+            label(quiet: true)
                 .padding(.horizontal, 4)
                 .help(hint.help)
                 .accessibilityElement(children: .ignore)
@@ -390,11 +482,25 @@ private struct HintView: View {
         }
     }
 
-    private var label: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 3) {
+    private var background: AnyShapeStyle {
+        if flashing { return AnyShapeStyle(.tint.opacity(0.3)) }
+        return hovering ? AnyShapeStyle(theme.surfaceHover) : AnyShapeStyle(Color.clear)
+    }
+
+    private func flash() {
+        flashing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            withAnimation(Motion.hover) { flashing = false }
+        }
+    }
+
+    private func label(quiet: Bool) -> some View {
+        // On the text's baseline, so the word sits level with the letters on
+        // the caps, not with their middles.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 ForEach(Array(hint.caps.enumerated()), id: \.offset) { _, cap in
-                    KeyCap(symbol: cap, theme: theme, compact: true, tintsModifiers: true)
+                    KeyCap(symbol: cap, theme: theme, compact: true, tintsModifiers: true, quiet: quiet)
                 }
             }
             // The keys never give way: shown cut down they read as "…", which
@@ -411,13 +517,14 @@ private struct HintView: View {
     }
 }
 
-/// What each modifier's shade means, in the shades the caps use.
+/// What each modifier's shade means, for the modifiers the list below has.
 private struct ModifierLegend: View {
+    let modifiers: [ModifierGlyph]
     let theme: Theme
 
     var body: some View {
         HStack(spacing: 14) {
-            ForEach(ModifierGlyph.allCases) { modifier in
+            ForEach(modifiers) { modifier in
                 HStack(spacing: 4) {
                     Text(String(modifier.rawValue))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -434,91 +541,105 @@ private struct ModifierLegend: View {
     }
 }
 
-/// A row that places its subviews in order and leaves out every one from the
-/// first that would not fit — the strip's hints are in the order they matter,
-/// so a narrow window keeps the ones that matter most. Nothing wraps or
-/// scrolls.
-private struct LeadingFitRow: Layout {
-    var spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let available = proposal.width ?? .infinity
-        var used: CGFloat = 0
-        var height: CGFloat = 0
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            let end = used + (index > 0 ? spacing : 0) + size.width
-            if end > available { break }
-            used = end
-            height = max(height, size.height)
-        }
-        return CGSize(width: proposal.width ?? used, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var fits = true
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            let start = x + (index > 0 ? spacing : 0)
-            if fits, start + size.width <= bounds.maxX + 0.5 {
-                // Asked for nothing in particular, as when it was measured, so
-                // it takes the size it measured at rather than a rounded copy
-                // of it that can come out a fraction short.
-                subview.place(at: CGPoint(x: start, y: bounds.midY), anchor: .leading, proposal: .unspecified)
-                x = start + size.width
-            } else {
-                // Everything after the first that does not fit goes too, so a
-                // short hint never jumps ahead of a longer, earlier one. Placed
-                // far outside the clipped row, where it is neither seen nor
-                // clicked.
-                fits = false
-                subview.place(at: CGPoint(x: bounds.maxX + 10_000, y: bounds.midY), anchor: .leading,
-                              proposal: .unspecified)
-            }
-        }
-    }
+private struct ListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// Everything listed for what the strip shows, opened from the program's name
-/// at the end of the line. A click types a key as the strip does, and closes
-/// the list so typing goes back to the terminal.
+/// at the end of the line or with ⌥⌘/. A click types a key as the strip does,
+/// and closes the list so typing goes back to the terminal. Type to narrow it;
+/// return types the first key found.
 private struct QuickReferenceFullList: View {
     let content: QuickReferenceContent
     let run: (QuickReferenceHint.Action) -> Void
     let openCheatsheet: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
+    @State private var query = ""
+    @State private var listHeight: CGFloat = 0
+    @FocusState private var searchFocused: Bool
+
+    private struct Group: Identifiable {
+        let section: ProgramKeySection
+        let entries: [ProgramKeyEntry]
+        var id: ProgramKeySection { section }
+    }
+
+    /// The sections' keys the search finds, in order.
+    private var groups: [Group] {
+        content.sections.compactMap { section in
+            let entries = ProgramKeyCatalog.filter(content.entries(in: section), matching: query)
+            return entries.isEmpty ? nil : Group(section: section, entries: entries)
+        }
+    }
+
+    /// The command's flags the search finds.
+    private var specEntries: [SpecEntry] {
+        let terms = query.lowercased().split(separator: " ").map(String.init)
+        guard !terms.isEmpty else { return content.commandEntries }
+        return content.commandEntries.filter { entry in
+            let words = (entry.display + " " + entry.detail).lowercased()
+            return terms.allSatisfy { words.contains($0) }
+        }
+    }
+
+    /// The modifiers the listed keys use, for the legend: none for a list
+    /// without any, and never ⌘, which no program here is sent.
+    private var modifiers: [ModifierGlyph] {
+        let used = Set(content.sections.flatMap { content.entries(in: $0) }
+            .flatMap(\.ways).flatMap { $0 }.flatMap { ModifierGlyph.split($0).modifiers })
+        return ModifierGlyph.allCases.filter(used.contains)
+    }
 
     var body: some View {
         let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        let groups = groups
+        let specEntries = specEntries
         VStack(spacing: 0) {
-            if !content.sections.isEmpty {
-                ModifierLegend(theme: theme)
+            searchField(theme: theme)
+            if !modifiers.isEmpty {
+                ModifierLegend(modifiers: modifiers, theme: theme)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                FadedDivider()
+                    .padding(.bottom, 8)
             }
+            FadedDivider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(content.sections) { section in
-                        header(section.title, note: section.note, theme: theme)
-                        ForEach(ProgramKeyCatalog.entries(in: section)) { entry in
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(groups) { group in
+                        header(group.section.title, note: note(for: group.section), theme: theme)
+                        ForEach(group.entries) { entry in
                             ProgramKeyRow(command: entry, onType: { index in
                                 if let text = entry.typed(way: index) { run(.keys(text)) }
                             }, tintsModifiers: true)
                         }
                     }
-                    if !content.commandEntries.isEmpty {
+                    if !specEntries.isEmpty {
                         header(content.badge, note: "From the composer's completion list, for the version macOS ships. Click one to add it to the line.",
                                theme: theme)
-                        ForEach(Array(content.commandEntries.enumerated()), id: \.offset) { _, entry in
+                        ForEach(Array(specEntries.enumerated()), id: \.offset) { _, entry in
                             specRow(entry, theme: theme)
                         }
                     }
+                    if groups.isEmpty && specEntries.isEmpty {
+                        Text("Nothing found for “\(query.trimmingCharacters(in: .whitespaces))”")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                    }
                 }
                 .padding(.bottom, 8)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: ListHeightKey.self, value: proxy.size.height)
+                    }
+                )
             }
+            // As tall as what is in it, up to a height that leaves the
+            // terminal in view: top's eight keys are not given Vim's room.
+            .frame(height: min(max(listHeight, 60), 400))
+            .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
             if let openCheatsheet {
                 FadedDivider()
                 HStack {
@@ -529,8 +650,50 @@ private struct QuickReferenceFullList: View {
                 .padding(.vertical, 10)
             }
         }
-        .frame(width: 460, height: 420)
+        .frame(width: 460)
         .background(theme.background)
+        .onAppear { searchFocused = true }
+    }
+
+    private func searchField(theme: Theme) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textSecondary)
+            TextField("Search \(content.badge)'s keys — return types the first", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($searchFocused)
+                .onSubmit(runFirst)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.surface)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
+    /// Return in the search: the first key found that a click can type, or
+    /// the first flag.
+    private func runFirst() {
+        for group in groups {
+            if let entry = group.entries.first(where: \.isClickable), let text = entry.typed(way: entry.stripWay) {
+                run(.keys(text))
+                return
+            }
+        }
+        if let name = specEntries.first?.names.first { run(.word(name)) }
+    }
+
+    /// A section's note, and for a multiplexer with its own prefix set, a word
+    /// on the keys below using it.
+    private func note(for section: ProgramKeySection) -> String {
+        guard let prefix = content.prefixes[section], prefix != section.defaultPrefix else { return section.note }
+        return section.note + " This one's prefix is \(prefix), and the keys below use it."
     }
 
     private func header(_ title: String, note: String?, theme: Theme) -> some View {

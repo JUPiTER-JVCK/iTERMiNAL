@@ -1829,6 +1829,58 @@ func checkShellIntegration() {
         check(mark(text) == nil, "\(text.debugDescription) is not a mark")
     }
 
+    // The command line, signed with the shell's code. The lines below are what
+    // zsh 5.9 wrote for them through the hook (scripts/shell-integration-check).
+    let nonce = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    func signed(_ text: String, code: String?) -> ShellIntegration.Mark? {
+        ShellIntegration.parse(Array(text.utf8)[...], nonce: code)
+    }
+    func ours(_ text: String) -> ShellIntegration.Mark? { signed(text, code: nonce) }
+    check(ours("E;\(nonce);ls -la") == .commandLine("ls -la"), "a command line with this shell's code")
+    check(ours("E;\(nonce);true \\xC3\\x9Cber \\xE2\\x82\\xAC5 na\\xC3\\xAFve") == .commandLine("true Über €5 naïve"),
+          "UTF-8 comes as \\xHH, and is read back")
+    check(ours("E;\(nonce);true back\\\\slash \"semi;colon\"") == .commandLine("true back\\slash \"semi;colon\""),
+          "a backslash comes doubled, and a semicolon as it is")
+    check(ours("E;\(nonce); true leading space") == .commandLine(" true leading space"), "a leading space is kept, for the tab's name to see")
+    check(ours("E;\(nonce);caf\\xc3\\xa9") == .commandLine("café"), "lowercase hex reads the same")
+    check(ours("E;\(nonce);a\\x09b") == .commandLine("a b"), "a tab is read as a space")
+    check(ours("C") == .commandStart && ours("D;3") == .commandFinished(exitCode: 3), "the other marks read the same with a code")
+    let longest = "E;\(nonce);" + String(repeating: "\\xF0\\x9F\\x98\\x80", count: 1000)
+    check(ours(longest) == .commandLine(String(repeating: "\u{1F600}", count: 1000)),
+          "the longest the hook sends, a thousand characters of four bytes each, fits")
+    check(signed("E;\(nonce);ls", code: nil) == nil && mark("E;\(nonce);ls") == nil, "a shell given no code names no command, whatever it prints")
+    let forged: [(String, String)] = [
+        ("E;ls", "no code"),
+        ("E;;ls", "an empty code"),
+        ("E;00000000000000000000000000000000;ls", "another code"),
+        ("E;\(nonce.uppercased());ls", "the code in other letters"),
+        ("E;\(nonce.dropLast());ls", "part of the code"),
+        ("E;\(nonce)ls", "no separator after the code"),
+        ("E;\(nonce);", "nothing after it"),
+        ("E;\(nonce);   ", "only spaces"),
+        ("E;\(nonce);caf\u{E9}", "a raw byte outside ASCII, which the hook never sends"),
+        ("E;\(nonce);a\u{7F}", "a raw DEL"),
+        ("E;\(nonce);back\\", "a backslash at the end"),
+        ("E;\(nonce);\\n", "an escape the hook never writes"),
+        ("E;\(nonce);\\x4", "a short escape"),
+        ("E;\(nonce);\\xZZ", "not hex"),
+        ("E;\(nonce);\\xC3", "half a character"),
+        ("E;\(nonce);\\xFF\\xFE", "not UTF-8"),
+        ("E;\(nonce);a\\x0Ab", "a newline"),
+        ("E;\(nonce);a\\x1B[31mb", "an escape character"),
+        ("E;\(nonce);a\\x00b", "a NUL"),
+        ("E;\(nonce);a\\xC2\\x9Cb", "a C1 control"),
+        ("E;\(nonce);" + String(repeating: "x", count: ShellIntegration.maximumCommandLineBytes), "too long"),
+    ]
+    for (text, why) in forged {
+        let shown = text.count > 60 ? String(text.prefix(40)) + "…" : text
+        check(ours(text) == nil, "\(shown.debugDescription) is not a command line: \(why)")
+    }
+    let codes = (0..<64).map { _ in ShellIntegration.makeNonce() }
+    check(codes.allSatisfy { $0.count == 32 && $0.allSatisfy { "0123456789abcdef".contains($0) } },
+          "a code is 32 lowercase hex digits: \(codes[0])")
+    check(Set(codes).count == codes.count, "and a fresh one each time")
+
     // Timing a command.
     var tracker = ShellIntegration.CommandTracker()
     let start = Date(timeIntervalSince1970: 1_000)
@@ -1844,6 +1896,10 @@ func checkShellIntegration() {
           "a prompt means nothing is running, so a later end has no start to measure from")
     _ = tracker.handle(.commandStart, at: start)
     check(tracker.handle(.commandFinished(exitCode: 0), at: start.addingTimeInterval(-30))?.seconds == 0, "a clock that went back gives 0, not a negative time")
+    check(tracker.handle(.commandLine("sleep 5"), at: start) == nil && tracker.runningSince == nil, "a command line starts nothing: the C after it does")
+    _ = tracker.handle(.commandStart, at: start)
+    check(tracker.handle(.commandLine("sleep 5"), at: start.addingTimeInterval(1)) == nil && tracker.runningSince == start,
+          "nor does it end or restart one")
 
     // The words.
     let durations: [(Double, String)] = [(0, "0s"), (0.9, "0s"), (59.9, "59s"), (60, "1m 0s"), (134, "2m 14s"),
@@ -1866,14 +1922,15 @@ func checkShellIntegration() {
 
     // How zsh is pointed at the files.
     let wrapper = "/Users/me/Library/Application Support/iTERMiNAL/ShellIntegration/zsh"
-    let withZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": "/Users/me/.config/zsh", "HOME": "/Users/me"])
-    check(withZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_ZDOTDIR_ORIG": "/Users/me/.config/zsh"] && withZdotdir.remove.isEmpty,
-          "their ZDOTDIR is handed on: \(withZdotdir)")
-    let withoutZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["HOME": "/Users/me"])
-    check(withoutZdotdir.set == ["ZDOTDIR": wrapper] && withoutZdotdir.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "with none, none is handed on, and a stale hand-over is removed")
-    let stale = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ITERMINAL_ZDOTDIR_ORIG": "/somewhere/else"])
+    let withZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": "/Users/me/.config/zsh", "HOME": "/Users/me"], nonce: nonce)
+    check(withZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_ZDOTDIR_ORIG": "/Users/me/.config/zsh", "ITERMINAL_NONCE": nonce] && withZdotdir.remove.isEmpty,
+          "their ZDOTDIR is handed on, with the code: \(withZdotdir)")
+    let withoutZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["HOME": "/Users/me"], nonce: nonce)
+    check(withoutZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_NONCE": nonce] && withoutZdotdir.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "with none, none is handed on, and a stale hand-over is removed")
+    let stale = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ITERMINAL_ZDOTDIR_ORIG": "/somewhere/else", "ITERMINAL_NONCE": "stale"], nonce: nonce)
     check(stale.set["ITERMINAL_ZDOTDIR_ORIG"] == nil && stale.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "a hand-over inherited from elsewhere is never believed")
-    check(ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": ""]).set["ITERMINAL_ZDOTDIR_ORIG"] == "", "an empty ZDOTDIR is theirs too")
+    check(stale.set["ITERMINAL_NONCE"] == nonce, "nor is a code: this launch's replaces it")
+    check(ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": ""], nonce: nonce).set["ITERMINAL_ZDOTDIR_ORIG"] == "", "an empty ZDOTDIR is theirs too")
 
     // The files.
     let files = ShellIntegration.zshFiles
@@ -1888,7 +1945,17 @@ func checkShellIntegration() {
     check(script.contains("ITERMINAL_ZDOTDIR_ORIG") && script.contains("builtin source"), ".zshenv hands ZDOTDIR back and loads theirs")
     check(script.contains("633;C\\a") && script.contains("633;D;") && script.contains("633;A\\a"), "and says what the app reads: C, D;status, A")
     check(script.contains("emulate -L zsh") && script.contains("precmd_functions") && script.contains("preexec_functions"), "from zsh's own option defaults, through the hook arrays")
-    check(!script.contains("633;E") && !script.contains("]7;") && !script.contains("]133;"), "and nothing else: no command text, no OSC 7, no OSC 133")
+    check(!script.contains("]7;") && !script.contains("]133;"), "and nothing else: no OSC 7, no OSC 133")
+    // The command line goes only with the code, and the code goes no further.
+    if let line = script.range(of: "633;E;'$__iterminal_nonce"), let guarded = script.range(of: "if [[ -n $__iterminal_nonce && -n $1 ]]"),
+       let unset = script.range(of: "unset ITERMINAL_NONCE"), let theirs = script.range(of: "builtin source") {
+        check(guarded.lowerBound < line.lowerBound, "the command line is sent only with a code, and only from what was typed ($1)")
+        check(unset.lowerBound < theirs.lowerBound, "and the code is out of the environment before any file of theirs runs")
+    } else {
+        check(false, "the script sends the line with its code, and takes the code out of the environment")
+    }
+    check(script.contains("local LC_ALL=C") && script.contains("[^ -~]") && script.contains("[1,1000]"),
+          "byte by byte, as \\xHH for anything outside plain ASCII, and no more than a thousand characters")
     // The order is the point. The hooks go in before any of their files can set an
     // option; ZDOTDIR goes back before anything else reads it (Apple's /etc/zshrc puts
     // the history file at ${ZDOTDIR:-$HOME}/.zsh_history); and theirs is loaded last.
@@ -17876,7 +17943,8 @@ func checkProgramKeyCatalog() {
         check(!ProgramKeyCatalog.entries(in: section).isEmpty && !strip.isEmpty, "\(section) has keys, and some for the strip")
         let ranks = strip.compactMap(\.strip)
         check(Set(ranks).count == ranks.count, "\(section)'s strip has no two keys in one place: \(ranks)")
-        check(!section.executables.isEmpty && section.executables.allSatisfy { ProgramKeyCatalog.normalizedProgramName($0) == $0 },
+        check((section == .gitPatch || !section.executables.isEmpty)
+                && section.executables.allSatisfy { ProgramKeyCatalog.normalizedProgramName($0) == $0 },
               "\(section)'s executables are written as the kernel names them")
     }
     // A key the strip shows as something to click must type something.
@@ -17907,7 +17975,10 @@ func checkProgramKeyCatalog() {
         ("emacs-29.4", .emacs), ("emacsclient", .emacs), ("more", .pager), ("less", .pager), ("man", .man),
         ("tmux", .tmux), ("screen", .screen), ("top", .top), ("htop", .htop), ("btop", .btop), ("ssh", .ssh),
         ("-zsh", .shell), ("bash", .shell), ("spf", .superfile), ("superfile", .superfile),
-        ("git", nil), ("ssh-keygen", nil), ("", nil),
+        ("hx", .helix), ("python3", .python), ("python3.12", .python), ("ipython", .python), ("node", .node),
+        ("node20", .node), ("irb", .irb), ("psql", .psql), ("mariadb", .mysql), ("sqlite3", .sqlite),
+        ("fzf", .fzf), ("lazygit", .lazygit),
+        ("git", nil), ("ssh-keygen", nil), ("md5", nil), ("base64", nil), ("", nil),
     ]
     for (name, section) in found {
         check(ProgramKeyCatalog.section(forProgram: name) == section, "\"\(name)\" is \(String(describing: section))")
@@ -17957,8 +18028,8 @@ func checkProgramKeySend() {
     check(typed("vim.save") == "\u{1B}:w" && typed("vim.saveQuit") == "\u{1B}:wq" && typed("vim.saveQuit", way: 1) == "\u{1B}ZZ",
           "Vim's commands start from normal mode and wait for return")
     check(typed("vim.search") == "\u{1B}/" && typed("vim.edit") == "\u{1B}:e " && typed("vim.numbers") == "\u{1B}:set number"
-            && typed("vim.replace") == "\u{1B}:%s/" && typed("vim.gotoLine", way: 1) == "\u{1B}:",
-          "what needs the person's own words types only the part before them")
+            && typed("vim.replace") == "\u{1B}:%s/" && typed("vim.gotoLine") == "\u{1B}:" && typed("vim.gotoLine", way: 1) == nil,
+          "what needs the person's own words types only the part before them, from one button, not one per way")
     check(typed("vim.normal") == "\u{1B}\u{1B}" && typed("vim.window") == "\u{1B}\u{17}w", "esc, and ⌃W then w")
 
     // What is never typed.
@@ -18020,13 +18091,14 @@ func checkActiveProgram() {
 
     // A shell leading the group: alone, at a prompt of its own; with others, running a script. macOS's man is a shell
     // script, so a page being read is sh with mandoc and less beside it, and its arguments name it.
-    check(resolve { $0.foreground = ["sh", "mandoc", "less"]; $0.foregroundScript = "man" } == .program(.man, name: "man"),
+    check(resolve { $0.foreground = ["sh", "mandoc", "less"]; $0.foregroundArguments = ["/bin/sh", "/usr/bin/man", "ls"] }
+            == .program(.man, name: "man"),
           "macOS's man, a shell script, is man")
     check(resolve { $0.foreground = ["sh", "mandoc", "less"] } == .program(.pager, name: "less"),
           "a script whose name could not be read is what it runs, when that is listed")
-    check(resolve { $0.foreground = ["sh", "make"]; $0.foregroundScript = "build.sh" } == .running("build.sh")
+    check(resolve { $0.foreground = ["sh", "make"]; $0.foregroundArguments = ["sh", "./build.sh"] } == .running("build.sh")
             && resolve { $0.foreground = ["sh", "make"] } == .running("make")
-            && resolve { $0.foreground = ["bash"]; $0.foregroundScript = "deploy.sh" } == .running("deploy.sh"),
+            && resolve { $0.foreground = ["bash"]; $0.foregroundArguments = ["bash", "deploy.sh"] } == .running("deploy.sh"),
           "a script with nothing listed is named by its script, or by what it runs")
     check(resolve { $0.foreground = ["zsh"] } == .shell(remote: false), "a shell alone in its group is still a prompt")
     check(ActiveProgram.script(inShellArguments: ["/bin/sh", "/usr/bin/man", "ls"]) == "man"
@@ -18056,7 +18128,7 @@ func checkActiveProgram() {
             && ActiveProgram.arguments(fromProcessArguments: Array(manBytes.prefix(14))) == nil,
           "bytes too short, with no arguments, or cut off give no arguments")
     check(resolve { $0.foreground = ["make", "sh"] } == .running("make"), "a build is running, with no keys listed")
-    check(resolve { $0.foreground = ["python3.12"] } == .running("python3.12"), "an unlisted program is named by the kernel")
+    check(resolve { $0.foreground = ["ruby3.3"] } == .running("ruby3.3"), "an unlisted program is named by the kernel")
 
     // Past sudo, from the line typed at the prompt — and never a word that is no program.
     check(resolve { $0.foreground = ["sudo"]; $0.lastCommandLine = "sudo -u root vim /etc/hosts" } == .program(.vim, name: "vim"),
@@ -18097,7 +18169,9 @@ func checkActiveProgram() {
     check(resolve { $0.foreground = []; $0.typedLine = "sudo -E LANG=C tar -x" } == .typing(.init(command: "tar", subcommand: nil)),
           "past a wrapper, its flags and an assignment")
     check(resolve { $0.foreground = []; $0.typedLine = "hunter2 more" } == .shell(remote: false), "a word no tool is called is never shown")
-    check(resolve { $0.isRemote = true; $0.typedLine = "ls " } == .typing(.init(command: "ls", subcommand: nil)), "at a remote prompt too")
+    check(resolve { $0.isRemote = true; $0.typedLine = "ls " } == .shell(remote: true)
+            && resolve { $0.foreground = ["ssh"]; $0.typedLine = "sed " } == .shell(remote: true),
+          "not on a shell somewhere else: the flags are this Mac's, and the far end's differ")
 
     // Reading a command line.
     check(ActiveProgram.program(in: "TERM=xterm-256color vim x")?.section == .vim && ActiveProgram.program(in: "env FOO=1 nano")?.section == .nano
@@ -18109,6 +18183,145 @@ func checkActiveProgram() {
           "a title names a program only at its ends, and a shell is no program")
 }
 checkActiveProgram()
+
+// MARK: Quick reference: more programs, prefixes, hidden shells
+
+func checkQuickReferenceMore() {
+    typealias Signals = ActiveProgram.Signals
+    func resolve(_ build: (inout Signals) -> Void) -> ActiveProgram {
+        var signals = Signals()
+        build(&signals)
+        return ActiveProgram.resolve(signals)
+    }
+    func typed(_ id: String, way: Int = 0) -> String? { ProgramKeyCatalog.entry(id: id)?.typed(way: way) }
+
+    // The keys added: Helix like Vim, from normal mode; the prompts' own commands typed as written.
+    check(typed("helix.save") == "\u{1B}:w" && typed("helix.palette") == "\u{1B} ?" && typed("helix.files") == "\u{1B} f",
+          "Helix's keys start from normal mode, and space is its menu")
+    check(typed("python.quit") == "exit()" && typed("python.helpOn") == "help(" && typed("node.load") == ".load "
+            && typed("psql.quit") == "\\q" && typed("psql.describe") == "\\d " && typed("mysql.databases") == "show databases;"
+            && typed("sqlite.mode") == ".mode ",
+          "a prompt's own commands are typed as written, and the ones that need a name stop before it")
+    check(typed("fzf.cancel") == "\u{1B}" && typed("fzf.mark") == "\t" && typed("fzf.accept") == nil && typed("lazygit.stage") == " ",
+          "fzf's and lazygit's keys")
+
+    // A prefix that was set takes the place of the program's own, everywhere it is.
+    let tmuxA = ProgramKeyCatalog.entries(in: .tmux, prefix: "⌃A")
+    check(tmuxA.first { $0.id == "tmux.newWindow" }?.ways == [["⌃A", "c"]]
+            && tmuxA.first { $0.id == "tmux.newWindow" }?.typed(way: 0) == "\u{01}c"
+            && tmuxA.first { $0.id == "tmux.window" }?.typed(way: 0) == "\u{01}",
+          "tmux's keys with ⌃A for a prefix use it, in the caps and in what a click types")
+    check(ProgramKeyCatalog.strip(for: .tmux, prefix: "⌃A").first?.ways.first == ["⌃A", "c"]
+            && ProgramKeyCatalog.entries(in: .tmux, prefix: nil) == ProgramKeyCatalog.entries(in: .tmux)
+            && ProgramKeyCatalog.entries(in: .tmux, prefix: "⌃B") == ProgramKeyCatalog.entries(in: .tmux)
+            && ProgramKeyCatalog.entries(in: .vim, prefix: "⌃A") == ProgramKeyCatalog.entries(in: .vim),
+          "no prefix, tmux's own, or a program with none changes nothing")
+    let screenT = ProgramKeyCatalog.entries(in: .screen, prefix: "⌃T")
+    check(screenT.first { $0.id == "screen.newWindow" }?.typed(way: 0) == "\u{14}c"
+            && screenT.first { $0.id == "screen.literal" }?.title == "Send ⌃T itself to the program",
+          "screen's escape key is swapped into the words about it too")
+
+    // The full list's search.
+    let vimSave = ProgramKeyCatalog.filter(ProgramKeyCatalog.entries(in: .vim), matching: "save quit")
+    check(vimSave.contains { $0.id == "vim.saveQuit" } && !vimSave.contains { $0.id == "vim.undo" }
+            && ProgramKeyCatalog.filter(ProgramKeyCatalog.entries(in: .vim), matching: " ").count == ProgramKeyCatalog.entries(in: .vim).count,
+          "the full list's search finds by every word, and an empty one finds everything")
+
+    // The program inside tmux, when tmux on this Mac says what its pane runs.
+    check(resolve { $0.foreground = ["tmux"]; $0.tmuxPaneCommand = "nvim" } == .program(.vim, name: "nvim", host: .tmux),
+          "Neovim in a tmux pane, with tmux's keys beside it")
+    check(resolve { $0.foreground = ["tmux"]; $0.tmuxPaneCommand = "zsh" } == .program(.tmux, name: "tmux")
+            && resolve { $0.foreground = ["tmux"] } == .program(.tmux, name: "tmux"),
+          "tmux's own keys at a shell in the pane, or when tmux could not be asked")
+
+    // Python and Node: a prompt, or a program run with them.
+    check(resolve { $0.foreground = ["python3"]; $0.foregroundArguments = ["python3"] } == .program(.python, name: "python3")
+            && resolve { $0.foreground = ["Python"]; $0.foregroundArguments = ["/usr/bin/python3", "-i", "app.py"] } == .program(.python, name: "python"),
+          "python3 alone, or with -i, is its prompt")
+    check(resolve { $0.foreground = ["python3"]; $0.foregroundArguments = ["python3", "app.py"] } == .running("python3")
+            && resolve { $0.foreground = ["python3"]; $0.foregroundArguments = ["python3", "-m", "http.server"] } == .running("python3")
+            && resolve { $0.foreground = ["node"]; $0.foregroundArguments = ["node", "server.js"] } == .running("node"),
+          "a program run with python3 or node is that program, not the prompt")
+    check(resolve { $0.foreground = ["sudo"]; $0.lastCommandLine = "sudo python3 app.py" } == .running("python3")
+            && resolve { $0.foreground = ["sudo"]; $0.lastCommandLine = "sudo python3" } == .program(.python, name: "python3"),
+          "past sudo too, by the line")
+    check(ActiveProgram.isInteractiveInterpreter(nil) && ActiveProgram.isInteractiveInterpreter(["node", "--inspect"])
+            && !ActiveProgram.isInteractiveInterpreter(["node", "-e", "1"]) && !ActiveProgram.isInteractiveInterpreter(["python3", "-"]),
+          "arguments not read count as a prompt; a flag alone is still one; -e or - is not")
+
+    // A shell the kernel cannot see into, decided by the line that started it.
+    let hidden: [(String, String?, ActiveProgram.HiddenShell?)] = [
+        ("docker", "docker exec -it web sh", .remote), ("docker", "docker run --rm -it ubuntu", .remote),
+        ("docker", "docker attach web", .remote), ("docker", "docker logs -f web", nil), ("docker", "docker exec web ls", nil),
+        ("kubectl", "kubectl exec -it pod -- bash", .remote), ("kubectl", "kubectl get pods", nil),
+        ("mosh-client", nil, .remote), ("vagrant", "vagrant ssh", .remote), ("lxc", "lxc shell box", .remote),
+        ("sudo", "sudo -i", .root), ("sudo", "sudo -u bob -i", .root), ("sudo", "sudo su -", .root), ("doas", "doas -s", .root),
+        ("sudo", "sudo bash", .root), ("sudo", "sudo --login", .root), ("sudo", "sudo ls -s", nil), ("sudo", "sudo vim /etc/hosts", nil),
+        ("sudo", "sudo -S true", nil), ("sudo", nil, nil),
+    ]
+    for (leader, line, expected) in hidden {
+        check(ActiveProgram.hiddenShell(leader: leader, line: line) == expected,
+              "\(leader) started by \(line ?? "nothing") is \(String(describing: expected))")
+    }
+    check(resolve { $0.foreground = ["docker"]; $0.hiddenShell = .remote } == .shell(remote: true)
+            && resolve { $0.foreground = ["docker"]; $0.hiddenShell = .remote; $0.alternateScreen = true; $0.lastCommandLine = "vim x" }
+                == .program(.vim, name: "vim"),
+          "a container's shell is a shell somewhere else, and a full-screen program in it is found as over ssh")
+    check(resolve { $0.foreground = ["sudo"]; $0.hiddenShell = .root } == .shell(remote: false)
+            && resolve { $0.foreground = ["sudo"]; $0.hiddenShell = .root; $0.typedLine = "tar " } == .typing(.init(command: "tar", subcommand: nil)),
+          "sudo -i is a shell on this Mac: its prompt, and a command's flags")
+    check(resolve { $0.foreground = ["docker"]; $0.lastCommandLine = "docker exec -it web sh" } == .running("docker"),
+          "only the decision made when the group came to the front counts, not the line as it is now")
+
+    // Choosing hunks.
+    check(resolve { $0.foreground = ["git"]; $0.lastCommandLine = "git add -p" } == .program(.gitPatch, name: "git add -p")
+            && resolve { $0.foreground = ["git"]; $0.lastCommandLine = "git stash push --patch" } == .program(.gitPatch, name: "git stash -p")
+            && resolve { $0.foreground = ["git"]; $0.lastCommandLine = "git -C repo reset -p" } == .program(.gitPatch, name: "git reset -p"),
+          "git asking about each hunk")
+    check(resolve { $0.foreground = ["git"]; $0.lastCommandLine = "git add ." } == .running("git")
+            && ActiveProgram.patchSubcommand(in: "git log -p") == nil && ActiveProgram.patchSubcommand(in: nil) == nil,
+          "and not otherwise: git log -p only prints")
+
+    // Prefix keys as tmux and screen write them.
+    let tmuxKeys: [(String, String?)] = [("C-a", "⌃A"), ("C-b", "⌃B"), ("C-Space", "⌃Space"), ("M-x", "⌥X"), ("`", "`"),
+                                         ("a", "a"), ("A", nil), ("None", nil), ("F12", nil), ("C-M-a", nil), ("", nil), ("C-a\n", "⌃A")]
+    for (key, cap) in tmuxKeys {
+        check(ActiveProgram.capForTmuxKey(key) == cap, "tmux's \(key.debugDescription) is \(cap ?? "nothing")")
+    }
+    check(ActiveProgram.screenEscape(fromScreenrc: "startup_message off\nescape ^Tt\n") == "⌃T"
+            && ActiveProgram.screenEscape(fromScreenrc: "defescape ^Bb") == "⌃B"
+            && ActiveProgram.screenEscape(fromScreenrc: "escape ``") == "`"
+            && ActiveProgram.screenEscape(fromScreenrc: "escape ^Aa\nescape ^Oo") == "⌃O"
+            && ActiveProgram.screenEscape(fromScreenrc: "# escape ^Tt\nvbell off") == nil,
+          "screen's escape key from ~/.screenrc, the last line winning, a comment not")
+    check(ActiveProgram.tmuxSocketArguments(["tmux", "-L", "work", "attach"]) == ["-L", "work"]
+            && ActiveProgram.tmuxSocketArguments(["tmux", "-S/tmp/s", "new"]) == ["-S", "/tmp/s"]
+            && ActiveProgram.tmuxSocketArguments(["tmux", "-f", "my.conf", "-L", "x", "a"]) == ["-L", "x"]
+            && ActiveProgram.tmuxSocketArguments(["tmux"]).isEmpty && ActiveProgram.tmuxSocketArguments(["tmux", "new", "-L", "x"]).isEmpty,
+          "the arguments that choose a tmux server, and none after the command")
+    check(TmuxQuery.parse("vim\nC-a\n") == .init(paneCommand: "vim", prefix: "⌃A")
+            && TmuxQuery.parse("\n\n") == .init(paneCommand: nil, prefix: nil)
+            && TmuxQuery.parse("zsh") == .init(paneCommand: "zsh", prefix: nil),
+          "what tmux prints for the pane and the prefix is read")
+
+    // A line read off the screen, once Tab or ↑ has changed it.
+    check(EnteredLine.lineOnScreen("git commit ", typedBefore: "git com") == "git commit "
+            && EnteredLine.lineOnScreen("git commit ", typedBefore: "gi") == "git commit "
+            && EnteredLine.lineOnScreen("ls -la", typedBefore: "") == "ls -la",
+          "the screen's line is taken when it starts as what was typed")
+    check(EnteredLine.lineOnScreen("echo hi", typedBefore: "git com") == nil && EnteredLine.lineOnScreen("   ", typedBefore: "") == nil,
+          "and not when the screen has moved under it, or shows nothing")
+    var buffer = EnteredLine.LineBuffer()
+    check(buffer.isAtLineStart && !buffer.isUntracked, "a new line starts at its start")
+    _ = buffer.feed(Array("git com".utf8)[...], moment: nil)
+    check(!buffer.isAtLineStart && !buffer.isUntracked && buffer.text == "git com", "typed keys are followed")
+    _ = buffer.feed([0x09][...], moment: nil)
+    check(buffer.isUntracked && buffer.typedBeforeUntracked == "git com" && buffer.text == nil,
+          "Tab leaves the keys behind, and remembers what was typed before it")
+    _ = buffer.feed([0x0D][...], moment: nil)
+    check(buffer.isAtLineStart && buffer.typedBeforeUntracked.isEmpty, "Return starts a new line")
+}
+checkQuickReferenceMore()
 
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

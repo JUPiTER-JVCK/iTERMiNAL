@@ -230,6 +230,7 @@ jobs:
             Sources/iTERMiNAL/Terminal/GhosttyThemeFile.swift \
             Sources/iTERMiNAL/Terminal/ShellIntegration.swift \
             Sources/iTERMiNAL/Terminal/ActiveProgram.swift \
+            Sources/iTERMiNAL/Terminal/TmuxQuery.swift \
             Sources/iTERMiNAL/Terminal/ShellIntegrationFiles.swift \
             Sources/iTERMiNAL/Terminal/OutputColors.swift \
             Sources/iTERMiNAL/Terminal/BackgroundOpacity.swift \

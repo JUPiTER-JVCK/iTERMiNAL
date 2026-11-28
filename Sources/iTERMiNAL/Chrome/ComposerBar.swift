@@ -105,6 +105,7 @@ struct ComposerBar: View {
             noteQuickReference(text: newText, focused: inputFocused)
         }
         .onChange(of: inputFocused) { _, focused in noteQuickReference(text: text, focused: focused) }
+        .onChange(of: settings.composerTarget) { _, _ in noteQuickReference(text: text, focused: inputFocused) }
         // Notes about the line follow it a moment after typing stops. Keyed on
         // the setting too, so switching it off clears them at once, and
         // restarted by every change, so a line still being typed is never read.
@@ -119,8 +120,13 @@ struct ComposerBar: View {
         }
     }
 
+    /// Tells the quick reference strip what is typed here — only while this
+    /// is a shell's input. Typed for the assistant, it is a message, and the
+    /// flags of a command named in it are no use there.
     private func noteQuickReference(text: String, focused: Bool) {
-        QuickReferenceModel.shared.noteComposer(text: text, focused: focused && settings.showQuickReference)
+        var chat = false
+        if case .assistant = store.composerDestination { chat = true }
+        QuickReferenceModel.shared.noteComposer(text: text, focused: focused && settings.showQuickReference && !chat)
     }
 
     /// How far the card may travel from home while staying fully on the

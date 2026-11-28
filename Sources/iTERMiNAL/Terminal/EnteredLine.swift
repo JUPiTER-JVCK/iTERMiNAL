@@ -117,6 +117,22 @@ enum EnteredLine {
 
     // MARK: The line
 
+    /// The line as the screen shows it — read from where it began to the
+    /// cursor — for when the keys alone no longer say what it is: Tab
+    /// completed a word, ↑ brought back an earlier command.
+    ///
+    /// What was typed before that (`typedBefore`) must still start it, up to
+    /// the end of its first word: if it does not, the place the line began has
+    /// moved — a list of completions scrolled the screen — and nothing is
+    /// returned rather than another line read in its place. Only the first
+    /// word is held to, because ⌃W and the like rewrite the rest.
+    static func lineOnScreen(_ screen: String, typedBefore: String) -> String? {
+        guard !screen.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let typedHead = typedBefore.prefix { $0 != " " && $0 != "\t" }
+        guard screen.hasPrefix(typedHead) else { return nil }
+        return screen
+    }
+
     /// The line being typed, rebuilt from the bytes heading for the terminal.
     ///
     /// Deliberately conservative. These are the bytes the user typed, not what
@@ -131,6 +147,11 @@ enum EnteredLine {
         /// what the shell will actually run.
         private var isTrustworthy = true
 
+        /// What had been typed when the buffer stopped matching the shell's
+        /// line: Tab completed a word, ↑ brought a command back. The line read
+        /// off the screen then has to start the same way (`lineOnScreen`).
+        private(set) var typedBeforeUntracked = ""
+
         init() {}
 
         /// What has been typed since the last Enter, while it still matches
@@ -140,6 +161,13 @@ enum EnteredLine {
             guard isTrustworthy, !bytes.isEmpty else { return nil }
             return String(bytes: bytes, encoding: .utf8)
         }
+
+        /// Nothing typed since the last Enter: the next key starts a line.
+        var isAtLineStart: Bool { isTrustworthy && bytes.isEmpty }
+
+        /// Whether the line has been changed in a way the keys alone cannot
+        /// follow, so only the screen says what it is now.
+        var isUntracked: Bool { !isTrustworthy }
 
         /// Takes in `data` and returns each line it completes, with the moment
         /// it was entered at — which still has to say it was the shell's
@@ -164,6 +192,7 @@ enum EnteredLine {
                     moment = nil
                     bytes.removeAll(keepingCapacity: true)
                     isTrustworthy = true
+                    typedBeforeUntracked = ""
                 case 0x7F, 0x08:                    // Backspace
                     // One keypress deletes one character, which in UTF-8 may be
                     // several bytes: dropping a single byte would leave a broken
@@ -176,6 +205,7 @@ enum EnteredLine {
                 case 0x03, 0x04, 0x15:              // ^C, ^D, ^U abandon the line
                     bytes.removeAll(keepingCapacity: true)
                     isTrustworthy = true
+                    typedBeforeUntracked = ""
                 case 0x20...0x7E, 0x80...0xFF:      // Printable ASCII and UTF-8
                     bytes.append(byte)
                 default:
@@ -185,6 +215,9 @@ enum EnteredLine {
                     // follow. Treating them as "no effect" produced titles that
                     // were confidently wrong: `echo old`, ^W, `new` runs
                     // `echo new` and would have been recorded as `echo oldnew`.
+                    if isTrustworthy {
+                        typedBeforeUntracked = String(decoding: bytes, as: UTF8.self)
+                    }
                     isTrustworthy = false
                 }
             }

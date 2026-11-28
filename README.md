@@ -262,26 +262,42 @@ A tour of the app in thirty-four pictures, in five groups.
   program in front of the focused terminal: `:w`, `:q` and `:help` in Vim and
   Neovim; Write Out, Exit, Cut and Paste in nano, in nano's own words; q,
   search and the sections in `man` (1 user commands, 2 system calls, 3 C
-  library, with `man -k` to search them); and the same for Emacs, micro, less,
-  tmux, screen, top, htop, btop and superfile. At a shell prompt it shows the
-  shell's own keys (⌃R, ⌃A, ⌃E, ⌃W, ⌃U, `!!`, `cd -`), and once a command's name
-  is typed — at the prompt or in the composer — that command's flags or
-  subcommands, from the composer's completion list. Click a key and it is typed
-  into the program; a Return at the end is left for you to press, Vim's
-  commands start from normal mode, and a key that needs your own words, such as
-  a search, types only the part before them (`/`). ssh's escape keys are shown
-  but never typed, because they start with a Return that would run whatever is
-  half typed. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's
-  own colour down to grey, so they tell apart without standing out. The program's
-  name sits at the end of the line; click it for the full list, and for a
-  typed command a link to its Cheatsheet page. On this Mac the program is found the way Terminal.app
-  names its tabs, by asking the system which process has the terminal — `git
-  log` is less, `sudo vim` is Vim — so it needs nothing from the shell. Over ssh
-  it goes by the program you typed and its switch to the full screen. The line
-  stays while a program runs, so the terminal never resizes under it. Keys a
-  config file has rebound are not reflected. Settings → Appearance → Status →
-  Quick reference turns it off, and the work of finding the program with it.
-  The design is in [`docs/design/quick-reference.md`](docs/design/quick-reference.md).
+  library, with `man -k` to search them); and the same for Helix, Emacs, micro,
+  less, tmux, screen, top, htop, btop and superfile, the Python, Node and Ruby
+  prompts, psql, mysql and sqlite3, fzf, lazygit, and `git add -p` asking about
+  each hunk — how to quit first. At a shell prompt it shows the shell's own keys
+  (⌃R, ⌃A, ⌃E, ⌃W, ⌃U, `!!`, `cd -`), and once a command's name is typed — at
+  the prompt or in the composer — that command's flags or subcommands, from the
+  composer's completion list, still after Tab completes a word or ↑ brings a
+  command back: the line is then read off the screen. Not over ssh, where the
+  flags of this Mac's tools could mislead. Click a key and it is typed into the
+  program, with a brief flash; a Return at the end is left for you to press,
+  Vim's and Helix's commands start from normal mode, and a key that needs your
+  own words, such as a search, types only the part before them (`/`). Keys
+  that are shown but never typed — ssh's escapes, which start with a Return
+  that would run whatever is half typed, and man's sections — have a dashed
+  edge. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's own colour
+  down to grey, so they tell apart without standing out. The program's name
+  sits at the end of the line; click it, or press ⌥⌘/, for the full list, which
+  you can search (Return types the first key found), and for a typed command a
+  link to its Cheatsheet page. A program with no keys listed but a Cheatsheet
+  page — docker, say — opens that page instead.
+
+  On this Mac the program is found the way Terminal.app names its tabs, by
+  asking the system which process has the terminal — `git log` is less, `sudo
+  vim` is Vim, and macOS's `man`, a shell script, is man — so it needs nothing
+  from the shell. Inside tmux, tmux itself is asked which program its pane
+  runs, and which prefix key is set, so a `~/.tmux.conf` that makes it ⌃A is
+  shown as ⌃A; screen's escape key is read from `~/.screenrc`. `sudo -i`, `docker
+  exec -it`, `kubectl exec -it`, `vagrant ssh` and mosh are taken for the shells
+  they are. Over ssh it goes by the program you typed and its switch to the full
+  screen. The line stays while a program runs, so the terminal never resizes
+  under it. Keys a program's own config has rebound are not reflected, apart
+  from tmux's and screen's prefix. Settings → Appearance → Status → Quick
+  reference turns it off, and the work of finding the program with it; Shell
+  keys at a prompt leaves the line empty at a prompt; View → Quick Reference is
+  the same switch. The design is in
+  [`docs/design/quick-reference.md`](docs/design/quick-reference.md).
 - **Option as Meta** — Settings → Terminal → Keyboard. On, the default, Option
   sends Escape plus the key, so Option-B and Option-F move by word in zsh and
   bash. Off, Option types the character your layout gives it, such as `@` or
@@ -904,7 +920,7 @@ deleted and retried, which is how `latest` was burned here for good.
 
 Settings → Terminal → **Shell integration**, off until you turn it on. A new zsh
 tab on this Mac is then started with two small hooks that tell iTERMiNAL when a
-command starts and what status it ends with. Nothing in your home folder is
+command starts, which command it is, and what status it ends with. Nothing in your home folder is
 changed: iTERMiNAL points zsh's `ZDOTDIR` at a private folder
 (`~/Library/Application Support/iTERMiNAL/ShellIntegration/zsh`) holding one
 `.zshenv`. zsh reads it first; it adds the hooks, puts `ZDOTDIR` back exactly as
@@ -921,18 +937,30 @@ folder.
   at, you get an in-app mark or a system banner — whichever *Pane attention*
   is set to — naming the command when it could tell what you typed, with its
   status and how long it ran.
+- The tab is named after a command even when Tab finished it or ↑ brought it
+  back, which keystrokes alone cannot follow, and the quick reference knows what
+  was run the same way — `sudo vim`, `docker exec -it`, `git add -p`. A command
+  typed with a space in front still never names the tab.
 
 What it is not: it works for **zsh only**. bash, fish, ssh sessions, and a tab
 that was already open are left exactly as they were. The folder is made private
 to your account and checked every time; if it is a link, someone else's, or open
 to others in a way that cannot be fixed, the shell starts the ordinary way
-instead. The hooks report only a status and the start and end of a command —
-never the command's text. They use OSC 633, the code VS Code's integration uses,
+instead. Besides a status and the start and end of a command, the hooks send
+the first line of each command as you typed it, a thousand characters at most —
+to this tab only, over the same terminal that already carries your keystrokes
+and the shell's echo of them. It is signed with a random code made for that shell
+as it starts and taken back out of its environment at once, so nothing the shell
+runs inherits it and nothing printed to the terminal — a file you `cat`, a
+program over ssh — can pass for a command. iTERMiNAL keeps it in memory where a
+typed line goes, under the same rules: the tab's name and the quick reference's
+record of what ran. They use OSC 633, the code VS Code's integration uses,
 because SwiftTerm already handles OSC 133 itself and keeps no exit status; and
 the marks are believed only from a tab started with the hooks. A program running
-in such a tab can still print one, which could change that tab's status line or
-raise the long-command notice — no more than it can already do with a bell or an
-OSC 777 notification.
+in such a tab can still print a start, an end or a status, which could change
+that tab's status line or raise the long-command notice — no more than it can
+already do with a bell or an OSC 777 notification — but not a command line,
+which needs the code.
 
 These files run inside your own login shell, so they are tested as one: CI
 writes them exactly as the app does and runs them in the runner's real zsh, on a
@@ -940,7 +968,9 @@ pseudo-terminal, for login and non-login shells, with a `ZDOTDIR` of your own,
 with a `.zshenv` that moves it, with a `precmd` of yours that fails, and with
 options such as `NO_UNSET` and `KSH_ARRAYS` set — and checks that anything
 reading `ZDOTDIR` afterwards, the system's own startup files included, sees
-yours, and that the same shell started without them reports nothing. See
+yours, that each command's first line arrives exactly as typed (UTF-8, a
+backslash, a leading space and `!!` included), that the code reaches nothing
+the shell starts, and that the same shell started without them reports nothing. See
 [`scripts/shell-integration-check`](scripts/shell-integration-check/check.py).
 
 ### Working directory (OSC 7)
@@ -1789,6 +1819,7 @@ bind:
 | --- | --- |
 | Command palette | ⌘K |
 | Keyboard shortcuts | ⌘/ |
+| Keys for the program in front (quick reference) | ⌥⌘/ |
 | New terminal tab | ⌘T |
 | New workspace | ⇧⌘N |
 | Split right / down | ⌘D / ⇧⌘D |
@@ -1823,10 +1854,12 @@ own, which the list does not read. Some actions (Split with Files, Split
 with HTTP Client) have no shortcut; the command palette finds every action.
 
 After the app's own keys come those of programs you run in a terminal — Vim,
-nano, Emacs, micro, less, man, tmux, screen, top, htop, ssh's escape keys and
-the shell's line editing — each from its own documentation, for its default
-keys. The quick reference line above the status bar shows the section for the
-program in front of the focused terminal, and types a key when you click it.
+Helix, nano, Emacs, micro, less, man, tmux, screen, top, htop, the Python, Node
+and Ruby prompts, psql, mysql, sqlite3, fzf, lazygit, `git add -p`, ssh's escape
+keys and the shell's line editing — each from its own documentation, for its
+default keys. The quick reference line above the status bar shows the section
+for the program in front of the focused terminal, and types a key when you click
+it; ⌥⌘/ opens that program's full list.
 
 ## Architecture
 

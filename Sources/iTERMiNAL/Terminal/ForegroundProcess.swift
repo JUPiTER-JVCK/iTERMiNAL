@@ -12,9 +12,12 @@ import Foundation
 ///
 /// Two more things come with it, for programs the names alone would misread:
 ///
-/// - The script a shell leading the group runs, from its arguments. macOS's
-///   man is a shell script, so the kernel names the job sh — with mandoc and
-///   less beside it — and only `/bin/sh /usr/bin/man ls` says it is man.
+/// - The leader's arguments, for a shell or an interpreter. macOS's man is a
+///   shell script, so the kernel names the job sh — with mandoc and less beside
+///   it — and only `/bin/sh /usr/bin/man ls` says it is man; `python3` is a
+///   prompt and `python3 app.py` a program.
+/// - For tmux, the client's binary and the arguments that choose its server,
+///   so the server can be asked what its pane runs (`TmuxQuery`).
 /// - The leader's parent, for a program that hands the terminal to a child in
 ///   a group of its own: a man built on mandoc does that with its pager.
 ///
@@ -26,8 +29,9 @@ enum ForegroundProcess {
     /// when the shell has exited.
     ///
     /// `previous` is the last answer for this terminal. While the same group
-    /// is in front, the script it found is kept rather than read again: the
-    /// arguments come in a buffer the size of the system's argument limit.
+    /// is in front, what it found — the leader's arguments, the tmux client —
+    /// is kept rather than read again: the arguments come in a buffer the size
+    /// of the system's argument limit.
     static func group(forShell shellPID: pid_t, reusing previous: ActiveProgram.ForegroundGroup?) -> ActiveProgram.ForegroundGroup? {
         guard shellPID > 0, let shell = info(pid: shellPID) else { return nil }
         let foreground = shell.kp_eproc.e_tpgid
@@ -46,15 +50,35 @@ enum ForegroundProcess {
         let parentPID = members.first { $0.kp_proc.p_pid == foreground }?.kp_eproc.e_ppid ?? 0
         let parent = parentPID > 1 && parentPID != shellPID ? name(of: parentPID) : nil
 
-        var script: String?
-        if leaderAlive, let leader = names.first, ProgramKeyCatalog.section(forProgram: leader) == .shell {
-            if let previous, previous.id == foreground, previous.names.first == leader {
-                script = previous.script
-            } else if let arguments = arguments(of: foreground) {
-                script = ActiveProgram.script(inShellArguments: arguments)
+        // The same group as last time keeps what was read about it then.
+        let sameGroup = previous.map { $0.id == foreground && $0.names.first == names.first } ?? false
+        var group = ActiveProgram.ForegroundGroup(names: names, parent: parent, id: foreground)
+        guard leaderAlive, let leader = names.first else { return group }
+        let section = ProgramKeyCatalog.section(forProgram: leader)
+        if section?.readsArguments == true {
+            group.arguments = sameGroup ? previous?.arguments : arguments(of: foreground)
+        }
+        if section == .tmux {
+            if sameGroup, let known = previous?.tmux {
+                group.tmux = known
+            } else if let executable = path(of: foreground) {
+                group.tmux = ActiveProgram.TmuxClient(
+                    executable: executable,
+                    socketArguments: arguments(of: foreground).map(ActiveProgram.tmuxSocketArguments) ?? []
+                )
             }
         }
-        return ActiveProgram.ForegroundGroup(names: names, parent: parent, script: script, id: foreground)
+        return group
+    }
+
+    /// The executable `pid` runs, by its full path.
+    private static func path(of pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        let bytes = buffer.prefix(Int(length)).map { UInt8(bitPattern: $0) }
+        let path = String(decoding: bytes, as: UTF8.self)
+        return path.isEmpty ? nil : path
     }
 
     private static func info(pid: pid_t) -> kinfo_proc? {

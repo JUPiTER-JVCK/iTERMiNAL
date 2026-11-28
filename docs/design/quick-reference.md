@@ -23,12 +23,27 @@ it describes the pane you are typing into.
   sidebar's footer as one line. When the status bar is switched off the strip
   is the last row, and because it is the same height its seam lines up instead.
 - Hints are in the order they matter, and a narrow window drops them from the
-  end (`LeadingFitRow`): nothing wraps or scrolls. A key cap never gives way —
-  cut down it reads as "…" — so only the words beside it are shortened.
+  end: nothing wraps or scrolls. `ViewThatFits` picks the longest run of them
+  that fits, so the ones left out are not on the screen at all — moved off it,
+  as an earlier layout did, VoiceOver still read them. A key cap never gives
+  way — cut down it reads as "…" — so only the words beside it are shortened.
+- The first key lines up with the status bar's first icon below it: the line
+  starts 4pt further left than the status bar, by the hint's own hover padding.
+- A key a click types warms under the pointer and flashes in the accent when
+  clicked. A key shown but never typed — man's sections, ssh's escapes — has
+  no fill and a dashed edge, so which is which is plain before hovering.
 - The program's name sits at the end of the line, as plain text with a small
-  chevron, and is the button that opens the rest in a popover; it brightens
-  under the pointer. At the start, in a capsule, it took room the hints
-  needed and stood out more than a label should.
+  chevron, at the status bar's size, and is the button that opens the rest in a
+  popover; ⌥⌘/ (Help → Keys for the Program in Front) does the same. At the
+  start, in a capsule, it took room the hints needed and stood out more than a
+  label should. For a program with no keys listed that the Cheatsheet has a
+  page for, it opens that page instead.
+- The popover is as tall as its list, up to 400pt, opens with its search
+  field focused, and Return there types the first key found. Its legend shows
+  only the modifiers the list uses — never ⌘, which no program here is sent.
+- At a prompt the shell's keys can be switched off (Settings → Appearance →
+  Status → Shell keys at a prompt). The line stays, empty, so the terminal
+  keeps its size.
 - ⌃, ⌥, ⇧ and ⌘ are each drawn in a shade of their own: the text's colour at
   full strength for Control, then a step dimmer for Option, Shift and Command
   (white to a darker grey on a dark theme, black to grey on a light one), so
@@ -62,6 +77,25 @@ Worked out from what the session already has, with no timer:
      the leader's arguments are read (`KERN_PROCARGS2`): `/bin/sh /usr/bin/man
      ls` names the script, man. Without them, a listed program in the group
      (less) is used. The arguments are read once per job.
+   - **An interpreter's arguments** are read the same way: `python3` and
+     `node` alone, or with `-i`, are their prompts; with a script, `-m` or
+     `-e`, they run a program, which has no keys listed.
+   - **tmux** runs each pane on a terminal of its own, so from outside the
+     program in front is only ever tmux. Its server is asked (`TmuxQuery`,
+     `tmux display-message -c <this terminal's tty>`, with the client's own
+     binary and `-L`/`-S`) what its current pane runs and which prefix is set
+     — at most once a second, off the main thread. The pane's program is shown
+     with tmux's keys beside it, and the prefix replaces ⌃B throughout.
+     screen's escape key comes from `~/.screenrc`; what runs inside screen
+     cannot be asked for.
+   - **A shell the kernel cannot see into** — `sudo -i` (sudo runs it on a
+     terminal of its own), `docker exec -it`, `kubectl exec -it`, `vagrant
+     ssh`, mosh — is decided once, by the line that started it, when its group
+     comes to the front, and kept while it stays there: a line typed into that
+     shell soon takes the starting line's place. A remote one is treated as ssh
+     is; a root one as a shell on this Mac.
+   - **`git add -p`** and the other patch modes are git reading the terminal
+     itself, told apart by the line that started it.
    - **The leader's parent** is read too: a man built on mandoc puts its pager
      in a process group of its own and hands it the terminal, so the group in
      front is less alone, and only its parent says it is man.
@@ -74,7 +108,14 @@ Worked out from what the session already has, with no timer:
    prompt. A program that does not use the alternate screen is not found there.
 4. **At a prompt**, once a command's name is typed and followed by a space, the
    strip shows its flags or subcommands from `CommandSpecs`. The composer's
-   input counts too, while it has the keyboard.
+   input counts too, while it has the keyboard and is a shell's — not while it
+   is the assistant's. Not over ssh or in a container: `CommandSpecs` is
+   macOS's tools, and GNU `sed -i` is not macOS's.
+   The line comes from the keys while they spell it out. Once Tab or ↑ has
+   changed it where the keys cannot follow, it is read off the screen, from
+   where the line began (the cursor's place as its first key was pressed) to
+   the cursor — and taken only if it still starts with what was typed before,
+   so a screen scrolled by a list of completions is not read as the line.
 
 It is asked again on the signals that mark a change: a repaint, and once more
 half a second after the drawing settles; return, and 0.3 s after it, for a
@@ -84,8 +125,9 @@ not optional: the engine passes on at most one repaint in each quarter second
 and drops the others rather than holding the last, so a page drawn whole just
 after the echo of return — man, less — and then left still would otherwise
 never be looked at again. Only the focused session is kept up to date, and nothing at all
-while the strip is off. Each refresh is at most two `sysctl` calls, and the
-answer is published only when it changes.
+while the strip is off. Each refresh is a few `sysctl` calls; a leader's arguments
+are read once per job, tmux is asked at most once a second, and the answer is
+published only when it changes.
 
 ### What a typed word may do
 
@@ -96,11 +138,29 @@ the kernel, never by what was typed. Locally the line is kept only while a shell
 was in front as return was pressed, so the password typed at sudo's prompt is
 never kept. Nothing typed is written anywhere.
 
+With shell integration on, zsh says itself which line it is about to run, just
+after the Return: its `preexec` hook sends the first line as typed (OSC 633 `E`),
+signed with a code made for that shell as it starts, so nothing printed to the
+terminal can pass for one. That line takes the place of the one kept at the
+Return, and is exact where Tab or ↑ had changed the line beyond what the keys,
+or the screen, could say. The hook writes every byte outside printable ASCII as
+`\xHH`, so nothing in the line can end the sequence (SwiftTerm ends an OSC at
+ESC, BEL or CAN) or be dropped from it (it drops other control bytes), and the
+app can refuse anything that is not exactly what the hook writes.
+
+Inside a shell somewhere else — ssh typed here, a container's, sudo's root
+shell — the kernel can only say ssh, docker or sudo is in front, so what this
+Mac can still see decides whether a line is kept: not one read with echo off,
+not one typed into a full-screen program. For a while after #137 such lines
+were not kept at all, and a program started on the far end of a local `ssh`
+was found only by its title.
+
 ## The keys (`ProgramKeyCatalog`)
 
 `EditorKeyCatalog` already listed Vim, nano, Emacs and micro for the Keyboard
-Shortcuts window. It is now `ProgramKeyCatalog`, with less, man, tmux, screen,
-top, htop, ssh's escapes and the shell's line editing added, each from that
+Shortcuts window. It is now `ProgramKeyCatalog`, with Helix, less, man, tmux,
+screen, top, htop, the Python, Node and Ruby prompts, psql, mysql, sqlite3,
+fzf, lazygit, `git add -p`, ssh's escapes and the shell's line editing added, each from that
 program's own documentation for its default keys. Each entry gained a short
 label for the strip (nano's own: Write Out, Where Is), its place in the strip,
 and what a click types. btop's and superfile's keys are not written again: they

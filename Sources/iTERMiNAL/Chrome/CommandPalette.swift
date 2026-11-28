@@ -410,6 +410,12 @@ struct CommandPaletteView: View {
                 // The palette is still closing as this runs.
                 store.showShortcuts(afterPresentation: true)
             },
+            PaletteAction(id: "quickReference.keys", title: "Keys for the Program in Front", subtitle: "The quick reference's full list, for the focused terminal", systemImage: "keyboard", shortcut: "⌥⌘/") {
+                store.showQuickReferenceKeys(afterPresentation: true)
+            },
+            PaletteAction(id: "quickReference.toggle", title: settings.showQuickReference ? "Hide Quick Reference" : "Show Quick Reference", subtitle: "The line of keys above the status bar", systemImage: "keyboard") {
+                settings.showQuickReference.toggle()
+            },
         ]
 
         actions.append(contentsOf: moreMenuActions())

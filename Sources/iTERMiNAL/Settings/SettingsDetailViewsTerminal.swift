@@ -199,7 +199,7 @@ struct TerminalSettingsView: View {
             }
             Section("Shell integration") {
                 Toggle("Report each command's result from zsh", isOn: $settings.shellIntegration)
-                Text("A new zsh tab on this Mac is started with two small hooks that tell iTERMiNAL when a command starts and what status it ends with. It works through zsh's ZDOTDIR: iTERMiNAL's own .zshenv adds the hooks, puts ZDOTDIR back and loads yours, so zsh reads everything else from where it really is — nothing in your home folder is changed. A tab whose last command failed shows its exit status in the sidebar. bash, fish and ssh sessions are left alone, and a tab that is already open keeps the way it was started.")
+                Text("A new zsh tab on this Mac is started with two small hooks that tell iTERMiNAL when a command starts, what its first line is, and what status it ends with — so a tab is named after a command even when Tab finished it or ↑ brought it back. It works through zsh's ZDOTDIR: iTERMiNAL's own .zshenv adds the hooks, puts ZDOTDIR back and loads yours, so zsh reads everything else from where it really is — nothing in your home folder is changed. A tab whose last command failed shows its exit status in the sidebar. bash, fish and ssh sessions are left alone, and a tab that is already open keeps the way it was started.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle("Notify when a long command finishes", isOn: $settings.notifyLongCommands)

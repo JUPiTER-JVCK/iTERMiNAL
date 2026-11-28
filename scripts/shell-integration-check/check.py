@@ -2,7 +2,7 @@
 """Run iTERMiNAL's zsh shell-integration files in a real zsh and check what they do.
 
 The file is one small .zshenv that iTERMiNAL points ZDOTDIR at. It has to add the
-hooks that report each command's start and exit status, put ZDOTDIR back at once, and
+hooks that report each command's start, first line and exit status, put ZDOTDIR back at once, and
 load the person's own .zshenv, so that zsh reads everything else of theirs in its
 usual order from where it really is. It runs inside someone's shell, so a mistake is
 not a failed test, it is a broken terminal. Hence this runs it in a real zsh on a real
@@ -145,6 +145,51 @@ def cycle(code):
     return ["C", f"D;{code}", "A"]
 
 
+# The code iTERMiNAL hands one shell to sign its command lines with (a fresh random one
+# each launch; any 32 hex digits here).
+NONCE = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+
+
+def utf8_locale():
+    """A UTF-8 locale this machine has. The app always starts zsh in one (LANG is
+    en_US.UTF-8 unless it was set), and zsh's line editor keeps typed UTF-8 only in one:
+    in the C locale it stores each such byte as "?" before any hook sees it."""
+    try:
+        names = subprocess.run(["locale", "-a"], capture_output=True, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        names = []
+    for wanted in ("en_US.UTF-8", "en_US.utf8", "C.UTF-8", "C.utf8"):
+        if wanted in names:
+            return wanted
+    return None
+
+
+def command_line(mark):
+    """Reads E;<nonce>;<line> as the app does: \\ and \\xHH, then UTF-8. None if it is
+    not one, is not this shell's, or has a byte the hook should never send raw."""
+    head = f"E;{NONCE};"
+    if not mark.startswith(head):
+        return None
+    text = mark[len(head):]
+    if any(not (0x20 <= ord(ch) <= 0x7E) for ch in text):
+        return None
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        if text[i] != "\\":
+            out.append(ord(text[i]))
+            i += 1
+        elif text[i + 1:i + 2] == "\\":
+            out.append(0x5C)
+            i += 2
+        elif text[i + 1:i + 2] == "x" and re.fullmatch(r"[0-9A-Fa-f]{2}", text[i + 2:i + 4]):
+            out.append(int(text[i + 2:i + 4], 16))
+            i += 4
+        else:
+            return None
+    return out.decode("utf-8")
+
+
 failures = []
 
 
@@ -188,7 +233,8 @@ def scenario_plain(wrapper: Path, login: bool):
             commands = ["true", "false", "sh -c 'exit 42'", "", "echo hi", PROBE]
             run_commands(session, commands, 1)
             expected = ["A"] + cycle(0) + cycle(1) + cycle(42) + ["A"] + cycle(0) + cycle(0)
-            check(session.marks() == expected, f"marks are A, then C / D;status / A for each command: {session.marks()}", session)
+            # With no code given (ITERMINAL_NONCE), no command line (E) either.
+            check(session.marks() == expected, f"marks are A, then C / D;status / A for each command, and no E without the code: {session.marks()}", session)
             trace = (home / "trace").read_text().splitlines()
             wanted = ["zshenv ZDOTDIR=<unset>"]
             if login:
@@ -320,11 +366,17 @@ def scenario_hostile_options(wrapper: Path):
     home = Path(tempfile.mkdtemp(prefix="itm-zsh-"))
     try:
         (home / ".zshrc").write_text(QUIET + "setopt NO_UNSET KSH_ARRAYS SH_WORD_SPLIT NO_GLOB NO_BARE_GLOB_QUAL\n")
-        session = Session(base_env(home, {"ZDOTDIR": str(wrapper)}))
+        locale = utf8_locale()
+        check(locale is not None, f"a UTF-8 locale to type in: {locale}")
+        session = Session(base_env(home, {"ZDOTDIR": str(wrapper), "ITERMINAL_NONCE": NONCE, "LANG": locale or "en_US.UTF-8"}))
         try:
             session.wait_for_marks("A", 1)
-            run_commands(session, ["false", "true"], 1)
-            check(session.marks() == ["A"] + cycle(1) + cycle(0), f"marks and statuses are right: {session.marks()}", session)
+            run_commands(session, ["false", "true Über"], 1)
+            marks = session.marks()
+            plain = [m for m in marks if not m.startswith("E;")]
+            check(plain == ["A"] + cycle(1) + cycle(0), f"marks and statuses are right: {plain}", session)
+            lines = [command_line(m) for m in marks if m.startswith("E;")]
+            check(lines == ["false", "true Über"], f"and so are the command lines: {lines!r}", session)
         finally:
             session.finish()
     finally:
@@ -351,17 +403,83 @@ def scenario_hostile_options_in_zshenv(wrapper: Path):
         shutil.rmtree(home, ignore_errors=True)
 
 
+def scenario_command_line(wrapper: Path):
+    print("\neach command's first line, signed with the code this shell was given")
+    home = Path(tempfile.mkdtemp(prefix="itm-zsh-"))
+    try:
+        (home / ".zshrc").write_text(QUIET + "setopt HIST_IGNORE_SPACE\n")
+        locale = utf8_locale()
+        check(locale is not None, f"a UTF-8 locale to type in: {locale}")
+        session = Session(base_env(home, {"ZDOTDIR": str(wrapper), "ITERMINAL_NONCE": NONCE, "LANG": locale or "en_US.UTF-8"}))
+        try:
+            session.wait_for_marks("A", 1)
+            typed = [
+                "true",
+                "true Über €5 naïve",
+                'true back\\slash "semi;colon"',
+                " true leading space",
+                "true again",
+                "!!",
+                # A long line, put in the history rather than typed: a pty takes only
+                # so much typing at once.
+                "print -s true ${(l:1200::x:)}",
+                "!!",
+            ]
+            prompts = run_commands(session, typed, 1)
+            # A command over two lines: only its first is sent.
+            session.send("true first \\")
+            session.send("second")
+            prompts += 1
+            session.wait_for_marks("A", prompts)
+            time.sleep(0.2)
+            lines = [command_line(m) for m in session.marks() if m.startswith("E;")]
+            wanted = [
+                "true",
+                "true Über €5 naïve",
+                'true back\\slash "semi;colon"',
+                " true leading space",
+                "true again",
+                "true again",
+                "print -s true ${(l:1200::x:)}",
+                ("true " + "x" * 1200)[:1000],
+                "true first \\",
+            ]
+            shown = [line if line is None or len(line) < 40 else f"{line[:12]}…({len(line)} characters)" for line in lines]
+            check(lines == wanted, f"each command's first line arrives as typed — a leading space kept, !! expanded, cut at 1000 characters: {shown!r}", session)
+            raw = [m for m in session.marks() if m.startswith("E;")]
+            check(all(all(0x20 <= ord(ch) <= 0x7E for ch in m) for m in raw),
+                  "and as printable ASCII throughout, so nothing in the line can end the sequence early")
+            marks = session.marks()
+            order = [m if not m.startswith("E;") else "E" for m in marks]
+            check(order[:5] == ["A", "E", "C", "D;0", "A"] and order.count("E") == order.count("C"),
+                  f"each comes just before its command's start: {order[:9]}")
+            session.send('print -r -- "CODE ENV=${ITERMINAL_NONCE-<unset>} CHILD=$(sh -c \'echo ${ITERMINAL_NONCE-unset}\') EXPORTED=$(env | grep -c ITERMINAL_NONCE) LCALL=${LC_ALL-<unset>}"')
+            session.pump(lambda: re.search(rb"CODE ENV=\S+ CHILD=\S+ EXPORTED=\d LCALL=\S+", bytes(session.buffer)) is not None, "the code probe")
+            found = re.search(rb"CODE ENV=(\S+) CHILD=(\S+) EXPORTED=(\d) LCALL=(\S+)", bytes(session.buffer))
+            check(found is not None and found.groups()[:3] == (b"<unset>", b"unset", b"0"),
+                  f"the code is out of the environment: nothing the shell starts inherits it: {found.groups()[:3] if found else None}", session)
+            check(found is not None and found.group(4) == b"<unset>",
+                  f"and the C locale the hook writes in stays inside it: LC_ALL is {found.group(4) if found else None}")
+            check(NONCE.encode() not in bytes(session.buffer).replace(f"\x1b]633;E;{NONCE};".encode(), b""),
+                  "and it is never printed but in the marks")
+        finally:
+            session.finish()
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 def scenario_not_interactive(wrapper: Path):
     print("\na non-interactive zsh that inherits the wrapper's ZDOTDIR")
     home = Path(tempfile.mkdtemp(prefix="itm-zsh-"))
     try:
         (home / ".zshenv").write_text(trace_line("zshenv"))
-        env = base_env(home, {"ZDOTDIR": str(wrapper)})
-        out = subprocess.run([ZSH, "-c", 'print -r -- "ran ZDOTDIR=${ZDOTDIR-<unset>} hooks=${#precmd_functions}"'],
+        env = base_env(home, {"ZDOTDIR": str(wrapper), "ITERMINAL_NONCE": NONCE})
+        out = subprocess.run([ZSH, "-c", 'print -r -- "ran ZDOTDIR=${ZDOTDIR-<unset>} hooks=${#precmd_functions} code=${ITERMINAL_NONCE-<unset>}"'],
                              env=env, capture_output=True, timeout=30)
         text = out.stdout.decode()
         check("\x1b]633" not in text and "hooks=0" in text, f"it gets no hooks and prints no marks: {text!r}")
         check("ZDOTDIR=<unset>" in text, "and ZDOTDIR is handed back to it too")
+        check("code=<unset>" in text, "and the command-line code is taken out of its environment as well")
         check((home / "trace").read_text().splitlines() == ["zshenv ZDOTDIR=<unset>"], "and their .zshenv still ran, as it would have")
     finally:
         shutil.rmtree(home, ignore_errors=True)
@@ -414,6 +532,7 @@ def main() -> int:
         scenario_system_files(wrapper)
         scenario_hostile_options(wrapper)
         scenario_hostile_options_in_zshenv(wrapper)
+        scenario_command_line(wrapper)
         scenario_not_interactive(wrapper)
         scenario_control_without_wrapper()
     except TimeoutError as error:
