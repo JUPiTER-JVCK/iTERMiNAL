@@ -26,8 +26,8 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// rather than after its directory, with what was true as Return was
     /// pressed. That is what says whether the shell was reading it, or a
     /// program it started — sudo asking for a password, say: see
-    /// `TypedCommand`.
-    var onCommand: ((String, TypedCommand.Moment) -> Void)?
+    /// `EnteredLine`.
+    var onCommand: ((String, EnteredLine.Moment) -> Void)?
     /// A mark from a shell started with the integration hooks (OSC 633): a prompt
     /// is about to be drawn, a command starts, a command ended with a status.
     /// Called on whichever queue SwiftTerm parses on.
@@ -50,8 +50,17 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     private var dragIsAcceptable = false
 
     /// What has been typed since the last Enter, rebuilt from the keystrokes
-    /// (see `TypedCommand.LineBuffer`).
-    private var lineBuffer = TypedCommand.LineBuffer()
+    /// (see `EnteredLine.LineBuffer`).
+    private var lineBuffer = EnteredLine.LineBuffer()
+    /// Called after each keystroke with `typedLine`, for the quick reference
+    /// strip's "a command is being typed". Kept in memory: nothing here is
+    /// written anywhere.
+    var onLineEdited: ((String?) -> Void)?
+
+    /// What has been typed since the last Enter, while it still matches what
+    /// the shell has. Nil once anything has moved or rewritten the line where
+    /// the buffer cannot follow, and while nothing is typed.
+    var typedLine: String? { lineBuffer.text }
 
     /// The keystroke path — `super` writes the bytes to the PTY, so it must
     /// always run, and nothing here may stop it.
@@ -67,11 +76,12 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
             onCommand?(entered.line, entered.moment)
         }
         onInput?()
+        if let onLineEdited { onLineEdited(typedLine) }
     }
 
     /// What is true of the terminal now, for a Return about to be passed on.
-    private func momentAtReturn() -> TypedCommand.Moment {
-        TypedCommand.Moment(
+    private func momentAtReturn() -> EnteredLine.Moment {
+        EnteredLine.Moment(
             shellInFront: TerminalReader.shellIsInFront(shellPID: process?.shellPid ?? 0),
             hiddenInput: TerminalReader.isReadingHiddenLine(pty: process?.childfd ?? -1),
             alternateScreen: getTerminal().isCurrentBufferAlternate

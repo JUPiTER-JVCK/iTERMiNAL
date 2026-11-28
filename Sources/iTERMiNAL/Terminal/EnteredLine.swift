@@ -11,7 +11,7 @@ import Foundation
 /// the composer's history, the last two of which are written to disk. So a
 /// line is taken only when what was true as Return was pressed says the shell
 /// was the one reading it, and only when it starts the way a command does.
-enum TypedCommand {
+enum EnteredLine {
     /// What was true of the terminal as Return was pressed. It is read before
     /// the Return is passed on: once the shell has it, the program the line
     /// starts can take the terminal, and would then seem to have been there
@@ -132,6 +132,14 @@ enum TypedCommand {
         private var isTrustworthy = true
 
         init() {}
+
+        /// What has been typed since the last Enter, while it still matches
+        /// what the shell has. Nil once anything has moved or rewritten the
+        /// line where the buffer cannot follow, and while nothing is typed.
+        var text: String? {
+            guard isTrustworthy, !bytes.isEmpty else { return nil }
+            return String(bytes: bytes, encoding: .utf8)
+        }
 
         /// Takes in `data` and returns each line it completes, with the moment
         /// it was entered at — which still has to say it was the shell's

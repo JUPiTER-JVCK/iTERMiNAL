@@ -18,8 +18,8 @@ final class SwiftTermEngine: TerminalEngine {
     var onLinkActivated: ((String) -> Void)?
     /// Called with each line typed into the terminal, and what was true as its
     /// Return was pressed — which says whether it was the shell's (see
-    /// `TypedCommand`).
-    var onCommand: ((String, TypedCommand.Moment) -> Void)?
+    /// `EnteredLine`).
+    var onCommand: ((String, EnteredLine.Moment) -> Void)?
     /// Called with each mark from a shell started with the integration hooks.
     var onShellMark: ((ShellIntegration.Mark) -> Void)? {
         get { terminalView.onShellMark }
@@ -63,6 +63,30 @@ final class SwiftTermEngine: TerminalEngine {
     /// Used to read the shell's working directory straight from the kernel,
     /// which is the only way to track `cd` in a shell that doesn't emit OSC 7.
     var shellPID: pid_t { terminalView.process?.shellPid ?? 0 }
+
+    var isAlternateScreen: Bool { terminalView.getTerminal().isCurrentBufferAlternate }
+
+    func foregroundGroup(reusing previous: ActiveProgram.ForegroundGroup?) -> ActiveProgram.ForegroundGroup? {
+        let pid = shellPID
+        guard pid > 0 else { return nil }
+        return ForegroundProcess.group(forShell: pid, reusing: previous)
+    }
+
+    var typedLine: String? { terminalView.typedLine }
+
+    /// Gives this terminal the keyboard, as a click on it would — for a
+    /// control outside it that types into it, so typing carries on here.
+    func takeFocus() {
+        guard let window = terminalView.window, window.firstResponder !== terminalView else { return }
+        window.makeFirstResponder(terminalView)
+    }
+
+    /// Called when the line being typed changes, with what `typedLine` now
+    /// says. Fires on the keystroke path, so whoever listens keeps it cheap.
+    var onLineEdited: ((String?) -> Void)? {
+        get { terminalView.onLineEdited }
+        set { terminalView.onLineEdited = newValue }
+    }
 
     init(options: TerminalOptions) {
         terminalView = InstrumentedTerminalView(

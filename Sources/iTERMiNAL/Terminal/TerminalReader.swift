@@ -1,7 +1,7 @@
 import Darwin
 
 /// What this Mac's kernel says about who is reading a terminal, for judging a
-/// line as Return is pressed (see `TypedCommand`). Each is one call, made only
+/// line as Return is pressed (see `EnteredLine`). Each is one call, made only
 /// on a Return.
 enum TerminalReader {
     /// Whether `shellPID`'s own process group is the terminal's foreground

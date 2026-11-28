@@ -53,7 +53,7 @@ struct ComposerLogSession: Codable, Identifiable, Equatable {
     /// so the list loads without reading every session's output.
     var hasOutput = false
     /// Set on a session recorded by a build that names a terminal after a line
-    /// only when its shell was reading it (`TypedCommand`). An older one's
+    /// only when its shell was reading it (`EnteredLine`). An older one's
     /// events name terminals by titles that may be a password typed at a sudo
     /// or ssh prompt, so those names are dropped when it is read.
     var terminalNamesVetted: Bool?
@@ -125,7 +125,7 @@ final class ComposerLog: ObservableObject {
     /// Drops the terminal names an older build recorded with commands sent to
     /// terminals, and writes those sessions again without them. Such a name was
     /// the terminal's title, which could be a password taken for a command
-    /// (see `TypedCommand`). The commands are kept: they are what was typed in
+    /// (see `EnteredLine`). The commands are kept: they are what was typed in
     /// the composer, not a title. A session read back has ended, so nothing is
     /// added to one of these again.
     private func forgetUnvettedTerminalNames() {

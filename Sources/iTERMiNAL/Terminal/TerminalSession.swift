@@ -40,7 +40,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// identified by what it is doing rather than by its directory — which is
     /// the same for every tab opened in one project. Only a line the shell was
     /// reading as Return was pressed: never one typed into a program it
-    /// started, which at a sudo or ssh prompt is a password (`TypedCommand`).
+    /// started, which at a sudo or ssh prompt is a password (`EnteredLine`).
     @Published private(set) var lastCommand: String?
     /// True after a bell / OSC attention while this pane was not in front of
     /// the user. Cleared when the session (or its tab) becomes focused.
@@ -48,6 +48,21 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// What the last command did, when this shell reports it (Settings →
     /// Terminal → Shell integration). Cleared when the next command starts.
     @Published private(set) var lastCommandResult: CommandResult?
+    /// What is in front of this terminal, for the quick reference strip: a
+    /// program it has keys for, a command being typed, the prompt. Kept up to
+    /// date only while the strip is switched on (Settings → Appearance →
+    /// Status), and published only when it changes.
+    @Published private(set) var activeProgram: ActiveProgram = .shell(remote: false)
+    /// The last command line given to a shell at its prompt, for seeing past
+    /// `sudo` and for what runs on the far end of ssh. Not a line typed into a
+    /// program — a password at sudo's prompt, text in a remote editor — which
+    /// is why it is taken only while a shell is in front, and never shown
+    /// unless it names a program the strip lists.
+    private var programLine: String?
+    /// The kernel's last answer about this terminal's foreground group, reused
+    /// between keystrokes rather than asked again for each one.
+    private var lastForeground: ActiveProgram.ForegroundGroup?
+    private var programRecheck: DispatchWorkItem?
 
     struct CommandResult: Equatable {
         let exitCode: Int?
@@ -188,7 +203,23 @@ final class TerminalSession: ObservableObject, Identifiable {
                 // directory change becomes visible in a shell with no OSC 7
                 // hook.
                 self.refreshDirectoryFromProcess()
+                // And where a program that has just started, or just quit,
+                // shows itself: it draws. Once now and once as the drawing
+                // settles, because the engine passes on at most one repaint in
+                // each quarter second and drops the rest rather than holding
+                // the last: a page that is drawn whole just after the echo of
+                // return, and then sits still — man, less — never sent one of
+                // its own.
+                self.refreshActiveProgram()
+                self.recheckActiveProgram(after: 0.5)
                 EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+            }
+        }
+        engine.onLineEdited = { [weak self] _ in
+            // The keystroke path. The kernel's last answer is reused: a key
+            // typed at a prompt does not change what is in front.
+            DispatchQueue.main.async {
+                self?.refreshActiveProgram(askKernel: false)
             }
         }
         engine.onAttention = { [weak self] attention in
@@ -223,6 +254,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         engine.selectionActions = { [weak self] text in
             self?.selectionActions(for: text) ?? []
         }
+        // `activeProgram` is first worked out when the strip shows this
+        // session, not here: that asks the workspace store, which may be the
+        // one creating this session while it restores the last workspace.
     }
 
     /// What a right-click on selected text offers: for an address, to open or
@@ -323,19 +357,20 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     /// Records a command line, shortened for display to the program and its
-    /// first argument (`TypedCommand.label`) — if it was one.
+    /// first argument (`EnteredLine.label`) — if it was one.
     ///
     /// The line is rebuilt from keystrokes, whatever was reading them, so it is
     /// judged by `moment`: what was true as Return was pressed. A line typed at
     /// a password prompt, into an editor or into a program on the far end of
     /// a local `ssh` is not a command and leaves the name as it was.
-    private func noteCommand(_ command: String, at moment: TypedCommand.Moment) {
+    private func noteCommand(_ command: String, at moment: EnteredLine.Moment) {
         // The line buffer behind this assumes a shell prompt. Inside btop or
         // superfile, Enter confirms a selection, and what was "typed" before
         // it is navigation keys — recorded, it would retitle the panel "jjk".
         guard !kind.isTool else { return }
-        guard TypedCommand.isCommand(at: moment, remote: isRemote),
-              let label = TypedCommand.label(for: command) else { return }
+        noteProgramLine(command, at: moment)
+        guard EnteredLine.isCommand(at: moment, remote: isRemote),
+              let label = EnteredLine.label(for: command) else { return }
         lastCommand = label
     }
 
@@ -370,6 +405,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// A mark from the shell's own hooks.
     private func noteShellMark(_ mark: ShellIntegration.Mark) {
         guard shellIntegrationActive else { return }
+        // A command starting or a prompt coming back is the moment what is in
+        // front changes.
+        refreshActiveProgram()
         // A command is starting: whatever the last one did is no longer the news.
         if case .commandStart = mark { lastCommandResult = nil }
         let now = Date()
@@ -392,6 +430,81 @@ final class TerminalSession: ObservableObject, Identifiable {
             title: "\(lastCommand ?? "Command") finished",
             body: ShellIntegration.summary(exitCode: finished.exitCode, seconds: seconds)
         ))
+    }
+
+    // MARK: Quick reference (see `ActiveProgram`)
+
+    /// Whether the quick reference strip is describing this terminal: it is
+    /// switched on, and this is the focused one. Only then is what is in front
+    /// kept up to date — a build printing away in a background tab has no one
+    /// reading its keys — and the strip asks again when focus arrives.
+    private var quickReferenceWatches: Bool {
+        AppSettings.shared.showQuickReference && WorkspaceStore.shared.focusedSession === self
+    }
+
+    /// Works out again what is in front of this terminal. Two sysctls when the
+    /// kernel is asked, and nothing published unless the answer changed.
+    func refreshActiveProgram(askKernel: Bool = true) {
+        guard quickReferenceWatches else { return }
+        if askKernel {
+            // Only a shell on this Mac: a remote session's child is ssh, and a
+            // tool's is the tool.
+            lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundGroup(reusing: lastForeground)
+        }
+        var signals = ActiveProgram.Signals()
+        signals.foreground = lastForeground?.names
+        signals.foregroundParent = lastForeground?.parent
+        signals.foregroundScript = lastForeground?.script
+        signals.alternateScreen = engine.isAlternateScreen
+        signals.isRemote = isRemote
+        signals.tool = kind.tool?.rawValue
+        signals.lastCommandLine = programLine
+        signals.typedLine = kind.isTool ? nil : engine.typedLine
+        signals.title = title
+        let resolved = ActiveProgram.resolve(signals)
+        if resolved != activeProgram { activeProgram = resolved }
+    }
+
+    /// Keeps a command line given at a prompt, for `ActiveProgram` to see past
+    /// `sudo` and across ssh. Judged by what was in front as return was
+    /// pressed — the program it starts may already be running by now — so a
+    /// line typed into a program is never taken for a command. Two readings
+    /// of that must agree: the strip's last look (`activeProgram`), and
+    /// `moment`, read as the Return was pressed (see `EnteredLine`), which
+    /// does not depend on the strip having looked since the program started.
+    private func noteProgramLine(_ command: String, at moment: EnteredLine.Moment) {
+        guard quickReferenceWatches else { return }
+        switch activeProgram {
+        case .shell, .typing:
+            if EnteredLine.isCommand(at: moment, remote: isRemote) { programLine = command }
+        case .program, .running: break
+        }
+        // What a command starts may print nothing at first — `sleep 30` — so
+        // look again a moment after return rather than wait for it to draw.
+        recheckActiveProgram(after: 0.3)
+    }
+
+    /// Asks again after `delay`, replacing a look already waiting: one look
+    /// once things have settled, however much was drawn before then.
+    private func recheckActiveProgram(after delay: TimeInterval) {
+        guard quickReferenceWatches else { return }
+        programRecheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refreshActiveProgram() }
+        programRecheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Types what a quick reference key sends — if what it was shown for is
+    /// still what is in front. The strip can be a moment behind a program that
+    /// has just quit, and keys meant for Vim must not land at the shell.
+    /// Returns whether anything was typed.
+    @discardableResult
+    func typeProgramKeys(_ text: String, expecting program: ActiveProgram) -> Bool {
+        refreshActiveProgram()
+        guard isRunning, !text.isEmpty, activeProgram == program else { return false }
+        send(text: text)
+        engine.takeFocus()
+        return true
     }
 
     /// Short status for the sidebar: nil while healthy.
@@ -959,6 +1072,9 @@ extension TerminalSession: TerminalEngineDelegate {
             "session": id.uuidString,
             "title": title,
         ]))
+        // On the far end of ssh, a title is one of the few things that names
+        // the program running there.
+        refreshActiveProgram(askKernel: false)
     }
 
     /// Re-reads the shell's working directory from the kernel.
@@ -1001,6 +1117,7 @@ extension TerminalSession: TerminalEngineDelegate {
 
     func engineProcessTerminated(exitCode: Int32?) {
         isRunning = false
+        refreshActiveProgram()
         // What the engine hands over is the raw wait status; what is shown and
         // published is the exit code, as a shell's `$?` has it.
         let code = ExitStatus.code(fromWaitStatus: exitCode)

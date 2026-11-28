@@ -96,8 +96,15 @@ struct ComposerBar: View {
         .onChange(of: store.composerInsertRequest) { _, _ in handlePendingInsert() }
         .onChange(of: settings.composerSuggestFromShellHistory) { _, reads in suggestions.setReadsShellHistory(reads) }
         // A list that is open follows the text, including changes the editor
-        // is not told about, such as the field being cleared on send.
-        .onChange(of: text) { _, newText in suggestions.refresh(text: newText, caret: suggestions.caret) }
+        // is not told about, such as the field being cleared on send. So does
+        // the quick reference strip, which shows the flags of a command typed
+        // here while the input has the keyboard: only the command reaches it,
+        // and only once it is one the completion table knows.
+        .onChange(of: text) { _, newText in
+            suggestions.refresh(text: newText, caret: suggestions.caret)
+            noteQuickReference(text: newText, focused: inputFocused)
+        }
+        .onChange(of: inputFocused) { _, focused in noteQuickReference(text: text, focused: focused) }
         // Notes about the line follow it a moment after typing stops. Keyed on
         // the setting too, so switching it off clears them at once, and
         // restarted by every change, so a line still being typed is never read.
@@ -108,7 +115,12 @@ struct ComposerBar: View {
             ai.cancel()
             outcome.stop()
             suggestions.close()
+            noteQuickReference(text: "", focused: false)
         }
+    }
+
+    private func noteQuickReference(text: String, focused: Bool) {
+        QuickReferenceModel.shared.noteComposer(text: text, focused: focused && settings.showQuickReference)
     }
 
     /// How far the card may travel from home while staying fully on the

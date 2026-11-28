@@ -1080,7 +1080,7 @@ final class WorkspaceStore: ObservableObject {
 
     /// Recents read from a saved or imported layout, with each title an older
     /// build wrote renamed after its host or folder: it may be a password that
-    /// was taken for a command (see `TypedCommand.recentTitle`). `renamed` says
+    /// was taken for a command (see `EnteredLine.recentTitle`). `renamed` says
     /// whether any was, so the file can be written again without it.
     private static func vetted(_ recents: [RecentSession]) -> (recents: [RecentSession], renamed: Bool) {
         var renamed = false
@@ -1091,7 +1091,7 @@ final class WorkspaceStore: ObservableObject {
                 .flatMap { id in AppSettings.shared.sshConnections.first { $0.id == id } }
                 .map { $0.name.isEmpty ? $0.destination : $0.name }
             var entry = recent
-            entry.title = TypedCommand.recentTitle(
+            entry.title = EnteredLine.recentTitle(
                 recent.title, vetted: recent.titleVetted, directory: recent.directory, connectionName: host
             )
             entry.titleVetted = true
