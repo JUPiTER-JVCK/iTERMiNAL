@@ -44,11 +44,14 @@ enum ActiveProgram: Equatable {
         /// as the kernel names them. Empty when the shell's own group is in
         /// front: a prompt. Nil when the kernel was not asked or could not say.
         var foreground: [String]?
-        /// What started the group's leader, when that was not the shell. man
-        /// on macOS puts its pager in a group of its own and hands it the
-        /// terminal, so while a page is read the group in front is less alone,
-        /// and only its parent says it is a manual page.
+        /// What started the group's leader, when that was not the shell. A man
+        /// built on mandoc puts its pager in a group of its own and hands it
+        /// the terminal, so while a page is read the group in front is less
+        /// alone, and only its parent says it is a manual page.
         var foregroundParent: String?
+        /// The script the group's leader runs, when the leader is a shell
+        /// running one (`ForegroundGroup.script`).
+        var foregroundScript: String?
         /// Whether the terminal shows the alternate screen, which full-screen
         /// programs draw on.
         var alternateScreen = false
@@ -70,9 +73,53 @@ enum ActiveProgram: Equatable {
     struct ForegroundGroup: Equatable {
         var names: [String]
         var parent: String?
+        /// The script the leader runs, when the leader is a shell running one:
+        /// macOS's man is a shell script, so the kernel names it sh, and only
+        /// its arguments say it is man.
+        var script: String?
+        /// The group's id, so a second look at the same group can keep what
+        /// the first found out about its script.
+        var id: Int32 = 0
 
         /// The shell's own group: a prompt.
         static let prompt = ForegroundGroup(names: [], parent: nil)
+    }
+
+    /// The arguments in what `KERN_PROCARGS2` hands back for a process: the
+    /// argument count as a 32-bit integer, the path that was run, NUL padding,
+    /// then each argument ending in a NUL — and after them the environment,
+    /// which is not read. Nil when the bytes are not laid out that way.
+    static func arguments(fromProcessArguments bytes: [UInt8]) -> [String]? {
+        let countSize = MemoryLayout<Int32>.size
+        guard bytes.count > countSize else { return nil }
+        let count = bytes.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
+        guard count > 0 else { return nil }
+        var index = countSize
+        // The path that was run, then the padding after it.
+        while index < bytes.count, bytes[index] != 0 { index += 1 }
+        while index < bytes.count, bytes[index] == 0 { index += 1 }
+        var arguments: [String] = []
+        while arguments.count < Int(count), index < bytes.count {
+            let start = index
+            while index < bytes.count, bytes[index] != 0 { index += 1 }
+            arguments.append(String(decoding: bytes[start..<index], as: UTF8.self))
+            index += 1
+        }
+        return arguments.count == Int(count) ? arguments : nil
+    }
+
+    /// The script a shell's arguments say it is running — `/usr/bin/man` in
+    /// `/bin/sh /usr/bin/man ls`, which is how the kernel starts a script —
+    /// by its name. Nil for a shell given its commands inline (`sh -c …`) or
+    /// none at all: an interactive one.
+    static func script(inShellArguments arguments: [String]) -> String? {
+        for argument in arguments.dropFirst() {
+            if argument == "-c" { return nil }
+            if argument.hasPrefix("-") || argument.hasPrefix("+") { continue }
+            let name = ProgramKeyCatalog.normalizedProgramName(argument)
+            return name.isEmpty ? nil : name
+        }
+        return nil
     }
 
     /// Programs that run another one named after them: `sudo vim` is Vim.
@@ -89,8 +136,7 @@ enum ActiveProgram: Equatable {
             guard let leader = foreground.first else { return atPrompt(signals, remote: false) }
             switch ProgramKeyCatalog.section(forProgram: leader) {
             case .shell?:
-                // A shell started from the shell: its prompt is in front.
-                return atPrompt(signals, remote: false)
+                return shellLeads(signals, group: foreground)
             case .ssh?:
                 // A shell on the far end, reached from this one.
                 return farEnd(signals, remote: true)
@@ -117,6 +163,37 @@ enum ActiveProgram: Equatable {
             return .running(leaderName.isEmpty ? nil : leaderName)
         }
         return farEnd(signals, remote: signals.isRemote)
+    }
+
+    /// A shell leading the group in front is one of two things. Started from
+    /// the prompt to be used — `bash` typed in zsh — it is at a prompt of its
+    /// own, alone in its group: an interactive shell gives every command it
+    /// runs a group of its own. Running a script, it is not: the script's
+    /// commands share its group. macOS's man is such a script, with mandoc and
+    /// less beside it, and was read as a prompt until this told them apart.
+    private static func shellLeads(_ signals: Signals, group: [String]) -> ActiveProgram {
+        if let script = signals.foregroundScript, let section = listedSection(script) {
+            return .program(section, name: script)
+        }
+        guard group.count > 1 || signals.foregroundScript != nil else {
+            return atPrompt(signals, remote: false)
+        }
+        // A script that is no program listed: what it runs may be.
+        for member in group.dropFirst() {
+            if let section = listedSection(member) {
+                return .program(section, name: ProgramKeyCatalog.normalizedProgramName(member))
+            }
+        }
+        let running = signals.foregroundScript
+            ?? group.dropFirst().first { ProgramKeyCatalog.section(forProgram: $0) != .shell }
+                .map(ProgramKeyCatalog.normalizedProgramName)
+        return .running(running ?? ProgramKeyCatalog.normalizedProgramName(group[0]))
+    }
+
+    /// A section for a program with keys of its own: not a shell, not ssh.
+    private static func listedSection(_ name: String) -> ProgramKeySection? {
+        guard let section = ProgramKeyCatalog.section(forProgram: name), section != .shell, section != .ssh else { return nil }
+        return section
     }
 
     /// Where the kernel cannot see what runs: the far end of ssh, or a session

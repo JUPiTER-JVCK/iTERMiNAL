@@ -446,11 +446,12 @@ final class TerminalSession: ObservableObject, Identifiable {
         if askKernel {
             // Only a shell on this Mac: a remote session's child is ssh, and a
             // tool's is the tool.
-            lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundGroup
+            lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundGroup(reusing: lastForeground)
         }
         var signals = ActiveProgram.Signals()
         signals.foreground = lastForeground?.names
         signals.foregroundParent = lastForeground?.parent
+        signals.foregroundScript = lastForeground?.script
         signals.alternateScreen = engine.isAlternateScreen
         signals.isRemote = isRemote
         signals.tool = kind.tool?.rawValue

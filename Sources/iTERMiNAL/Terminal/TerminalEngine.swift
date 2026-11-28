@@ -76,8 +76,10 @@ protocol TerminalEngine: AnyObject {
     /// editors, pagers, top — switch to while they run.
     var isAlternateScreen: Bool { get }
     /// The process group in front of the terminal, from the kernel: `.prompt`
-    /// at the shell's prompt, nil when it cannot say. See `ForegroundProcess`.
-    var foregroundGroup: ActiveProgram.ForegroundGroup? { get }
+    /// at the shell's prompt, nil when it cannot say. `previous`, the last
+    /// answer, lets what is already known about the same group be kept. See
+    /// `ForegroundProcess`.
+    func foregroundGroup(reusing previous: ActiveProgram.ForegroundGroup?) -> ActiveProgram.ForegroundGroup?
     /// The line being typed at the prompt, while it can be trusted to match
     /// what the shell has; nil otherwise.
     var typedLine: String? { get }

@@ -160,7 +160,7 @@ struct ProgramKeyRow: View {
     /// Types the way at an index. Nil, as in the Keyboard Shortcuts window,
     /// leaves the keys as a reference.
     var onType: ((Int) -> Void)?
-    /// Colours the modifiers, as the quick reference does throughout.
+    /// Shades the modifiers, as the quick reference does throughout.
     var tintsModifiers = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
@@ -286,7 +286,7 @@ struct KeyCap: View {
     let symbol: String
     let theme: Theme
     var compact = false
-    /// Draws ⌃ ⌥ ⇧ ⌘ each in a colour of its own, a hair apart from the key,
+    /// Draws ⌃ ⌥ ⇧ ⌘ each in a shade of its own, a hair apart from the key,
     /// so which is which reads at a glance in a cap as small as the strip's.
     var tintsModifiers = false
 
@@ -316,7 +316,7 @@ struct KeyCap: View {
                 ForEach(Array(parts.modifiers.enumerated()), id: \.offset) { _, modifier in
                     Text(String(modifier.rawValue))
                         .fontWeight(.semibold)
-                        .foregroundStyle(modifier.tint)
+                        .foregroundStyle(modifier.shade(on: theme))
                 }
                 if !parts.key.isEmpty {
                     Text(parts.key)
@@ -330,9 +330,8 @@ struct KeyCap: View {
     }
 }
 
-/// The modifier keys as caps print them, each with the colour the quick
-/// reference gives it. System colours, so each keeps its contrast in light and
-/// dark and under Increase Contrast.
+/// The modifier keys as caps print them, each with the shade the quick
+/// reference gives it.
 enum ModifierGlyph: Character, CaseIterable, Identifiable {
     case control = "⌃"
     case option = "⌥"
@@ -350,13 +349,20 @@ enum ModifierGlyph: Character, CaseIterable, Identifiable {
         }
     }
 
-    var tint: Color {
+    /// A shade of the text colour, a step dimmer for each — Control as bright
+    /// as the key itself, then Option, Shift and Command — so they tell apart
+    /// without colour that stands out. On a dark theme that runs from white to
+    /// a darker grey; on a light one, from black to grey. The dimmest is kept
+    /// where it still reads on a cap.
+    func shade(on theme: Theme) -> Color {
+        let strength: Double
         switch self {
-        case .control: return Color(nsColor: .systemOrange)
-        case .option: return Color(nsColor: .systemPurple)
-        case .shift: return Color(nsColor: .systemGreen)
-        case .command: return Color(nsColor: .systemBlue)
+        case .control: strength = 1
+        case .option: strength = 0.8
+        case .shift: strength = 0.64
+        case .command: strength = 0.5
         }
+        return theme.textPrimary.opacity(strength)
     }
 
     /// The modifiers a cap starts with, and the key after them: "⌃X" is

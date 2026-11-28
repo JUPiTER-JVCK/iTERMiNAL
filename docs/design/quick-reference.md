@@ -28,9 +28,12 @@ it describes the pane you are typing into.
 - The program's name sits at the end of the line, in a narrow capsule, and is
   the button that opens the rest in a popover. At the start it took room the
   hints needed.
-- ⌃, ⌥, ⇧ and ⌘ are each drawn in a system colour of their own (orange,
-  purple, green, blue), so which modifier a key needs reads at a glance; the
-  popover opens with a legend.
+- ⌃, ⌥, ⇧ and ⌘ are each drawn in a shade of their own: the text's colour at
+  full strength for Control, then a step dimmer for Option, Shift and Command
+  (white to a darker grey on a dark theme, black to grey on a light one), so
+  which modifier a key needs reads at a glance without colour standing out.
+  The popover opens with a legend. Colours were tried first and stood out too
+  much against the rest of the window.
 
 Considered and not chosen: inside the status bar (too little room beside the
 system figures, and it would hide the directory while a program runs), inside
@@ -50,9 +53,17 @@ Worked out from what the session already has, with no timer:
    a prompt. A member counts as well as the leader, so `git log` (git, with less
    in its group) is the pager and `git commit` the editor it opens. This is how
    Terminal.app names its tabs, and it needs nothing from the shell.
-   The leader's parent is read too: macOS's man (mandoc) puts its pager in a
-   process group of its own and hands it the terminal, so while a page is read
-   the group in front is less alone, and only its parent says it is man.
+   - **A shell leading the group** is read two ways. Alone, it is a shell typed
+     at the prompt, at a prompt of its own: an interactive shell gives each
+     command a group of its own. With others beside it, it is running a
+     script, whose commands share its group — and macOS's `man` is a shell
+     script, so a manual page is a group of sh, mandoc and less. For that case
+     the leader's arguments are read (`KERN_PROCARGS2`): `/bin/sh /usr/bin/man
+     ls` names the script, man. Without them, a listed program in the group
+     (less) is used. The arguments are read once per job.
+   - **The leader's parent** is read too: a man built on mandoc puts its pager
+     in a process group of its own and hands it the terminal, so the group in
+     front is less alone, and only its parent says it is man.
 2. **Past `sudo`**, whose child can run on a terminal of its own, the command
    line typed at the prompt names the program.
 3. **Over ssh** the kernel only ever sees `ssh`. A full-screen program switches

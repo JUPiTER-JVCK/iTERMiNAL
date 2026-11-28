@@ -414,7 +414,7 @@ private struct HintView: View {
     }
 }
 
-/// What each modifier's colour means, in the colours the caps use.
+/// What each modifier's shade means, in the shades the caps use.
 private struct ModifierLegend: View {
     let theme: Theme
 
@@ -424,7 +424,7 @@ private struct ModifierLegend: View {
                 HStack(spacing: 4) {
                     Text(String(modifier.rawValue))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(modifier.tint)
+                        .foregroundStyle(modifier.shade(on: theme))
                     Text(modifier == .option ? "Option (Meta)" : modifier.name)
                         .font(.system(size: 11))
                         .foregroundStyle(theme.textSecondary)

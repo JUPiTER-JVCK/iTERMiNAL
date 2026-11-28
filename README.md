@@ -271,7 +271,8 @@ A tour of the app in thirty-four pictures, in five groups.
   commands start from normal mode, and a key that needs your own words, such as
   a search, types only the part before them (`/`). ssh's escape keys are shown
   but never typed, because they start with a Return that would run whatever is
-  half typed. ⌃, ⌥, ⇧ and ⌘ each have a colour of their own. The program's
+  half typed. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's
+  own colour down to grey, so they tell apart without standing out. The program's
   name sits at the end of the line; click it for the full list, and for a
   typed command a link to its Cheatsheet page. On this Mac the program is found the way Terminal.app
   names its tabs, by asking the system which process has the terminal — `git

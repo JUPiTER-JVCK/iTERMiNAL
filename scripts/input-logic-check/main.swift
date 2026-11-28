@@ -17899,6 +17899,44 @@ func checkActiveProgram() {
           "a pager anything else started is the pager")
     check(resolve { $0.foreground = ["vim"]; $0.foregroundParent = "man" } == .program(.vim, name: "vim"),
           "only a pager is taken for the manual page it shows")
+
+    // A shell leading the group: alone, at a prompt of its own; with others, running a script. macOS's man is a shell
+    // script, so a page being read is sh with mandoc and less beside it, and its arguments name it.
+    check(resolve { $0.foreground = ["sh", "mandoc", "less"]; $0.foregroundScript = "man" } == .program(.man, name: "man"),
+          "macOS's man, a shell script, is man")
+    check(resolve { $0.foreground = ["sh", "mandoc", "less"] } == .program(.pager, name: "less"),
+          "a script whose name could not be read is what it runs, when that is listed")
+    check(resolve { $0.foreground = ["sh", "make"]; $0.foregroundScript = "build.sh" } == .running("build.sh")
+            && resolve { $0.foreground = ["sh", "make"] } == .running("make")
+            && resolve { $0.foreground = ["bash"]; $0.foregroundScript = "deploy.sh" } == .running("deploy.sh"),
+          "a script with nothing listed is named by its script, or by what it runs")
+    check(resolve { $0.foreground = ["zsh"] } == .shell(remote: false), "a shell alone in its group is still a prompt")
+    check(ActiveProgram.script(inShellArguments: ["/bin/sh", "/usr/bin/man", "ls"]) == "man"
+            && ActiveProgram.script(inShellArguments: ["/bin/sh", "-e", "/usr/bin/man", "ls"]) == "man"
+            && ActiveProgram.script(inShellArguments: ["sh", "-c", "less notes.txt"]) == nil
+            && ActiveProgram.script(inShellArguments: ["-zsh"]) == nil
+            && ActiveProgram.script(inShellArguments: ["zsh", "-l"]) == nil
+            && ActiveProgram.script(inShellArguments: ["bash", "./deploy.sh", "--now"]) == "deploy.sh",
+          "a shell's arguments name the script it runs, and none for one given commands inline or none at all")
+
+    // KERN_PROCARGS2's bytes, as macOS lays them out for `/bin/sh /usr/bin/man ls`: the count, the path run, padding,
+    // the arguments, then the environment.
+    func procArgs(count: Int32, path: String, padding: Int, arguments: [String], environment: [String]) -> [UInt8] {
+        var bytes = withUnsafeBytes(of: count.littleEndian) { Array($0) }
+        bytes += Array(path.utf8) + [UInt8](repeating: 0, count: padding)
+        for text in arguments + environment { bytes += Array(text.utf8) + [0] }
+        return bytes
+    }
+    let manBytes = procArgs(count: 3, path: "/bin/sh", padding: 5, arguments: ["/bin/sh", "/usr/bin/man", "ls"],
+                            environment: ["PATH=/usr/bin:/bin", "SECRET=not-read"])
+    check(ActiveProgram.arguments(fromProcessArguments: manBytes) == ["/bin/sh", "/usr/bin/man", "ls"],
+          "the arguments are read, and the environment after them is not")
+    check(ActiveProgram.arguments(fromProcessArguments: manBytes).flatMap(ActiveProgram.script(inShellArguments:)) == "man",
+          "and they name man")
+    check(ActiveProgram.arguments(fromProcessArguments: []) == nil
+            && ActiveProgram.arguments(fromProcessArguments: procArgs(count: 0, path: "/bin/sh", padding: 1, arguments: [], environment: [])) == nil
+            && ActiveProgram.arguments(fromProcessArguments: Array(manBytes.prefix(14))) == nil,
+          "bytes too short, with no arguments, or cut off give no arguments")
     check(resolve { $0.foreground = ["make", "sh"] } == .running("make"), "a build is running, with no keys listed")
     check(resolve { $0.foreground = ["python3.12"] } == .running("python3.12"), "an unlisted program is named by the kernel")
 
