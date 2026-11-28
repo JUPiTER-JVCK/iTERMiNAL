@@ -6,15 +6,11 @@
 Reads, as the sources:
 
   Resources/AppIcon/AppIcon-dark.svg, AppIcon-light.svg
-  Resources/AppIcon/AppIcon-dark-cursor-off.svg, AppIcon-light-cursor-off.svg
-      the same two icons with the cursor hidden: the "off" frame of the Dock blink
 
 and writes:
 
   Resources/Assets.xcassets/AppIcon.appiconset/            the bundle icon (dark)
   Resources/Assets.xcassets/DockIconLight.imageset/        the Dock's icon while the app is light
-  Resources/Assets.xcassets/DockCursorOff.imageset/        the Dock's blink frame, dark
-  Resources/Assets.xcassets/DockCursorOffLight.imageset/   the Dock's blink frame, light
 
 The icon (M9, "Status Line") is one terminal window on a charcoal (dark) or
 slate-grey (light) tile: phosphor-green output bars, a `$_` prompt, and a status
@@ -82,12 +78,10 @@ def main():
     jobs = [
         (str(sources / "AppIcon-dark.svg"), [(str(appicon / name), px) for name, px in APPICON]),
     ]
-    # The Dock's own pictures (see DockIcon.swift): the light icon while the app
-    # is light, and a cursor-less frame of each for the blink. 512pt at 1x and 2x.
+    # The Dock's own picture (see DockIcon.swift): the light icon while the app
+    # is light. 512pt at 1x and 2x.
     for name, svg in [
         ("DockIconLight", "AppIcon-light.svg"),
-        ("DockCursorOff", "AppIcon-dark-cursor-off.svg"),
-        ("DockCursorOffLight", "AppIcon-light-cursor-off.svg"),
     ]:
         d = catalog / f"{name}.imageset"
         d.mkdir(exist_ok=True)

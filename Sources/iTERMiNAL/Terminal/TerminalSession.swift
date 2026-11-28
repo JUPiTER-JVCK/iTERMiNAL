@@ -101,10 +101,6 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     let engine: SwiftTermEngine
-
-    deinit {
-        DockBlink.shared.end(id)
-    }
     /// Coalesces rapid bells / identical OSC text to about one event per
     /// second. Private because nothing outside `noteAttention` has any business
     /// moving the debounce window.
@@ -464,12 +460,6 @@ final class TerminalSession: ObservableObject, Identifiable {
         refreshActiveProgram()
         // A command is starting: whatever the last one did is no longer the news.
         if case .commandStart = mark { lastCommandResult = nil }
-        // The Dock icon's cursor blinks for as long as any tab has one running.
-        switch mark {
-        case .commandStart: DockBlink.shared.begin(id)
-        case .commandFinished, .promptStart: DockBlink.shared.end(id)
-        case .commandLine: break
-        }
         let now = Date()
         guard let finished = commandTracker.handle(mark, at: now) else { return }
         lastCommandResult = CommandResult(exitCode: finished.exitCode, seconds: finished.seconds, finishedAt: now)
@@ -956,7 +946,6 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard hasStarted, isRunning else { return }
         engine.terminate()
         isRunning = false
-        DockBlink.shared.end(id)
     }
 
     // MARK: Automatic reconnect
@@ -1262,7 +1251,6 @@ extension TerminalSession: TerminalEngineDelegate {
 
     func engineProcessTerminated(exitCode: Int32?) {
         isRunning = false
-        DockBlink.shared.end(id)
         refreshActiveProgram()
         // What the engine hands over is the raw wait status; what is shown and
         // published is the exit code, as a shell's `$?` has it.

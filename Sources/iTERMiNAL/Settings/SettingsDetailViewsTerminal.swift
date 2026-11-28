@@ -211,11 +211,6 @@ struct TerminalSettingsView: View {
                 Text("Follows Pane attention above: nothing if it is off, an in-app mark, or a system banner as well. It is shown only for a tab you are not looking at.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Toggle("Blink the Dock icon's cursor while a command runs", isOn: $settings.dockBlink)
-                    .disabled(!settings.shellIntegration)
-                Text("The cursor in iTERMiNAL's Dock icon blinks from the moment a command starts until it ends, in any tab. Off while Reduce Motion is on.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
             Section("Performance") {
                 Toggle("GPU rendering (experimental)", isOn: $settings.useGPURendering)
