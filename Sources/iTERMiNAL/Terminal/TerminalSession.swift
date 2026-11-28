@@ -30,8 +30,20 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// Whether SwiftTerm's Metal renderer ended up active for this session —
     /// requesting GPU rendering can silently fall back to the CPU path.
     @Published private(set) var isGPUAccelerated = false
-    /// Drives the sidebar's relative timestamps.
-    @Published private(set) var lastActivityAt = Date()
+    /// When the terminal last drew something — output, or the echo of a key —
+    /// at most four times a second, as the engine passes it on. For the
+    /// sidebar's idle time and the task list's order.
+    ///
+    /// Not published. It changes as fast as anyone types, and every view that
+    /// watches this session — its sidebar row, the status bar, its pane, the
+    /// quick reference — redrew with each change, on the main thread, between
+    /// a key and its echo. What any of them shows from it changes only when an
+    /// idle stretch long enough to be shown ends, so only then are they told
+    /// (`noteActivity`). Anything that follows each change subscribes to
+    /// `activity`.
+    private(set) var lastActivityAt = Date()
+    /// Each new `lastActivityAt`, as it is set.
+    let activity = PassthroughSubject<Date, Never>()
     /// When the shell was launched, for the task manager's uptime column.
     /// Nil until it actually starts, so a session that never launched reads
     /// as "not started" rather than claiming zero seconds of uptime.
@@ -216,11 +228,11 @@ final class TerminalSession: ObservableObject, Identifiable {
             // below either publishes observable state or reads an AppKit
             // view, so the hop has to happen before any of it. The event bus
             // hops on its own, which is why this was survivable before, but
-            // `lastActivityAt` was already being published off-thread.
+            // the activity time was already being set off-thread.
             DispatchQueue.main.async {
                 guard let self else { return }
                 // Already debounced by the engine, so this is cheap.
-                self.lastActivityAt = Date()
+                self.noteActivity()
                 // A prompt redraw after `cd` is activity, so this is where a
                 // directory change becomes visible in a shell with no OSC 7
                 // hook.
@@ -383,6 +395,15 @@ final class TerminalSession: ObservableObject, Identifiable {
     var connection: SSHConnection? {
         guard let id = kind.connectionID else { return nil }
         return AppSettings.shared.sshConnections.first { $0.id == id }
+    }
+
+    /// The terminal drew something. Views that watch this session hear of it
+    /// only when the sidebar was showing how long it had been idle, which this
+    /// ends; while someone types, nothing they show changes.
+    private func noteActivity(at now: Date = Date()) {
+        if RelativeTime.short(since: lastActivityAt, now: now) != "now" { objectWillChange.send() }
+        lastActivityAt = now
+        activity.send(now)
     }
 
     /// Records a command line, shortened for display to the program and its
@@ -723,7 +744,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             launchedAt = Date()
             isRunning = true
             lastExitCode = nil
-            lastActivityAt = Date()
+            noteActivity()
             EventBus.shared.publish(APIEvent("session.started", [
                 "session": id.uuidString,
                 "remote": isRemote,
