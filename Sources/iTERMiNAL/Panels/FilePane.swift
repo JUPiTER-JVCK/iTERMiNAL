@@ -945,14 +945,31 @@ private struct FileRowView: View {
     let item: FileItem
     let dateFormatter: DateFormatter
 
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
+    /// Increased on the selected row of a focused list, which sits on the
+    /// accent-coloured highlight.
+    @Environment(\.backgroundProminence) private var prominence
+
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
+        // On the highlight, the system's own styles, which turn light to read
+        // against it. The theme's colours stay as they are, so its greys and
+        // an accent folder would sink into an accent highlight.
+        let onHighlight = prominence == .increased
+        let primary = onHighlight ? AnyShapeStyle(.primary) : AnyShapeStyle(theme.textPrimary)
+        let secondary = onHighlight ? AnyShapeStyle(.secondary) : AnyShapeStyle(theme.textSecondary)
         HStack(spacing: 8) {
             Image(systemName: item.isDirectory ? "folder.fill" : "doc")
                 .font(.system(size: 12))
-                .foregroundStyle(item.isDirectory ? Color.accentColor : Color.secondary)
+                // `.tint`, not `Color.accentColor`: the app's accent is applied
+                // as a tint on the window's content, and `Color.accentColor`
+                // is the system's.
+                .foregroundStyle(item.isDirectory ? (onHighlight ? primary : AnyShapeStyle(.tint)) : secondary)
                 .frame(width: 16)
             Text(item.name)
                 .font(.system(size: 12))
+                .foregroundStyle(primary)
                 .lineLimit(1)
                 // Cut in the middle, so a long name keeps its extension.
                 .truncationMode(.middle)
@@ -960,7 +977,7 @@ private struct FileRowView: View {
             if let modified = item.modified {
                 Text(dateFormatter.string(from: modified))
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondary)
                     .lineLimit(1)
                     // The name gives way first. With the two at the same
                     // priority a narrow pane cut the date as well, down to

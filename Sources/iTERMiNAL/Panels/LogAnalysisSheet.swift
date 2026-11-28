@@ -107,6 +107,8 @@ struct LogAnalysisSheet: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appThemeID) private var appThemeID
     @State private var question = ""
     @State private var showing = false
 
@@ -117,24 +119,26 @@ struct LogAnalysisSheet: View {
     private var isConfigured: Bool { AssistantServiceProvider.current.isConfigured }
 
     var body: some View {
+        let theme = Theme.current(for: colorScheme, themeID: appThemeID)
         VStack(alignment: .leading, spacing: 12) {
             Text("Analyze a log file")
                 .font(.headline)
             Text((model.path as NSString).abbreviatingWithTildeInPath)
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            content
+            content(theme: theme)
         }
         .padding(16)
         .frame(width: 580)
+        .background(theme.background)
         .tint(settings.accentColor)
         .onAppear { model.load() }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(theme: Theme) -> some View {
         switch model.phase {
         case .reading:
             HStack(spacing: 8) {
@@ -151,7 +155,7 @@ struct LogAnalysisSheet: View {
             closeRow
 
         case .ready(let log):
-            ready(log)
+            ready(log, theme: theme)
 
         case .asking(let progress):
             HStack(spacing: 8) {
@@ -168,7 +172,7 @@ struct LogAnalysisSheet: View {
         case .answered(let answer):
             Text("The answer is written by a model from the text it was sent. It can be wrong, so it is shown as text only: nothing in it is run.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 Text(answer)
@@ -178,7 +182,7 @@ struct LogAnalysisSheet: View {
                     .padding(8)
             }
             .frame(height: 280)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(theme.surface.opacity(0.6)))
             HStack {
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
@@ -212,12 +216,12 @@ struct LogAnalysisSheet: View {
         }
     }
 
-    private func ready(_ log: PreparedLog) -> some View {
+    private func ready(_ log: PreparedLog, theme: Theme) -> some View {
         let destination = AssistantDestination.describe(baseURL: settings.assistantBaseURL)
         return VStack(alignment: .leading, spacing: 12) {
             Text("It reads the end of the file, up to \(LogAnalysis.sizeLabel(LogAnalysis.maxBytes)), and asks the assistant about it a part at a time. Nothing is sent until you press Analyze.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             TextField(LogAnalysis.defaultQuestion, text: $question, axis: .vertical)
@@ -227,7 +231,7 @@ struct LogAnalysisSheet: View {
             if log.droppedPartialLine {
                 Text("The file was cut at the start of what was read, so the first line, a fragment, is left out.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
 
             if !isConfigured {
@@ -256,7 +260,7 @@ struct LogAnalysisSheet: View {
 
             Text("The answer is written by a model from that text. It can be wrong, and a log can try to steer it, so it is shown only as text: nothing in it is run.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
