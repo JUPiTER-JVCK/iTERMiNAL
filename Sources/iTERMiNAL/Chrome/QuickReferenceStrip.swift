@@ -248,14 +248,6 @@ private struct QuickReferenceSessionStrip: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appThemeID) private var appThemeID
     @State private var showAll = false
-    /// Each hint's width, by its id, from the copy of the row that is never
-    /// drawn (`HintMeasure`); and the width there is for them.
-    @State private var hintWidths: [String: CGFloat] = [:]
-    @State private var hintRoom: CGFloat = 0
-
-    static let hintSpacing: CGFloat = 16
-    /// The note's key among the widths, which no hint's id can be.
-    static let noteWidthKey = "\u{0}note"
 
     private var content: QuickReferenceContent {
         var context = QuickReferenceContent.Context()
@@ -279,6 +271,7 @@ private struct QuickReferenceSessionStrip: View {
             hints(content, theme: theme)
                 .id(content.id)
                 .transition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .clipped()
 
             // At the end of the line, where it costs the hints nothing: what
@@ -327,45 +320,22 @@ private struct QuickReferenceSessionStrip: View {
     /// from the first that would not — so a narrow window keeps the ones that
     /// matter most, nothing wraps or scrolls, and nothing left out is still
     /// there for VoiceOver to read.
-    ///
-    /// One row, of only the hints that fit, built once. How many that is comes
-    /// from each hint's width, measured on a copy of the row that is never
-    /// drawn and that VoiceOver does not see (`QuickReferenceFit`): a hint not
-    /// yet measured is not shown, so for a frame after the hints change the
-    /// line may be short, inside the cross-fade.
     private func hints(_ content: QuickReferenceContent, theme: Theme) -> some View {
-        let count = QuickReferenceFit.count(
-            widths: content.hints.map { hintWidths[$0.id] },
-            hasNote: content.note != nil,
-            noteWidth: hintWidths[Self.noteWidthKey],
-            spacing: Self.hintSpacing,
-            room: hintRoom
-        )
-        return HStack(spacing: Self.hintSpacing) {
-            ForEach(content.hints.prefix(count)) { hint in
-                HintView(hint: hint, theme: theme, perform: perform(hint, in: content))
-            }
-            if count == content.hints.count, let note = content.note {
-                Text(note)
-                    .lineLimit(1)
-                    .foregroundStyle(theme.textSecondary)
+        ViewThatFits(in: .horizontal) {
+            ForEach(Array(stride(from: content.hints.count, through: 0, by: -1)), id: \.self) { count in
+                HStack(spacing: 16) {
+                    ForEach(content.hints.prefix(count)) { hint in
+                        HintView(hint: hint, theme: theme, perform: perform(hint, in: content))
+                    }
+                    if count == content.hints.count, let note = content.note {
+                        Text(note)
+                            .lineLimit(1)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                }
+                .fixedSize()
             }
         }
-        .fixedSize()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(alignment: .leading) {
-            HintMeasure(content: content, theme: theme, spacing: Self.hintSpacing)
-        }
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: HintRoomKey.self, value: proxy.size.width)
-            }
-        }
-        // Merged, not replaced: through a cross-fade the old row and the new
-        // one both say what they measured, and a hint seen before keeps its
-        // width for when it comes back.
-        .onPreferenceChange(HintWidthsKey.self) { widths in hintWidths.merge(widths) { $1 } }
-        .onPreferenceChange(HintRoomKey.self) { hintRoom = $0 }
     }
 
     /// The program's name was clicked, or ⌥⌘/ pressed: the full list, or for
@@ -482,7 +452,7 @@ private struct HintView: View {
                 flash()
                 perform()
             } label: {
-                HintLabel(hint: hint, theme: theme, quiet: false)
+                label(quiet: false)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .background(
@@ -504,7 +474,7 @@ private struct HintView: View {
         } else {
             // Shown, not typed: its keys drawn quieter, so what a click
             // will do is plain before the pointer gets there.
-            HintLabel(hint: hint, theme: theme, quiet: true)
+            label(quiet: true)
                 .padding(.horizontal, 4)
                 .help(hint.help)
                 .accessibilityElement(children: .ignore)
@@ -523,16 +493,8 @@ private struct HintView: View {
             withAnimation(Motion.hover) { flashing = false }
         }
     }
-}
 
-/// A hint's keys and its word, as `HintView` draws them and `HintMeasure`
-/// measures them: one view, so the width measured is the width drawn.
-private struct HintLabel: View {
-    let hint: QuickReferenceHint
-    let theme: Theme
-    let quiet: Bool
-
-    var body: some View {
+    private func label(quiet: Bool) -> some View {
         // On the text's baseline, so the word sits level with the letters on
         // the caps, not with their middles.
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -553,60 +515,6 @@ private struct HintLabel: View {
                 .frame(maxWidth: 170, alignment: .leading)
         }
     }
-}
-
-/// Every hint laid out as the line would lay it out, never drawn, out of
-/// VoiceOver's reach and taking no clicks: only to say how wide each is, for
-/// `QuickReferenceFit`. Plain labels, without the buttons, hover and tooltips
-/// of the row that is drawn.
-private struct HintMeasure: View {
-    let content: QuickReferenceContent
-    let theme: Theme
-    let spacing: CGFloat
-
-    var body: some View {
-        HStack(spacing: spacing) {
-            ForEach(content.hints) { hint in
-                HintLabel(hint: hint, theme: theme, quiet: hint.action == nil)
-                    .padding(.horizontal, 4)
-                    .fixedSize()
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: HintWidthsKey.self, value: [hint.id: proxy.size.width])
-                        }
-                    }
-            }
-            if let note = content.note {
-                Text(note)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: HintWidthsKey.self,
-                                value: [QuickReferenceSessionStrip.noteWidthKey: proxy.size.width]
-                            )
-                        }
-                    }
-            }
-        }
-        .fixedSize()
-        .opacity(0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-private struct HintWidthsKey: PreferenceKey {
-    static let defaultValue: [String: CGFloat] = [:]
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        value.merge(nextValue()) { $1 }
-    }
-}
-
-private struct HintRoomKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// What each modifier's shade means, for the modifiers the list below has.

@@ -198,7 +198,6 @@ jobs:
             Sources/iTERMiNAL/Chrome/ShortcutCatalog.swift \
             Sources/iTERMiNAL/Chrome/ProgramKeyCatalog.swift \
             Sources/iTERMiNAL/Chrome/ProgramKeySend.swift \
-            Sources/iTERMiNAL/Chrome/QuickReferenceFit.swift \
             Sources/iTERMiNAL/Chrome/HomeWeather.swift \
             Sources/iTERMiNAL/Panels/MarkdownHTML.swift \
             Sources/iTERMiNAL/Panels/QuickLookPolicy.swift \
