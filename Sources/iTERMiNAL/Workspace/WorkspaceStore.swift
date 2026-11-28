@@ -1395,6 +1395,25 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    /// Set by ⌥⌘/ and its menu item: the quick reference strip opens its full
+    /// list for the program in front, and clears it. Turns the strip on first,
+    /// if it was off, since the list hangs from it.
+    @Published var quickReferenceListPending = false
+
+    func showQuickReferenceKeys(afterPresentation: Bool = false) {
+        let wait = afterPresentation || showCommandPalette
+        showCommandPalette = false
+        if !AppSettings.shared.showQuickReference { AppSettings.shared.showQuickReference = true }
+        guard wait else {
+            quickReferenceListPending = true
+            return
+        }
+        // A popover cannot open while the palette's sheet is still going.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.quickReferenceListPending = true
+        }
+    }
+
     /// Opens the sheet that reads the log at `path` and asks the assistant about
     /// it. Nothing is read or sent until the sheet is up, and nothing is sent
     /// until the person has seen where it goes and pressed Analyze.

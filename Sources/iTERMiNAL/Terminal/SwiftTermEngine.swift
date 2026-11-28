@@ -75,6 +75,22 @@ final class SwiftTermEngine: TerminalEngine {
 
     var typedLine: String? { terminalView.typedLine }
 
+    /// A line read off the screen as Return was pressed, for one the keys
+    /// alone could not follow. See `InstrumentedTerminalView`.
+    var onEnteredFromScreen: ((String, EnteredLine.Moment) -> Void)? {
+        get { terminalView.onEnteredFromScreen }
+        set { terminalView.onEnteredFromScreen = newValue }
+    }
+
+    /// The device the shell's side of the terminal is — `/dev/ttys012` — which
+    /// is how tmux names the client running in it. Nil before the shell has
+    /// started.
+    var terminalDevicePath: String? {
+        let master = terminalView.process?.childfd ?? -1
+        guard master >= 0, let name = ptsname(master) else { return nil }
+        return String(cString: name)
+    }
+
     /// Gives this terminal the keyboard, as a click on it would — for a
     /// control outside it that types into it, so typing carries on here.
     func takeFocus() {

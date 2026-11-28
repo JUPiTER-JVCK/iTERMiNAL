@@ -262,26 +262,42 @@ A tour of the app in thirty-four pictures, in five groups.
   program in front of the focused terminal: `:w`, `:q` and `:help` in Vim and
   Neovim; Write Out, Exit, Cut and Paste in nano, in nano's own words; q,
   search and the sections in `man` (1 user commands, 2 system calls, 3 C
-  library, with `man -k` to search them); and the same for Emacs, micro, less,
-  tmux, screen, top, htop, btop and superfile. At a shell prompt it shows the
-  shell's own keys (⌃R, ⌃A, ⌃E, ⌃W, ⌃U, `!!`, `cd -`), and once a command's name
-  is typed — at the prompt or in the composer — that command's flags or
-  subcommands, from the composer's completion list. Click a key and it is typed
-  into the program; a Return at the end is left for you to press, Vim's
-  commands start from normal mode, and a key that needs your own words, such as
-  a search, types only the part before them (`/`). ssh's escape keys are shown
-  but never typed, because they start with a Return that would run whatever is
-  half typed. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's
-  own colour down to grey, so they tell apart without standing out. The program's
-  name sits at the end of the line; click it for the full list, and for a
-  typed command a link to its Cheatsheet page. On this Mac the program is found the way Terminal.app
-  names its tabs, by asking the system which process has the terminal — `git
-  log` is less, `sudo vim` is Vim — so it needs nothing from the shell. Over ssh
-  it goes by the program you typed and its switch to the full screen. The line
-  stays while a program runs, so the terminal never resizes under it. Keys a
-  config file has rebound are not reflected. Settings → Appearance → Status →
-  Quick reference turns it off, and the work of finding the program with it.
-  The design is in [`docs/design/quick-reference.md`](docs/design/quick-reference.md).
+  library, with `man -k` to search them); and the same for Helix, Emacs, micro,
+  less, tmux, screen, top, htop, btop and superfile, the Python, Node and Ruby
+  prompts, psql, mysql and sqlite3, fzf, lazygit, and `git add -p` asking about
+  each hunk — how to quit first. At a shell prompt it shows the shell's own keys
+  (⌃R, ⌃A, ⌃E, ⌃W, ⌃U, `!!`, `cd -`), and once a command's name is typed — at
+  the prompt or in the composer — that command's flags or subcommands, from the
+  composer's completion list, still after Tab completes a word or ↑ brings a
+  command back: the line is then read off the screen. Not over ssh, where the
+  flags of this Mac's tools could mislead. Click a key and it is typed into the
+  program, with a brief flash; a Return at the end is left for you to press,
+  Vim's and Helix's commands start from normal mode, and a key that needs your
+  own words, such as a search, types only the part before them (`/`). Keys
+  that are shown but never typed — ssh's escapes, which start with a Return
+  that would run whatever is half typed, and man's sections — have a dashed
+  edge. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's own colour
+  down to grey, so they tell apart without standing out. The program's name
+  sits at the end of the line; click it, or press ⌥⌘/, for the full list, which
+  you can search (Return types the first key found), and for a typed command a
+  link to its Cheatsheet page. A program with no keys listed but a Cheatsheet
+  page — docker, say — opens that page instead.
+
+  On this Mac the program is found the way Terminal.app names its tabs, by
+  asking the system which process has the terminal — `git log` is less, `sudo
+  vim` is Vim, and macOS's `man`, a shell script, is man — so it needs nothing
+  from the shell. Inside tmux, tmux itself is asked which program its pane
+  runs, and which prefix key is set, so a `~/.tmux.conf` that makes it ⌃A is
+  shown as ⌃A; screen's escape key is read from `~/.screenrc`. `sudo -i`, `docker
+  exec -it`, `kubectl exec -it`, `vagrant ssh` and mosh are taken for the shells
+  they are. Over ssh it goes by the program you typed and its switch to the full
+  screen. The line stays while a program runs, so the terminal never resizes
+  under it. Keys a program's own config has rebound are not reflected, apart
+  from tmux's and screen's prefix. Settings → Appearance → Status → Quick
+  reference turns it off, and the work of finding the program with it; Shell
+  keys at a prompt leaves the line empty at a prompt; View → Quick Reference is
+  the same switch. The design is in
+  [`docs/design/quick-reference.md`](docs/design/quick-reference.md).
 - **Option as Meta** — Settings → Terminal → Keyboard. On, the default, Option
   sends Escape plus the key, so Option-B and Option-F move by word in zsh and
   bash. Off, Option types the character your layout gives it, such as `@` or
@@ -1789,6 +1805,7 @@ bind:
 | --- | --- |
 | Command palette | ⌘K |
 | Keyboard shortcuts | ⌘/ |
+| Keys for the program in front (quick reference) | ⌥⌘/ |
 | New terminal tab | ⌘T |
 | New workspace | ⇧⌘N |
 | Split right / down | ⌘D / ⇧⌘D |
@@ -1823,10 +1840,12 @@ own, which the list does not read. Some actions (Split with Files, Split
 with HTTP Client) have no shortcut; the command palette finds every action.
 
 After the app's own keys come those of programs you run in a terminal — Vim,
-nano, Emacs, micro, less, man, tmux, screen, top, htop, ssh's escape keys and
-the shell's line editing — each from its own documentation, for its default
-keys. The quick reference line above the status bar shows the section for the
-program in front of the focused terminal, and types a key when you click it.
+Helix, nano, Emacs, micro, less, man, tmux, screen, top, htop, the Python, Node
+and Ruby prompts, psql, mysql, sqlite3, fzf, lazygit, `git add -p`, ssh's escape
+keys and the shell's line editing — each from its own documentation, for its
+default keys. The quick reference line above the status bar shows the section
+for the program in front of the focused terminal, and types a key when you click
+it; ⌥⌘/ opens that program's full list.
 
 ## Architecture
 

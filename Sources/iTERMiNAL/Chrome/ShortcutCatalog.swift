@@ -253,6 +253,8 @@ enum ShortcutCatalog {
                       detail: "Search every action, including the ones with no shortcut"),
         ShortcutEntry("shortcuts.open", "Keyboard shortcuts", [ShortcutChord("/", cmd)], in: .general,
                       detail: "This list. Type to search; esc closes it"),
+        ShortcutEntry("quickReference.keys", "Keys for the program in front", [ShortcutChord("/", [option, cmd])], in: .general,
+                      detail: "The quick reference's full list, for what the focused terminal is running"),
         ShortcutEntry("settings.open", "Settings", [ShortcutChord(",", cmd)], in: .general, .system),
         ShortcutEntry("tasks.open", "Task manager", [ShortcutChord("t", [option, cmd])], in: .general,
                       detail: "Every shell this app is running"),

@@ -63,6 +63,21 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// between keystrokes rather than asked again for each one.
     private var lastForeground: ActiveProgram.ForegroundGroup?
     private var programRecheck: DispatchWorkItem?
+    /// The prefix key tmux on this Mac says is set, for the strip to show in
+    /// place of tmux's own ⌃B. Nil until tmux has been asked, and over ssh.
+    @Published private(set) var tmuxPrefix: String?
+    /// The command key ~/.screenrc sets for screen, shown in place of ⌃A.
+    @Published private(set) var screenEscape: String?
+    /// The command in the current pane of the tmux in front, from tmux.
+    private var tmuxPaneCommand: String?
+    private var tmuxAsking = false
+    private var tmuxAskedAt: Date?
+    private var tmuxAskLater: DispatchWorkItem?
+    private var screenrcReadAt: Date?
+    /// Whether the group in front is a shell the kernel cannot see into —
+    /// `docker exec -it`, `sudo -i` — decided when the group came to the front
+    /// and kept while it stays there (`ActiveProgram.hiddenShell`).
+    private var hiddenShellGroup: (id: Int32, kind: ActiveProgram.HiddenShell?)?
 
     struct CommandResult: Equatable {
         let exitCode: Int?
@@ -218,6 +233,13 @@ final class TerminalSession: ObservableObject, Identifiable {
                 self.refreshActiveProgram()
                 self.recheckActiveProgram(after: 0.5)
                 EventBus.shared.publish(APIEvent("session.activity", ["session": self.id.uuidString]))
+            }
+        }
+        engine.onEnteredFromScreen = { [weak self] line, moment in
+            // A line Tab or ↑ had changed, read off the screen: for the strip's
+            // record of what was run, as a line the keys spelled out is.
+            DispatchQueue.main.async {
+                self?.noteProgramLine(line, at: moment)
             }
         }
         engine.onLineEdited = { [weak self] _ in
@@ -460,11 +482,16 @@ final class TerminalSession: ObservableObject, Identifiable {
             // Only a shell on this Mac: a remote session's child is ssh, and a
             // tool's is the tool.
             lastForeground = (isRemote || kind.isTool || !isRunning) ? nil : engine.foregroundGroup(reusing: lastForeground)
+            if let client = lastForeground?.tmux { askTmux(client) }
         }
+        if lastForeground?.tmux == nil { tmuxPaneCommand = nil }
+        noteHiddenShell()
         var signals = ActiveProgram.Signals()
         signals.foreground = lastForeground?.names
         signals.foregroundParent = lastForeground?.parent
-        signals.foregroundScript = lastForeground?.script
+        signals.foregroundArguments = lastForeground?.arguments
+        signals.tmuxPaneCommand = tmuxPaneCommand
+        signals.hiddenShell = hiddenShellGroup?.kind
         signals.alternateScreen = engine.isAlternateScreen
         signals.isRemote = isRemote
         signals.tool = kind.tool?.rawValue
@@ -473,6 +500,60 @@ final class TerminalSession: ObservableObject, Identifiable {
         signals.title = title
         let resolved = ActiveProgram.resolve(signals)
         if resolved != activeProgram { activeProgram = resolved }
+        if case .program(.screen, _, _) = resolved, !isRemote { readScreenEscapeIfDue() }
+    }
+
+    /// Decides, for a group just come to the front, whether it is a shell the
+    /// kernel cannot see into, by the line that started it — and keeps a yes
+    /// for as long as that group stays in front, since a line typed into the
+    /// shell soon takes that one's place. A no is asked again: the line may
+    /// not have been kept yet when the group was first seen.
+    private func noteHiddenShell() {
+        guard let group = lastForeground, group.id != 0, let leader = group.names.first else {
+            hiddenShellGroup = nil
+            return
+        }
+        if let known = hiddenShellGroup, known.id == group.id, known.kind != nil { return }
+        hiddenShellGroup = (group.id, ActiveProgram.hiddenShell(leader: leader, line: programLine))
+    }
+
+    /// Asks tmux, on this Mac, what the pane in front runs and which prefix is
+    /// set — at most once a second, with one more look once that second is up,
+    /// so a pane changed in a burst of drawing is still caught.
+    private func askTmux(_ client: ActiveProgram.TmuxClient) {
+        guard !tmuxAsking, let terminal = engine.terminalDevicePath else { return }
+        if let asked = tmuxAskedAt, Date().timeIntervalSince(asked) < 1 {
+            if tmuxAskLater == nil {
+                let work = DispatchWorkItem { [weak self] in
+                    self?.tmuxAskLater = nil
+                    self?.refreshActiveProgram()
+                }
+                tmuxAskLater = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+            }
+            return
+        }
+        tmuxAsking = true
+        tmuxAskedAt = Date()
+        TmuxQuery.ask(client, terminal: terminal) { [weak self] answer in
+            guard let self else { return }
+            self.tmuxAsking = false
+            if answer?.prefix != self.tmuxPrefix { self.tmuxPrefix = answer?.prefix }
+            guard answer?.paneCommand != self.tmuxPaneCommand else { return }
+            self.tmuxPaneCommand = answer?.paneCommand
+            self.refreshActiveProgram(askKernel: false)
+        }
+    }
+
+    /// The command key ~/.screenrc sets, read again no more than every half
+    /// minute while screen is in front. Over ssh the far end's is not
+    /// readable, and screen's own ⌃A is shown.
+    private func readScreenEscapeIfDue() {
+        if let read = screenrcReadAt, Date().timeIntervalSince(read) < 30 { return }
+        screenrcReadAt = Date()
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".screenrc")
+        let escape = (try? String(contentsOfFile: path, encoding: .utf8)).flatMap(ActiveProgram.screenEscape(fromScreenrc:))
+        if escape != screenEscape { screenEscape = escape }
     }
 
     /// Keeps a command line given at a prompt, for `ActiveProgram` to see past
@@ -484,9 +565,19 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// does not depend on the strip having looked since the program started.
     private func noteProgramLine(_ command: String, at moment: EnteredLine.Moment) {
         guard quickReferenceWatches else { return }
+        // A shell the kernel cannot see into — ssh typed here, a container's,
+        // sudo -i's — has ssh, docker or sudo in front as far as the kernel can
+        // say, so only what this Mac can still see decides: not a password
+        // being read, not a full-screen program. A line kept that way is only
+        // ever used if it names a program the strip lists, never shown.
+        let hidden = hiddenShellGroup?.kind != nil && hiddenShellGroup?.id == lastForeground?.id
         switch activeProgram {
+        case .shell(let farEnd) where farEnd || hidden || isRemote:
+            if EnteredLine.isCommand(at: moment, remote: true) { programLine = command }
+        case .typing where hidden || isRemote:
+            if EnteredLine.isCommand(at: moment, remote: true) { programLine = command }
         case .shell, .typing:
-            if EnteredLine.isCommand(at: moment, remote: isRemote) { programLine = command }
+            if EnteredLine.isCommand(at: moment, remote: false) { programLine = command }
         case .program, .running: break
         }
         // What a command starts may print nothing at first — `sleep 30` — so

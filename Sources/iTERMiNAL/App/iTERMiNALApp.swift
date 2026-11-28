@@ -216,6 +216,10 @@ struct AppCommands: Commands {
                 withAnimation(Motion.panel) { settings.railPanelOpen.toggle() }
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+
+            // The same switch as Settings → Appearance → Status → Quick
+            // reference.
+            Toggle("Quick Reference", isOn: $settings.showQuickReference)
         }
 
         // Replaces "iTERMiNAL Help", which has no help book behind it and only
@@ -225,6 +229,13 @@ struct AppCommands: Commands {
                 WorkspaceStore.shared.showShortcuts()
             }
             .keyboardShortcut("/", modifiers: .command)
+
+            // The quick reference's full list, for what is in front of the
+            // focused terminal: the same as clicking its name.
+            Button("Keys for the Program in Front") {
+                WorkspaceStore.shared.showQuickReferenceKeys()
+            }
+            .keyboardShortcut("/", modifiers: [.command, .option])
         }
 
         CommandMenu("Terminal") {

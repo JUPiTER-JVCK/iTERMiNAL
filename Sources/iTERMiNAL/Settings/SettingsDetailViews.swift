@@ -210,7 +210,13 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("Quick reference", isOn: $settings.showQuickReference)
-                Text("A line above it with the keys for what is in front of the focused terminal — Vim, nano, man, less, tmux, top and others — or the shell's own keys at a prompt, and the flags of a command as you type it. Click a key to type it; a return at the end is left for you to press. Click the program's name, at the end of the line, for the rest. On this Mac the app asks the system which program it is; over ssh it goes by what you typed.")
+                Text("A line above it with the keys for what is in front of the focused terminal — Vim, Helix, nano, man, less, tmux, top, Python, psql, fzf, lazygit and others — or the shell's own keys at a prompt, and the flags of a command as you type it. Click a key to type it; a return at the end is left for you to press. Click the program's name, at the end of the line, or press ⌥⌘/ for the rest. On this Mac the app asks the system which program it is; over ssh it goes by what you typed.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Shell keys at a prompt", isOn: $settings.showQuickReferenceShellKeys)
+                    .disabled(!settings.showQuickReference)
+                Text("⌃R, ⌃A, ⌃E and the rest while the shell is waiting for a command. Off leaves the line empty there; it stays, so the terminal keeps its size.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 

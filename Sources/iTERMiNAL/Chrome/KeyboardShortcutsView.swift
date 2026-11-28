@@ -202,21 +202,49 @@ struct ProgramKeyRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(theme.textSecondary)
                 }
+                let typed = command.typed(way: index) != nil
+                // In the quick reference's list, where some keys type and some
+                // do not, the ones that do not are drawn quieter.
                 let caps = HStack(spacing: 3) {
                     ForEach(Array(way.enumerated()), id: \.offset) { _, cap in
-                        KeyCap(symbol: cap, theme: theme, tintsModifiers: tintsModifiers)
+                        KeyCap(symbol: cap, theme: theme, tintsModifiers: tintsModifiers,
+                               quiet: onType != nil && !typed)
                     }
                 }
-                if let onType, command.typed(way: index) != nil {
-                    Button { onType(index) } label: { caps.contentShape(Rectangle()) }
-                        .buttonStyle(.plain)
-                        .focusable(false)
+                if let onType, typed {
+                    TypingCaps(caps: caps, theme: theme) { onType(index) }
                         .help(QuickReferenceWording.clickHelp(for: command, way: index))
                         .accessibilityLabel("Type " + way.joined(separator: " then "))
                 } else {
                     caps
                 }
             }
+        }
+    }
+}
+
+/// Key caps a click types into a program, warming under the pointer as the
+/// strip's own do, so which keys in a list are buttons is plain.
+private struct TypingCaps<Caps: View>: View {
+    let caps: Caps
+    let theme: Theme
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            caps
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(hovering ? theme.surfaceHover : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { inside in
+            withAnimation(Motion.hover) { hovering = inside }
         }
     }
 }
@@ -289,6 +317,10 @@ struct KeyCap: View {
     /// Draws ⌃ ⌥ ⇧ ⌘ each in a shade of its own, a hair apart from the key,
     /// so which is which reads at a glance in a cap as small as the strip's.
     var tintsModifiers = false
+    /// A key that is shown but not typed by a click — man's sections, ssh's
+    /// escapes — drawn with no fill and a dashed edge, so it reads as a note
+    /// rather than a button.
+    var quiet = false
 
     var body: some View {
         face
@@ -300,11 +332,11 @@ struct KeyCap: View {
             .fixedSize()
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(theme.surface)
+                    .fill(quiet ? Color.clear : theme.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(theme.surfaceBorder)
+                    .strokeBorder(theme.surfaceBorder, style: StrokeStyle(lineWidth: 1, dash: quiet ? [2, 2] : []))
             )
     }
 
