@@ -43,6 +43,15 @@ struct QuickReferenceContent {
 
     var hasFullList: Bool { !sections.isEmpty || !commandEntries.isEmpty }
 
+    /// The most hints the line holds; the full list has every one.
+    ///
+    /// The line is a `ViewThatFits` with a row for each count, from all the
+    /// hints down to none, which builds n(n+1)/2 hints whenever it is drawn
+    /// again: 561 for git's 33 subcommands, 378 for grep's flags. A hint is 90
+    /// to 200 points wide, so sixteen is more than fits across a wide window,
+    /// and holds that to 136.
+    static let mostHints = 16
+
     /// Changes whenever what is shown does: the cross-fade's key.
     var id: String { badge + "|" + hints.map(\.id).joined(separator: ",") }
 
@@ -118,7 +127,8 @@ struct QuickReferenceContent {
         QuickReferenceContent(
             source: source,
             badge: badge,
-            hints: ProgramKeyCatalog.strip(for: section, prefix: context.prefixes[section]).map(QuickReferenceHint.init),
+            hints: ProgramKeyCatalog.strip(for: section, prefix: context.prefixes[section])
+                .prefix(mostHints).map(QuickReferenceHint.init),
             sections: [section],
             prefixes: context.prefixes
         )
@@ -140,7 +150,7 @@ struct QuickReferenceContent {
         return QuickReferenceContent(
             source: source,
             badge: badge,
-            hints: entries.compactMap(QuickReferenceHint.init(spec:)),
+            hints: Array(entries.compactMap(QuickReferenceHint.init(spec:)).prefix(mostHints)),
             sections: [],
             commandEntries: entries,
             command: typed.command
