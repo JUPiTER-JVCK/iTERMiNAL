@@ -29,9 +29,14 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// `EnteredLine`.
     var onCommand: ((String, EnteredLine.Moment) -> Void)?
     /// A mark from a shell started with the integration hooks (OSC 633): a prompt
-    /// is about to be drawn, a command starts, a command ended with a status.
+    /// is about to be drawn, a command starts — and, signed with
+    /// `shellIntegrationNonce`, what it is — or a command ended with a status.
     /// Called on whichever queue SwiftTerm parses on.
     var onShellMark: ((ShellIntegration.Mark) -> Void)?
+    /// The code this launch's hooks sign command lines with; nil for a shell
+    /// started without them, whose output then cannot name a command at all.
+    /// Set as each process is started, before it can print anything.
+    var shellIntegrationNonce: String?
     /// What the app adds to the right-click menu beneath the editing items —
     /// splitting the pane, opening a tab. Asked each time the menu opens, so it
     /// can reflect the moment.
@@ -60,7 +65,8 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// A line the keys alone could not follow — Tab completed a word, ↑ brought
     /// one back — read off the screen as Return was pressed, with the moment
     /// it was entered at. For the quick reference's record of what was run,
-    /// never for a tab's name: those keep to lines the keys spell out.
+    /// never for a tab's name: those keep to lines the keys spell out, or that
+    /// the shell's own hooks report (`ShellIntegration.Mark.commandLine`).
     var onEnteredFromScreen: ((String, EnteredLine.Moment) -> Void)?
 
     /// Where the line being typed began on the screen: the cursor's column,
@@ -316,8 +322,8 @@ final class InstrumentedTerminalView: LocalProcessTerminalView {
     /// so, as above, it holds `self` weakly.
     func installShellMarkHandler() {
         getTerminal().registerOscHandler(code: ShellIntegration.oscCode) { [weak self] data in
-            guard let mark = ShellIntegration.parse(data) else { return }
-            self?.onShellMark?(mark)
+            guard let self, let mark = ShellIntegration.parse(data, nonce: self.shellIntegrationNonce) else { return }
+            self.onShellMark?(mark)
         }
     }
 

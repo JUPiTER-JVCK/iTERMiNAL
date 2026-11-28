@@ -177,7 +177,8 @@ final class AppSettings: ObservableObject {
         }
     }
     /// Starts new zsh tabs on this Mac with hooks that report each command's
-    /// start and exit status. Off: nothing about a shell's startup is touched.
+    /// start, first line and exit status. Off: nothing about a shell's startup
+    /// is touched.
     @Published var shellIntegration: Bool { didSet { defaults.set(shellIntegration, forKey: "shellIntegration") } }
     /// Says so when a command that ran for `longCommandSeconds` ends in a tab
     /// nobody is looking at. Needs shell integration.

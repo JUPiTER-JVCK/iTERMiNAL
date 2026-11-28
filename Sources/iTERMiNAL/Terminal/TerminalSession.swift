@@ -41,6 +41,8 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// the same for every tab opened in one project. Only a line the shell was
     /// reading as Return was pressed: never one typed into a program it
     /// started, which at a sudo or ssh prompt is a password (`EnteredLine`).
+    /// A zsh with the integration hooks says itself which line it runs, a
+    /// line Tab or ↑ changed on the way included (`noteShellCommandLine`).
     @Published private(set) var lastCommand: String?
     /// True after a bell / OSC attention while this pane was not in front of
     /// the user. Cleared when the session (or its tab) becomes focused.
@@ -432,6 +434,10 @@ final class TerminalSession: ObservableObject, Identifiable {
     /// A mark from the shell's own hooks.
     private func noteShellMark(_ mark: ShellIntegration.Mark) {
         guard shellIntegrationActive else { return }
+        if case .commandLine(let line) = mark {
+            noteShellCommandLine(line)
+            return
+        }
         // A command starting or a prompt coming back is the moment what is in
         // front changes.
         refreshActiveProgram()
@@ -441,11 +447,25 @@ final class TerminalSession: ObservableObject, Identifiable {
         switch mark {
         case .commandStart: DockBlink.shared.begin(id)
         case .commandFinished, .promptStart: DockBlink.shared.end(id)
+        case .commandLine: break
         }
         let now = Date()
         guard let finished = commandTracker.handle(mark, at: now) else { return }
         lastCommandResult = CommandResult(exitCode: finished.exitCode, seconds: finished.seconds, finishedAt: now)
         announceIfLong(finished)
+    }
+
+    /// The command zsh is about to run, as its own hook reports it (the first
+    /// line, as typed). Exact where the keys were not — Tab finished a word, ↑
+    /// brought a command back — and only ever a line the shell itself runs, so
+    /// never one read by a program it started. It comes just after the Return
+    /// that entered it, so it has the last word on that command: the record of
+    /// what was run, for the quick reference, and the tab's name, by the same
+    /// rule as a typed line — not one that starts with a space. Never kept
+    /// anywhere a typed line is not.
+    private func noteShellCommandLine(_ line: String) {
+        programLine = line
+        if let label = EnteredLine.label(for: line) { lastCommand = label }
     }
 
     /// Says so when a command that ran for a long time ends where nobody is

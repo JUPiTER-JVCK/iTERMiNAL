@@ -197,6 +197,9 @@ final class SwiftTermEngine: TerminalEngine {
     func start(_ configuration: TerminalLaunchConfiguration) {
         guard !started else { return }
         started = true
+        // Before the shell can print anything: its first command line may come
+        // as soon as it has read its startup files.
+        terminalView.shellIntegrationNonce = configuration.shellIntegrationNonce
         terminalView.startProcess(
             executable: configuration.executable,
             args: configuration.args,

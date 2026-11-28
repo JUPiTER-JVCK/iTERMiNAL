@@ -138,6 +138,15 @@ the kernel, never by what was typed. Locally the line is kept only while a shell
 was in front as return was pressed, so the password typed at sudo's prompt is
 never kept. Nothing typed is written anywhere.
 
+With shell integration on, zsh says itself which line it is about to run, just
+after the Return: its `preexec` hook sends the first line as typed (OSC 633 `E`),
+signed with a code made for that shell as it starts, so nothing printed to the
+terminal can pass for one. That line takes the place of the one kept at the
+Return, and is exact where Tab or ↑ had changed the line beyond what the keys,
+or the screen, could say. The hook writes every byte outside plain ASCII as
+`\xHH`: SwiftTerm reads an OSC byte by byte, and ends it at any byte from 0x80
+to 0x9F, which UTF-8 uses inside characters such as `Ü` and `€`.
+
 Inside a shell somewhere else — ssh typed here, a container's, sudo's root
 shell — the kernel can only say ssh, docker or sudo is in front, so what this
 Mac can still see decides whether a line is kept: not one read with echo off,

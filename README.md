@@ -920,7 +920,7 @@ deleted and retried, which is how `latest` was burned here for good.
 
 Settings → Terminal → **Shell integration**, off until you turn it on. A new zsh
 tab on this Mac is then started with two small hooks that tell iTERMiNAL when a
-command starts and what status it ends with. Nothing in your home folder is
+command starts, which command it is, and what status it ends with. Nothing in your home folder is
 changed: iTERMiNAL points zsh's `ZDOTDIR` at a private folder
 (`~/Library/Application Support/iTERMiNAL/ShellIntegration/zsh`) holding one
 `.zshenv`. zsh reads it first; it adds the hooks, puts `ZDOTDIR` back exactly as
@@ -937,18 +937,30 @@ folder.
   at, you get an in-app mark or a system banner — whichever *Pane attention*
   is set to — naming the command when it could tell what you typed, with its
   status and how long it ran.
+- The tab is named after a command even when Tab finished it or ↑ brought it
+  back, which keystrokes alone cannot follow, and the quick reference knows what
+  was run the same way — `sudo vim`, `docker exec -it`, `git add -p`. A command
+  typed with a space in front still never names the tab.
 
 What it is not: it works for **zsh only**. bash, fish, ssh sessions, and a tab
 that was already open are left exactly as they were. The folder is made private
 to your account and checked every time; if it is a link, someone else's, or open
 to others in a way that cannot be fixed, the shell starts the ordinary way
-instead. The hooks report only a status and the start and end of a command —
-never the command's text. They use OSC 633, the code VS Code's integration uses,
+instead. Besides a status and the start and end of a command, the hooks send
+the first line of each command as you typed it, a thousand characters at most —
+to this tab only, over the same terminal that already carries your keystrokes
+and the shell's echo of them. It is signed with a random code made for that shell
+as it starts and taken back out of its environment at once, so nothing the shell
+runs inherits it and nothing printed to the terminal — a file you `cat`, a
+program over ssh — can pass for a command. iTERMiNAL keeps it in memory where a
+typed line goes, under the same rules: the tab's name and the quick reference's
+record of what ran. They use OSC 633, the code VS Code's integration uses,
 because SwiftTerm already handles OSC 133 itself and keeps no exit status; and
 the marks are believed only from a tab started with the hooks. A program running
-in such a tab can still print one, which could change that tab's status line or
-raise the long-command notice — no more than it can already do with a bell or an
-OSC 777 notification.
+in such a tab can still print a start, an end or a status, which could change
+that tab's status line or raise the long-command notice — no more than it can
+already do with a bell or an OSC 777 notification — but not a command line,
+which needs the code.
 
 These files run inside your own login shell, so they are tested as one: CI
 writes them exactly as the app does and runs them in the runner's real zsh, on a
@@ -956,7 +968,9 @@ pseudo-terminal, for login and non-login shells, with a `ZDOTDIR` of your own,
 with a `.zshenv` that moves it, with a `precmd` of yours that fails, and with
 options such as `NO_UNSET` and `KSH_ARRAYS` set — and checks that anything
 reading `ZDOTDIR` afterwards, the system's own startup files included, sees
-yours, and that the same shell started without them reports nothing. See
+yours, that each command's first line arrives exactly as typed (UTF-8, a
+backslash, a leading space and `!!` included), that the code reaches nothing
+the shell starts, and that the same shell started without them reports nothing. See
 [`scripts/shell-integration-check`](scripts/shell-integration-check/check.py).
 
 ### Working directory (OSC 7)

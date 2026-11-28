@@ -89,11 +89,14 @@ enum SessionLaunch {
             // asked. If the folder for the wrapper files cannot be made safely,
             // the shell starts the ordinary way rather than not at all.
             var integration: ShellIntegration.EnvironmentChange?
+            var nonce: String?
             if settings.shellIntegration, ShellIntegration.isZsh(path: shell.path),
                case .success(let wrapper) = ShellIntegrationFiles.installZsh() {
+                let code = ShellIntegration.makeNonce()
                 integration = ShellIntegration.zshEnvironment(
-                    wrapperDirectory: wrapper, inheriting: ProcessInfo.processInfo.environment
+                    wrapperDirectory: wrapper, inheriting: ProcessInfo.processInfo.environment, nonce: code
                 )
+                nonce = code
             }
             return .success(TerminalLaunchConfiguration(
                 executable: shell.path,
@@ -108,7 +111,8 @@ enum SessionLaunch {
                 initialDirectory: directory
                     ?? profile?.resolvedStartDirectory(exists: { Self.isFolder($0) })
                     ?? settings.resolvedInitialDirectory,
-                shellIntegration: integration != nil
+                shellIntegration: integration != nil,
+                shellIntegrationNonce: nonce
             ))
 
         case .remote(let id):

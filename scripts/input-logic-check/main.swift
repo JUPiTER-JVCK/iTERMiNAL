@@ -1829,6 +1829,58 @@ func checkShellIntegration() {
         check(mark(text) == nil, "\(text.debugDescription) is not a mark")
     }
 
+    // The command line, signed with the shell's code. The lines below are what
+    // zsh 5.9 wrote for them through the hook (scripts/shell-integration-check).
+    let nonce = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    func signed(_ text: String, code: String?) -> ShellIntegration.Mark? {
+        ShellIntegration.parse(Array(text.utf8)[...], nonce: code)
+    }
+    func ours(_ text: String) -> ShellIntegration.Mark? { signed(text, code: nonce) }
+    check(ours("E;\(nonce);ls -la") == .commandLine("ls -la"), "a command line with this shell's code")
+    check(ours("E;\(nonce);true \\xC3\\x9Cber \\xE2\\x82\\xAC5 na\\xC3\\xAFve") == .commandLine("true Über €5 naïve"),
+          "UTF-8 comes as \\xHH, and is read back")
+    check(ours("E;\(nonce);true back\\\\slash \"semi;colon\"") == .commandLine("true back\\slash \"semi;colon\""),
+          "a backslash comes doubled, and a semicolon as it is")
+    check(ours("E;\(nonce); true leading space") == .commandLine(" true leading space"), "a leading space is kept, for the tab's name to see")
+    check(ours("E;\(nonce);caf\\xc3\\xa9") == .commandLine("café"), "lowercase hex reads the same")
+    check(ours("E;\(nonce);a\\x09b") == .commandLine("a b"), "a tab is read as a space")
+    check(ours("C") == .commandStart && ours("D;3") == .commandFinished(exitCode: 3), "the other marks read the same with a code")
+    let longest = "E;\(nonce);" + String(repeating: "\\xF0\\x9F\\x98\\x80", count: 1000)
+    check(ours(longest) == .commandLine(String(repeating: "\u{1F600}", count: 1000)),
+          "the longest the hook sends, a thousand characters of four bytes each, fits")
+    check(signed("E;\(nonce);ls", code: nil) == nil && mark("E;\(nonce);ls") == nil, "a shell given no code names no command, whatever it prints")
+    let forged: [(String, String)] = [
+        ("E;ls", "no code"),
+        ("E;;ls", "an empty code"),
+        ("E;00000000000000000000000000000000;ls", "another code"),
+        ("E;\(nonce.uppercased());ls", "the code in other letters"),
+        ("E;\(nonce.dropLast());ls", "part of the code"),
+        ("E;\(nonce)ls", "no separator after the code"),
+        ("E;\(nonce);", "nothing after it"),
+        ("E;\(nonce);   ", "only spaces"),
+        ("E;\(nonce);caf\u{E9}", "a raw byte outside ASCII, which the hook never sends"),
+        ("E;\(nonce);a\u{7F}", "a raw DEL"),
+        ("E;\(nonce);back\\", "a backslash at the end"),
+        ("E;\(nonce);\\n", "an escape the hook never writes"),
+        ("E;\(nonce);\\x4", "a short escape"),
+        ("E;\(nonce);\\xZZ", "not hex"),
+        ("E;\(nonce);\\xC3", "half a character"),
+        ("E;\(nonce);\\xFF\\xFE", "not UTF-8"),
+        ("E;\(nonce);a\\x0Ab", "a newline"),
+        ("E;\(nonce);a\\x1B[31mb", "an escape character"),
+        ("E;\(nonce);a\\x00b", "a NUL"),
+        ("E;\(nonce);a\\xC2\\x9Cb", "a C1 control"),
+        ("E;\(nonce);" + String(repeating: "x", count: ShellIntegration.maximumCommandLineBytes), "too long"),
+    ]
+    for (text, why) in forged {
+        let shown = text.count > 60 ? String(text.prefix(40)) + "…" : text
+        check(ours(text) == nil, "\(shown.debugDescription) is not a command line: \(why)")
+    }
+    let codes = (0..<64).map { _ in ShellIntegration.makeNonce() }
+    check(codes.allSatisfy { $0.count == 32 && $0.allSatisfy { "0123456789abcdef".contains($0) } },
+          "a code is 32 lowercase hex digits: \(codes[0])")
+    check(Set(codes).count == codes.count, "and a fresh one each time")
+
     // Timing a command.
     var tracker = ShellIntegration.CommandTracker()
     let start = Date(timeIntervalSince1970: 1_000)
@@ -1844,6 +1896,10 @@ func checkShellIntegration() {
           "a prompt means nothing is running, so a later end has no start to measure from")
     _ = tracker.handle(.commandStart, at: start)
     check(tracker.handle(.commandFinished(exitCode: 0), at: start.addingTimeInterval(-30))?.seconds == 0, "a clock that went back gives 0, not a negative time")
+    check(tracker.handle(.commandLine("sleep 5"), at: start) == nil && tracker.runningSince == nil, "a command line starts nothing: the C after it does")
+    _ = tracker.handle(.commandStart, at: start)
+    check(tracker.handle(.commandLine("sleep 5"), at: start.addingTimeInterval(1)) == nil && tracker.runningSince == start,
+          "nor does it end or restart one")
 
     // The words.
     let durations: [(Double, String)] = [(0, "0s"), (0.9, "0s"), (59.9, "59s"), (60, "1m 0s"), (134, "2m 14s"),
@@ -1866,14 +1922,15 @@ func checkShellIntegration() {
 
     // How zsh is pointed at the files.
     let wrapper = "/Users/me/Library/Application Support/iTERMiNAL/ShellIntegration/zsh"
-    let withZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": "/Users/me/.config/zsh", "HOME": "/Users/me"])
-    check(withZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_ZDOTDIR_ORIG": "/Users/me/.config/zsh"] && withZdotdir.remove.isEmpty,
-          "their ZDOTDIR is handed on: \(withZdotdir)")
-    let withoutZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["HOME": "/Users/me"])
-    check(withoutZdotdir.set == ["ZDOTDIR": wrapper] && withoutZdotdir.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "with none, none is handed on, and a stale hand-over is removed")
-    let stale = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ITERMINAL_ZDOTDIR_ORIG": "/somewhere/else"])
+    let withZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": "/Users/me/.config/zsh", "HOME": "/Users/me"], nonce: nonce)
+    check(withZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_ZDOTDIR_ORIG": "/Users/me/.config/zsh", "ITERMINAL_NONCE": nonce] && withZdotdir.remove.isEmpty,
+          "their ZDOTDIR is handed on, with the code: \(withZdotdir)")
+    let withoutZdotdir = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["HOME": "/Users/me"], nonce: nonce)
+    check(withoutZdotdir.set == ["ZDOTDIR": wrapper, "ITERMINAL_NONCE": nonce] && withoutZdotdir.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "with none, none is handed on, and a stale hand-over is removed")
+    let stale = ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ITERMINAL_ZDOTDIR_ORIG": "/somewhere/else", "ITERMINAL_NONCE": "stale"], nonce: nonce)
     check(stale.set["ITERMINAL_ZDOTDIR_ORIG"] == nil && stale.remove == ["ITERMINAL_ZDOTDIR_ORIG"], "a hand-over inherited from elsewhere is never believed")
-    check(ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": ""]).set["ITERMINAL_ZDOTDIR_ORIG"] == "", "an empty ZDOTDIR is theirs too")
+    check(stale.set["ITERMINAL_NONCE"] == nonce, "nor is a code: this launch's replaces it")
+    check(ShellIntegration.zshEnvironment(wrapperDirectory: wrapper, inheriting: ["ZDOTDIR": ""], nonce: nonce).set["ITERMINAL_ZDOTDIR_ORIG"] == "", "an empty ZDOTDIR is theirs too")
 
     // The files.
     let files = ShellIntegration.zshFiles
@@ -1888,7 +1945,17 @@ func checkShellIntegration() {
     check(script.contains("ITERMINAL_ZDOTDIR_ORIG") && script.contains("builtin source"), ".zshenv hands ZDOTDIR back and loads theirs")
     check(script.contains("633;C\\a") && script.contains("633;D;") && script.contains("633;A\\a"), "and says what the app reads: C, D;status, A")
     check(script.contains("emulate -L zsh") && script.contains("precmd_functions") && script.contains("preexec_functions"), "from zsh's own option defaults, through the hook arrays")
-    check(!script.contains("633;E") && !script.contains("]7;") && !script.contains("]133;"), "and nothing else: no command text, no OSC 7, no OSC 133")
+    check(!script.contains("]7;") && !script.contains("]133;"), "and nothing else: no OSC 7, no OSC 133")
+    // The command line goes only with the code, and the code goes no further.
+    if let line = script.range(of: "633;E;'$__iterminal_nonce"), let guarded = script.range(of: "if [[ -n $__iterminal_nonce && -n $1 ]]"),
+       let unset = script.range(of: "unset ITERMINAL_NONCE"), let theirs = script.range(of: "builtin source") {
+        check(guarded.lowerBound < line.lowerBound, "the command line is sent only with a code, and only from what was typed ($1)")
+        check(unset.lowerBound < theirs.lowerBound, "and the code is out of the environment before any file of theirs runs")
+    } else {
+        check(false, "the script sends the line with its code, and takes the code out of the environment")
+    }
+    check(script.contains("local LC_ALL=C") && script.contains("[^ -~]") && script.contains("[1,1000]"),
+          "byte by byte, as \\xHH for anything outside plain ASCII, and no more than a thousand characters")
     // The order is the point. The hooks go in before any of their files can set an
     // option; ZDOTDIR goes back before anything else reads it (Apple's /etc/zshrc puts
     // the history file at ${ZDOTDIR:-$HOME}/.zsh_history); and theirs is loaded last.

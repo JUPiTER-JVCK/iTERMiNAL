@@ -117,13 +117,6 @@ enum EnteredLine {
 
     // MARK: The line
 
-    /// The line being typed, rebuilt from the bytes heading for the terminal.
-    ///
-    /// Deliberately conservative. These are the bytes the user typed, not what
-    /// the shell has after its own line editing, so anything that rewrites the
-    /// line behind our back — history recall, tab completion, any arrow key —
-    /// abandons the buffer rather than reporting a command that was never run.
-    /// A wrong tab name is worse than the directory it would otherwise show.
     /// The line as the screen shows it — read from where it began to the
     /// cursor — for when the keys alone no longer say what it is: Tab
     /// completed a word, ↑ brought back an earlier command.
@@ -140,6 +133,13 @@ enum EnteredLine {
         return screen
     }
 
+    /// The line being typed, rebuilt from the bytes heading for the terminal.
+    ///
+    /// Deliberately conservative. These are the bytes the user typed, not what
+    /// the shell has after its own line editing, so anything that rewrites the
+    /// line behind our back — history recall, tab completion, any arrow key —
+    /// abandons the buffer rather than reporting a command that was never run.
+    /// A wrong tab name is worse than the directory it would otherwise show.
     struct LineBuffer {
         /// What has been typed since the last Enter.
         private var bytes: [UInt8] = []
