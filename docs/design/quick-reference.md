@@ -25,8 +25,11 @@ it describes the pane you are typing into.
 - Hints are in the order they matter, and a narrow window drops them from the
   end: nothing wraps or scrolls. `ViewThatFits` picks the longest run of them
   that fits, so the ones left out are not on the screen at all — moved off it,
-  as an earlier layout did, VoiceOver still read them. A key cap never gives
-  way — cut down it reads as "…" — so only the words beside it are shortened.
+  as an earlier layout did, VoiceOver still read them. It builds a row for every
+  count, n(n+1)/2 hints each time the line is drawn — 561 for git's 33
+  subcommands — so the line holds at most 16 (136), more than fit across a
+  wide window; the full list has the rest. A key cap never gives way — cut down
+  it reads as "…" — so only the words beside it are shortened.
 - The first key lines up with the status bar's first icon below it: the line
   starts 4pt further left than the status bar, by the hint's own hover padding.
 - A key a click types warms under the pointer and flashes in the accent when
@@ -38,7 +41,10 @@ it describes the pane you are typing into.
   start, in a capsule, it took room the hints needed and stood out more than a
   label should. For a program with no keys listed that the Cheatsheet has a
   page for, it opens that page instead.
-- The popover is as tall as its list, up to 400pt, opens with its search
+- The popover opens upward, over the terminal. AppKit shows it
+  (`AnchoredPopover`), on the edge it is given: SwiftUI's `.popover` takes its
+  arrow edge as a hint, and opened it below the line and off the screen with
+  either edge. It is as tall as its list, up to 400pt, opens with its search
   field focused, and Return there types the first key found. Its legend shows
   only the modifiers the list uses — never ⌘, which no program here is sent.
 - At a prompt the shell's keys can be switched off (Settings → Appearance →
@@ -125,7 +131,9 @@ not optional: the engine passes on at most one repaint in each quarter second
 and drops the others rather than holding the last, so a page drawn whole just
 after the echo of return — man, less — and then left still would otherwise
 never be looked at again. Only the focused session is kept up to date, and nothing at all
-while the strip is off. Each refresh is a few `sysctl` calls; a leader's arguments
+while the strip is off. Typing itself redraws nothing: the session's activity time,
+which the echo of each key moves, is not published to the views that watch it
+(`TerminalSession.lastActivityAt`). Each refresh is a few `sysctl` calls; a leader's arguments
 are read once per job, tmux is asked at most once a second, and the answer is
 published only when it changes.
 

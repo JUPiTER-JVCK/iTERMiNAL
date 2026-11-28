@@ -182,14 +182,6 @@ final class AppSettings: ObservableObject {
     @Published var shellIntegration: Bool { didSet { defaults.set(shellIntegration, forKey: "shellIntegration") } }
     /// Says so when a command that ran for `longCommandSeconds` ends in a tab
     /// nobody is looking at. Needs shell integration.
-    /// Whether the Dock icon's cursor blinks while a command runs (see
-    /// `DockBlink`). Needs the shell integration above to know when one does.
-    @Published var dockBlink: Bool {
-        didSet {
-            defaults.set(dockBlink, forKey: "dockBlink")
-            if !dockBlink { DockBlink.shared.cancel() }
-        }
-    }
     @Published var notifyLongCommands: Bool { didSet { defaults.set(notifyLongCommands, forKey: "notifyLongCommands") } }
     /// How long counts as long, in seconds: 5 to 3600.
     @Published var longCommandSeconds: Int { didSet { defaults.set(longCommandSeconds, forKey: "longCommandSeconds") } }
@@ -540,7 +532,6 @@ final class AppSettings: ObservableObject {
         optionAsMeta = defaults.object(forKey: "optionAsMeta") as? Bool ?? true
         secureKeyboardEntry = defaults.object(forKey: "secureKeyboardEntry") as? Bool ?? false
         shellIntegration = defaults.object(forKey: "shellIntegration") as? Bool ?? false
-        dockBlink = defaults.object(forKey: "dockBlink") as? Bool ?? true
         notifyLongCommands = defaults.object(forKey: "notifyLongCommands") as? Bool ?? false
         longCommandSeconds = min(max(defaults.object(forKey: "longCommandSeconds") as? Int ?? 30, 5), 3600)
         terminalLineSpacing = VisualRange.clamp(
@@ -935,7 +926,6 @@ final class AppSettings: ObservableObject {
         optionAsMeta = true
         secureKeyboardEntry = false
         shellIntegration = false
-        dockBlink = true
         notifyLongCommands = false
         longCommandSeconds = 30
         terminalLineSpacing = 1

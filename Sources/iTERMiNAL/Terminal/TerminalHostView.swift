@@ -11,7 +11,7 @@ struct TerminalHostView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TerminalContainerView {
         // Not here: starting a session sets several `@Published` values
-        // (`isRunning`, `startedAt`, `launchError`, `lastActivityAt`), and this
+        // (`isRunning`, `startedAt`, `launchError`), and this
         // runs while SwiftUI is still computing a view, which it logs as
         // "Publishing changes from within view updates is not allowed". The next
         // turn of the run loop is early enough: nothing is drawn by a shell in

@@ -32,8 +32,7 @@ final class CommandOutcomeWatcher: ObservableObject {
         onOffer: @escaping (ErrorOffer) -> Void
     ) {
         stop()
-        subscription = session.$lastActivityAt
-            .dropFirst()
+        subscription = session.activity
             .debounce(for: .seconds(Self.quietPeriod), scheduler: DispatchQueue.main)
             .sink { [weak self, weak session] _ in
                 guard let self, let session else { return }

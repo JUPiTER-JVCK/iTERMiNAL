@@ -5,7 +5,7 @@ import QuartzCore
 /// A block cursor that flashes above SDR white ("flash HDR") on displays with EDR headroom.
 ///
 /// - Works only inside iTERMiNAL's own windows: EDR is opted into per CAMetalLayer the app creates.
-///   The Dock is drawn by macOS, so it can't show HDR (use `DockBlink` there).
+///   The Dock is drawn by macOS, so it can't show HDR.
 /// - On displays without headroom (e.g. most external SDR monitors, MacBook Air), it falls back
 ///   automatically to normal brightness, because the boost is clamped to the screen's headroom.
 /// - No shaders: each frame just clears the drawable to the cursor color.

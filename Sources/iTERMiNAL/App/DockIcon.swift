@@ -1,7 +1,6 @@
 import AppKit
 
-/// Keeps the Dock icon matched to the app's appearance, and to the cursor's
-/// blink while a command runs (see `DockBlink`).
+/// Keeps the Dock icon matched to the app's appearance.
 ///
 /// The icon in the bundle is the dark icon. An asset-catalog icon cannot
 /// switch with the appearance on the toolchain this is built with (that takes
@@ -10,9 +9,6 @@ import AppKit
 /// is dark. Finder, Launchpad and the app switcher read the bundle and so show
 /// the dark one either way.
 ///
-/// Each appearance has a second picture with the cursor hidden, `DockCursorOff`
-/// and `DockCursorOffLight`; the blink alternates between the two.
-///
 /// This follows `NSApp.effectiveAppearance`, which already folds in the
 /// Light / Dark / System choice in Settings (see `AppSettings.applyAppearance`):
 /// on System it is the Mac's appearance, and on Light or Dark it is that.
@@ -20,11 +16,6 @@ final class DockIcon {
     static let shared = DockIcon()
 
     private var observation: NSKeyValueObservation?
-
-    /// False for the half of the blink that has the cursor hidden.
-    var cursorLit = true {
-        didSet { if cursorLit != oldValue { refresh() } }
-    }
 
     private init() {}
 
@@ -36,17 +27,12 @@ final class DockIcon {
         }
     }
 
-    /// Puts the Dock icon right for the appearance and the blink's phase now.
+    /// Puts the Dock icon right for the appearance now.
     func refresh() {
         guard let app = NSApp else { return }
         let dark = app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         // nil restores the icon from the bundle. A missing image set leaves
         // that in place too, so a damaged catalog degrades to the dark icon.
-        if dark {
-            app.applicationIconImage = cursorLit ? nil : NSImage(named: "DockCursorOff")
-        } else {
-            let light = NSImage(named: "DockIconLight")
-            app.applicationIconImage = cursorLit ? light : (NSImage(named: "DockCursorOffLight") ?? light)
-        }
+        app.applicationIconImage = dark ? nil : NSImage(named: "DockIconLight")
     }
 }
