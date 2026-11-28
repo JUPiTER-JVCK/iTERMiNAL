@@ -52,6 +52,11 @@ struct ComposerLogSession: Codable, Identifiable, Equatable {
     /// Whether what the shell printed was kept, in a file of its own. Kept apart
     /// so the list loads without reading every session's output.
     var hasOutput = false
+    /// Set on a session recorded by a build that names a terminal after a line
+    /// only when its shell was reading it (`EnteredLine`). An older one's
+    /// events name terminals by titles that may be a password typed at a sudo
+    /// or ssh prompt, so those names are dropped when it is read.
+    var terminalNamesVetted: Bool?
 
     var isLive: Bool { endedAt == nil }
 }
@@ -113,7 +118,27 @@ final class ComposerLog: ObservableObject {
 
     init() {
         sessions = Self.loadAll()
+        forgetUnvettedTerminalNames()
         prune()
+    }
+
+    /// Drops the terminal names an older build recorded with commands sent to
+    /// terminals, and writes those sessions again without them. Such a name was
+    /// the terminal's title, which could be a password taken for a command
+    /// (see `EnteredLine`). The commands are kept: they are what was typed in
+    /// the composer, not a title. A session read back has ended, so nothing is
+    /// added to one of these again.
+    private func forgetUnvettedTerminalNames() {
+        for index in sessions.indices
+        where sessions[index].kind == .terminals
+            && sessions[index].terminalNamesVetted != true
+            && sessions[index].events.contains(where: { $0.who != nil }) {
+            for event in sessions[index].events.indices {
+                sessions[index].events[event].who = nil
+            }
+            dirty.insert(sessions[index].id)
+        }
+        if !dirty.isEmpty { saveNow() }
     }
 
     // MARK: Recording
@@ -135,7 +160,7 @@ final class ComposerLog: ObservableObject {
         if let existing = open[key], sessions.contains(where: { $0.id == existing }) {
             id = existing
         } else {
-            let session = ComposerLogSession(kind: kind, title: title, startedAt: Date())
+            let session = ComposerLogSession(kind: kind, title: title, startedAt: Date(), terminalNamesVetted: true)
             sessions.insert(session, at: 0)
             open[key] = session.id
             id = session.id

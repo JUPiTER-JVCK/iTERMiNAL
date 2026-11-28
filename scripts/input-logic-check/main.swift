@@ -6476,6 +6476,124 @@ func checkExitStatusOfAProcess() {
 }
 checkExitStatusOfAProcess()
 
+// MARK: Entered lines and passwords
+
+// A line is rebuilt from keystrokes, whatever program reads them, and becomes a
+// tab's name. A password typed at sudo's or ssh's prompt must never be one: it is
+// taken only when what was true as Return was pressed says the shell was reading
+// it, and only when it starts the way a command does. Names an older build wrote
+// to disk are renamed when read back.
+func checkEnteredLines() {
+    typealias Moment = EnteredLine.Moment
+    let prompt = Moment(shellInFront: true, hiddenInput: false, alternateScreen: false)
+    let jobInFront = Moment(shellInFront: false, hiddenInput: false, alternateScreen: false)
+    let unknown = Moment(shellInFront: nil, hiddenInput: false, alternateScreen: false)
+
+    // Who was reading, on this Mac.
+    check(EnteredLine.isCommand(at: prompt, remote: false), "a line the shell read at its prompt is a command")
+    check(!EnteredLine.isCommand(at: jobInFront, remote: false),
+          "a line read by a job the shell started — sudo's password prompt, vim, a local ssh — is not")
+    check(EnteredLine.isCommand(at: unknown, remote: false), "when the kernel cannot say, the other signs decide")
+    for shell: Bool? in [true, false, nil] {
+        for remote in [false, true] {
+            check(!EnteredLine.isCommand(at: Moment(shellInFront: shell, hiddenInput: true, alternateScreen: false), remote: remote),
+                  "a line read without being shown is a password, whoever asked (shell \(String(describing: shell)), remote \(remote))")
+            check(!EnteredLine.isCommand(at: Moment(shellInFront: shell, hiddenInput: false, alternateScreen: true), remote: remote),
+                  "a line typed on the alternate screen is not a command (shell \(String(describing: shell)), remote \(remote))")
+        }
+    }
+    // Over ssh the kernel only ever sees ssh in front, so its answer is not used.
+    check(EnteredLine.isCommand(at: prompt, remote: true) && EnteredLine.isCommand(at: jobInFront, remote: true)
+            && EnteredLine.isCommand(at: unknown, remote: true),
+          "a remote session is judged by what this Mac can see, not by the kernel's word about ssh")
+
+    // What a tab is called, unchanged for ordinary commands.
+    let named: [(String, String)] = [
+        ("ls", "ls"), ("git commit -m \"fix it\"", "git commit"), ("npm run build", "npm run"), ("ls  -la", "ls -la"),
+        ("make ", "make"), ("./build.sh release", "./build.sh release"), ("~/bin/sync now", "~/bin/sync now"),
+        ("/usr/bin/env python3 x.py", "/usr/bin/env python3"), ("g++ main.cpp", "g++ main.cpp"), ("7z x a.7z", "7z x"),
+        ("python3.12 -m venv", "python3.12 -m"), ("ssh-add -l", "ssh-add -l"), ("\\ls -la", "\\ls -la"),
+        ("[ -f x ] && echo", "[ -f"), ("!!", "!!"), (". ~/.zshrc", ". ~/.zshrc"), ("(cd sub && make)", "(cd sub"),
+        ("cd -", "cd -"), ("~", "~"), ("FOO=1 make all", "FOO=1 make"), ("_X=a/b ./run", "_X=a/b ./run"),
+        ("sudo ls", "sudo ls"), ("ssh me@host", "ssh me@host"), ("kubectl get pods", "kubectl get"),
+    ]
+    for (line, expected) in named {
+        check(EnteredLine.label(for: line) == expected,
+              "\(line.debugDescription) names a tab \(expected.debugDescription), not \(String(describing: EnteredLine.label(for: line)))")
+    }
+    // And no name from a line that could not start a command.
+    let unnamed = [
+        "", " ", " ls", "  rm -rf build", // a leading space keeps a line out of the shell's history, and out of here
+        "P@ssw0rd!", "hunter2#", "s3cr3t$", "pa$$word", "123456", "000000", "%secret%", "*star*", "a&b", "pass=word!",
+        "-secret", "--help", "=x", "a~b", "café", "naïve", "$EDITOR notes", "\"quoted\" word", "'x'", "?", "@me",
+        "FOO=1", "A=1 B=2", "((i++))",
+    ]
+    for line in unnamed {
+        check(EnteredLine.label(for: line) == nil,
+              "\(line.debugDescription) names no tab, not \(String(describing: EnteredLine.label(for: line)))")
+    }
+
+    // The line, rebuilt from the keystrokes.
+    func feed(_ buffer: inout EnteredLine.LineBuffer, _ text: String, _ moment: Moment?) -> [String] {
+        buffer.feed(Array(text.utf8)[...], moment: moment).map(\.line)
+    }
+    var buffer = EnteredLine.LineBuffer()
+    check(feed(&buffer, "l", nil).isEmpty && feed(&buffer, "s", nil).isEmpty && feed(&buffer, "\r", prompt) == ["ls"],
+          "keys typed one by one make a line on Return")
+    let entered = buffer.feed(Array("pwd\r".utf8)[...], moment: jobInFront)
+    check(entered.map(\.line) == ["pwd"] && entered.first?.moment == jobInFront,
+          "a line comes with the moment of its Return, to be judged by")
+    check(feed(&buffer, "\r", prompt).isEmpty, "an empty line is nothing")
+    check(feed(&buffer, "sudo ls\r", nil).isEmpty, "a line with no moment is not passed on")
+    check(feed(&buffer, "sudo ls\rhunter2\r", prompt) == ["sudo ls"],
+          "of lines pasted together only the first is known to be the shell's: the password after it is not passed on")
+    check(feed(&buffer, "\rhunter2\r", prompt).isEmpty, "nor is a line after an empty one in the same bytes")
+    check(feed(&buffer, "echo old\u{17}new\r", prompt).isEmpty, "an editing key makes the line untrusted")
+    check(feed(&buffer, "ls\r", prompt) == ["ls"], "and the next line is trusted again")
+    check(feed(&buffer, "\u{1B}[A\r", prompt).isEmpty, "history recall is not taken for what it recalls")
+    check(feed(&buffer, "gi\tt\r", prompt).isEmpty, "a Tab completes something unseen")
+    check(feed(&buffer, "lsx\u{7F}\r", prompt) == ["ls"], "Backspace removes a character")
+    check(feed(&buffer, "echo é\u{7F}\r", prompt) == ["echo "], "Backspace removes a whole UTF-8 character")
+    check(feed(&buffer, "secret\u{15}ls\r", prompt) == ["ls"] && feed(&buffer, "oops\u{03}pwd\r", prompt) == ["pwd"],
+          "^U and ^C abandon the line")
+    check(feed(&buffer, "a\r\n", prompt) == ["a"], "CR LF is one line")
+
+    // The line so far, for the quick reference strip.
+    var typing = EnteredLine.LineBuffer()
+    check(typing.text == nil, "nothing typed is no line")
+    _ = feed(&typing, "git co", nil)
+    check(typing.text == "git co", "what is typed so far is the line: \(String(describing: typing.text))")
+    _ = feed(&typing, "\u{1B}[D", nil)
+    check(typing.text == nil, "once the cursor moves, the line is not known")
+    _ = feed(&typing, "\u{15}ls", nil)
+    check(typing.text == "ls", "^U starts it again")
+    _ = feed(&typing, "\r", prompt)
+    check(typing.text == nil, "Return ends it")
+
+    // A password, typed as each prompt asks for it.
+    let afterSudo = feed(&buffer, "sudo ls\r", prompt)
+    let password = buffer.feed(Array("hunter2\r".utf8)[...], moment: Moment(shellInFront: false, hiddenInput: true, alternateScreen: false))
+    check(afterSudo == ["sudo ls"] && password.map(\.line) == ["hunter2"]
+            && !password.contains { EnteredLine.isCommand(at: $0.moment, remote: false) },
+          "sudo's prompt: the line is rebuilt, and judged not a command")
+    let sshPassword = buffer.feed(Array("hunter2\r".utf8)[...], moment: Moment(shellInFront: true, hiddenInput: true, alternateScreen: false))
+    check(sshPassword.map(\.line) == ["hunter2"] && !sshPassword.contains { EnteredLine.isCommand(at: $0.moment, remote: true) },
+          "ssh's own prompt in a remote session, where ssh is all the kernel sees: hidden input")
+
+    // Recents titles written before these rules.
+    check(EnteredLine.recentTitle("npm run", vetted: true, directory: "/Users/me/app", connectionName: nil) == "npm run",
+          "a title written by this build is kept")
+    check(EnteredLine.recentTitle("hunter2", vetted: nil, directory: "/Users/me/app", connectionName: nil) == "app",
+          "an older one is renamed after its folder")
+    check(EnteredLine.recentTitle("hunter2", vetted: false, directory: "/Users/me/app", connectionName: "Build box") == "Build box",
+          "or its host")
+    check(EnteredLine.recentTitle("hunter2", vetted: nil, directory: "/Users/me/app", connectionName: "") == "app",
+          "a host with no name falls back to the folder")
+    check(EnteredLine.recentTitle("hunter2", vetted: nil, directory: "", connectionName: nil) == "Terminal",
+          "and with no folder either, it is a Terminal")
+}
+checkEnteredLines()
+
 // MARK: Port forwards and host options
 
 func checkPortForwardsAndHostOptions() {

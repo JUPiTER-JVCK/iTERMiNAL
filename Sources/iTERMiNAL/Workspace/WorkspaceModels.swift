@@ -209,6 +209,11 @@ struct RecentSession: Codable, Identifiable, Hashable {
     var directory: String
     var connection: String?
     var closedAt: Date
+    /// Set on an entry whose title was made by a build that names a tab after
+    /// a line only when its shell was reading it (`EnteredLine`). Absent from
+    /// older entries, whose title may be a password typed at a sudo or ssh
+    /// prompt: those are renamed when read (`EnteredLine.recentTitle`).
+    var titleVetted: Bool?
 
     var isRemote: Bool { connection != nil }
 }

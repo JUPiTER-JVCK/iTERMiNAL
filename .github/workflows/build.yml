@@ -218,6 +218,7 @@ jobs:
             Sources/iTERMiNAL/Terminal/AutoReconnect.swift \
             Sources/iTERMiNAL/Terminal/TabConnectionProblem.swift \
             Sources/iTERMiNAL/Terminal/ExitStatus.swift \
+            Sources/iTERMiNAL/Terminal/EnteredLine.swift \
             Sources/iTERMiNAL/Remote/SavedTunnel.swift \
             Sources/iTERMiNAL/HTTP/GeoLookup.swift \
             Sources/iTERMiNAL/HTTP/IPIntel.swift \
