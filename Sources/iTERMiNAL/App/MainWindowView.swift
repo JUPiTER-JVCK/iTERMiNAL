@@ -250,6 +250,16 @@ struct DetailView: View {
                     .transition(Motion.dockTransition(reduceMotion: reduceMotion))
             }
 
+            // Directly above the status bar. Present whatever the terminal
+            // runs, so it never resizes the terminal under a program. The seam
+            // under it is the status bar's own, which runs on across the
+            // sidebar's footer as one line; the strip is the status bar's
+            // height, so when it is the last row its seam lines up instead.
+            if settings.showQuickReference && store.focusedSession != nil {
+                FadedDivider()
+                QuickReferenceStrip()
+            }
+
             // Last in the column, so it lands in the window's bottom-right
             // corner: the detail column runs to the trailing edge, the sidebar
             // does not.

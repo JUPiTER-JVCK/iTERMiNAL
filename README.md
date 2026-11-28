@@ -258,6 +258,30 @@ A tour of the app in thirty-four pictures, in five groups.
   with a control character in it is refused, as is a drop of more than 100 files
   or 64 KB of text, and a bare UUID is ignored because that is how a tab is
   dragged in the sidebar.
+- **Quick reference** — a line above the status bar shows the keys for the
+  program in front of the focused terminal: `:w`, `:q` and `:help` in Vim and
+  Neovim; Write Out, Exit, Cut and Paste in nano, in nano's own words; q,
+  search and the sections in `man` (1 user commands, 2 system calls, 3 C
+  library, with `man -k` to search them); and the same for Emacs, micro, less,
+  tmux, screen, top, htop, btop and superfile. At a shell prompt it shows the
+  shell's own keys (⌃R, ⌃A, ⌃E, ⌃W, ⌃U, `!!`, `cd -`), and once a command's name
+  is typed — at the prompt or in the composer — that command's flags or
+  subcommands, from the composer's completion list. Click a key and it is typed
+  into the program; a Return at the end is left for you to press, Vim's
+  commands start from normal mode, and a key that needs your own words, such as
+  a search, types only the part before them (`/`). ssh's escape keys are shown
+  but never typed, because they start with a Return that would run whatever is
+  half typed. ⌃, ⌥, ⇧ and ⌘ each have a shade of their own, from the text's
+  own colour down to grey, so they tell apart without standing out. The program's
+  name sits at the end of the line; click it for the full list, and for a
+  typed command a link to its Cheatsheet page. On this Mac the program is found the way Terminal.app
+  names its tabs, by asking the system which process has the terminal — `git
+  log` is less, `sudo vim` is Vim — so it needs nothing from the shell. Over ssh
+  it goes by the program you typed and its switch to the full screen. The line
+  stays while a program runs, so the terminal never resizes under it. Keys a
+  config file has rebound are not reflected. Settings → Appearance → Status →
+  Quick reference turns it off, and the work of finding the program with it.
+  The design is in [`docs/design/quick-reference.md`](docs/design/quick-reference.md).
 - **Option as Meta** — Settings → Terminal → Keyboard. On, the default, Option
   sends Escape plus the key, so Option-B and Option-F move by word in zsh and
   bash. Off, Option types the character your layout gives it, such as `@` or
@@ -1797,6 +1821,12 @@ that tool's panel is in front; the app's ⌘ shortcuts still work there too.
 btop's keys are built in. superfile's can be changed in a `hotkeys.toml` of your
 own, which the list does not read. Some actions (Split with Files, Split
 with HTTP Client) have no shortcut; the command palette finds every action.
+
+After the app's own keys come those of programs you run in a terminal — Vim,
+nano, Emacs, micro, less, man, tmux, screen, top, htop, ssh's escape keys and
+the shell's line editing — each from its own documentation, for its default
+keys. The quick reference line above the status bar shows the section for the
+program in front of the focused terminal, and types a key when you click it.
 
 ## Architecture
 

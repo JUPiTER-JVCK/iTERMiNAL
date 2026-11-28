@@ -225,6 +225,10 @@ final class AppSettings: ObservableObject {
         set { ipLookupProviderTag = newValue.rawValue }
     }
     @Published var showStatusBar: Bool { didSet { defaults.set(showStatusBar, forKey: "showStatusBar") } }
+    /// The strip above the status bar with the keys of the program in front of
+    /// the focused terminal. Off also stops each terminal working out what that
+    /// program is.
+    @Published var showQuickReference: Bool { didSet { defaults.set(showQuickReference, forKey: "showQuickReference") } }
     @Published var showRemotePorts: Bool { didSet { defaults.set(showRemotePorts, forKey: "showRemotePorts") } }
     /// The globe in the status bar's corner that opens the Connect list, and the
     /// button beside it that shows and hides the composer. Both on unless turned
@@ -492,6 +496,7 @@ final class AppSettings: ObservableObject {
             importedThemes = []
         }
         showStatusBar = defaults.object(forKey: "showStatusBar") as? Bool ?? true
+        showQuickReference = defaults.object(forKey: "showQuickReference") as? Bool ?? true
         showRemotePorts = defaults.bool(forKey: "showRemotePorts")
         showConnectButton = defaults.object(forKey: "showConnectButton") as? Bool ?? true
         showComposerButton = defaults.object(forKey: "showComposerButton") as? Bool ?? true
@@ -889,6 +894,7 @@ final class AppSettings: ObservableObject {
         localTerminalTypeTag = TerminalType.default.rawValue
         remoteTerminalTypeTag = TerminalType.default.rawValue
         showStatusBar = true
+        showQuickReference = true
         showRemotePorts = false
         showConnectButton = true
         showComposerButton = true

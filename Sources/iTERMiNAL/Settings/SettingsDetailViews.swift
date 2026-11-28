@@ -209,6 +209,11 @@ struct AppearanceSettingsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                Toggle("Quick reference", isOn: $settings.showQuickReference)
+                Text("A line above it with the keys for what is in front of the focused terminal — Vim, nano, man, less, tmux, top and others — or the shell's own keys at a prompt, and the flags of a command as you type it. Click a key to type it; a return at the end is left for you to press. Click the program's name, at the end of the line, for the rest. On this Mac the app asks the system which program it is; over ssh it goes by what you typed.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
                 Toggle("System monitor", isOn: $settings.showSystemMetrics)
                 Text("Live CPU, memory, GPU and network for this Mac, in a strip along the bottom right of the window. Hover the numbers for detail. Off stops the sampling as well as hiding the strip.")
                     .font(.subheadline)
