@@ -141,6 +141,104 @@ struct SearchPattern: Equatable {
         }
         return true
     }
+
+    // MARK: The byte looked for first
+
+    /// One byte of the pattern that is not a wildcard. A search looks for it alone, sixteen bytes at
+    /// a time (`ByteScan`), and checks the whole pattern only where it is.
+    struct Anchor: Equatable {
+        /// Where in the pattern it is.
+        let index: Int
+        /// The byte; made lower case when `foldsCase`.
+        let byte: UInt8
+        /// The byte is a letter and case is ignored, so it is found in either case.
+        let foldsCase: Bool
+    }
+
+    /// The byte a search looks for first: of those that are not wildcards, the first that
+    /// `commonness` ranks lowest. Nil when every byte is a wildcard.
+    var anchor: Anchor? {
+        var best: (index: Int, rank: Int)?
+        for index in 0..<count where !wildcard[index] {
+            let rank = SearchPattern.commonness(bytes[index])
+            if best == nil || rank < best!.rank { best = (index, rank) }
+            if rank == 0 { break }
+        }
+        guard let best else { return nil }
+        let lower = SearchPattern.folded(bytes[best.index])
+        let foldsCase = ignoresCase && lower >= 0x61 && lower <= 0x7A
+        return Anchor(index: best.index, byte: foldsCase ? lower : bytes[best.index], foldsCase: foldsCase)
+    }
+
+    /// A guess at how common `byte` is in files, from 0 to 3: zero, which pads most binaries, then
+    /// 0xFF, then spaces, digits and letters. Looking for a rarer byte first means checking the
+    /// whole pattern in fewer places. It changes how fast a search is, never what it finds.
+    static func commonness(_ byte: UInt8) -> Int {
+        switch byte {
+        case 0x00: return 3
+        case 0xFF: return 2
+        case 0x20, 0x30...0x39, 0x41...0x5A, 0x61...0x7A: return 1
+        default: return 0
+        }
+    }
+}
+
+/// Finding one byte value in memory sixteen bytes at a time.
+///
+/// Sixteen bytes is what both kinds of Mac compare in one instruction: SSE on Intel, NEON on Apple
+/// silicon. The app is built for neither's wider vectors (AVX2 is not assumed on Intel), so a wider
+/// one is split in two, and a 32-byte scan built for x86-64 measured slower than this one.
+enum ByteScan {
+    /// The first index in `lower...upper` whose byte is `byte`, or, when `foldsCase`, `byte` or the
+    /// same letter in upper case (`byte` is then a lower-case letter). Indexes outside `raw` are not
+    /// looked at.
+    static func firstIndex(of byte: UInt8, foldsCase: Bool, in raw: UnsafeRawBufferPointer, from lower: Int, through upper: Int) -> Int? {
+        let lower = max(lower, 0)
+        let upper = min(upper, raw.count - 1)
+        guard lower <= upper else { return nil }
+        // Setting bit 5 makes A to Z a to z, and a lower-case letter is then equal to `byte` only if
+        // it was that letter in one case or the other.
+        let fold: UInt8 = foldsCase ? 0x20 : 0
+        let want = SIMD16<UInt8>(repeating: byte)
+        let mask = SIMD16<UInt8>(repeating: fold)
+        var index = lower
+        while index + 16 <= upper + 1 {
+            let found = (raw.loadUnaligned(fromByteOffset: index, as: SIMD16<UInt8>.self) | mask) .== want
+            if any(found) {
+                for lane in 0..<16 where found[lane] { return index + lane }
+            }
+            index += 16
+        }
+        while index <= upper {
+            if raw[index] | fold == byte { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    /// The last index in `lower...upper` whose byte is `byte`, matched as `firstIndex` matches it.
+    static func lastIndex(of byte: UInt8, foldsCase: Bool, in raw: UnsafeRawBufferPointer, from lower: Int, through upper: Int) -> Int? {
+        let lower = max(lower, 0)
+        let upper = min(upper, raw.count - 1)
+        guard lower <= upper else { return nil }
+        let fold: UInt8 = foldsCase ? 0x20 : 0
+        let want = SIMD16<UInt8>(repeating: byte)
+        let mask = SIMD16<UInt8>(repeating: fold)
+        // The last of the sixteen bytes looked at next.
+        var index = upper
+        while index - 15 >= lower {
+            let found = (raw.loadUnaligned(fromByteOffset: index - 15, as: SIMD16<UInt8>.self) | mask) .== want
+            if any(found) {
+                for lane in stride(from: 15, through: 0, by: -1) where found[lane] { return index - 15 + lane }
+            }
+            index -= 16
+        }
+        while index >= lower {
+            if raw[index] | fold == byte { return index }
+            index -= 1
+        }
+        return nil
+    }
 }
 
 enum SearchDirection: Equatable {
@@ -175,6 +273,7 @@ enum ByteSearcher {
         let size = Int64(max(chunk, 1))
         var scanned: Int64 = 0
         let budget = Double(lastStart + 1)
+        let anchor = pattern.anchor
 
         // Looks for the first match among starts lo...hi, in the order of `direction`.
         func scan(_ lo: Int64, _ hi: Int64) -> SearchOutcome? {
@@ -187,10 +286,8 @@ enum ByteSearcher {
                     let blockHigh = min(blockLow + size - 1, hi)
                     let data = source.read(blockLow..<(blockHigh + length))
                     let usable = min(Int64(data.count) - length, blockHigh - blockLow)
-                    if usable >= 0 {
-                        for offset in 0...Int(usable) where pattern.matches(in: data, at: offset) {
-                            return .found((blockLow + Int64(offset))..<(blockLow + Int64(offset) + length))
-                        }
+                    if usable >= 0, let offset = firstMatch(of: pattern, anchor: anchor, in: data, through: Int(usable)) {
+                        return .found((blockLow + Int64(offset))..<(blockLow + Int64(offset) + length))
                     }
                     scanned += blockHigh - blockLow + 1
                     progress?(min(1, Double(scanned) / budget))
@@ -203,10 +300,8 @@ enum ByteSearcher {
                     let blockLow = max(blockHigh - size + 1, lo)
                     let data = source.read(blockLow..<(blockHigh + length))
                     let usable = min(Int64(data.count) - length, blockHigh - blockLow)
-                    if usable >= 0 {
-                        for offset in stride(from: Int(usable), through: 0, by: -1) where pattern.matches(in: data, at: offset) {
-                            return .found((blockLow + Int64(offset))..<(blockLow + Int64(offset) + length))
-                        }
+                    if usable >= 0, let offset = lastMatch(of: pattern, anchor: anchor, in: data, through: Int(usable)) {
+                        return .found((blockLow + Int64(offset))..<(blockLow + Int64(offset) + length))
                     }
                     scanned += blockHigh - blockLow + 1
                     progress?(min(1, Double(scanned) / budget))
@@ -227,6 +322,42 @@ enum ByteSearcher {
             if wraps, let result = scan(max(start + 1, 0), lastStart) { return result }
         }
         return .notFound
+    }
+
+    /// The first start in `0...last` at which `pattern` is in `data`, which holds at least
+    /// `last + pattern.count` bytes. The whole pattern is checked only where its anchor's byte is.
+    static func firstMatch(of pattern: SearchPattern, anchor: SearchPattern.Anchor?, in data: [UInt8], through last: Int) -> Int? {
+        guard last >= 0 else { return nil }
+        guard let anchor else {
+            // Nothing but wildcards: there is no byte to look for.
+            for offset in 0...last where pattern.matches(in: data, at: offset) { return offset }
+            return nil
+        }
+        return data.withUnsafeBytes { raw -> Int? in
+            var from = anchor.index
+            while let hit = ByteScan.firstIndex(of: anchor.byte, foldsCase: anchor.foldsCase, in: raw, from: from, through: last + anchor.index) {
+                if pattern.matches(in: data, at: hit - anchor.index) { return hit - anchor.index }
+                from = hit + 1
+            }
+            return nil
+        }
+    }
+
+    /// The last start in `0...last` at which `pattern` is in `data`, found as `firstMatch` finds it.
+    static func lastMatch(of pattern: SearchPattern, anchor: SearchPattern.Anchor?, in data: [UInt8], through last: Int) -> Int? {
+        guard last >= 0 else { return nil }
+        guard let anchor else {
+            for offset in stride(from: last, through: 0, by: -1) where pattern.matches(in: data, at: offset) { return offset }
+            return nil
+        }
+        return data.withUnsafeBytes { raw -> Int? in
+            var through = last + anchor.index
+            while let hit = ByteScan.lastIndex(of: anchor.byte, foldsCase: anchor.foldsCase, in: raw, from: anchor.index, through: through) {
+                if pattern.matches(in: data, at: hit - anchor.index) { return hit - anchor.index }
+                through = hit - 1
+            }
+            return nil
+        }
     }
 }
 

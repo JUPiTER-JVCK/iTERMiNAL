@@ -9292,6 +9292,30 @@ func checkBytesSources2() {
         check(false, "a regular file opens")
     }
 
+    // Opened for one pass, with no cache and so no lock: the same bytes, to any number of threads at once.
+    if case .success(let direct) = FileByteSource.opening(path: path, caching: false),
+       case .success(let cached) = FileByteSource.opening(path: path) {
+        check(!direct.caches && cached.caches, "a source says whether it reads through the cache")
+        check(direct.read(0..<200_000) == content && direct.read(65_530..<65_545) == Array(content[65_530..<65_545])
+                && direct.read(196_600..<250_000) == Array(content[196_600...]) && direct.read(199_999..<200_001) == [content[199_999]]
+                && direct.read(200_000..<200_010).isEmpty && direct.read(-5..<3) == Array(content[0..<3]) && direct.read(9..<9).isEmpty,
+              "without the cache the file reads back as it does with it, to its ends and across pages")
+        var wrongOnThreads = [Int](repeating: 0, count: 8)
+        wrongOnThreads.withUnsafeMutableBufferPointer { wrong in
+            DispatchQueue.concurrentPerform(iterations: 8) { thread in
+                var mine = BytesCheckRandom(seed: UInt64(100 + thread))
+                for _ in 0..<200 {
+                    let from = mine.below(200_000)
+                    let to = min(200_000, from + mine.below(70_000))
+                    if direct.read(Int64(from)..<Int64(to)) != Array(content[from..<to]) { wrong[thread] += 1 }
+                }
+            }
+        }
+        check(wrongOnThreads.allSatisfy { $0 == 0 }, "eight threads reading it at once each get the bytes they asked for: \(wrongOnThreads) wrong")
+    } else {
+        check(false, "a regular file opens without the cache")
+    }
+
     // More pages than the cache holds, each a different byte, read in two orders: a page
     // the cache has let go of is read again from the file, and is still right.
     let pageSize = FileByteSource.pageSize
@@ -9363,6 +9387,7 @@ func checkBytesSources2() {
 
     // A file that changes under an open source: short reads, never a hole, and a way to tell.
     let watched = write("watched.bin", [UInt8](repeating: 7, count: 1000))
+    let watchedDirectly = FileByteSource.opening(path: watched, caching: false)
     if case .success(let source) = FileByteSource.opening(path: watched) {
         check(source.staleness() == .unchanged, "a file nobody touched is unchanged")
         var times = [timeval(tv_sec: Int(Date().timeIntervalSince1970) - 3600, tv_usec: 0),
@@ -9379,6 +9404,12 @@ func checkBytesSources2() {
         check(source.staleness() == .shrank, "and one that got shorter shrank")
         check(source.read(0..<1000) == [UInt8](repeating: 7, count: 10), "reading past the new end gives the bytes that are left")
         check(source.read(500..<510).isEmpty, "and nothing from a place that is gone")
+        if case .success(let direct) = watchedDirectly {
+            check(direct.read(0..<1000) == [UInt8](repeating: 7, count: 10) && direct.read(500..<510).isEmpty && direct.read(5..<20) == [UInt8](repeating: 7, count: 5),
+                  "without the cache, too, a file that shrank gives the bytes that are left and nothing past them")
+        } else {
+            check(false, "the watched file opens without the cache")
+        }
         let other = write("other.bin", [9])
         rename(other, watched)
         check(source.staleness() == .replaced, "a different file with the name is a replacement")
@@ -15368,6 +15399,90 @@ func checkByteSearch() {
 }
 checkByteSearch()
 
+// MARK: Looking for one byte first
+
+// A search looks for one byte of the pattern, sixteen bytes at a time, and checks the whole pattern only where that
+// byte is. Here the scan is held against a plain loop at every length up to past four vectors, the byte chosen is
+// checked, and whole searches over files longer than a vector, with letters in either case, are held against
+// looking at every place in turn.
+
+func checkLookingForOneByteFirst() {
+    var random = BytesCheckRandom(seed: 0xB17E5)
+
+    var scanWrong: [String] = []
+    for length in 0...70 {
+        let data: [UInt8] = (0..<length).map { _ in [0x41, 0x61, 0x42, 0x00, 0x5A][random.below(5)] }
+        data.withUnsafeBytes { raw in
+            for lower in [-1, 0, 1, 7, 15, 16, 17, 31, 32, 33, 69] where lower <= length + 1 {
+                for upper in [length + 3, length, length - 1, length - 2, length - 17, lower + 15, lower + 16, lower, lower - 1] {
+                    for (byte, folds) in [(UInt8(0x41), false), (UInt8(0x61), false), (UInt8(0x61), true), (UInt8(0x7A), true), (UInt8(0x00), false)] {
+                        let low = max(lower, 0)
+                        let high = min(upper, length - 1)
+                        let hits = low <= high ? (low...high).filter { folds ? data[$0] | 0x20 == byte : data[$0] == byte } : []
+                        let first = ByteScan.firstIndex(of: byte, foldsCase: folds, in: raw, from: lower, through: upper)
+                        let last = ByteScan.lastIndex(of: byte, foldsCase: folds, in: raw, from: lower, through: upper)
+                        if first != hits.first || last != hits.last {
+                            scanWrong.append("\(String(byte, radix: 16)) folding \(folds) in \(lower)...\(upper) of \(length): \(String(describing: first)), \(String(describing: last)) not \(String(describing: hits.first)), \(String(describing: hits.last))")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    check(scanWrong.isEmpty, "the scan finds the first and last of a byte as a plain loop does, at every length to 70, from ranges inside, across and outside the bytes: \(scanWrong.prefix(2))")
+    check([UInt8]().withUnsafeBytes { ByteScan.firstIndex(of: 0, foldsCase: false, in: $0, from: 0, through: 10) == nil && ByteScan.lastIndex(of: 0, foldsCase: false, in: $0, from: -3, through: 0) == nil }, "and in no bytes at all finds nothing")
+    let bothCases = Array("aAzZ@`[{".utf8)
+    let folded = bothCases.withUnsafeBytes { raw in (0..<bothCases.count).filter { ByteScan.firstIndex(of: 0x61, foldsCase: true, in: raw, from: $0, through: $0) != nil || ByteScan.firstIndex(of: 0x7A, foldsCase: true, in: raw, from: $0, through: $0) != nil } }
+    check(folded == [0, 1, 2, 3], "folding finds a letter in either case, and not @, `, [ or {, which sit just outside the letters")
+
+    func hex(_ text: String) -> SearchPattern { try! SearchPattern.hex(text).get() }
+    check(hex("00 00 7F").anchor == SearchPattern.Anchor(index: 2, byte: 0x7F, foldsCase: false), "a byte that is not zero is looked for before zeros")
+    check(hex("00 FF").anchor?.index == 1 && hex("FF 41").anchor?.index == 1 && hex("41 9C 9D").anchor?.index == 1 && hex("00 00").anchor?.index == 0, "zero is looked for last, then 0xFF, then letters, and among the rarest the first")
+    check(hex("?? ??").anchor == nil && hex("?? 00 ??").anchor?.index == 1, "a wildcard is never looked for, so a pattern of only wildcards has nothing to look for")
+    let shout = try! SearchPattern.text("HELLO", encoding: .utf8, ignoresCase: true).get()
+    let exact = try! SearchPattern.text("HELLO", encoding: .utf8, ignoresCase: false).get()
+    let mark = try! SearchPattern.text("Hi!", encoding: .utf8, ignoresCase: true).get()
+    check(shout.anchor == SearchPattern.Anchor(index: 0, byte: 0x68, foldsCase: true) && exact.anchor == SearchPattern.Anchor(index: 0, byte: 0x48, foldsCase: false), "with case ignored a letter is looked for in either case, and only then")
+    check(mark.anchor == SearchPattern.Anchor(index: 2, byte: 0x21, foldsCase: false), "and a mark is looked for before letters, as it is")
+    check((0...255).allSatisfy { (0...3).contains(SearchPattern.commonness(UInt8($0))) } && SearchPattern.commonness(0) == 3 && SearchPattern.commonness(0xFF) == 2 && SearchPattern.commonness(0x7F) == 0, "how common a byte is, from 0 to 3")
+
+    // Whole searches, against looking at every place in turn in the order `find` promises.
+    var searchWrong: [String] = []
+    for round in 0..<300 {
+        let length = round % 10 == 0 ? 1000 + random.below(3000) : random.below(300)
+        let letters: [UInt8] = [0x00, 0x41, 0x61, 0x42, 0x62, 0x21]
+        let data = (0..<length).map { _ in letters[random.below(letters.count)] }
+        let width = 1 + random.below(6)
+        var bytes = (0..<width).map { _ in letters[random.below(letters.count)] }
+        // Half the patterns are taken from the file, so that there is something to find.
+        if length >= width, random.below(2) == 0 {
+            let from = random.below(length - width + 1)
+            bytes = Array(data[from..<(from + width)])
+        }
+        let wild = (0..<width).map { _ in random.below(4) == 0 }
+        let want = SearchPattern(bytes: bytes, wildcard: wild, ignoresCase: random.below(2) == 0)
+        let starts = (0..<max(0, length - width + 1)).filter { want.matches(in: data, at: $0) }.map { Int64($0) }
+        let start = Int64(random.below(length + 6)) - 3
+        let chunk = [1, 2, 15, 16, 17, 100, 1 << 20][random.below(7)]
+        for forward in [true, false] {
+            for wraps in [true, false] {
+                var expected: SearchOutcome = .notFound
+                if forward {
+                    if let first = starts.first(where: { $0 >= start }) { expected = .found(first..<(first + Int64(width))) }
+                    else if wraps, let first = starts.first(where: { $0 < start }) { expected = .found(first..<(first + Int64(width))) }
+                } else {
+                    if let last = starts.last(where: { $0 <= start }) { expected = .found(last..<(last + Int64(width))) }
+                    else if wraps, let last = starts.last(where: { $0 > start }) { expected = .found(last..<(last + Int64(width))) }
+                }
+                let got = ByteSearcher.find(want, in: DataByteSource(data), startingAt: start, direction: forward ? .forward : .backward, wraps: wraps, chunk: chunk)
+                if got != expected { searchWrong.append("round \(round): \(forward ? "forward" : "back") from \(start) wraps \(wraps), chunk \(chunk), in \(length) bytes: \(got) not \(expected)") }
+            }
+        }
+    }
+    check(searchWrong.isEmpty, "1,200 searches through files of up to 4,000 bytes, with letters in either case and chunks either side of a vector, agree with looking at every place: \(searchWrong.prefix(2))")
+}
+checkLookingForOneByteFirst()
+
 // MARK: Typing and saving
 
 // What typing does to the bytes (where a digit lands, what the second digit changes, where the cursor goes, what Delete is for)
@@ -16480,6 +16595,156 @@ func checkStoppingProgressAndFilesThatShrink() {
     check(nothing.readBytes == 0 && nothing.unreadBytes == 8 && nothing.entropy == 0, "a file that cannot be read at all is a map of nothing, not a crash")
 }
 checkStoppingProgressAndFilesThatShrink()
+
+// MARK: A pass shared among threads
+
+/// A source that is safe to read from several threads at once: the bytes of `MapFormulaSource`, worked out
+/// rather than kept, or of `inner`, up to `readable`, with its reads counted behind a lock.
+final class MapSharedSource: ByteSource {
+    let count: Int64
+    private let inner: ByteSource?
+    private let readable: Int64
+    private let lock = NSLock()
+    private var readsSoFar = 0
+
+    init(_ inner: ByteSource, readable: Int64? = nil) {
+        self.inner = inner
+        count = inner.count
+        self.readable = readable ?? inner.count
+    }
+
+    init(formulaCount: Int64) {
+        inner = nil
+        count = formulaCount
+        readable = formulaCount
+    }
+
+    var reads: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return readsSoFar
+    }
+
+    func read(_ range: Range<Int64>) -> [UInt8] {
+        lock.lock()
+        readsSoFar += 1
+        lock.unlock()
+        let limited = clamped(range)
+        let end = min(limited.upperBound, readable)
+        guard end > limited.lowerBound else { return [] }
+        guard let inner else { return (limited.lowerBound..<end).map { MapFormulaSource.byte(at: $0) } }
+        return inner.read(limited.lowerBound..<end)
+    }
+}
+
+func checkThePassSharedAmongThreads() {
+    func shared(_ workers: Int, runBytes: Int64 = 1 << 14, over base: ByteMapAnalyzer.Limits = .standard) -> ByteMapAnalyzer.Limits {
+        var limits = base
+        limits.workers = workers
+        limits.parallelMinimum = 0
+        limits.runBytes = runBytes
+        return limits
+    }
+    func same(_ a: ByteMapAnalysis?, _ b: ByteMapAnalysis?) -> Bool {
+        guard let a, let b else { return false }
+        return a.layout.order == b.layout.order && a.layout.windowCount == b.layout.windowCount && a.cells == b.cells
+            && a.windowEntropy == b.windowEntropy && a.windowBytes == b.windowBytes && a.windowDistinct == b.windowDistinct
+            && a.histogram == b.histogram && a.entropy == b.entropy && a.isSampled == b.isSampled
+            && a.sampleSize == b.sampleSize && a.unreadBytes == b.unreadBytes && a.readBytes == b.readBytes
+    }
+
+    // The counting, against a plain count, at lengths either side of each multiple of four.
+    var random = BytesCheckRandom(seed: 0x7A11)
+    var tables = [Int](repeating: 0, count: 1024)
+    var countsRight = true
+    for length in 0...21 {
+        let bytes = (0..<length).map { _ in UInt8(random.below(6)) }
+        ByteMapAnalyzer.countValues(bytes, into: &tables)
+        ByteMapAnalyzer.countValues(bytes, into: &tables)
+        for value in 0..<256 {
+            let got = tables[value] + tables[256 + value] + tables[512 + value] + tables[768 + value]
+            if got != 2 * bytes.filter({ $0 == UInt8(value) }).count { countsRight = false }
+        }
+        tables = [Int](repeating: 0, count: 1024)
+    }
+    check(countsRight, "the four tables a cell is counted in add up to how often each value occurs, and counting again adds to them")
+
+    // The same map to the bit, however many threads and however long their runs. The checks are built without
+    // optimisation, where a map of a million bytes takes most of a second, so that one is made only twice over.
+    let mixed = mapMixedFile()
+    let files: [(String, [UInt8], [(Int, Int64)])] = [
+        ("the mixed file", mixed, []),
+        ("17,000 zeros", [UInt8](repeating: 0, count: 17_000), []),
+        ("30,001 random bytes", (0..<30_001).map { _ in random.byte() }, []),
+        ("five bytes", [1, 2, 3, 4, 5], []),
+        ("a million bytes", (0..<1_000_000).map { MapFormulaSource.byte(at: Int64($0)) }, [(4, 1 << 14), (7, 1)]),
+    ]
+    var different: [String] = []
+    for (name, bytes, only) in files {
+        let source = DataByteSource(bytes)
+        let alone = ByteMapAnalyzer.analyze(source)
+        let ways = only.isEmpty ? [2, 3, 4, 7, 64].flatMap { workers in [Int64(1), 5000, 1 << 20].map { (workers, $0) } } : only
+        for (workers, runBytes) in ways where !same(alone, ByteMapAnalyzer.analyze(source, limits: shared(workers, runBytes: runBytes))) {
+            different.append("\(name), \(workers) threads, runs of \(runBytes)")
+        }
+    }
+    var sampling = ByteMapAnalyzer.Limits()
+    sampling.budget = 4096
+    sampling.sampleSize = 64
+    let sampled = MapSharedSource(formulaCount: 100_000)
+    if !same(ByteMapAnalyzer.analyze(sampled, limits: sampling), ByteMapAnalyzer.analyze(sampled, limits: shared(4, runBytes: 200, over: sampling))) {
+        different.append("a sampled file")
+    }
+    var hugeSampling = ByteMapAnalyzer.Limits()
+    hugeSampling.budget = 1 << 20
+    hugeSampling.sampleSize = 1024
+    let huge = MapSharedSource(formulaCount: 5368721465)
+    if !same(ByteMapAnalyzer.analyze(huge, limits: hugeSampling), ByteMapAnalyzer.analyze(huge, limits: shared(5, over: hugeSampling))) {
+        different.append("a 5 GiB file")
+    }
+    let shrinking = MapSharedSource(DataByteSource((0..<1000).map { UInt8($0 % 251) }), readable: 400)
+    let shrunk = ByteMapAnalyzer.analyze(shrinking, limits: shared(3, runBytes: 1))
+    if !same(ByteMapAnalyzer.analyze(shrinking), shrunk) || shrunk?.unreadBytes != 600 {
+        different.append("a file that shrank")
+    }
+    check(different.isEmpty, "shared among 2 to 64 threads, in runs of a byte to a mebibyte, every map is the one a single thread makes, to the bit, sampled, 5 GiB long or shrunk: \(different)")
+
+    // Asked to stop, and saying how far it has got, only between rounds and only on the thread that called it.
+    let caller = pthread_self()
+    var elsewhere = false
+    var asked = 0
+    var reports: [Double] = []
+    // The mixed file is 32 windows of 128 cells, 320 bytes a window: runs of 640 bytes are 2 windows, so four
+    // threads take 8 windows a round, and there are 4 rounds.
+    let counted = MapSharedSource(DataByteSource(mixed))
+    let rounds = ByteMapAnalyzer.analyze(counted, limits: shared(4, runBytes: 640),
+                                         isCancelled: { asked += 1; if pthread_equal(pthread_self(), caller) == 0 { elsewhere = true }; return false },
+                                         progress: { reports.append($0); if pthread_equal(pthread_self(), caller) == 0 { elsewhere = true } })
+    check(rounds != nil && !elsewhere, "shared among threads, the pass is asked to stop and reports progress only on the thread that called it")
+    check(asked == 4 && counted.reads == 4096, "it is asked once a round, not once a cell, and still reads every cell once: \(asked) asks, \(counted.reads) reads")
+    check(reports == [0, 0.25, 0.5, 0.75, 1], "progress begins at 0, goes up a round at a time and ends at 1: \(reports)")
+
+    var asks = 0
+    let stopping = MapSharedSource(DataByteSource(mixed))
+    let stopped = ByteMapAnalyzer.analyze(stopping, limits: shared(4, runBytes: 640), isCancelled: { asks += 1; return asks > 2 })
+    check(stopped == nil && stopping.reads == 2 * 8 * 128, "stopped, it gives nothing back and reads only the rounds it had begun: \(stopping.reads) reads")
+    let never = MapSharedSource(DataByteSource(mixed))
+    check(ByteMapAnalyzer.analyze(never, limits: shared(4), isCancelled: { true }) == nil && never.reads == 0, "and stopped before it begins it reads nothing")
+
+    // Shared only when there is enough to read, and never by more threads than there are windows.
+    var limits = ByteMapAnalyzer.Limits()
+    limits.workers = 8
+    limits.parallelMinimum = Int64(mixed.count) + 1
+    var asksAlone = 0
+    _ = ByteMapAnalyzer.analyze(DataByteSource(mixed), limits: limits, isCancelled: { asksAlone += 1; return false })
+    limits.parallelMinimum = Int64(mixed.count)
+    var asksShared = 0
+    _ = ByteMapAnalyzer.analyze(DataByteSource(mixed), limits: limits, isCancelled: { asksShared += 1; return false })
+    check(asksAlone == 4096 && asksShared == 1, "a pass a byte smaller than the minimum is one thread's, asked before each cell; one of the minimum is shared, in one round of 4 MiB runs: \(asksAlone), \(asksShared)")
+    check(ByteMapAnalyzer.Limits.standard.workers == 1 && ByteMapAnalyzer.Limits.standard.parallelMinimum == 16 << 20, "a pass is one thread's unless its caller asks for more, and shared only from 16 MiB")
+    check(same(ByteMapAnalyzer.analyze(DataByteSource([7, 8, 9])), ByteMapAnalyzer.analyze(DataByteSource([7, 8, 9]), limits: shared(1000, runBytes: 1))), "a thousand threads for a file of one window is one thread")
+}
+checkThePassSharedAmongThreads()
 
 // MARK: Colours
 
