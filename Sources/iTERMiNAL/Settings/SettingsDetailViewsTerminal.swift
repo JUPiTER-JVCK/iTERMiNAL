@@ -160,6 +160,10 @@ struct TerminalSettingsView: View {
                 Text("An animation takes the place of the blink, while the terminal is the one you are typing in. It is drawn by the default renderer, so it does nothing with GPU rendering on, and it is off while Reduce Motion is. Applies to open terminals as they come into view.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                Toggle("Flash a block cursor in HDR", isOn: $settings.hdrCursor)
+                Text("On a display with room above white, such as a MacBook Pro's XDR screen, a block cursor flashes brighter than the text around it, in the cursor's own color. Other displays, GPU rendering, bar and underline cursors, and Reduce Motion keep the plain cursor. The Dock draws its icon at normal brightness, so it cannot do this.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             TerminalColorOverridesSection()
             ThemeEditorSection()
@@ -205,6 +209,11 @@ struct TerminalSettingsView: View {
                 }
                 .disabled(!settings.shellIntegration || !settings.notifyLongCommands)
                 Text("Follows Pane attention above: nothing if it is off, an in-app mark, or a system banner as well. It is shown only for a tab you are not looking at.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Toggle("Blink the Dock icon's cursor while a command runs", isOn: $settings.dockBlink)
+                    .disabled(!settings.shellIntegration)
+                Text("The cursor in iTERMiNAL's Dock icon blinks from the moment a command starts until it ends, in any tab. Off while Reduce Motion is on.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -60,8 +60,9 @@ protocol TerminalEngine: AnyObject {
     func applyPalette(_ colors: [PaletteColor])
 
     /// The cursor's style, by `CursorStyle` tag name, and on top of it an
-    /// animation. Safe to call on every styling pass.
-    func applyCursor(styleTag: String, animation: CursorAnimation)
+    /// animation, or for a block the HDR flash. Safe to call on every styling
+    /// pass.
+    func applyCursor(styleTag: String, animation: CursorAnimation, hdr: Bool)
 
     /// Requests GPU-accelerated rendering; returns whether it is actually
     /// active afterwards, so callers can report a fallback to the CPU path.

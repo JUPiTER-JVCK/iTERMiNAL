@@ -1,6 +1,7 @@
 import AppKit
 
-/// Keeps the Dock icon matched to the app's appearance.
+/// Keeps the Dock icon matched to the app's appearance, and to the cursor's
+/// blink while a command runs (see `DockBlink`).
 ///
 /// The icon in the bundle is the dark icon. An asset-catalog icon cannot
 /// switch with the appearance on the toolchain this is built with (that takes
@@ -8,6 +9,9 @@ import AppKit
 /// the light icon when the app is light and put back to the bundle's when it
 /// is dark. Finder, Launchpad and the app switcher read the bundle and so show
 /// the dark one either way.
+///
+/// Each appearance has a second picture with the cursor hidden, `DockCursorOff`
+/// and `DockCursorOffLight`; the blink alternates between the two.
 ///
 /// This follows `NSApp.effectiveAppearance`, which already folds in the
 /// Light / Dark / System choice in Settings (see `AppSettings.applyAppearance`):
@@ -17,20 +21,32 @@ final class DockIcon {
 
     private var observation: NSKeyValueObservation?
 
+    /// False for the half of the blink that has the cursor hidden.
+    var cursorLit = true {
+        didSet { if cursorLit != oldValue { refresh() } }
+    }
+
     private init() {}
 
     /// Applies the icon for the current appearance, then again on each change.
     func start() {
         guard observation == nil else { return }
-        observation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { app, _ in
-            DockIcon.apply(to: app)
+        observation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { _, _ in
+            DockIcon.shared.refresh()
         }
     }
 
-    private static func apply(to app: NSApplication) {
+    /// Puts the Dock icon right for the appearance and the blink's phase now.
+    func refresh() {
+        guard let app = NSApp else { return }
         let dark = app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         // nil restores the icon from the bundle. A missing image set leaves
         // that in place too, so a damaged catalog degrades to the dark icon.
-        app.applicationIconImage = dark ? nil : NSImage(named: "DockIconLight")
+        if dark {
+            app.applicationIconImage = cursorLit ? nil : NSImage(named: "DockCursorOff")
+        } else {
+            let light = NSImage(named: "DockIconLight")
+            app.applicationIconImage = cursorLit ? light : (NSImage(named: "DockCursorOffLight") ?? light)
+        }
     }
 }
