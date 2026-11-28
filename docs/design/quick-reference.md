@@ -25,9 +25,10 @@ it describes the pane you are typing into.
 - Hints are in the order they matter, and a narrow window drops them from the
   end (`LeadingFitRow`): nothing wraps or scrolls. A key cap never gives way —
   cut down it reads as "…" — so only the words beside it are shortened.
-- The program's name sits at the end of the line, in a narrow capsule, and is
-  the button that opens the rest in a popover. At the start it took room the
-  hints needed.
+- The program's name sits at the end of the line, as plain text with a small
+  chevron, and is the button that opens the rest in a popover; it brightens
+  under the pointer. At the start, in a capsule, it took room the hints
+  needed and stood out more than a label should.
 - ⌃, ⌥, ⇧ and ⌘ are each drawn in a shade of their own: the text's colour at
   full strength for Control, then a step dimmer for Option, Shift and Command
   (white to a darker grey on a dark theme, black to grey on a light one), so

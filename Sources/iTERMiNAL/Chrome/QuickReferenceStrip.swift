@@ -301,10 +301,10 @@ private struct QuickReferenceSessionStrip: View {
     }
 }
 
-/// The program's name, in a small capsule at the end of the line — and, when
-/// more is listed for it than the line shows, the button that opens the rest.
-/// Narrow on purpose: it is a label, and every point it takes is one a hint
-/// does not get.
+/// The program's name at the end of the line, as plain text — and, when more
+/// is listed for it than the line shows, the button that opens the rest, which
+/// brightens under the pointer as the bar's other text controls do. Narrow on
+/// purpose: it is a label, and every point it takes is one a hint does not get.
 private struct ProgramButton: View {
     let name: String
     let theme: Theme
@@ -315,7 +315,7 @@ private struct ProgramButton: View {
     var body: some View {
         if opensList {
             Button(action: open) {
-                capsule.contentShape(Capsule())
+                label.contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -325,13 +325,13 @@ private struct ProgramButton: View {
             .help("All keys for \(name)")
             .accessibilityLabel("All keys for \(name)")
         } else {
-            capsule
+            label
                 .help("What is in front of the focused terminal")
                 .accessibilityLabel(name)
         }
     }
 
-    private var capsule: some View {
+    private var label: some View {
         HStack(spacing: 3) {
             Text(name)
                 .lineLimit(1)
@@ -340,16 +340,13 @@ private struct ProgramButton: View {
             if opensList {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(theme.textSecondary)
             }
         }
         .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(theme.textPrimary)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
+        .foregroundStyle(hovering ? theme.textPrimary : theme.textSecondary)
+        // Room to hit it, without a shape around it.
+        .padding(.vertical, 3)
         .fixedSize()
-        .background(Capsule().fill(hovering ? theme.surfaceHover : theme.surface))
-        .overlay(Capsule().strokeBorder(theme.surfaceBorder))
     }
 }
 
